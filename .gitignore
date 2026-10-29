@@ -1,0 +1,24 @@
+# Local credentials and private runtime configuration
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Generated build and tooling output
+bin/
+obj/
+artifacts/
+.artifacts/
+.vs/
+.idea/
+__pycache__/
+*.pyc
+node_modules/
+
+# Local editor/OS files
+.DS_Store
+Thumbs.db
