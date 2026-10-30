@@ -147,3 +147,8 @@
 - [x] Preserve separate protected source/backups retention and require cutoff before target restore/import exposure; no live deletion or table-count change.
 - [ ] Finalize taxonomy/privacy, cutoff index, permissions, scheduling/backlog monitoring and backup restoration details before implementation.
 - [ ] After implementation authorization, validate expiry boundaries, cleanup/replay/concurrency recovery, domain-history isolation and independent financial idempotency.
+
+## Supplier bonus items — admin disposition (owner approval 2026-10-30)
+
+- [x] Owner chose that any verified supplier bonus items actually received go to admins, with the customer receiving only the complete ordered quantity (FR-072 / SC-041, ADR-45).
+- [ ] Review typed bonus/customer attribution, protected admin content access, request/item deduplication and recovery before DDL; verify SC-041 after implementation authorization. No new table or live bonus delivery is approved.

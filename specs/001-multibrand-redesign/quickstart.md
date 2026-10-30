@@ -214,3 +214,9 @@ Expected: no split brain, no orphan paid order, no key loss, and approved data r
 ## Not included
 
 - Admin web UI/screenshots, frontend performance tests, public website deployment or AI model/provider implementation.
+
+## Supplier bonus items — admin disposition (owner approval 2026-10-30)
+
+If a supplier actually provides verified bonus accounts, keys or codes beyond the customer's ordered quantity, route those extras to authorized administrators through the existing admin facilities with protected content access. The customer receives the complete ordered quantity only; bonuses are excluded from every customer manifest, download, history and delivery path. Retain bonus content encrypted and attributable to its original supplier request/account/product and item identity; deduplicate purchase/export replays so the same item cannot become both a paid customer unit and an admin bonus. Do not increase order quantity, customer fulfillment rows, coupon usage or payment, automatically add bonuses to saleable shared inventory, or buy extra units to obtain a bonus. Do not expose credentials in logs, activity events, ordinary audit text or unprotected notices. Ambiguous extras or unprovable item identity require admin review rather than invented bonus attribution. This policy is conditional, not a claim that any current supplier is offering bonuses; incomplete customer quantities still follow the whole-order administrator-review rule.
+
+Future checks (SC-041): five ordered plus one verified bonus; no bonus; repeated/reordered export; duplicate item identity; ambiguous extras; insufficient complete customer quantity; unauthorized reveal. Assert exactly five customer units, one protected admin bonus when proven, no duplicate/overlap or extra purchase, unchanged money/coupon/order quantity, and no secret leakage. These are planned checks, not executed tests.
