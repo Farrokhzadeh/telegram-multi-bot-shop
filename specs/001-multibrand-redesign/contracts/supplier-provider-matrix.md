@@ -107,3 +107,9 @@ This owner policy does not establish that any of the five inspected adapters sup
 An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
 
 This is the owner's final answer: the earlier immediate hide answer is superseded by visible Out-of-stock. Status applies to the administrator-selected shared source only; no fallback or supplier preorder is authorized. Provider stock/eligibility verification and freshness remain necessary; source repair does not clear already accepted order-review blockers.
+
+## Opt-in one-time restock alerts — owner approval (2026-10-30)
+
+Restock alerts are voluntary, one-time and brand-scoped; existing jobs/delivery machinery handles notices, without reservation, automatic purchase or interference with paid FIFO. Explicit opt-in is separate from activity history and ordinary campaign consent.
+
+Use verified selected-source availability for supplier alerts, with no fallback to an unselected provider. Local alerts assess saleable stock only after paid-preorder FIFO and exclude admin-only bonuses. Availability repair still does not clear old accepted-order review blockers. Durable consent needs the separately proposed subscription relation; provider polling/freshness remains a technical review item, not live API authorization.

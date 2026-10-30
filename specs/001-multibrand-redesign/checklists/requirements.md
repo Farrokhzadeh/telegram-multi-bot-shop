@@ -167,3 +167,9 @@
 
 - [x] Owner corrected the immediate hide answer: keep published supplier products visible as Out of stock, blocking new purchases until the selected source can supply again (FR-075 / SC-044, ADR-48).
 - [ ] Review typed availability freshness and all catalog/callback/checkout guards; verify SC-044 after implementation authorization. Existing explicit visibility controls and paid obligations remain protected.
+
+## Opt-in one-time restock alerts — owner approval (2026-10-30)
+
+- [x] Owner approved one-time restock notifications only for customers who explicitly opt in (FR-076 / SC-045, ADR-49).
+- [ ] Review/approve proposed table 28 `product_stock_subscriptions` and typed job/delivery origins; the approved inventory is still 27.
+- [ ] Finalize consent/queued-cancellation lifecycle, availability freshness, brand guards and retention; verify SC-045 after implementation authorization. No actual alerts or opt-ins have been created.

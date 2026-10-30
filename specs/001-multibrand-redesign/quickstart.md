@@ -238,3 +238,9 @@ Future SC-043 checks: baseline 10.00 with current 9.00/10.00/11.00/11.01; five-u
 An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
 
 Future SC-044 checks: all three published brands show Out of stock; explicitly hidden listings stay hidden; stale/forged callbacks and each checkout method are blocked before mutation; verified recovery restores ordinary purchase eligibility; accepted-payment races retain existing obligations and review blockers. No live catalog update/test is performed.
+
+## Opt-in one-time restock alerts — owner approval (2026-10-30)
+
+Restock alerts are voluntary, one-time and brand-scoped; existing jobs/delivery machinery handles notices, without reservation, automatic purchase or interference with paid FIFO. Explicit opt-in is separate from activity history and ordinary campaign consent.
+
+Future SC-045 checks: opt-in/repeated opt-in/foreign callbacks, unsubscribe, all three brands, supplier/local recovery, hidden listings, stock lost before first send, repeated events/restart, activity purge, blocked sender and ambiguous Telegram result, fresh opt-in after completed notice. Prove one logical notification with no financial/order/stock/coupon action. Schema storage remains proposed table 28 pending owner review; no alert or subscription is created by this documentation update.

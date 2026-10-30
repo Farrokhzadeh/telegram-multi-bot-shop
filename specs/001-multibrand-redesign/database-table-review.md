@@ -248,3 +248,22 @@ The 27-table candidate remains unchanged. Review typed acceptance-time supplier-
 An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
 
 Preserve the 27-table candidate and existing independent product/brand visibility controls. Review typed supplier availability/freshness evidence and checkout guards without storing an automatic hide flag or introducing a supplier-preorder queue. Existing order/source/coupon history is unaffected.
+
+## Opt-in one-time restock alerts — owner approval (2026-10-30)
+
+Restock alerts are voluntary, one-time and brand-scoped; existing jobs/delivery machinery handles notices, without reservation, automatic purchase or interference with paid FIFO. Explicit opt-in is separate from activity history and ordinary campaign consent.
+
+Propose **`product_stock_subscriptions` as table 28, not yet owner-approved**. Candidate typed fields: `id`, `user_id` FK to the brand membership, `product_id` FK, `created_at`, nullable `triggered_at`, nullable `cancelled_at`, nullable `closed_at`; exact timestamp checks remain review. A partial unique `(user_id,product_id)` where `closed_at IS NULL` enforces one active waiting/queued opt-in; repeated callbacks are idempotent, and a fresh opt-in after terminal completion gets a distinct subscription identity. `closed_at` closes consent after a terminal notification/cancellation outcome; delivery send status remains in its existing table. Validate the product's listing against the membership's brand without redundant Telegram identity. Use checked nullable `product_stock_subscription_id` origin FKs on existing `jobs`/`telegram_deliveries`, unique logical delivery per subscription and same-member/brand guards. Delivery state remains authoritative in `telegram_deliveries`, not duplicated as a second editable send-status field. Exact active/queued cancellation semantics, job integration and retention require final review. No JSON/EAV, arrays of subscriber IDs, raw message/credential storage or coupling to the 180-day activity purge. The feature is approved; the physical addition is proposed separately, so the approved inventory remains 27.
+
+Candidate structure (separate from the numbered approved inventory):
+
+| Candidate field | Purpose |
+|---|---|
+| `id` | Stable identity for one explicit opt-in and its logical alert |
+| `user_id`, `product_id` | Membership and master product, checked against its brand listing |
+| `created_at` | Consent creation time |
+| `triggered_at` | Nullable durable alert-trigger time |
+| `cancelled_at` | Nullable cancellation time; suppress unsent work |
+| `closed_at` | Nullable terminal opt-in time; unique active subscription has `closed_at IS NULL` |
+
+Waiting consent is neither an analytics event nor a scheduled delivery. Do not append an approved numbered inventory row until the owner approves the proposed addition.

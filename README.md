@@ -26,13 +26,14 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Deliver the complete requested order quantity. Local preorder FIFO waits for the whole oldest order; incomplete supplier acquisitions remain protected internally with zero customer release.
 - Nonfinancial bot activity events have 180-day rolling retention; financial, order, support and admin-audit history follow separate policies.
 - Paid-preorder cancellation requests go through existing support tickets for manual staff review; support activity does not automatically cancel or pause orders. Once cancellation is approved, the admin handles repayment outside the shop; cancellation creates no wallet credit or external payout record. All held coupon uses return automatically with approved cancellation, keeping their original expiry and current eligibility.
+- Customers may opt into a one-time, brand-scoped back-in-stock alert; no stock is reserved and no order is placed. Durable subscription storage is proposed below the approved 27-table baseline for schema review.
 - Published supplier products remain visible as **Out of stock** when the selected source cannot supply them; new purchases are blocked.
 - Supplier cost increases up to and including 10% of the acceptance-time supplier cost are allowed; larger increases require admin review. Customer prices stay fixed.
 - Valid 100%-off supplier orders procure automatically when checkout commits; coupon uses stay held until complete fulfillment, with no wallet debit or external invoice.
 - Verified supplier bonus items beyond the ordered quantity go to the admin, with protected content access; customers receive their ordered quantity only.
 - External refunds and their records stay outside the platform.
 
-The feature contains **75 functional requirements, 44 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
+The feature contains **76 functional requirements, 45 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
 
 ## Spec-kit
 
