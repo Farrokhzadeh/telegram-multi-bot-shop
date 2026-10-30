@@ -220,7 +220,7 @@ The old Django supplier/preorder refund rows are historical evidence; preserve v
 
 **Consequences:** A paid local preorder may wait for stock; immediate-sale stock rejection and FR-019 crypto shortage credit do not apply to its intentional backlog. Paid remainders do not expire with unpaid invoices. Supplier 3-of-5 remains administrator-reviewed. Local preorder unit obligations are separate from an advance purchase issuing an N-use prepaid coupon.
 
-**Open:** cancellation/hold and expected-date behavior, complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
+**Open:** cancellation/hold and optional-date notification behavior (optional dates are resolved in ADR-39), complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
 
 ## ADR-34 — Bind supplier at accepted payment; retain unavailable-source paid obligations (owner approval 2026-10-29)
 
@@ -268,3 +268,11 @@ The owner selected ready-to-deliver accounts, keys and codes for first-release a
 This aligns with the inspected staging adapters' restricted subsets, but adapter code alone is not current provider proof. Verify exact product/variant requirements before mapping publication and before purchase. Unverified/excluded items cannot enter new payable API checkout. A post-payment eligibility change keeps accepted payment and original source in administrator review under FR-066; do not purchase from another source or compensate automatically. Provider processing/status/export may be asynchronous, and full-order manifest gating remains under FR-067.
 
 No customer-input, activation or upgrade table is added; the approved candidate stays 27. Added FR-068 / SC-037, updated existing future T057/T094 and validation coverage. Current totals: 68 functional requirements, 37 success criteria, 96 tasks; T001 repository setup complete, 95 unchecked. Specification only.
+
+## ADR-39 — Local preorders may have no availability date (owner approval 2026-10-30)
+
+The owner selected “Allow preorders without a date.” This intentionally differs from staging's required preorder date. Absence is a valid NULL, not a synthetic promise. Local preorders remain publishable/purchasable under other rules; show no estimate specified. Staff may set/update/clear an estimate; retain original quoted estimate/absence in accepted order evidence.
+
+The date is informational: passing/clearing/changing it never cancels/expires/reorders paid FIFO, resolves coupons or triggers automatic credit/refund. Actual full stock and existing review rules govern delivery; unpaid payment-window expiry remains unchanged. Exact automatic date-change notifications and paid cancellation/queue-hold workflow are still separate choices.
+
+Candidate fields are nullable product date and nullable order quote snapshot, without another physical table. FR-069 / SC-038 and future T095/T096 cover this choice. Current counts: 27 tables, 69 requirements, 38 success criteria, 96 tasks; T001 setup complete and 95 unchecked. Specification only.

@@ -149,6 +149,14 @@ These are future checks, not live staging results. The approved candidate contai
 
 These are specified future checks, not executed live-provider results.
 
+### E1c. Optional local-preorder estimates (FR-069 / SC-038; future checks)
+
+- Create/publish/quote/pay a local preorder with NULL estimate; show no estimate specified and allow full-quantity paid FIFO fulfillment under normal rules.
+- Quote a dated preorder, update and then clear the product estimate, and advance beyond the originally quoted date. Preserve original quote snapshots, paid state, queue priority and whole coupon holds; no automatic cancellation/expiry/credit/refund.
+- Add an estimate to a previously undated product without rewriting that earlier order's quoted absence. Do not fabricate dates for missing legacy values.
+- Still expire an unpaid external order at its payment deadline when no timely evidence exists. Estimate date and payment deadline are independent.
+- Verify nullable date schema/quote handling and no mandatory-date check. Date-change notification policy and paid cancellation/hold remain separate gates; these are future checks, not live results.
+
 ### E2. Human support without AI
 
 - Disable or disconnect the entire AI service.

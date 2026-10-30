@@ -86,13 +86,19 @@ Admin reads must be paginated and support stable filtering; exact query fields a
 
 `product_supplier_sources` is owner-approved as table 27. Its typed product/provider/external-product/optional-variant mapping, source revision, one checked active product selection and request provenance support these proposed internal contracts; exact persistence constraints remain reviewed. These are not deployed endpoints. Source scope is approved: one shared master-product active source for all three brands, with no per-brand override. Binding time is approved at accepted payment under FR-066; unpaid invoices/unapproved receipts do not bind. One configured account per provider is approved across products/brands; resolve its singleton protected configuration, with no per-mapping credential/account selector or provider account pools. Exact config persistence and snapshot/blocker fields remain open. Requests retain actual account identity; same-account key rotation does not rebind, while different-account replacement cannot silently redirect old reconciliation. Provider calls occur after local commit; retries retain the original binding, and source re-enablement alone does not clear administrator review. No automatic fallback. A local key does not prove remote idempotency or credential replay.
 
-Preorder notifications remain brand scoped despite shared-product fairness. Non-preorder settlement keeps all-or-nothing/no-stock compensation rules; preorder settlement retains paid FIFO obligations. Supplier remainders do not enter this queue. Whole-claim coupon redemption applies to complete fulfillment; cancellation/hold/date workflows and historical partial-order compatibility remain under review. See [provider review](supplier-provider-matrix.md).
+Preorder notifications remain brand scoped despite shared-product fairness. Non-preorder settlement keeps all-or-nothing/no-stock compensation rules; preorder settlement retains paid FIFO obligations. Supplier remainders do not enter this queue. Whole-claim coupon redemption applies to complete fulfillment; cancellation/hold, optional-date notification behavior and historical partial-order compatibility remain under review. Local-preorder estimates are optional under FR-069. See [provider review](supplier-provider-matrix.md).
 
 ## Ready-to-deliver supplier scope (owner approval 2026-10-30)
 
 Mapping publication and pre-purchase validation accept only exact provider products/variants supplying ready accounts, keys or codes without buyer fulfillment inputs. No input-collecting activation, email-required slot, existing-account upgrade or manual/custom supplier flow. Unknown requirements are ineligible; new checkout must not charge/create an invoice for them.
 
 If requirements change after accepted payment, keep the original source and paid/unfulfilled administrator-review state under FR-066, with no fallback purchase or automatic compensation. Status/lookup/export remains valid for asynchronous supplier processing; full-manifest release still gates delivery. Normal customer redemption of an already delivered key/code is allowed. No new input-form, activation API or table is introduced. FR-068 / SC-037; independently approved local/manual scope is unchanged.
+
+## Optional local-preorder estimate contract (owner approval 2026-10-30)
+
+A local-preorder product may have `expected_availability_date = NULL`; publication/checkout cannot require a date. Authorized product edits may set/update/clear an estimate. Quotes/orders preserve their original displayed estimate or absence, while current customer views distinguish no estimate from an estimated date. No guaranteed delivery deadline is invented.
+
+Missing/passed/edited/cleared estimates cannot expire/cancel/reorder a paid obligation, release coupon uses or trigger compensation. Full-stock FIFO and independent unpaid payment deadlines still govern. Automatic date-change notifications and paid cancellation/hold commands are not approved by this field decision. FR-069 / SC-038; no new relation or endpoint is implied.
 
 ## Approved history contract (2026-10-29; no implementation authorized)
 

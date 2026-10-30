@@ -78,7 +78,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Local preorders are fully paid order/unit obligations, separate from prepaid coupon issuance. Shared-product FIFO uses accepted paid time plus order-ID tie-breaker; queued orders retain priority and allocate only when their complete quantity exists, without partial assignment/reservation or smaller-order bypass. Restocking commits durable drain work. Payment/allocation recovery never repeats debit or item assignment. Intentional preorder shortage does not cause immediate-sale rejection, crypto shortage credit or unpaid timeout.
 - Supplier partial/unknown quantities still await admin review; they are not automatic local preorder backlog.
 - [Provider and preorder reconciliation](contracts/supplier-provider-matrix.md) pins all five staging adapters and the preorder handoff at `5752ec9c21e49b93e1d7d9f0b95bb8a7d713737d`. Source review only; no live staging/provider verification. Canboso purchase-only credentials and RoboticVN/RapidX uncertain purchases remain recovery gates.
-- **Next review:** proposed source-mapping relation, singleton provider configuration persistence and blocker field design, then preorder expected dates/cancellation/hold and historical partial-order compatibility. External refunds and records stay off-platform. No code/DDL/migration/deployment or live supplier calls. All 96 implementation tasks remain unchecked.
+- **Next review:** proposed source-mapping relation, singleton provider configuration persistence and blocker field design, then preorder cancellation/hold and optional-date notification details and historical partial-order compatibility. External refunds and records stay off-platform. No code/DDL/migration/deployment or live supplier calls. All 96 implementation tasks remain unchecked.
 
 ## Owner decision — one active supplier for all brands (2026-10-29)
 
@@ -93,7 +93,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Bind the then-current shared master-product source/account/product/variant with paid state and durable procurement intent locally; call the supplier outside the transaction. Keep customer quote terms fixed and never rebind on replay or later source switches.
 - Owner explicitly approved: **if the selected source is disabled or cannot supply at confirmation, retain payment and paid/unfulfilled liability for administrator review; no silent switch or lost obligation**. Missing selections follow the same review default, retaining known source evidence without fabricating a source/runnable request. No automatic wallet credit, external refund or purchase. Re-enablement alone does not clear staff review.
 - Added FR-066 / SC-035 and updated the model/contracts/future T093–T094 validation. At this earlier decision: **66 requirements, 35 success criteria, 96 unchecked tasks; 26 baseline tables**, subsequently extended by the approvals below. The then-proposed `product_supplier_sources` is subsequently approved as table 27 in the latest decision below. No implementation/DDL/migration/deployment or live API calls.
-- **Partial coupon question superseded:** the owner requires complete-order delivery under the latest FR-067 clarification below. Keep whole claims held until complete fulfillment. Preorder cancellation/date behavior, protected singleton provider configuration persistence and exact blocker/transport relations remain open.
+- **Partial coupon question superseded:** the owner requires complete-order delivery under the latest FR-067 clarification below. Keep whole claims held until complete fulfillment. Preorder cancellation and optional-date notification behavior, protected singleton provider configuration persistence and exact blocker/transport relations remain open.
 
 ## Latest owner correction — deliver the complete order, never an intentional subset (2026-10-29)
 
@@ -113,7 +113,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Recommend typed provider configuration with external protected credential references; exact persistence remains under review. No additional supplier-account table is authorized merely for multi-account support.
 - Keep actual account identity on paid-request snapshots. Same-account key rotation is allowed without rebinding; account replacement cannot silently redirect old requests. Missing original-account access requires administrator review, with no automatic purchase/credit.
 - FR-064 / SC-033 and future T093/T094 checks updated. **67 requirements, 36 success criteria, 96 unchecked tasks; baseline now 27 approved tables** after the source-mapping approval below. No implementation/DDL/migration/deployment or live supplier calls.
-- **Next review:** final constraints and protected provider configuration, FR-068 provider eligibility evidence, then preorder date/cancellation policy. The source-mapping relation/table count decision is resolved below.
+- **Next review:** final constraints and protected provider configuration, FR-068 provider eligibility evidence, then preorder cancellation/optional-date notification policy. The source-mapping relation/table count decision is resolved below.
 
 ## Latest owner approval — product_supplier_sources is table 27 (2026-10-29)
 
@@ -138,4 +138,12 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Normal customer redemption/use of an already delivered code is allowed. Provider processing/status/export may remain asynchronous; no synchronous-success guarantee is implied. Complete-order-only customer release, one supplier account and accepted-payment source binding remain unchanged.
 - Verify exact product/variant eligibility at mapping publication and pre-purchase; unknown/excluded requirements block payable API checkout. If discovered after payment, retain original source and paid/unfulfilled admin review under FR-066; no fallback purchase or automatic compensation.
 - Added **FR-068 / SC-037** and updated existing future T057/T094 coverage. **27 tables, 68 requirements, 37 success criteria, 96 tasks: T001 setup complete, 95 unchecked.** No implementation/DDL/migration/deployment/live provider calls or new input/activation table.
-- **Next business clarification:** local-preorder estimated availability dates, then cancellation/hold rules and bot activity retention. Final provider proof, wallet/constraint/migration review and legacy-constitution alignment remain open.
+- **Next business clarification:** local-preorder cancellation/hold rules, optional-date notification details and bot activity retention. Optional availability dates are resolved in the subsequent owner decision below. Final provider proof, wallet/constraint/migration review and legacy-constitution alignment remain open.
+
+## Latest owner decision — preorder availability dates optional (2026-10-30)
+
+- Owner chose **allow local preorders without a date**. Create/publish/purchase remains valid with NULL estimate under other rules; show no estimated date specified, never invent one.
+- Current estimates are optional and may be set/updated/cleared by authorized staff. Preserve the original quoted estimate/absence on accepted orders. Missing/passed/changed dates do not expire/cancel a paid order, change FIFO priority, release coupon holds or trigger compensation.
+- Full-quantity oldest-paid allocation and independent 30-minute unpaid payment deadline remain unchanged. Date-change notifications are not silently added; exact notification and cancellation/hold workflows remain open.
+- Candidate fields: nullable product date and nullable order quote snapshot; no date-history table. Added **FR-069 / SC-038**, updated future T095/T096. **27 tables, 69 requirements, 38 success criteria, 96 tasks; T001 setup complete, 95 unchecked.**
+- Specification only: no code/DDL/migration/deployment/live provider calls. **Next business clarification: how customers request cancellation of a paid queued preorder**, then optional-date notifications and bot activity retention. Final constraints/provider/migration evidence and imported-constitution alignment remain open.

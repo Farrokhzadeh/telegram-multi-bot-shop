@@ -90,7 +90,7 @@
 - [x] Owner approved source binding at accepted wallet/crypto/bank payment and retention of accepted payment plus paid/unfulfilled admin review when the selected source is disabled/unavailable; no silent fallback, automatic credit or lost obligation. FR-066 / SC-035 cover replay/race and unpaid-order cases.
 - [x] Owner confirmed one configured account per provider across products/brands; no account pools or per-mapping credentials/account selection. Retain original account identity on paid requests and block silent account replacement during reconciliation.
 - [ ] Finalize singleton provider configuration persistence and snapshot/blocker fields; finalize approved table 27 `product_supplier_sources` constraints. Approved physical baseline is 27.
-- [ ] Finalize preorder cancellation/hold/date policy, full-manifest access/transport guards and historical partial-delivery compatibility before executable schema or implementation.
+- [ ] Finalize preorder cancellation/hold and optional-date notification policy, full-manifest access/transport guards and historical partial-delivery compatibility before executable schema or implementation.
 - [ ] After implementation authorization, validate paid FIFO across brands, serialized allocation, complete-order/multi-message restart recovery and unchanged immediate-sale/supplier safety using approved fixtures.
 
 ## Notes
@@ -121,3 +121,11 @@
 - [x] Add FR-068 / SC-037 and existing future T057/T094 coverage; 27-table count unchanged, only repository setup T001 complete.
 - [ ] Verify exact provider product/variant eligibility, publication/pre-purchase guards and post-payment type-change admin review using authorized fixtures before implementing adapters.
 - [ ] Reconcile historical excluded product obligations without silently dropping or reclassifying source evidence.
+
+## Optional local-preorder date approval (2026-10-30)
+
+- [x] Owner approved local preorders without dates, valid NULL estimates and no invented delivery promise.
+- [x] Add FR-069 / SC-038 and future T095/T096 coverage: nullable create/publish/checkout, immutable quote evidence, authorized update/clear and no date-driven paid-state/queue/coupon/money transition.
+- [x] Keep unpaid payment deadline separate and 27-table count unchanged.
+- [ ] Specify automatic estimate-change notification behavior and paid cancellation/hold workflow before implementation.
+- [ ] After implementation is authorized, validate nullable fields and missing/passed/edited/cleared estimates using synthetic fixtures.
