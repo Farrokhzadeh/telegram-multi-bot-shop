@@ -1,0 +1,199 @@
+# Canonical schema contract — 28-table forward design
+
+**Reviewed:** 2026-10-30. **Input:** main at 350a4d90ebfe6e4082d94820910806bb96c2484e.
+**Status:** selected documentation design, not executable DDL or implementation approval. The business baseline remains FR-001–084 / SC-001–053. Evidence gates E1–E6 in [consistency-review.md](consistency-review.md) prevent an implementation/release readiness claim.
+
+This file selects concrete types, ownership, keys and cross-row guards for new target data. It replaces alternative pointer/flag, duplicate timestamp, recipient and ledger-source proposals in earlier model notes. Historical decisions remain in research.md and Git history. Source/provider compatibility must be proved before importing historical rows or enabling real procurement.
+
+## Common types and ownership
+
+- New surrogate IDs and all matching entity FKs: UUID. Composite keys remain explicit below. The generation implementation is verified by T033/T078; created_at, never UUID order, is authoritative time.
+- Telegram user/chat/message/update IDs: BIGINT. Quantities/part numbers: positive INTEGER; revisions, posting sequence and attempt counters: nonnegative BIGINT.
+- Time: TIMESTAMPTZ, trusted UTC; a nullable time is absent, never a magic zero date. No preorder date/ETA/deadline/duration column.
+- Money, FX, quoted/native received amounts: finite exact NUMERIC, not float or PostgreSQL money. No new scale truncation is introduced. Currency-specific accepted precision, input bounds, legacy preservation and .NET exact mapping require E3 fixtures. Stored amounts retain their declared denomination.
+- Flags: BOOLEAN; controlled states/provider/method/action codes: TEXT with finite checked vocabularies. Human prose, file references and external IDs: bounded TEXT validated by their contract. IDs/refs never confer authority.
+- Encrypted content: BYTEA ciphertext plus TEXT key ID, authenticated to scope/table/row/field. Evidence/manifest asset refs name restricted encrypted objects, not arbitrary fetch URLs. Digests: BYTEA; credential identity uses a protected keyed digest, never a publicly reversible plaintext hash.
+- No json/jsonb columns, serialized job business state, subscriber arrays or generic EAV settings. A prose payment-terms snapshot is display content; typed columns alone drive payment and allocation. New-row mutation functions enforce live invariants; historical exceptions require the restricted import role and a matching legacy_id_map proof in the same transaction.
+- Default FKs are restrictive; no business-history cascade. New transactional records with a membership derive the brand through users. New live order product linkage is mandatory; historical unmapped exceptions require E3, not a guessed product.
+- Sensitive inputs, finite-decimal checks and field length bounds apply before writes. Provider currency, exact precision and stable item identity cannot be inferred from this document.
+
+## Final table contracts
+
+### 1. brands
+UUID id PK. TEXT code unique, internal_name, public_name, market, default_language, logo_asset_ref nullable, bot_username; BIGINT bot_id unique. Bot token ciphertext/key ID. BOOLEAN active and allow_wallet/crypto/bank/wallet_topup/zero_balance_topup, require_channel_join, support_enabled, fx_enabled. UUID customer_support_admin_id nullable FK admins; require a configured active contact before enabling the public support surface. Encrypted current bank number/holder, keyed global card fingerprint and changed time nullable as a complete bank-enabled tuple. Current FX NUMERIC/source/fetched_at/error; pricing_rounding_step NUMERIC, max_exchange_rate_age_seconds BIGINT, policy_version BIGINT, created_at/updated_at.
+Guards: Iranian active card fingerprints differ; version-check replacements. Public contact is a published handle, never backend login/roster. No per-brand supplier account or NOWPayments credential copy.
+
+### 2. brand_channels
+PK (brand_id UUID FK brands, chat_id BIGINT). title/invite_link TEXT nullable, required/active BOOLEAN, created_at/updated_at. Effective enforcement is brand.require_channel_join AND channel.required AND channel.active, except a verified active staff actor. Disabling enforcement preserves channel rows.
+
+### 3. users
+UUID id PK; brand_id FK brands, telegram_id BIGINT, UNIQUE(brand_id,telegram_id), UNIQUE(id,brand_id). Optional username/names; language TEXT, blocked_at/banned_at/marketing_opt_out_at nullable, first_seen_at/last_seen_at. Typed current flow_state, flow_revision BIGINT, nullable flow_order_id/flow_product_id FKs, flow_anchor_message_id BIGINT, flow_expires_at.
+Flow transitions check expected revision and same-member references. Telegram update replay protection must survive both 180-day purges; a per-bot processed-update checkpoint is trusted runtime metadata, not activity-row existence. No global customer identity or customer session/chat table.
+
+### 4. admins
+UUID id PK, login TEXT unique; password_verifier or external_subject with checked configured authentication mode, disabled_at nullable, auth_version BIGINT, created_at/last_login_at. Nullable verified telegram_user_id BIGINT unique when set, public_contact_handle TEXT and verification actor/time audit link.
+Pending binding fields are binding_challenge_hash BYTEA, binding_candidate_telegram_id BIGINT and binding_expires_at TIMESTAMPTZ, nullable as one tuple. Bind only after a short-lived two-channel possession challenge through a verified private bot conversation and the independently authenticated admin session; never put the challenge in URLs/logs. Clear pending fields on completion/revocation.
+Only an independently authenticated admin can bind/revoke a Telegram identity; no username or group-membership self-promotion. All active admins have global backend scope. Approximate team size 4–6 is configuration, not a DB cap.
+
+### 5. admin_sessions
+UUID id PK; admin_id FK admins, token_hash BYTEA unique, auth_version_at_issue BIGINT, issued_at/expires_at, revoked_at/last_used_at nullable. Require current admin auth version, non-revoked session and active actor on every privileged operation. Tokens are never stored plaintext.
+
+### 6. products
+UUID id PK; sku TEXT nullable unique, fulfillment_kind TEXT(local/supplier/manual), local_first BOOLEAN, availability_policy TEXT(immediate/local_preorder), active_supplier_source_id UUID nullable, revision BIGINT. Base title/description/icon ref/guidance TEXT, active BOOLEAN, created_at/updated_at.
+One authoritative source pointer only; no independently editable selected flag on mappings or brand override. Composite FK (id,active_supplier_source_id) -> product_supplier_sources(product_id,id), added after both tables exist.
+Selection changes require an enabled same-product source. Disabling an already selected source is allowed and retains the pointer for evidence; eligibility checks block new remote work. Re-enable does not clear a paid review case. local_preorder is a local-stock queue policy; it never implicitly enables supplier-backed preorder.
+
+### 7. brand_products
+PK (brand_id UUID FK brands, product_id UUID FK products). visible BOOLEAN; title/description/icon/guidance mode TEXT(inherit/override/clear) with typed nullable override values. price_usdt/price_toman NUMERIC, auto_price_toman BOOLEAN, method flags, min_quantity/max_quantity INTEGER, revision BIGINT, updated_at.
+Only optional description/icon/guidance may use clear; title must inherit or provide a nonblank override. Mode/value consistency, positive applicable prices and valid quantity interval are checked. Manual toman price and independent USDT price remain distinct. When auto pricing is enabled, cached display values cannot replace the versioned USD-total -> discount -> verified FX -> legacy rounding algorithm.
+
+### 8. inventory_items
+UUID id PK; product_id FK products; credential_ciphertext/key_id, source_fingerprint BYTEA; origin_kind TEXT(local_import/supplier_bonus), nullable supplier_request_id FK, nullable remote_item_ref TEXT and supplier_item_key BYTEA, state TEXT(available/allocated/retired/admin_held), assigned_fulfillment_id UUID nullable unique FK fulfillments, allocated_at nullable, created_at.
+A supplier bonus is stored as admin_held with original request provenance and no customer assignment, never as saleable available stock. Original encrypted acquisition evidence remains preserved; admin-only extracted copies use the restricted inventory scope and fresh authenticated row context. This is restricted storage in an existing table, not automatic admission to the shared saleable pool. Normal local stock uses the platform-inventory keyring. Trusted capture/reveal workers, not ordinary bot consumers, handle bonus content. See unit-identity guard below.
+Paid allocation is immutable except an audited safe disposition; unpaid checkout reserves nothing.
+
+### 9. wallets
+user_id UUID PK/FK users; balance NUMERIC, version BIGINT, updated_at. USD only, nonnegative finite live balance; no repeated currency/brand/Telegram columns. Credit lazily creates the original membership's wallet within the posting transaction.
+
+### 10. wallet_entries
+UUID id PK; user_id FK wallets, signed_amount NUMERIC, balance_after NUMERIC nullable only for missing historical evidence, posting_version BIGINT nullable, movement_kind TEXT, is_posting BOOLEAN, idempotency_key TEXT, nullable order_id/payment_id/supplier_request_id FKs, nullable legacy_import_batch UUID, admin_id FK nullable, audit_event_id FK nullable, reason TEXT, created_at.
+Use checked typed origins by movement kind instead of an authoritative polymorphic source_type/source_ref. Keep source-kind provenance in legacy_id_map/restricted source evidence before removing any historical source fields.
+UNIQUE(user_id,idempotency_key); UNIQUE(user_id,posting_version) when posting. Live debit/credit locks the wallet and updates balance/version plus immutable entry atomically; posting_version equals committed wallet version. Imported history is nonposting; one frozen opening entry posts once. Posting entries have exact balance_after.
+Supplier credit is unique at order-resolution level, linked to original order/request and audit. No second bank-conversion amount is stored on orders. A bank admin supplies the confirmed USD amount; wallet/crypto credit uses original net USD. No external outgoing payment/refund record.
+
+### 11. orders
+UUID id PK and sole new public identifier; user_id FK users, product_id FK products (nullable only for reviewed historical unmapped cases), quantity INTEGER, revision BIGINT. order_kind TEXT(product_purchase/prepaid_units); payment_status TEXT(awaiting_payment/under_review/confirmation_pending/paid/not_required/expired/cancelled), fulfillment_status TEXT(unfulfilled/waiting_stock/acquiring/requires_admin/ready/delivering/completed/cancelled/compensated), currency TEXT(USDT/TOMAN), payment_method TEXT(wallet/crypto/bank/no_payment_required); unit_price_usdt NUMERIC, nullable unit_price_toman/FX/source/time, auto_price_toman_snapshot BOOLEAN, pricing_rounding_step_snapshot NUMERIC, price_calculation_version TEXT, discount_pct_snapshot NUMERIC nullable, discount_units_snapshot INTEGER.
+payment_due_at nullable, payment_confirmed_at nullable is the single accepted-time/FIFO clock; do not also store paid_at as a competing timestamp. created_at/updated_at are separate.
+Immutable brand/product presentation and display payment-terms snapshots; fulfillment_kind_snapshot, local_first_snapshot, is_preorder BOOLEAN.
+Typed review_code nullable; hold_at/hold_admin_id/hold_reason nullable as a checked active-hold tuple; resolution_kind, resolution_admin_id/time/audit_event_id and resolution_wallet_entry_id nullable as checked terminal-resolution fields.
+Complete-manifest fields: delivery_generation UUID nullable, manifest_asset_ref/digest nullable, manifest_prepared_at/release_authorized_at nullable; UNIQUE(id,delivery_generation). No public_ref, stored order totals, generic settings, duplicate brand_id/telegram_id or preorder date fields. A prepaid_units source order issues one N-use entitlement and no supplier procurement/local goods; product_purchase is the only path requiring quantity customer goods rows. This explicit discriminator prevents a prepaid sale from being mistaken for a goods checkout.
+Partial UNIQUE(user_id) WHERE payment_status=awaiting_payment. Protected receipt/confirmation/accepted states are not replaceable. Cancelled is fulfillment/business resolution, not proof payment was never received; retained accepted financial history is immutable.
+
+### 12. payments
+UUID id PK; order_id FK orders XOR topup_user_id FK users. payment_method TEXT(crypto/bank), quote_currency TEXT(USD/TOMAN), amount_due NUMERIC, amount_received NUMERIC nullable, provider_code/ref/idempotency_ref, network_asset TEXT nullable, network_amount NUMERIC nullable, provider_confirmations BIGINT nullable; first_payment_observed_at/confirmed_at nullable, status TEXT(created/awaiting/observed/confirming/settled/rejected/expired/review), bounded provider_status_code nullable, created_at.
+Bank destination ciphertext/key tuple captured once; receipt_asset_ref, review_admin_id/time/reason nullable. compensating_wallet_entry_id FK nullable, evidence_asset_ref/digest nullable. Preserve a nullable legacy_kind TEXT only as mapped historical evidence until E3 proves every source value; it never controls new logic.
+Provider identity uniqueness is (provider_code,provider_payment_ref) when set; idempotency_ref unique. Top-up vs order derives from XOR origin, not a mixed kind enum. New top-ups and USD quotes are crypto only; bank is order-linked TOMAN only. USD quote denomination and actual USDTTRC20/USDTBSC received amount are distinct. Historical other assets are not permission to offer them.
+No fabricated payment for no_payment_required or wallet checkout; no outgoing/external refund subtype.
+
+### 13. fulfillments
+UUID id PK, order_id FK orders, unit_no INTEGER, kind TEXT(local/supplier/manual) nullable only for an unfilled not-yet-routed slot, status TEXT(unfilled/acquired/ready/released/retained_admin), supplier_request_id FK nullable, remote_item_ref nullable, supplier_item_key BYTEA nullable; encrypted delivered_content/key_id nullable, content_kind, resolution_admin_id/note nullable, manifest_generation UUID nullable, created_at/completed_at nullable.
+UNIQUE(order_id,unit_no); unit numbers cover exactly 1..orders.quantity for live product_purchase orders; prepaid_units source sales issue the single linked coupon instead of fake goods rows. Same-order request guard; same-product allocation guard. Local inventory points here as the one allocation authority. Composite (order_id,manifest_generation) references the order's immutable delivery generation.
+Acquired/ready is not customer delivered. Complete-set/review/terminal-resolution checks authorize the whole order before any content path opens. Local content is re-encrypted by a trusted worker to the brand scope when needed; an ordinary consumer never decrypts the unsold shared pool.
+
+### 14. supplier_requests
+UUID id PK, order_id FK orders, requested_quantity INTEGER positive remote remainder, product_supplier_source_id FK product_supplier_sources nullable only for a blocked known/unusable-source case, source_revision BIGINT nullable; immutable provider_code/account_ref/external_product_id/variant snapshot where known. local_intent_key TEXT unique, remote_ref nullable, request_sha256 BYTEA, status TEXT(blocked/pending/in_flight/unknown/partial_pending_admin/succeeded/failed/resolved), revision BIGINT, review_code nullable, next_check_at nullable, encrypted evidence ref, created_at/updated_at.
+No row for zero supplier remainder. A missing selected source may leave an order-only review case; never fabricate a provider/account or runnable request. A blocked request cannot queue submit until its explicit reviewed state permits it.
+Accepted cost_baseline_amount NUMERIC positive and cost_currency TEXT (nullable only on a blocked unverified-cost case; a later quote must not pretend it was known at acceptance), cost_quote_ref/observed_at, cost_max_auto derived as baseline*1.10 (not separately mutable). Snapshot the bound remote quantity, not the customer's entire mixed quantity. Optional explicit approved_cost_ceiling NUMERIC plus approval_audit_id for the exact request. No retry/cost refresh can reset the baseline.
+Only one unresolved live procurement per order unit. Later local stock does not resize/rebind pending remote obligations.
+
+### 15. jobs
+UUID id PK, brand_id FK brands nullable only for declared platform-maintenance or shared-product/source kinds, job_kind TEXT, checked nullable origin FKs: payment_id/order_id/fulfillment_id/campaign_id/discount_id/support_message_id/telegram_delivery_id/product_stock_subscription_id/supplier_request_id/product_id/product_supplier_source_id/audit_event_id, plus origin_revision BIGINT nullable for revision-guarded commands. status TEXT(pending/leased/succeeded/retry/failed/cancelled), attempts BIGINT, available_at, locked_by/lease_until nullable, dedupe_key unique, last_error_code nullable, created_at/completed_at.
+Each job kind has an exact permitted origin set; no object_ref/payload blob. Persistent work is inserted with its business transaction. A lease is not proof a provider purchase failed. An admin resolution command UUID is the unique audit identity; retry work retains that authorization and expected request revision, so stale work cannot consume a later approval or higher cost ceiling. Platform cleanup jobs cannot imply a customer brand.
+
+### 16. campaigns
+UUID id PK, batch_id UUID, brand_id FK brands, language TEXT; typed audience_kind/active_since/language fields, message_text/media_ref nullable as valid content tuple, status, created_by_admin_id FK, approved_at/created_at/started_at/completed_at.
+UNIQUE(batch_id,brand_id,language), UNIQUE(id,batch_id,brand_id). Keep the language variant: different rows may share a launch/brand but cannot send twice to the same membership in that launch.
+
+### 17. telegram_deliveries
+UUID id PK, brand_id FK brands, recipient_kind TEXT(customer_dm/staff_chat), user_id FK users nullable, staff_chat_id BIGINT nullable; purpose/action TEXT(send/edit), target_message_id BIGINT nullable, part_no INTEGER, delivery_generation UUID nullable, recipient_language TEXT nullable, eligibility_checked_at, dedupe_key unique, status/attempts/next_attempt_at/last_attempt_at/telegram_message_id/last_error_code/sent_at/created_at.
+Typed nullable origin FKs: campaign_id/campaign_batch_id, discount_id, order_id, fulfillment_id, support_message_id, product_stock_subscription_id, supplier_request_id, audit_event_id. Purpose-specific cardinality guards, not one generic payload.
+Recipient XOR: customer -> user and no staff_chat_id; staff -> configured trusted staff_chat_id, no user, staff-only case/bonus purpose. No customer credential/campaign/restock body may target a group. Customer DM target is always users.telegram_id; no duplicate customer chat_id.
+Campaign composite FK uses (campaign_id,campaign_batch_id,brand_id); partial UNIQUE(campaign_batch_id,user_id) covers all language variants. Customer manifest UNIQUE(order_id,delivery_generation,part_no,purpose); one restock logical alert per subscription; staff notice uniqueness by exact case/bonus origin and generation. Edit requires target ID and authoritative state recheck.
+No guaranteed exactly-once Telegram receipt. Retry the same durable intent; never repurchase/redeem to compensate for an uncertain send.
+
+### 18. support_tickets
+UUID id PK, user_id FK users, order_id FK nullable, category/status/source TEXT, assigned_admin_id FK nullable, created_at/updated_at/closed_at. Linked order must have the same membership, not merely the same brand. Ticket state/text cannot mutate order/stock/coupon/money.
+
+### 19. support_messages
+UUID id PK, ticket_id FK, sender_kind TEXT(customer/admin/system), sender_admin_id FK nullable, historical sender_telegram_id BIGINT nullable, encrypted body/key ID, asset_ref nullable, telegram_message_id BIGINT nullable, created_at.
+Customer sender is the ticket's membership; staff is authenticated admin. Historical sender evidence is not dropped without E3, and is not a new caller-controlled routing selector. External-origin uniqueness includes the correct bot/ticket identity. Media and staff/customer notifications remain independently durable.
+
+### 20. legacy_id_map
+PK(source_brand TEXT,source_table TEXT,source_key_kind TEXT,legacy_id TEXT); source_key_kind checks primary/public_order_reference. target_kind TEXT checked, target_id UUID, target_brand_id UUID nullable for composite destinations, source_fingerprint BYTEA, import_batch UUID, import_manifest_ref TEXT, migrated_at.
+A static validated target-kind guard checks the actual target, including composite brand listings. Alias and primary IDs cannot collide. Target write plus mapping commit atomically. Import checkpoint recovery derives from this map and an external protected immutable batch manifest; no unapproved checkpoint table.
+
+### 21. audit_events
+UUID id PK (also an idempotent admin command identity where applicable), actor_kind TEXT, actor_admin_id/actor_user_id FKs nullable with checked actor-kind XOR (system has neither), brand_id FK nullable for platform events, action/entity_kind TEXT controlled registries, entity_id UUID nullable only for declared platform kinds, reason TEXT, previous_revision/new_revision nullable, correlation_id UUID, command_sha256 BYTEA nullable for the idempotent admin command, created_at. A command replay must match actor, scope and canonical input digest before returning the saved outcome.
+Finite entity lookup guards validate the referenced domain object; this searchable audit pointer is not EAV business settings. Actual money/hold/resolution state lives in typed domain rows and coupon settings in table 24. Typed before_channel_enforcement/after_channel_enforcement BOOLEAN nullable only for that action. Audit rows immutable; no free-form secret payload or external refund amount/reference/status.
+
+### 22. discounts
+UUID id PK, brand_id FK, code_digest BYTEA, encrypted code/key ID, display_prefix TEXT, issuance_batch_id UUID, kind TEXT(prepaid_entitlement/goodwill/promotion), percent_off NUMERIC [0,100], product_id/eligible_user_id/source_order_id FKs nullable by kind, max_total_uses/max_uses_per_user BIGINT nullable for uncapped, redeemed_count BIGINT, usage_adjustment_units BIGINT signed, starts_at/ends_at nullable, active BOOLEAN, revision BIGINT, created_by_admin_id FK, created_at.
+UNIQUE(brand_id,code_digest); new prepaid issuance requires matching customer/product/verified paid prepaid_units source provenance and defaults no expiry; partial UNIQUE(source_order_id) for prepaid_entitlement prevents reissuing the same source obligation. Immutable actual redemptions are distinct from editable effective used=max(0,redeemed_count+adjustment). No lower cap floor or owner-edit veto. The paid source/member/product provenance stays immutable; owner eligibility writes do not transfer that paid binding. New use must satisfy both that original provenance and the current eligibility revision; incompatible edited scope can stop new use without rewriting source facts. Existing valid holds use their original grant revision. Derived new capacity subtracts held claims and clamps to zero.
+
+### 23. discount_uses
+PK(discount_id UUID FK,order_id UUID FK), UNIQUE(order_id); discount_revision_id UUID FK discount_revisions with same-coupon guard; units_covered INTEGER, saved_amount NUMERIC, saved_currency TEXT, status TEXT(held/redeemed/released), created_at/transitioned_at.
+Do not store a duplicate user_id; membership derives from the order. Retain saved_currency as explicit historical denomination until E3 proves removable; it is not assumed to be the wallet currency. Exactly one chosen whole-quantity coupon per new order, checked with same-brand/member/product eligibility at claim creation and pinned to its immutable granting revision. Existing valid holds survive later owner edits/expiry; fulfillment redeems once without new-checkout cap validation. Terminal release never changes coupon terms.
+
+### 24. discount_revisions
+UUID id PK, discount_id FK, revision_no BIGINT, audit_event_id FK unique; typed post-edit percent/caps/adjustment/redeemed_count_at_revision/held_units_at_revision/starts_at/ends_at/active/product_id/eligible_user_id. UNIQUE(discount_id,revision_no). Initial issuance and every owner edit append with current-row/audit changes atomically; ordinary redemption does not manufacture an edit revision.
+
+### 25. bot_activity_events
+UUID id PK, user_id FK, finite event_type/source_kind/action_code, optional product_id/order_id/support_ticket_id FKs, quantity_selected/flow_revision/telegram_update_id nullable, outcome_code/idempotency_key TEXT, occurred_at. UNIQUE(user_id,idempotency_key).
+Same-member/brand contextual guards; no raw DM/callback/credential/payment payload. Reads hide occurred_at older than the rolling 180-day cutoff; maintenance may delete only expired rows. Business replay protection is independent.
+
+### 26. supplier_request_attempts
+UUID id PK, supplier_request_id FK, attempt_no BIGINT, operation TEXT(submit/status_lookup/export), outcome TEXT(in_flight/succeeded/failed/timeout/unknown), parent_submit_attempt_id self-FK nullable for lookup/export, admin_authorization_audit_id FK nullable for explicitly retried submit; purchase_idempotency_key TEXT nullable only where provider support is verified, max_charge_amount NUMERIC nullable, http_status/error_code/remote_ref/evidence_ref nullable, started_at/finished_at nullable as checked lifecycle.
+UNIQUE(supplier_request_id,attempt_no). Allocate sequence under request lock; commit in_flight intent before each possible network operation, then finalize once. Terminal unknown is evidence, not a retry instruction; later lookup is a new row. The request's stable local intent differs from a provider-specific purchase-attempt key; only proven-safe explicit retry can authorize a fresh submit key. No worker lease implies remote rejection.
+
+### 27. product_supplier_sources
+UUID id PK, product_id FK, provider_code TEXT registry, external_product_id TEXT, external_variant_id TEXT nullable, enabled BOOLEAN, revision BIGINT positive, created_at/updated_at.
+UNIQUE(product_id,id) supports the selected-source composite FK. Partial UNIQUE(product_id,provider_code,external_product_id) WHERE external_variant_id IS NULL and UNIQUE(product_id,provider_code,external_product_id,external_variant_id) WHERE external_variant_id IS NOT NULL cover both identity cases; no duplicate absent-variant mapping. provider_code resolves one active protected account in service configuration; not an account selector on each mapping.
+Typed last-observation fields: observation_revision BIGINT, observed_source_revision BIGINT, observed_account_ref TEXT, observed_at nullable, availability_code TEXT(unknown/available/out_of_stock/ineligible/error), available_quantity INTEGER nullable, observed_unit_cost NUMERIC nullable, observed_currency TEXT nullable, eligibility_code TEXT, quote_ref TEXT nullable, observation_error_code TEXT nullable. Each direct read supplies its request-specific evidence/revision; a later mutable observation cannot validate an older checkout.
+Do not change provider/product identities of referenced mappings in place: create a new mapping and switch the pointer explicitly. Enabled/revision observations may change; paid snapshots never do. Hard deletion of referenced sources is prohibited.
+
+### 28. product_stock_subscriptions
+UUID id PK, user_id FK users, product_id FK products, created_at, triggered_at/cancelled_at/closed_at nullable. Partial UNIQUE(user_id,product_id) WHERE closed_at IS NULL. Listing/membership guard and trusted timestamps.
+One consent row -> one durable logical customer alert; a later explicit opt-in uses a new ID. triggered_at records enqueue, not proof Telegram received it; delivery state remains table 17. Cancellation sets cancelled_at/closed_at and suppresses any unsent intent. A notified/terminally unreachable intent closes the row; unknown transport outcomes reconcile before a new automatic send/close decision.
+Retain active rows without an age limit. Keep closed cutoff equality and clean strictly older than closed_at+180 elapsed days. First stop/verify terminal restock-only work, then purge eligible related restock-only job/delivery rows and consent in one bounded transaction; never cascade generic domain records or erase audit/financial dependencies. Dependency failure blocks that batch and raises redacted backlog metrics. Do not retimestamp replayed consent or treat expired rows as authorization.
+
+## Cross-table guards and transaction boundaries
+
+1. Brand/member guards are explicit constraint triggers or typed stored mutation functions with restricted table-write roles. CHECK expressions cannot stand in for cross-row ownership proof. Composite FKs cover actual unique keys; static guards cover membership-derived brand without reintroducing orders.brand_id.
+2. Lock order: affected memberships first, shared products second, coupons, wallets, orders/requests, then units in deterministic ID order. Admin edits that change member/product FKs acquire those affected parents first and recheck expected revisions, avoiding inverse FK-lock acquisition. Multi-product new orders are forbidden. No provider/Telegram call inside the database transaction.
+3. Immediate local-only: one atomic full allocation/debit/full coupon redemption/manifest authorization/outbox, or zero checkout effects.
+4. Local preorder: accepted time is payment_confirmed_at; oldest paid then order ID. A held or locked head blocks. Select the absolute oldest active paid head including holds; do not skip locked heads or filter holds out. Incomplete head gets zero local allocation/reservation and later consumers cannot steal its stock. SKIP LOCKED is a scheduler optimization only, not a FIFO business-head selection rule.
+5. Mixed: commit accepted payment or zero-due acceptance, available eligible local allocations, immutable paid split/source/cost snapshot and positive remainder work. No remote remainder means no supplier request/read dependency. If provider evidence becomes invalid after money arrives, retain the accepted obligation and review blocker, not a fictitious purchase.
+6. Supplier: current source observation is preflight only. Freeze usable identity/account/cost at accepted binding; disabled/missing/unverifiable source yields a typed blocked case. A remote attempt must have durable intent and an enforceable approved charge ceiling; unknown results reconcile. Actual paid scope and purchased units never rebase to later catalog values.
+7. Whole manifest: lock order; verify exactly quantity unique ready units, no unresolved review/hold/terminal credit, assign one immutable delivery_generation and encrypted content manifest, redeem full held claim and queue stable parts atomically. Acquired subsets never authorize customer reveal.
+8. Admin resolution: lock order/request against worker/delivery; verify reconciled effects; explicit safe retry preserves original source and unmet units. Wallet credit writes the original membership's USD ledger plus terminal resolution/full held release once. Bank amount is an explicit admin input; zero-due gives no fictitious cash credit. Goods retain admin-only provenance. Local-preorder cancellation remains the separately approved outside-shop path.
+9. Supplier unit identity: serialize capture under request and product locks. Check a proved stable supplier_item_key across fulfillments and admin_held inventory before either insertion; immutable request/item disposition is disjoint. A duplicate/reordered response is matched deterministically or retained encrypted for admin reconciliation, never guessed. Admin bonus retrieval cannot use customer manifest endpoints.
+10. Retention has two independent clocks and narrowly scoped maintenance permissions: activity occurred_at and closed subscription closed_at. Neither erases financial replay protection or resets consent.
+11. Staff group routing is checked against trusted protected configuration at enqueue/send. It is separate from per-brand public contact and from current independent admin authentication; a group member is not automatically an admin.
+
+## Job-kind origin matrix
+
+Only the listed typed references may be present for each kind; platform maintenance has no customer origin. Cross-row brand guards apply to every brand-owned origin.
+
+| Kind | Required typed origin |
+|---|---|
+| expire_order_payment | order_id |
+| verify_payment, settle_wallet_topup | payment_id |
+| submit_supplier, reconcile_supplier, export_supplier | supplier_request_id; explicit retry also requires authorization audit_event_id and origin_revision |
+| prepare_manifest, issue_prepaid_coupon | order_id, with checked order_kind |
+| send_telegram | telegram_delivery_id |
+| drain_local_preorders, evaluate_restock | product_id; platform-owned shared-product work |
+| refresh_catalog_source | product_supplier_source_id; no bound paid purchase implied |
+| refresh_fx | brand_id |
+| campaign_materialize | campaign_id |
+| coupon_notice | discount_id |
+| support_notice | support_message_id |
+| activity_cleanup, subscription_cleanup | no customer origin; explicit maintenance permission |
+
+A product-origin job may affect all memberships through the shared product; it carries no guessed brand_id. Customer send jobs derive their brand and recipient from their checked delivery.
+
+## Financial and release state distinctions
+
+- A paid cancellation changes fulfillment/resolution, not historical payment_status=paid. Unpaid expiry/replacement may retain payment_status=expired/cancelled even when independently reconciled late money later creates the approved wallet credit.
+- not_required means accepted zero customer due; it is not evidence of an external payment. Accepted payment_confirmed_at is used for zero-due source binding as well as positive-due accepted payment.
+- review_code is a checked vocabulary: source_missing/source_disabled/account_unverified/source_ineligible/stock_shortage/cost_unverified/cost_limit/provider_unknown/provider_failed/partial_acquisition/identity_mismatch/credential_recovery. Provider-specific free text cannot silently create new transitions.
+- resolution_kind is checked: replaced/unpaid_expiry/local_preorder_cancellation/immediate_crypto_shortage_credit/late_crypto_credit/supplier_wallet_credit/manual_fulfilled, or NULL while unresolved. External payout/reference/status fields are absent.
+- Coupon redemption and content release commit only after a complete product_purchase manifest is ready. A paid mixed order may have internal local allocations while held claims remain; incomplete local preorders still allocate zero. Prepaid_units source settlement issues its one matching entitlement atomically, without pretending actual customer goods were delivered.
+- Immediate crypto shortage credit is for an immediate local-only goods order whose complete local allocation failed. Supplier/mixed accepted procurement uses retained review and explicit FR-080 resolution; paid local preorders use FIFO. Never apply the local shortage credit merely because a mixed order has fewer local units.
+
+## Configuration, migrations and readiness
+
+One protected active supplier account per provider and one shared NOWPayments account live in typed deployment/service configuration; request snapshots hold non-secret account identity, not credentials. Old account/key material needed for reconciliation is restricted recovery configuration, not a selectable pool. Shared staff-chat ID is restricted typed configuration and is snapshotted only on staff notice intents.
+
+All 28 base tables/column types are declared before cyclic FKs/triggers are attached in the reviewed explicit migration sequence; constraint validation finishes before any worker/service writes. Story tasks qualify/assert that baseline rather than creating duplicate tables. The migration runner is operator-invoked, never daemon startup. Do not silently add schema-history/import-checkpoint tables: use an immutable external release/import manifest plus a transactionally applied schema-revision metadata marker and catalog assertions. Any later proposal for an extra physical table needs its own inventory decision.
+
+This design has not been applied to PostgreSQL. E1 constitution alignment, E2 real provider/time/cost/item contracts, E3 protected legacy denomination/cardinality/precision, E4 database/crypto/AOT probes, E5 merchant/private-chat disclosure and E6 restore/cutover proof remain gates. Never infer implementation or production approval from this document.

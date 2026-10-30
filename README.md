@@ -39,6 +39,15 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 
 The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
 
+## Review deliverables
+
+- [Consistency findings and remaining evidence gates](specs/001-multibrand-redesign/consistency-review.md)
+- [Canonical 28-table field and constraint contract](specs/001-multibrand-redesign/schema-contract.md)
+- [84-requirement / 53-criterion task traceability](specs/001-multibrand-redesign/requirements-traceability.md)
+- [Concrete constitution alignment proposal](specs/001-multibrand-redesign/constitution-alignment-proposal.md)
+
+The documentation review does not claim a schema was executed or providers verified. The imported constitution remains unchanged; its alignment and the report's stage-specific evidence gates are explicit.
+
 ## Spec-kit
 
 Existing spec-kit 1.2.0 configuration, templates, PowerShell scripts and ten generic integration skills are included under `.specify/` and `.agents/skills/`. Their scripts/skills are copied unchanged from the source revision. The active feature is selected by `.specify/feature.json`.

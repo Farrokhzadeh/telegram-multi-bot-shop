@@ -402,3 +402,9 @@ After lifecycle-diagram explanation, the owner selected 180 elapsed days from cl
 The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
 
 Current approved baseline after ADR-52–58: **28 tables, 84 requirements, 53 success criteria, 96 tasks; T001 setup complete, 95 unchecked.** No notifications, supplier calls, wallet postings, holds or deletions were performed.
+
+## Technical consistency pass — 2026-10-30 (no business approval changes)
+
+The canonical forward field/types/guards are selected in schema-contract.md and findings in consistency-review.md. No ADR/business identifier is renumbered. Earlier dated table counts, single-source-only checkout language and proposed alternatives above are history, not parallel runtime rules. The imported constitution remains unchanged; the prepared alignment proposal is not ratification.
+
+The pass introduces no 29th table or live behavior. Full traceability is planning evidence only: 84 requirements, 53 success criteria, 96 tasks with setup T001 alone complete. Future PostgreSQL/provider/legacy/AOT and release gates remain explicit.

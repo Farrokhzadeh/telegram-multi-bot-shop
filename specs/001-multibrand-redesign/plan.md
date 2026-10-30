@@ -4,6 +4,8 @@
 **Specification repository**: `Farrokhzadeh/telegram-multi-bot-shop`, branch `main`; imported from `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513` (implementation and deployment remain unapproved)  
 **Status**: Backend-only architecture plan, suitable for task breakdown after source evidence; no deployment authority.
 
+**Current review:** [consistency-review.md](consistency-review.md). Types/relationships are selected in [schema-contract.md](schema-contract.md); ownership is mapped in [requirements-traceability.md](requirements-traceability.md). Older dated clarification notes below are rationale, not competing field alternatives.
+
 ## Summary
 
 Build a lean, brand-neutral backend serving three independently presented Telegram shops. One shared commerce core controls brand-scoped users/wallets, a shared catalog and inventory, atomic wallet checkout, asynchronous external payment reconciliation, supplier fulfillment, campaigns, and brand-independent operational configuration. Each brand has its own bot token, encryption keyring and state. Administration is exposed via authenticated APIs **only**; no dashboard, frontend, UI framework or website is part of this plan. AI answering is a separately deployable service, outside the commerce codebase's execution path.
@@ -19,7 +21,7 @@ The historical `feature/001-csharp-native-aot` branch is a source of proven idea
 | API host | ASP.NET Core Minimal APIs, source-generated JSON, explicit request validation and authentication; no MVC, Blazor or server-rendered UI |
 | Telegram | Per-brand long-polling consumer initially, or verified webhook mode if existing ingress requires it; a single update consumer per token |
 | Persistence | PostgreSQL, Npgsql/direct explicit SQL, migration scripts applied deliberately; avoid experimental EF Native AOT dependency |
-| Relational schema | **No JSON/JSONB/EAV columns in v1**; owner-approved 28-table candidate (23-table base + 3 history relations + `product_supplier_sources` + `product_stock_subscriptions`); **USD-only wallets keyed by `user_id`**, customer private-DM `users.flow_*` and no redundant delivery `chat_id`; approved typed `discount_revisions` coupon-edit history and `bot_activity_events` customer interaction history; current FX fields on `brands`, accepted rates only on `orders`; pending proof of one-product legacy orders |
+| Relational schema | **No JSON/JSONB/EAV columns in v1**; owner-approved 28-table candidate (23-table base + 3 history relations + `product_supplier_sources` + `product_stock_subscriptions`); **USD-only wallets keyed by `user_id`**, customer private-DM `users.flow_*` and no redundant delivery `chat_id`; approved typed `discount_revisions` coupon-edit history and `bot_activity_events` customer interaction history; current FX fields on brands, accepted rates only on orders; pending proof of one-product legacy orders |
 | Encryption | Migration-only legacy Fernet/key derivation reader; new authenticated ciphertext with **new per-brand keys for brand-owned data plus a distinct platform shared-inventory key**; AES-256-GCM candidate after golden-vector and Linux AOT tests |
 | Jobs | PostgreSQL outbox, leases, idempotency keys and retry/reconcile states; no memory-only durable obligations |
 | Administration | Private authenticated, audited admin API; all admins can manage all brands; **no graphical UI** |

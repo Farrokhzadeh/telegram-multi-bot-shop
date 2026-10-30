@@ -19,6 +19,8 @@
 
 Expected: the typed physical schema matches the approved table list, and no unsafe table removal was used merely to reduce the count.
 
+**Review baseline:** [schema-contract.md](schema-contract.md), [requirements-traceability.md](requirements-traceability.md), [consistency-review.md](consistency-review.md). Every check below is planned; no application, PostgreSQL, AOT, live provider or Telegram check ran in this documentation review.
+
 ### A. Build proof
 
 ```bash
