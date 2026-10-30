@@ -202,3 +202,9 @@ The approved inventory now contains **27 tables**, including `product_supplier_s
 **Encryption key ownership is not conditional**: current design needs separate per-brand keys **and** an independent shared-inventory key. Never choose a brand's key for a brand-neutral stock item merely because Brand A originally supplied the master catalog.
 
 **The current owner-approved design target is 27 proposed tables. No production schema/write/migration permission is implied.** Per-brand encrypted secrets, Native AOT scope, three independent storefronts, wallet accounting and staged cutover gates are unchanged.
+
+## Supplier product eligibility — approved first-release boundary (2026-10-30)
+
+FR-068 limits automated supplier mappings/procurement to ready-to-deliver accounts, keys and codes, requiring no customer-provided fulfillment inputs. Email activation, buyer-email slot assignment, existing-account upgrades and manual/custom supplier delivery are excluded; do not add input-form/activation tables or generic input payloads for them.
+
+Validate exact provider product/variant requirements at mapping publication and before purchase. Unknown requirements fail eligibility; a change after payment preserves the original bound paid obligation for administrator review under FR-066. Ordinary delivered-code redemption and asynchronous provider status/export remain allowed. Complete-order release remains unchanged. The approved candidate remains **27 tables**; exact typed eligibility evidence/guards still require provider fixtures and final constraint review.

@@ -19,12 +19,13 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - C#/.NET 10 Native AOT backend and PostgreSQL; no graphical admin UI in scope.
 - 27 proposed relational tables, no JSON/JSONB/EAV business-state columns.
 - Brand-isolated users, USD wallets, orders and payments; shared catalog/stock.
+- Automated supplier products: ready-to-deliver accounts, keys and codes only, without buyer fulfillment inputs; activation/upgrade/custom supplier flows are excluded.
 - Multiple supplier mappings per product; one account per supplier and one product-level active selection shared across all brands.
 - Supplier choice binds at accepted payment. An unavailable source preserves payment and the paid obligation for administrator review, without automatic fallback or compensation.
 - Deliver the complete requested order quantity. Local preorder FIFO waits for the whole oldest order; incomplete supplier acquisitions remain protected internally with zero customer release.
 - External refunds and their records stay outside the platform.
 
-The feature contains **67 functional requirements, 36 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
+The feature contains **68 functional requirements, 37 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
 
 ## Spec-kit
 

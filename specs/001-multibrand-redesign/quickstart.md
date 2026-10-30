@@ -139,6 +139,16 @@ Expected: uncertain supplier outcome stays pending reconciliation; incomplete 3-
 
 These are future checks, not live staging results. The approved candidate contains 27 tables, including `product_supplier_sources`; its exact constraints/config and any further transport relations still need review. No new split-delivery table is implied.
 
+### E1b. Supplier product eligibility (FR-068 / SC-037; future checks)
+
+- Enable/publish verified ready-to-deliver account/key/code mappings with separate exact product/variant identity. Unverified requirements must not default to eligible.
+- Reject email activation, buyer-email slot assignment, existing-account upgrades and manual/custom supplier delivery before creating a payable checkout, invoice or wallet debit. No customer fulfillment-input prompts/payloads are created.
+- After accepting payment for an eligible item, simulate a provider requirement change before purchase: retain original source/payment and full paid obligation for admin review, with no purchase/fallback/automatic compensation. Retry/replay never duplicates or loses that obligation.
+- Allow ordinary redemption instructions for delivered codes and asynchronous provider processing/status/export. Keep full-order manifest release, one-time credential capture and source account isolation unchanged.
+- Reconcile any historical excluded product obligations explicitly; do not silently reclassify old customer orders or discard source evidence. No new operational input/activation table is implied.
+
+These are specified future checks, not executed live-provider results.
+
 ### E2. Human support without AI
 
 - Disable or disconnect the entire AI service.

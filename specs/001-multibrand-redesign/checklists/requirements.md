@@ -113,3 +113,11 @@
 - [x] Preserve shared master-product selection, one provider account, accepted-payment immutable request provenance, unavailable-source review and complete-order delivery.
 - [ ] Finalize null-aware mapping uniqueness, same-product active selection, referenced mapping lifecycle, paid source-revision/snapshot constraints and protected provider configuration before DDL.
 - [ ] Verify mapping/selection/payment concurrency and historical source provenance after implementation is authorized; all implementation tasks remain unchecked.
+
+## Supplier product scope approval (2026-10-30)
+
+- [x] Record ready-to-deliver accounts/keys/codes only for first-release automated supplier products, without customer-provided fulfillment inputs.
+- [x] Exclude input-collecting activation/slot/upgrade and manual/custom supplier delivery; preserve ordinary delivered-code use, asynchronous processing and complete-order release.
+- [x] Add FR-068 / SC-037 and existing future T057/T094 coverage; 27-table count unchanged, only repository setup T001 complete.
+- [ ] Verify exact provider product/variant eligibility, publication/pre-purchase guards and post-payment type-change admin review using authorized fixtures before implementing adapters.
+- [ ] Reconcile historical excluded product obligations without silently dropping or reclassifying source evidence.

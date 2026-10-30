@@ -88,6 +88,12 @@ Admin reads must be paginated and support stable filtering; exact query fields a
 
 Preorder notifications remain brand scoped despite shared-product fairness. Non-preorder settlement keeps all-or-nothing/no-stock compensation rules; preorder settlement retains paid FIFO obligations. Supplier remainders do not enter this queue. Whole-claim coupon redemption applies to complete fulfillment; cancellation/hold/date workflows and historical partial-order compatibility remain under review. See [provider review](supplier-provider-matrix.md).
 
+## Ready-to-deliver supplier scope (owner approval 2026-10-30)
+
+Mapping publication and pre-purchase validation accept only exact provider products/variants supplying ready accounts, keys or codes without buyer fulfillment inputs. No input-collecting activation, email-required slot, existing-account upgrade or manual/custom supplier flow. Unknown requirements are ineligible; new checkout must not charge/create an invoice for them.
+
+If requirements change after accepted payment, keep the original source and paid/unfulfilled administrator-review state under FR-066, with no fallback purchase or automatic compensation. Status/lookup/export remains valid for asynchronous supplier processing; full-manifest release still gates delivery. Normal customer redemption of an already delivered key/code is allowed. No new input-form, activation API or table is introduced. FR-068 / SC-037; independently approved local/manual scope is unchanged.
+
 ## Approved history contract (2026-10-29; no implementation authorized)
 
 - A coupon's initial issuance and every owner edit append **exactly one** immutable `discount_revisions` typed state and matching `audit_events` row while advancing `discounts.revision` atomically. Rejected or replayed commands add no revision. Redemptions add only domain usage facts, never a synthetic owner edit.

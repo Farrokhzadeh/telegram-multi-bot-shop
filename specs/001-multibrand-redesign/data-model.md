@@ -38,6 +38,12 @@ Local preorders are fully paid product obligations using existing `orders` and p
 
 A zero-stock paid preorder is valid and may allocate later, including wallet-funded or verified crypto/bank payment; immediate all-or-nothing/no-stock credit rules apply only to immediate orders. Unpaid preorders still use the existing payment deadline; paid remainders do not expire or receive automatic shortage compensation. Use one stable complete-order manifest with per-unit/message identities and resumable transport, without storing credentials in transport logs. New target orders do not require multiple business delivery batches or split coupon accounting: hold all uses while waiting, redeem all exactly once at complete allocation/fulfillment. Expected dates, paid cancellation/hold policy, full-manifest access guards and historical partial-order reconciliation remain gates; do not inherit staging refund workflows.
 
+## First-release supplier eligibility (owner approval 2026-10-30)
+
+Only provider-supplied ready accounts, keys and codes are eligible for automated procurement, without collecting buyer email, existing-account credentials, OTPs or other fulfillment inputs. Do not introduce customer-input/activation/upgrade relations or generic payload columns. Existing mappings keep separate product/variant identities; provider-specific eligibility must be verified at enablement/publication and before purchase.
+
+Unknown or excluded requirements block new supplier checkout before payment. When discovered after accepted payment, preserve the original source snapshot and whole paid/unfulfilled administrator-review obligation, with no runnable purchase/fallback or automatic compensation. Ready-to-deliver does not require the provider to complete synchronously; lookup/export and encrypted one-time response capture remain necessary. The full order must be ready before customer delivery content is released. Local/manual scope and normal customer redemption of a delivered code are unchanged. FR-068 / SC-037; table count stays 27.
+
 ## Money / orders
 
 | Entity | Key | Fields and constraints |

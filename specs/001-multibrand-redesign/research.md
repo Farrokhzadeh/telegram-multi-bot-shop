@@ -260,3 +260,11 @@ The typed relation links a master product to provider/external-product/optional-
 This resolves the pending table-addition decision, not the final DDL. Review same-product active-selection guards, referenced mapping lifecycle, source revisions/snapshot provenance, provider eligibility and protected configuration persistence before implementation. No supplier-account pool, refund or split-delivery relation is approved. Complete-order fulfillment and administrator review of blocked/incomplete supplier orders stay unchanged.
 
 The approved count is now **27**; 67 functional requirements, 36 success criteria and 96 unchecked future tasks remain. Documentation only.
+
+## ADR-38 — Ready-to-deliver supplier items only (owner approval 2026-10-30)
+
+The owner selected ready-to-deliver accounts, keys and codes for first-release automated supplier products. Do not collect customer email, existing-account credentials, OTPs or other buyer fulfillment inputs. Exclude input-collecting activation/slot/upgrade workflows and manual/custom supplier delivery. Normal redemption/use of an already delivered code is allowed; this decision does not remove separately approved local/manual products.
+
+This aligns with the inspected staging adapters' restricted subsets, but adapter code alone is not current provider proof. Verify exact product/variant requirements before mapping publication and before purchase. Unverified/excluded items cannot enter new payable API checkout. A post-payment eligibility change keeps accepted payment and original source in administrator review under FR-066; do not purchase from another source or compensate automatically. Provider processing/status/export may be asynchronous, and full-order manifest gating remains under FR-067.
+
+No customer-input, activation or upgrade table is added; the approved candidate stays 27. Added FR-068 / SC-037, updated existing future T057/T094 and validation coverage. Current totals: 68 functional requirements, 37 success criteria, 96 tasks; T001 repository setup complete, 95 unchecked. Specification only.

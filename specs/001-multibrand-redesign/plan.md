@@ -157,3 +157,11 @@ Keep the solution modular but avoid one network service per library. Core/API/bo
 ## Complexity Tracking
 
 No accepted constitution exception. The planned three deployable host types address token ownership, transaction processing and durable jobs. Verify consolidation only after representative measurements; do not preemptively split into a remote microservice for each domain.
+
+## Approved supplier product scope (2026-10-30)
+
+The first release automates only ready-to-deliver accounts, keys and codes. No email activation, buyer-email slot assignment, existing-account upgrades, customer-input collection or manual/custom supplier delivery. This does not change separately approved local/manual product types or ordinary customer redemption of a delivered key.
+
+Validate the exact product/variant at mapping publication and immediately before procurement using verified provider capabilities; unverified requirements are not eligible. Block known excluded items before payment. A post-payment eligibility change preserves the bound paid obligation for administrator review under FR-066, with no silent fallback/purchase/compensation. Provider processing/status/export can still be asynchronous; complete-order-only release remains mandatory.
+
+FR-068 / SC-037 and existing future T057/T094 cover this policy. No extra physical table or implementation is added. The 27-table candidate remains subject to final constraints/provider/migration proof.

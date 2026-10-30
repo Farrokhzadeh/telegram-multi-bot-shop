@@ -12,6 +12,12 @@
 
 FR-064/065 and SC-033/034 capture the new behavior. The approved physical baseline now contains **27 tables**, including owner-approved `product_supplier_sources` below. Final constraints/configuration remain reviewed before DDL.
 
+## First-release eligible product scope — owner approved (2026-10-30)
+
+Automated supplier procurement supports ready-to-deliver accounts, keys and codes only, with no customer-provided fulfillment inputs. Exclude email activation, buyer-email slot assignment, existing-account upgrades and manual/custom supplier delivery. Normal customer redemption of an already delivered code remains allowed. Ready-to-deliver is a product/input boundary, not a synchronous API-success guarantee; processing/status/export and one-time encrypted content recovery remain necessary.
+
+Validate exact external product/variant requirements at mapping enablement/publication and before purchase. Unknown/unverified requirements fail eligibility. Block known excluded items before payable checkout; a requirement change after accepted payment preserves the original source and full paid obligation for administrator review under FR-066, with no fallback purchase/automatic compensation. Full-order-only release remains FR-067. No new customer-input/activation table, form or generic payload is approved; local/manual scope is unchanged. FR-068 / SC-037.
+
 ## Source capability matrix
 
 These statements describe the inspected adapters and their embedded evidence notes, not independently verified current supplier contracts. Source comments about prior live probes are historical claims from that code, not probes performed in this review. Headers, local retry flags and local intent keys alone do not prove remote safety.

@@ -1,4 +1,4 @@
-# Multi-brand redesign — conversation handoff (updated 2026-10-29)
+# Multi-brand redesign — conversation handoff (updated 2026-10-30)
 
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
 **Branch:** `main`  
@@ -113,14 +113,14 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Recommend typed provider configuration with external protected credential references; exact persistence remains under review. No additional supplier-account table is authorized merely for multi-account support.
 - Keep actual account identity on paid-request snapshots. Same-account key rotation is allowed without rebinding; account replacement cannot silently redirect old requests. Missing original-account access requires administrator review, with no automatic purchase/credit.
 - FR-064 / SC-033 and future T093/T094 checks updated. **67 requirements, 36 success criteria, 96 unchecked tasks; baseline now 27 approved tables** after the source-mapping approval below. No implementation/DDL/migration/deployment or live supplier calls.
-- **Next review:** final constraints and protected provider configuration, provider product eligibility, then preorder date/cancellation policy. The source-mapping relation/table count decision is resolved below.
+- **Next review:** final constraints and protected provider configuration, FR-068 provider eligibility evidence, then preorder date/cancellation policy. The source-mapping relation/table count decision is resolved below.
 
 ## Latest owner approval — product_supplier_sources is table 27 (2026-10-29)
 
 - Owner explicitly approved **`product_supplier_sources` as table 27**. Current approved schema candidate: **27 tables** (original 23 plus coupon revisions, bot activity, supplier attempts and product/supplier mappings).
 - Candidate fields: `id`, `product_id` FK, controlled `provider_code`, `external_product_id`, nullable separate `external_variant_id`, `enabled`, `revision`, timestamps. Enforce duplicate/no-variant identity and one same-product active selection shared across all brands. One configured account per provider, no per-mapping credentials/account selector.
 - Paid requests retain source-ID/revision provenance plus immutable actual provider/account/product/variant snapshots. New catalog edits never redirect an old request. Disabled/unavailable source keeps the paid order under admin review; complete-order-only delivery/coupon policy is unchanged.
-- This supersedes all earlier pending-table/count notes. Exact FK/uniqueness/selection representation, provider config persistence and provider eligibility remain reviewed before DDL.
+- This supersedes all earlier pending-table/count notes. Exact FK/uniqueness/selection representation, provider config persistence and proof of the approved ready-to-deliver eligibility boundary remain reviewed before DDL.
 - Updated 12 specification files, including physical inventory row 27, FR-064/SC-033, audit/contract/validation and future T093/T094 coverage. Counts remain **67 requirements, 36 success criteria, 96 unchecked tasks**. No code/DDL/migration/deployment/live API calls or new refund/account-pool/split-delivery relation.
 
 ## Repository transfer — current continuation location (2026-10-29)
@@ -131,3 +131,11 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - The 12 feature documents and existing spec-kit templates/scripts/skills were transferred. Legacy Django code, application spikes, deployment workflows, runtime configuration, databases and credentials were not transferred or executed. Historical source references still point to the original repository.
 - Original fleet constitution is retained unchanged as imported source governance. Its old physical-fleet/schema assumptions need reconciliation with the accepted multi-brand design before implementation; importing it does not revoke the owner's approved decisions or ratify a new deployment policy.
 - The user authorized this repository transfer, not implementation, migrations or deployment. The original repository remains the legacy source reference; `door-bell` was not modified.
+
+## Latest owner decision — supplier items ready to deliver only (2026-10-30)
+
+- First-release automated supplier products are **ready-to-deliver accounts, keys and codes only**, requiring no customer-supplied email, existing-account credentials, OTPs or other fulfillment inputs. Exclude activation/slot/upgrade flows requiring such inputs and manual/custom supplier delivery.
+- Normal customer redemption/use of an already delivered code is allowed. Provider processing/status/export may remain asynchronous; no synchronous-success guarantee is implied. Complete-order-only customer release, one supplier account and accepted-payment source binding remain unchanged.
+- Verify exact product/variant eligibility at mapping publication and pre-purchase; unknown/excluded requirements block payable API checkout. If discovered after payment, retain original source and paid/unfulfilled admin review under FR-066; no fallback purchase or automatic compensation.
+- Added **FR-068 / SC-037** and updated existing future T057/T094 coverage. **27 tables, 68 requirements, 37 success criteria, 96 tasks: T001 setup complete, 95 unchecked.** No implementation/DDL/migration/deployment/live provider calls or new input/activation table.
+- **Next business clarification:** local-preorder estimated availability dates, then cancellation/hold rules and bot activity retention. Final provider proof, wallet/constraint/migration review and legacy-constitution alignment remain open.
