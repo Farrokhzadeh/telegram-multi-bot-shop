@@ -242,3 +242,9 @@ Keep the 27-table candidate. `orders` and coupon/request/jobs state represent ac
 Automatic supplier procurement may absorb a cost increase of at most 10% inclusive against the immutable same-source cost at order acceptance; above that, retain the accepted order/claim for admin review. Customer pricing stays fixed, and 100%-off orders use the same guard. No rolling baseline, fallback purchase or automatic compensation.
 
 The 27-table candidate remains unchanged. Review typed acceptance-time supplier-cost snapshot, currency, quote evidence, current payable cost and audited request-specific ceiling in existing supplier/request/attempt/order/audit relations. Do not store a duplicate independently mutable 110% value or reset baseline from current product configuration. Provider enforcement and exact fields are technical gates before DDL.
+
+## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
+
+An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
+
+Preserve the 27-table candidate and existing independent product/brand visibility controls. Review typed supplier availability/freshness evidence and checkout guards without storing an automatic hide flag or introducing a supplier-preorder queue. Existing order/source/coupon history is unaffected.

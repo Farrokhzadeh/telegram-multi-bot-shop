@@ -172,3 +172,9 @@ Zero customer due is not a synthetic payment or zero wallet movement. Reuse type
 Automatic supplier procurement may absorb a cost increase of at most 10% inclusive against the immutable same-source cost at order acceptance; above that, retain the accepted order/claim for admin review. Customer pricing stays fixed, and 100%-off orders use the same guard. No rolling baseline, fallback purchase or automatic compensation.
 
 Immutable supplier procurement cost belongs to the accepted request/source history and differs from customer sale price/payment. Derive the default 110% ceiling from the frozen baseline instead of creating competing mutable authorities. Typed override ceiling/actor/reason applies only to its request; exact persistence remains reviewed with no new table.
+
+## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
+
+An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
+
+Supplier supply availability differs from deliberate product/brand publication. Derive Out-of-stock display/purchase blocking from checked source availability; do not denormalize it into visibility settings or a second editable status authority. No new table or EAV/JSON state.

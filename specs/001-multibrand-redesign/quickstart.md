@@ -232,3 +232,9 @@ Future SC-042 checks: zero wallet plus valid five-use 100%-off coupon; duplicate
 Automatic supplier procurement may absorb a cost increase of at most 10% inclusive against the immutable same-source cost at order acceptance; above that, retain the accepted order/claim for admin review. Customer pricing stays fixed, and 100%-off orders use the same guard. No rolling baseline, fallback purchase or automatic compensation.
 
 Future SC-043 checks: baseline 10.00 with current 9.00/10.00/11.00/11.01; five-unit totals and mandatory fees; 100%-off orders; invalid/mismatched cost evidence; retry staircase; source edits; blocked price later falls; explicit admin ceiling; provider price change between preflight/submit and ambiguous POST. Assert no customer repricing, rolling baseline, automatic blocker clearance or blind repeat purchase. These are planned checks, not executed supplier tests.
+
+## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
+
+An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
+
+Future SC-044 checks: all three published brands show Out of stock; explicitly hidden listings stay hidden; stale/forged callbacks and each checkout method are blocked before mutation; verified recovery restores ordinary purchase eligibility; accepted-payment races retain existing obligations and review blockers. No live catalog update/test is performed.

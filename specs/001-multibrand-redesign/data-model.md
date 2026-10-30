@@ -194,3 +194,9 @@ Reuse `orders.payment_method='no_payment_required'`, `discount_uses` lifecycle, 
 Automatic supplier procurement may absorb a cost increase of at most 10% inclusive against the immutable same-source cost at order acceptance; above that, retain the accepted order/claim for admin review. Customer pricing stays fixed, and 100%-off orders use the same guard. No rolling baseline, fallback purchase or automatic compensation.
 
 Review typed immutable supplier-cost amount/currency/quote-evidence/time at accepted source binding, plus typed checked payable cost, blocked reason and request-specific audited override ceiling. Reuse request/attempt/audit/job relations; do not add mutable catalog cost as historical authority or pretend supplier cost is a customer payment. Exact field placement/constraints remain pre-DDL review; no new table or business JSON/EAV is approved.
+
+## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
+
+An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
+
+Derive customer Out-of-stock/purchasable status from the checked shared-source availability and existing brand publication settings. Do not overwrite `products.active` / `brand_products` visibility or create an independently editable duplicate publication state. Exact typed availability evidence, refresh/freshness and guards remain technical review; no table addition.

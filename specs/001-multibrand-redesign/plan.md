@@ -205,3 +205,9 @@ Use existing checkout, coupon, supplier-request and jobs mechanisms. Extend futu
 Automatic supplier procurement may absorb a cost increase of at most 10% inclusive against the immutable same-source cost at order acceptance; above that, retain the accepted order/claim for admin review. Customer pricing stays fixed, and 100%-off orders use the same guard. No rolling baseline, fallback purchase or automatic compensation.
 
 Freeze supplier cost independently from the customer quote at acceptance, then check the 110% ceiling before remote procurement. Before automatic purchase, prove the provider's charged amount cannot exceed the allowed ceiling, using a documented binding quote, maximum-charge parameter or equivalent verified provider contract. A catalog read followed by an uncapped purchase is insufficient proof. Without that capability/evidence, route to admin review; do not claim that this policy proves current adapters enforce a cost cap. Provider calls stay outside the acceptance transaction. If a purchase may already have happened, reconcile the original attempt rather than retrying or treating a later price check as proof of no charge. Extend future T054/T056/T057/T058/T094 after technical review; the 27-table candidate and implementation authorization are unchanged.
+
+## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
+
+An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
+
+Treat source availability as catalog purchase eligibility rather than an automatic publish/unpublish command. Extend existing future T021/T023/T032/T094; no new table, fallback source or supplier-preorder feature is introduced.

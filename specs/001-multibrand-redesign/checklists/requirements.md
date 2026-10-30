@@ -162,3 +162,8 @@
 
 - [x] Owner allows supplier cost increases up to and including 10%; larger increases require admin review, with customer terms fixed (FR-074 / SC-043, ADR-47).
 - [ ] Review exact immutable acceptance-time cost/currency/evidence fields, request-specific override ceiling and provider-enforced charge-cap capability before automatic procurement/DDL; verify SC-043 after implementation authorization. No new table or live purchase is authorized.
+
+## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
+
+- [x] Owner corrected the immediate hide answer: keep published supplier products visible as Out of stock, blocking new purchases until the selected source can supply again (FR-075 / SC-044, ADR-48).
+- [ ] Review typed availability freshness and all catalog/callback/checkout guards; verify SC-044 after implementation authorization. Existing explicit visibility controls and paid obligations remain protected.
