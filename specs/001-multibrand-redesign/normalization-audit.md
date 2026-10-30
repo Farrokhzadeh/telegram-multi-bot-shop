@@ -81,11 +81,11 @@ For a financially sensitive three-brand platform, the second approach is **easie
 ## Pending decisions (do not silently apply)
 
 1. **Wallet scope — RESOLVED**: USD-only customer wallets in all three bots; no TOMAN wallet in v1. Wallet/ledger `currency` columns are absent. Historical non-USD sources, if any, must be separately reconciled before migration.
-2. **Public order reference**: use the globally unique `orders.id` as the only public order identifier? This was the prior owner preference, but confirm whether customer-facing ID exposure is acceptable.
+2. **Public order reference — RESOLVED (FR-083)**: use globally unique orders.id directly; remove new-target public_ref, retaining created_at and authorization guards and preserving genuine legacy aliases.
 3. **Bot transport — RESOLVED**: all customer conversations and campaign/order/support messages are private DMs; `telegram_deliveries.chat_id` is derived from `users.telegram_id` and `telegram_sessions` is omitted in v1. Forced-join `brand_channels.chat_id` remains necessary.
 4. **Order payment method, wallet funding origin, crypto networks and bank cards — RESOLVED**: method/currency frozen at order creation; switching means a fresh order. Stand-alone **NOWPayments crypto-only** USD wallet funding uses `payments.topup_user_id`, order settlement uses `payments.order_id`, and exactly one is nonnull. Allowed new crypto `network_asset` values are **`USDTTRC20` and `USDTBSC` only**. The two Iranian brands use **distinct active receiving bank cards**, with one protected current destination per brand and immutable protected bank-payment destination snapshots. **Provider/legacy denomination audit remains OPEN** before dropping `payments.kind/currency`. Card-to-card funds TOMAN orders only, never a wallet.
-5. **Fulfillment method**: can a single order's different units be local and supplier/manual mixed? If yes, keep `fulfillments.kind`.
-6. **Channel enforcement**: does an active required channel alone force membership, or must there also be a global brand bypass switch?
+5. **Fulfillment method — RESOLVED (FR-078)**: local-first mixed local/selected-supplier/manual units are approved, with complete-order customer release. Keep actual fulfillments.kind, supplier-remainder quantity and immutable per-unit provenance.
+6. **Channel enforcement — RESOLVED (FR-081)**: verified active staff bypass personally; admins may disable enforcement per brand while retaining channels. Ordinary customers obey enabled rules.
 7. **Tenant integrity tradeoff**: prefer shorter rows plus brand-check triggers, or one intentional `brand_id` in customer-owned transactional tables for composite foreign keys?
 
 Do not remove columns until legacy fixture migration, production-equivalent feature inventory and concurrency/tenant tests justify the invariant. No DDL or production writes are authorized by this audit.
@@ -128,7 +128,7 @@ Three additional history relations plus the source-mapping relation are owner-ap
 - **Approved:** local preorders allocate automatically by oldest accepted paid time per shared product; allocation occurs only when its full quantity exists, with no partial assignment or reservation and no newer/smaller-order bypass. New paid orders cannot bypass a queued remainder; unpaid quotes get no paid-queue position. Use existing order/unit obligations where sufficient, derive queue position/counts and serialize every allocator that can consume the product's stock.
 - **Critical exception:** intentional paid preorder backlog is not failed immediate checkout. Wallet checkout may pay fully and queue absent units; verified crypto stays as paid preorder value, without FR-019 shortage credit. Existing immediate-sale all-or-nothing tests continue unchanged.
 - **Complete-manifest proof required:** prepare and gate access to one full order manifest; per-unit transport links and resumable sends must not introduce multiple partial business batches. A dedicated split-delivery relation is not justified for new orders. Preserve actual staging batch history through a reviewed migration compatibility plan.
-- **Open:** historical partial-order compatibility, full-manifest access guards, remaining admin cancellation state/hold transition design (support is the approved request channel under FR-070), and provider evidence that allowed ready-to-deliver mappings require no customer fulfillment inputs. Customer-input activation/upgrade flows are excluded by FR-068, not an open first-release scope choice. No staging refund behavior is imported. Provider source code is evidence of adapter behavior, not live API safety.
+- **Open:** historical partial-order compatibility, full-manifest access guards, exact approved admin hold/cancellation state representation under FR-079 (support is the approved request channel under FR-070), and provider evidence that allowed ready-to-deliver mappings require no customer fulfillment inputs. Customer-input activation/upgrade flows are excluded by FR-068, not an open first-release scope choice. No staging refund behavior is imported. Provider source code is evidence of adapter behavior, not live API safety.
 - Current approved baseline: **28**; detailed evidence and recommendations are in [supplier-provider-matrix.md](contracts/supplier-provider-matrix.md). Specification review only.
 
 ## Supplier eligibility compaction decision (2026-10-30)
@@ -188,3 +188,15 @@ Restock consent is an independent many-to-many membership/product lifecycle. Cur
 ## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
 
 A cached availability observation, a customer retail quote and an accepted supplier-cost baseline are separate facts. Mandatory direct refresh updates validated observation data; it cannot overwrite old quote/binding/baseline history or duplicate publication authority. Exact typed fields/constraints remain reviewed under the 28-table candidate.
+
+## Remaining business clarifications approved (2026-10-30)
+
+- Use eligible local stock first; mix local, selected-supplier and explicitly administered manual units while releasing one complete order. Full local coverage works without supplier access; refresh/revalidate only an actual supplier remainder (FR-078).
+- Admin pause/resume preserves a paid local preorder's priority; a paused head blocks later local allocations until explicit resume/cancellation (FR-079).
+- Confirmed supplier failure alerts staff and offers explicit reconciled retry or same-brand wallet credit. Bank credit requires admin-entered/confirmed USD plus reason; wallet/crypto credit uses original net USD. No automatic credit/retry or external payout record (FR-080).
+- Verified active staff personally bypass channel checks and may disable enforcement per brand, preserving channel lists. Approximately 4–6 staff is an expected team size, not a hard cap; one customer-facing admin contact is configured per bot (FR-081/082).
+- Private shared staff-chat notices use a separate trusted recipient kind, metadata and protected case/bonus access. Customers stay in membership DMs, and group text/membership grants no financial authority (FR-082).
+- Use orders.id directly, without new public_ref; preserve genuine historical aliases through reviewed migration evidence (FR-083).
+- Retain closed restock records 180 elapsed days from closed_at; retain cutoff equality and all active subscriptions. Coordinate only expired terminal restock evidence, with no financial/domain cascade or paid-preorder expiry (FR-084).
+
+Public-reference, mixed-kind and channel-bypass business questions are resolved. Retain actual per-unit kind; paid local allocations differ from unpaid reservations. Staff routing cannot be collapsed into customer users.telegram_id. Financial decision/ledger links and independent closed_at retention dependencies require final constraint/compatibility review.

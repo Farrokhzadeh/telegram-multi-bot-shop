@@ -12,7 +12,7 @@
 | `brand_channels` | `(brand_id, chat_id)` | title/link, enabled, required; checks scoped to correct bot |
 | `users` | PK `id`, unique `(brand_id, telegram_id)` | per-brand language, username, ban/block/unsubscribe flags, created/last_seen; Telegram ID BIGINT; `id` identifies a **brand membership**, not a cross-brand customer |
 | `users.flow_*` | `users.id` | One revision-guarded active private-DM conversation flow per brand membership; no `telegram_sessions` in v1 |
-| `admins`, `admin_sessions` | internal IDs | separate global admin login with immediately revocable API sessions |
+| `admins`, `admin_sessions` | internal IDs | separate global admin login and revocable API sessions; reviewed verified Telegram staff identity for channel exemption, with no customer self-promotion; one configured public admin contact per brand |
 | `audit_events` | event ID | actor, action, brand, target, revision, reason, timestamp; no arbitrary before/after JSON |
 
 Customer-owned tables use the brand-membership `user_id` where possible, removing repeated Telegram/brand identifiers from `orders`. A database trigger must validate the `orders.user_id` brand against the selected `brand_products` listing and scoped discounts; where `brand_id` is retained for messaging/campaign lookup, composite `(brand_id,user_id)` FKs enforce the match. Direct cross-brand links are forbidden.
@@ -37,7 +37,7 @@ No long-lived `inventory_reservations` table is required in v1; immediate alloca
 
 Local preorders are fully paid product obligations using existing `orders` and per-unit `fulfillments`, distinct from prepaid coupon issuance. Candidate typed order fields are immutable `is_preorder` and `payment_confirmed_at`; the paid queue is ordered by `(payment_confirmed_at,order_id)` per shared product across brands. Queue position and remaining quantity derive from authoritative paid orders and per-unit states; do not store a second independent position/count authority. Serialize checkout and all allocators for the same product. New inventory writes durable drain work atomically with the stock addition; workers allocate the oldest eligible paid order's complete quantity atomically only when enough stock exists, otherwise assign/reserve none and block newer/smaller orders. Persist one complete logical manifest and recoverable transport work. Never send supplier shortfalls through this queue.
 
-A zero-stock paid preorder is valid and may allocate later, including wallet-funded or verified crypto/bank payment; immediate all-or-nothing/no-stock credit rules apply only to immediate orders. Unpaid preorders still use the existing payment deadline; paid remainders do not expire or receive automatic shortage compensation. Use one stable complete-order manifest with per-unit/message identities and resumable transport, without storing credentials in transport logs. New target orders do not require multiple business delivery batches or split coupon accounting: hold all uses while waiting, redeem all exactly once at complete allocation/fulfillment. Remaining admin cancellation state/hold transition design, full-manifest access guards and historical partial-order reconciliation remain gates; do not inherit staging refund workflows.
+A zero-stock paid preorder is valid and may allocate later, including wallet-funded or verified crypto/bank payment; immediate all-or-nothing/no-stock credit rules apply only to immediate orders. Unpaid preorders still use the existing payment deadline; paid remainders do not expire or receive automatic shortage compensation. Use one stable complete-order manifest with per-unit/message identities and resumable transport, without storing credentials in transport logs. New target orders do not require multiple business delivery batches or split coupon accounting: hold all uses while waiting, redeem all exactly once at complete allocation/fulfillment. Exact approved admin hold/cancellation state representation under FR-079, full-manifest access guards and historical partial-order reconciliation remain gates; do not inherit staging refund workflows.
 
 ## First-release supplier eligibility (owner approval 2026-10-30)
 
@@ -80,7 +80,7 @@ No fixed id encoding is mandated by the business spec. UUIDv7 is a candidate for
 | `supplier_request_attempts` | attempt ID / UNIQUE `(supplier_request_id,attempt_no)` | pre-call durable intent for remote `submit/status_lookup/export` with `in_flight`/terminal outcome, sanitized HTTP/error/remote/evidence refs and timestamps; terminal results immutable, no secrets or provider JSON |
 | `jobs` | job ID | durable committed effect, typed origin FK, dedupe, lease, retries; no serialized job payload |
 | `campaigns` | campaign ID | **one brand/language per row**, with common launch batch, typed audience fields and message |
-| `telegram_deliveries` | delivery ID | one durable outgoing order/support DM send/edit or one materialized campaign recipient per brand membership, with Telegram message ID and retry state; resolve destination from `users.telegram_id`, so no `chat_id` |
+| `telegram_deliveries` | delivery ID | durable customer-DM or trusted staff-chat send/edit, with checked recipient kind and retry state; customer targets derive from users.telegram_id, while staff-only notices use configured staff_chat_id under FR-082 |
 
 ## Complete-order acquisition and release guards
 
@@ -149,7 +149,7 @@ External off-platform refunds and their records remain outside AccAbad. Any sepa
 `payment_confirmed → supplier_request_pending → success / confirmed_failure / unknown / partial_pending_admin`.  
 `unknown → reconciliation → success / confirmed_failure / still_unknown`; never treat timeout alone as failure. A five-unit request returning three verified encrypted items stores them as `acquired` (candidate state name), not customer-delivered; all customer release remains blocked and the whole order is paid/unfulfilled in `partial_pending_admin`. No automatic re-purchase, credit, coupon release or external refund. Administrator review and the complete five-unit verified set are required before one whole-order manifest can be released. Each remote operation has its own attempt record; per-unit identity/key scope/dedupe are retained. The entire coupon claim remains held until complete-order fulfillment redeems it once; no new per-unit coupon split. Actual legacy partial deliveries remain a separate migration compatibility gate.
 
-Until a provider/payment-specific internal wallet-credit policy is signed off, `confirmed_failure → paid_unfulfilled_requires_admin_resolution` and no automatic credit is performed. **All external refunds are manually performed and recorded outside AccAbad; no `refunds` table, outgoing `payments` kind or refund API is planned.** An authorized order-state change is audited as such, not as proof of any external settlement; historical legacy supplier/preorder refund records are preserved in separately verified read-only archives pending migration signoff.
+Under approved FR-080, confirmed failure stays in paid-unfulfilled administrator resolution until an explicit safe retry or exactly-once same-brand wallet-credit decision; no automatic credit is performed. **All external refunds are manually performed and recorded outside AccAbad; no `refunds` table, outgoing `payments` kind or refund API is planned.** An authorized order-state change is audited as such, not as proof of any external settlement; historical legacy supplier/preorder refund records are preserved in separately verified read-only archives pending migration signoff.
 
 ### Human support and campaigns
 
@@ -211,3 +211,15 @@ Restock alerts are voluntary, one-time and brand-scoped; existing jobs/delivery 
 ## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
 
 Review typed supplier observation/evidence identity, source revision, cost/currency, availability/eligibility and checked-at provenance without raw business payloads. Observations are distinct from immutable customer quote and accepted cost/source snapshots. Network reads precede local transactions; revision/evidence guards serialize creation with source edits. No new table beyond the approved 28 is implied.
+
+## Remaining business clarifications approved (2026-10-30)
+
+- Use eligible local stock first; mix local, selected-supplier and explicitly administered manual units while releasing one complete order. Full local coverage works without supplier access; refresh/revalidate only an actual supplier remainder (FR-078).
+- Admin pause/resume preserves a paid local preorder's priority; a paused head blocks later local allocations until explicit resume/cancellation (FR-079).
+- Confirmed supplier failure alerts staff and offers explicit reconciled retry or same-brand wallet credit. Bank credit requires admin-entered/confirmed USD plus reason; wallet/crypto credit uses original net USD. No automatic credit/retry or external payout record (FR-080).
+- Verified active staff personally bypass channel checks and may disable enforcement per brand, preserving channel lists. Approximately 4–6 staff is an expected team size, not a hard cap; one customer-facing admin contact is configured per bot (FR-081/082).
+- Private shared staff-chat notices use a separate trusted recipient kind, metadata and protected case/bonus access. Customers stay in membership DMs, and group text/membership grants no financial authority (FR-082).
+- Use orders.id directly, without new public_ref; preserve genuine historical aliases through reviewed migration evidence (FR-083).
+- Retain closed restock records 180 elapsed days from closed_at; retain cutoff equality and all active subscriptions. Coordinate only expired terminal restock evidence, with no financial/domain cascade or paid-preorder expiry (FR-084).
+
+Use existing per-unit actual kinds, paid allocations and positive supplier-request remainder; no unpaid stock reservation or extra customer units. Review typed local-first snapshots, active hold actor/time/reason, verified admin Telegram identity, brand public-contact FK and staff/customer delivery-recipient XOR in existing relations. Financial resolution is ledger-linked and serialized; original payment, unsent goods and legacy reference provenance remain intact.

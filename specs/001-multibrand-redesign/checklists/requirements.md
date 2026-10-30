@@ -90,7 +90,7 @@
 - [x] Owner approved source binding at accepted wallet/crypto/bank payment and retention of accepted payment plus paid/unfulfilled admin review when the selected source is disabled/unavailable; no silent fallback, automatic credit or lost obligation. FR-066 / SC-035 cover replay/race and unpaid-order cases.
 - [x] Owner confirmed one configured account per provider across products/brands; no account pools or per-mapping credentials/account selection. Retain original account identity on paid requests and block silent account replacement during reconciliation.
 - [ ] Finalize singleton provider configuration persistence and snapshot/blocker fields; finalize approved table 27 `product_supplier_sources` constraints. Approved physical baseline is 28.
-- [ ] Finalize explicit admin preorder cancellation outcome/hold (request channel resolved as support under FR-070), full-manifest access/transport guards and historical partial-delivery compatibility before executable schema or implementation.
+- [ ] Verify the approved FR-070/079 cancellation/blocking-hold field design and allocator races, full-manifest guards and historical partial-delivery compatibility before executable schema or implementation; the business policies are resolved.
 - [ ] After implementation authorization, validate paid FIFO across brands, serialized allocation, complete-order/multi-message restart recovery and unchanged immediate-sale/supplier safety using approved fixtures.
 
 ## Notes
@@ -178,3 +178,16 @@
 
 - [x] Owner requires updated supplier product data before creating supplier-backed orders; record mandatory direct stock/cost/eligibility refresh and preserve later binding/procurement guards (FR-077 / SC-046, ADR-51).
 - [ ] Review exact typed observation/revision/quote evidence and provider read capabilities/rate-limit behavior; verify SC-046 after implementation authorization. Approved baseline is 28; no live supplier refresh performed.
+
+## Remaining business clarifications approved (2026-10-30)
+
+- Use eligible local stock first; mix local, selected-supplier and explicitly administered manual units while releasing one complete order. Full local coverage works without supplier access; refresh/revalidate only an actual supplier remainder (FR-078).
+- Admin pause/resume preserves a paid local preorder's priority; a paused head blocks later local allocations until explicit resume/cancellation (FR-079).
+- Confirmed supplier failure alerts staff and offers explicit reconciled retry or same-brand wallet credit. Bank credit requires admin-entered/confirmed USD plus reason; wallet/crypto credit uses original net USD. No automatic credit/retry or external payout record (FR-080).
+- Verified active staff personally bypass channel checks and may disable enforcement per brand, preserving channel lists. Approximately 4–6 staff is an expected team size, not a hard cap; one customer-facing admin contact is configured per bot (FR-081/082).
+- Private shared staff-chat notices use a separate trusted recipient kind, metadata and protected case/bonus access. Customers stay in membership DMs, and group text/membership grants no financial authority (FR-082).
+- Use orders.id directly, without new public_ref; preserve genuine historical aliases through reviewed migration evidence (FR-083).
+- Retain closed restock records 180 elapsed days from closed_at; retain cutoff equality and all active subscriptions. Coordinate only expired terminal restock evidence, with no financial/domain cascade or paid-preorder expiry (FR-084).
+
+- [x] Owner resolved all seven business areas under FR-078–084 / SC-047–053, including bank credit amount entered by the admin and 180-day closed-subscription retention.
+- [ ] Finalize typed fields, provider retry/financial proof, staff identity/destination guards, mixed/hold races, legacy alias/goods disposition and scoped retention dependency handling before implementation. These are technical/compatibility checks, not requests to repeat the approved policies.

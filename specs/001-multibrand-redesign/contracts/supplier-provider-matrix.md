@@ -5,7 +5,7 @@
 
 ## Owner-approved behavior
 
-1. A shop product may have several supplier mappings; an administrator selects the active source. No automatic supplier selection, fallback or split procurement.
+1. A shop product may have several supplier mappings; an administrator selects the active source. No automatic supplier selection, fallback or multi-provider split procurement; approved local-first mixing uses the one selected supplier for the remainder (FR-078).
 2. Local stock allocates automatically oldest paid order first only when the complete requested quantity exists; no partial assignment/reservation or smaller-order bypass.
 3. Supplier 3-of-5 retains three encrypted internal acquired items but releases zero customer content; the whole paid order requires administrator review. Release only a complete verified set after review clearance.
 4. All external refunds and their recordkeeping remain outside AccAbad.
@@ -80,7 +80,7 @@ The [staging preorder handoff](https://github.com/Farrokhzadeh/AccAbad-Shop/blob
 ## Before executable schema or implementation
 
 - Apply the approved shared master-product selection scope; settle singleton protected configuration persistence and typed binding/blocker fields, then verify the 28-table candidate's final constraints. Do not treat table approval as implementation or migration authorization.
-- Apply corrected no-date/no-paid-time-cap FR-069 and support request channel FR-070; settle remaining admin cancellation state/hold transition design (outside-shop repayment is approved), validate whole-order coupon/manifest guards and reconcile historical partial-delivery evidence.
+- Apply corrected no-date/no-paid-time-cap FR-069 and support request channel FR-070; settle exact approved admin hold/cancellation state representation under FR-079 (outside-shop repayment is approved), validate whole-order coupon/manifest guards and reconcile historical partial-delivery evidence.
 - Prove batch/event unit membership, provider item dedupe and encrypted response recovery. Canboso's original response may be irrecoverable if the process dies after remote success but before durable capture; a database transaction cannot make that external boundary atomic. Such a gap requires manual reconciliation, not a blind repurchase or invented delivery.
 - Verify provider currency, idempotency semantics/key lifetime and result-retrieval shapes with authorized fixtures/provider tests later. Do not treat this matrix as completion evidence.
 
@@ -116,4 +116,16 @@ Use verified selected-source availability for supplier alerts, with no fallback 
 
 ## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
 
-Each adapter must provide current product stock/cost/currency/eligibility for the exact selected mapping before new order creation; where no detail endpoint exists, a validated fresh product-list read may supply that evidence. Provider rate limits/failures block creation with retry guidance, not stale cache success. No supplier endpoint is called in this documentation change. Accepted-payment and pre-purchase revalidation/cost-cap capability gates remain unchanged.
+When an order needs supplier units, each adapter must provide current product stock/cost/currency/eligibility for the exact selected mapping before new order creation; where no detail endpoint exists, a validated fresh product-list read may supply that evidence. Provider rate limits/failures block creation with retry guidance, not stale cache success. No supplier endpoint is called in this documentation change. Accepted-payment and pre-purchase revalidation/cost-cap capability gates remain unchanged.
+
+## Remaining business clarifications approved (2026-10-30)
+
+- Use eligible local stock first; mix local, selected-supplier and explicitly administered manual units while releasing one complete order. Full local coverage works without supplier access; refresh/revalidate only an actual supplier remainder (FR-078).
+- Admin pause/resume preserves a paid local preorder's priority; a paused head blocks later local allocations until explicit resume/cancellation (FR-079).
+- Confirmed supplier failure alerts staff and offers explicit reconciled retry or same-brand wallet credit. Bank credit requires admin-entered/confirmed USD plus reason; wallet/crypto credit uses original net USD. No automatic credit/retry or external payout record (FR-080).
+- Verified active staff personally bypass channel checks and may disable enforcement per brand, preserving channel lists. Approximately 4–6 staff is an expected team size, not a hard cap; one customer-facing admin contact is configured per bot (FR-081/082).
+- Private shared staff-chat notices use a separate trusted recipient kind, metadata and protected case/bonus access. Customers stay in membership DMs, and group text/membership grants no financial authority (FR-082).
+- Use orders.id directly, without new public_ref; preserve genuine historical aliases through reviewed migration evidence (FR-083).
+- Retain closed restock records 180 elapsed days from closed_at; retain cutoff equality and all active subscriptions. Coordinate only expired terminal restock evidence, with no financial/domain cascade or paid-preorder expiry (FR-084).
+
+requested_quantity is the positive remote remainder, with cost baseline scoped to that request quantity. Original source/account identity, unknown-effect reconciliation, encrypted acquisition and bonus/customer disjointness remain required. Full eligible local coverage needs no supplier access; later local restock cannot silently resize/cancel an unresolved remote request. Admin retry requires proven safe effects, not a repeated ambiguous POST.

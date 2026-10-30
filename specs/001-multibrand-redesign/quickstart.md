@@ -34,7 +34,7 @@ Expected: zero unexpected AOT/trim warnings; each published native executable st
 
 - Create identical Telegram IDs in A, B and C with different **USD** wallets/orders/languages; each brand membership has its own distinct `users.id`.
 - Verify `wallets(user_id PK)` and `wallet_entries(user_id FK)` have **no currency columns**, while order/payment currency facts still distinguish USDT from toman. A 100%-free in-stock order succeeds even if a USD-wallet row has not been created yet.
-- Verify every outbound private DM resolves `chat_id` from `telegram_deliveries.user_id → users.telegram_id`; confirm `telegram_deliveries` has no `chat_id` and that forced-join checks still use `brand_channels.chat_id`.
+- Verify every outbound private DM resolves `chat_id` from `telegram_deliveries.user_id → users.telegram_id`; confirm customer deliveries store no redundant chat ID, while staff-only notices have a distinct trusted recipient kind/configured staff destination and that forced-join checks still use `brand_channels.chat_id`.
 - Simulate two overlapping private-chat menus from one user: a stale callback must fail `users.flow_revision` and may not reuse a newer active purchase flow. Group/topic customer commerce is unsupported in v1.
 - Exercise all customer actions and bot callbacks with each authenticated brand context.
 - Attempt forged or mismatched brand/context IDs; all cross-brand data retrieval and mutations fail.
@@ -248,3 +248,15 @@ Future SC-045 checks: opt-in/repeated opt-in/foreign callbacks, unsubscribe, all
 ## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
 
 Future SC-046 covers stale cache versus direct refresh, every payment method/100%-off checkout, insufficient quantity, timeout/429/malformed or mismatched provider responses, source-switch-before-commit, duplicate request return, and post-creation stock/cost changes. Verify no mutation on pre-creation failure and preserved accepted obligations afterwards. Approved table 28 restock consent also needs the SC-045 lifecycle/brand/delivery checks. No provider or notification test was run.
+
+## Remaining business clarifications approved (2026-10-30)
+
+- Use eligible local stock first; mix local, selected-supplier and explicitly administered manual units while releasing one complete order. Full local coverage works without supplier access; refresh/revalidate only an actual supplier remainder (FR-078).
+- Admin pause/resume preserves a paid local preorder's priority; a paused head blocks later local allocations until explicit resume/cancellation (FR-079).
+- Confirmed supplier failure alerts staff and offers explicit reconciled retry or same-brand wallet credit. Bank credit requires admin-entered/confirmed USD plus reason; wallet/crypto credit uses original net USD. No automatic credit/retry or external payout record (FR-080).
+- Verified active staff personally bypass channel checks and may disable enforcement per brand, preserving channel lists. Approximately 4–6 staff is an expected team size, not a hard cap; one customer-facing admin contact is configured per bot (FR-081/082).
+- Private shared staff-chat notices use a separate trusted recipient kind, metadata and protected case/bonus access. Customers stay in membership DMs, and group text/membership grants no financial authority (FR-082).
+- Use orders.id directly, without new public_ref; preserve genuine historical aliases through reviewed migration evidence (FR-083).
+- Retain closed restock records 180 elapsed days from closed_at; retain cutoff equality and all active subscriptions. Coordinate only expired terminal restock evidence, with no financial/domain cascade or paid-preorder expiry (FR-084).
+
+SC-047–053 cover 3-local+2-supplier release, 5-local supplier-outage exemption and binding races; blocking holds; retry-vs-credit with bank-entered USD; verified staff/brand-wide bypass; public-contact/staff-recipient isolation; sole order-ID authorization; independent 180-day closed-subscription cleanup. These are planned checks, not executed app/provider tests.

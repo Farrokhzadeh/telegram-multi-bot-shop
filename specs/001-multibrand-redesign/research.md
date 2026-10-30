@@ -358,3 +358,47 @@ The owner additionally required supplier products to be updated before creating 
 Before new creation, perform the read outside the DB transaction and validate source/revision/current full-quantity availability. Failed/rate-limited/malformed/unverifiable reads block creation without invoice, coupon hold, wallet debit or fabricated accepted request. Idempotent repeats of an existing creation return original saved terms. The fresh read is not a supplier reservation or early source binding; revalidate at accepted payment/no-payment-required checkout and before procurement, retain all accepted obligations when later supply fails, and preserve the immutable 10% cost baseline. Provider capability/freshness/evidence fields and final constraints remain technical review.
 
 Added FR-077 / SC-046 and extended future T031/T033/T049/T057/T094. Current totals: **28 approved candidate tables, 77 requirements, 46 success criteria and 96 tasks; T001 setup complete, 95 unchecked.** No implementation/migration/live product read, stock mutation, notification or purchase was performed.
+
+## ADR-52 — Local-first mixed complete fulfillment (owner approval 2026-10-30)
+
+Local-first and mixed methods are approved, including local-only success during supplier outage. This intentionally replaces the earlier single-method/source-only availability and unconditional supplier-refresh interpretations. Keep local paid FIFO priority, no unpaid reservation, one selected supplier remainder and whole-order release; FR-078 / SC-047.
+
+The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
+
+## ADR-53 — Manual pause retains and blocks preorder FIFO (owner approval 2026-10-30)
+
+The owner selected Pause; keep queue blocked. A paid local-preorder hold/resume is explicit, audited and serialized, with original paid priority, no later local bypass and no new timer/coupon/money effect; FR-079 / SC-048.
+
+The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
+
+## ADR-54 — Admin retry or wallet credit after confirmed supplier failure (owner approval 2026-10-30)
+
+The owner requested staff notification and explicit retry or wallet credit. After workflow-diagram clarification, bank-paid USD credit is entered/confirmed by the admin with a reason, not calculated by an automatic FX rule. Wallet/crypto credit retains its exact original net USD basis; zero-due cases cannot create cash credit. Unknown effects still reconcile first; terminal credit cannot race into another purchase/delivery and releases the full held claim. This is internal store credit, not an external bank/crypto refund record. Local-preorder cancellation remains outside-shop repayment; FR-080 / SC-049.
+
+The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
+
+## ADR-55 — Staff channel exemptions and brand-wide enforcement bypass (owner approval 2026-10-30)
+
+The owner described approximately 4–6 staff, one customer-facing admin per bot, all staff personally exempt from channel checks and admins able to disable enforcement brand-wide. Staff size is not a hard limit, existing global backend permissions remain, and verified identity/revocation guards stay independent of customer/group claims; FR-081 / SC-050.
+
+The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
+
+## ADR-56 — Brand public admin contacts and private shared staff notices (owner approval 2026-10-30)
+
+The owner selected a private shared staff chat for blocked-order alerts and bonus notices, while each bot has its own customer-facing contact. This adds a typed staff-only destination exception to the existing private-customer-DM delivery model; it does not introduce group commerce or a graphical admin UI. Group notices carry metadata/protected retrieval pointers, not plaintext credentials or financial command authority. Exact identity/configuration/origin constraints remain reviewed within the existing tables; FR-082 / SC-051.
+
+The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
+
+## ADR-57 — Use orders.id directly (owner approval 2026-10-30)
+
+The owner explicitly approved the real order ID for customer support and messages. Remove the new-target public_ref column, preserve created_at and all membership authorization, and reconcile historical aliases rather than delete them. Other column-compaction questions are not implicitly approved; FR-083 / SC-052.
+
+The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
+
+## ADR-58 — 180-day closed restock subscription retention (owner approval 2026-10-30)
+
+After lifecycle-diagram explanation, the owner selected 180 elapsed days from closed_at for completed/cancelled stock subscriptions. Active waiting/queued rows remain, and this does not expire preorders or waiting alerts. Coordinate only expired terminal restock-specific operational links, protect all unrelated domain history, retain cutoff equality and separate this clock from bot-activity occurred_at retention; FR-084 / SC-053.
+
+The exact typed fields, legacy compatibility and provider/concurrency proofs remain implementation-design review; no application/DDL/live action is authorized.
+
+Current approved baseline after ADR-52–58: **28 tables, 84 requirements, 53 success criteria, 96 tasks; T001 setup complete, 95 unchecked.** No notifications, supplier calls, wallet postings, holds or deletions were performed.
