@@ -1,25 +1,58 @@
-<!--
-SYNC IMPACT REPORT
-Version: 1.0.0 -> 1.1.0
-Reason: replace premature technology and benchmark mandates with non-negotiable production migration safeguards.
-Scope: C# Native AOT feature documentation; no running application changes.
-Updated: 2026-10-15
--->
+# AccAbad Multi-Brand Commerce Constitution
 
-# Account Abad Fleet Constitution
-
-**Version**: 1.1.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-15
-
-## Core principles
+## Core Principles
 
 ### I. Behavioral parity and customer safety (NON-NEGOTIABLE)
 A platform rewrite MUST preserve existing customer-facing and administrator workflows unless an explicitly approved, independently specified change replaces them. This includes purchases, balances, pricing, receipt approvals, inventory allocation, delivery, services, Telegram UI/callbacks, AI support, translations, notifications, and panel operations. The currently deployed Python application and its tests/documented behavior are the reference; every workflow MUST be inventoried with source anchors and measurable acceptance evidence. Historical records are never reconstructed from current prices.
 
-### II. Preserve data, identities, and encryption (NON-NEGOTIABLE)
-Existing PostgreSQL data and the per-instance database/stage binding MUST remain authoritative. Preserve actual table names, primary key types, relations, constraints, decimal precision, currencies, and identifiers; do not assume that similarly named replacement entities are schema-compatible. All existing Fernet ciphertext formats and tenant-specific FIELD_ENCRYPTION_KEY / previous-key rotation behavior MUST remain readable, including legacy/plaintext compatibility where the current readers permit it. New encryption formats require separately reviewed, reversible migrations with backup and round-trip evidence. Production databases MUST NOT undergo automatic schema mutation on service startup.
+### II. Preserve source data, identities, obligations, and encryption (NON-NEGOTIABLE)
 
-### III. Deployment isolation and recoverability (NON-NEGOTIABLE)
-Preserve three separately deployable production instances and a separate staging instance, each with isolated process/container, bot token, DB role/database, encryption key, admin credentials, media, hostname, and release lifecycle. Shared infrastructure may continue to exist, but failure, upgrade, and rollback boundaries remain per instance. Use staging first, then prod1 canary, then prod2 and prod3 with the same validated immutable artifact. Take verified backups and preserve known-good rollback images; never deploy a feature branch to production.
+Existing legacy shops remain operational under their existing owners until each brand's separately
+authorized freeze. Captured production/staging evidence, source schemas, key formats and instance
+bindings remain authoritative read-only migration inputs; review and migration tooling must not
+alter production sources. Never assume similarly named source/target entities are compatible. A
+new separately reviewed target schema may normalize tables and assign target identities only with
+explicit source-to-target provenance, repeatable import, exact money/denomination preservation and
+reconciliation of every outstanding paid obligation.
+
+Preserve source primary identifiers and historical references in protected evidence/mappings,
+including actual partial deliveries, prepaid entitlements and legacy external-refund archives. No
+current price or guessed ownership may reconstruct historical money or erase liability. Unexpected
+multi-product orders, non-USD wallets or unrepresentable source facts block the affected import
+until reviewed.
+
+Legacy Fernet, previous-key and approved legacy/plaintext readers remain migration/recovery-only
+and must roundtrip against protected samples. New target ciphertext uses separately reviewed
+authenticated per-brand keyrings and a restricted shared-inventory scope, with reversible
+migration, verified backups and field/context integrity. Production sources are never
+automatically altered and target daemons never apply schema changes on startup.
+
+### III. Explicit shared-core boundaries and recoverability (NON-NEGOTIABLE)
+
+The approved target may run one shared commerce backend, relational database, catalog/local stock
+pool and globally authorized administrative API for at least three separately branded Telegram
+bots. Brand/customer access, customer presentation, wallet accounting, bank destinations,
+encrypted brand secrets and audit attribution remain isolated. Shared inventory decryption has an
+independently restricted scope. Explicitly approved shared provider/merchant accounts do not merge
+customer balances or authorize automatic supplier fallback.
+
+Shared infrastructure has a common failure/upgrade boundary; do not claim physical per-brand
+failure isolation. Define and test per-brand writer ownership, callback routing, stop/resume
+controls and rollback/reconciliation within that shared core. Keep staging credentials/data and
+all production traffic separate. The owner-selected staging environment may share the production
+server only with separately qualified runtime, database/volume, secret, routing and resource
+boundaries and an independent stop procedure. It shares the host failure boundary;
+host-destructive staging tests must not run there. See
+[staging-plan.md](../../specs/001-multibrand-redesign/staging-plan.md); this hosting choice does
+not authorize deployment. Consolidated host/process choices require measured qualification, not
+implied deployment permission.
+
+Migrate brands one at a time from verified frozen checkpoints after stopping all old writers for
+the affected brand. Stock must never be saleable by old and new systems simultaneously. Use
+verified immutable artifacts, backup/restore drills and retained keys/images. Retain protected
+legacy keys for as long as any retained encrypted archive, backup or rollback procedure depends on
+them; real production cutover requires a separate explicit operator decision. A target failure or
+rollback must preserve all brands' accepted money and committed background obligations.
 
 ### IV. Reliable financial and background side effects (NON-NEGOTIABLE)
 A purchase or receipt approval MUST NOT charge/credit twice, allocate stock twice, deliver credentials repeatedly, or lose a committed job on crash. Keep PostgreSQL-backed durable jobs and recovery semantics (dedupe, transactional enqueue, leases, retries, persisted delivery markers). In-memory Channels MAY be used for bounded wake-up/dispatch, not as the sole record of outstanding business work. External callbacks/webhooks require verification and replay protection.
@@ -41,6 +74,47 @@ Maintain feature-to-code-to-test traceability for critical flows. Prioritize tar
 4. Demonstrate parity, tenant isolation, restore/rollback, and a publish-and-run probe before moving any traffic.
 5. Treat changes to schema, money flows, security, and deployment as review blockers until validation evidence exists. Keep the current Python fleet operational during development.
 
+## Amendment record
+
+### 2.0.0 — 2026-10-30
+
+The owner ratified this amendment on 2026-10-30. The original constitution was adopted on
+2026-10-15; the version metadata preserves that original ratification date.
+
+- Approved baseline: FR-001–084 and SC-001–053; the 28-table shared-backend architecture.
+- Exact approved source: [proposal at 2c869fa](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/blob/2c869fa23733fe1087f6fb12527eb6a644878b0a/specs/001-multibrand-redesign/constitution-alignment-proposal.md),
+  blob `7190bf250852a38e75c5edce39c3fdd38d43e6da`.
+- Approval provenance: [owner ratification record](../../specs/001-multibrand-redesign/constitution-ratification.md).
+- Major version rationale: principles II and III redefine inherited physical schema/fleet
+  assumptions to permit the approved shared target and reviewed source-to-target mapping.
+- Principle II changes from preserving the physical source schema as the runtime contract to
+  preserving source evidence, identities, obligations and recoverable encryption migrations.
+- Principle III changes from per-instance deployment isolation to explicit shared-core and
+  same-server staging boundaries, with qualified isolation, ownership and recovery controls.
+- Principles I and IV–VII, the development/release gates and Governance remain unchanged.
+  The staging-plan link in principle III is relocated for this file's directory.
+- This record and the risk table preserve the approved written rationale/impact evidence.
+
+The governance amendment is applied. The separate constitution alignment analysis remains
+pending; do not close E1 or claim full design readiness from this file update alone.
+Provider E2, legacy E3, runtime E4, identity/privacy E5 and release E6 retain their
+[documented stages and required proof](../../specs/001-multibrand-redesign/consistency-review.md#evidence-gates-owners-and-required-proof).
+No application implementation, migration execution, live integration, financial mutation or
+production cutover is authorized by this amendment. Only repository setup T001 is complete.
+
+### Approved risk assessment and controls
+
+| Change | Risk | Required control |
+|---|---|---|
+| Same-server staging | Test load, restore mistakes or host failures can affect production | Separate runtime/data/secrets/routes, qualified resource limits, independent stop and no host-destructive tests |
+| Shared DB/core | A failure or bad migration can affect several brands | Static tenant guards, shared-stock serialisation, staged rehearsal, platform restore and per-brand writer ownership |
+| New target IDs/schema | Mis-mapping or dropped legacy semantics | Protected snapshots, alias/key maps, repeat imports and signed reconciliation |
+| New encryption scopes | Wrong-key disclosure or unrecoverable history | Migration-only old readers, new-context re-encryption, key separation and roundtrip/restore proof |
+| Global staff/private group | Internal notices could leak if routed as customer content | Independent active admin auth, trusted staff-only recipient kind, metadata-only notices and protected secret retrieval |
+| Shared supplier/merchant | Wrong account replay or common merchant disclosure | Original account binding, verified callback origin, safe retry/cost contracts and operator privacy acceptance |
+
 ## Governance
 
 This constitution supersedes feature plans. Any exceptions require a written rationale, risk assessment, approval, and a version amendment (MAJOR removes/weakens safeguards, MINOR adds principles, PATCH clarifies wording). A checked checklist means verified evidence, not an intention. The C# feature remains a **draft migration design**, not an authorized production cutover.
+
+**Version**: 2.0.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-30
