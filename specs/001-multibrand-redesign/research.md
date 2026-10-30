@@ -220,7 +220,7 @@ The old Django supplier/preorder refund rows are historical evidence; preserve v
 
 **Consequences:** A paid local preorder may wait for stock; immediate-sale stock rejection and FR-019 crypto shortage credit do not apply to its intentional backlog. Paid remainders do not expire with unpaid invoices. Supplier 3-of-5 remains administrator-reviewed. Local preorder unit obligations are separate from an advance purchase issuing an N-use prepaid coupon.
 
-**Open:** explicit admin cancellation outcome/hold policy (request channel resolved as support in ADR-40) and optional-date notification behavior (optional dates are resolved in ADR-39), complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
+**Open:** explicit admin cancellation outcome/hold policy (request channel resolved as support in ADR-40), complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
 
 ## ADR-34 — Bind supplier at accepted payment; retain unavailable-source paid obligations (owner approval 2026-10-29)
 
@@ -269,13 +269,9 @@ This aligns with the inspected staging adapters' restricted subsets, but adapter
 
 No customer-input, activation or upgrade table is added; the approved candidate stays 27. Added FR-068 / SC-037, updated existing future T057/T094 and validation coverage. Current totals: 68 functional requirements, 37 success criteria, 96 tasks; T001 repository setup complete, 95 unchecked. Specification only.
 
-## ADR-39 — Local preorders may have no availability date (owner approval 2026-10-30)
+## ADR-39 — Historical optional-date interpretation, superseded by ADR-42
 
-The owner selected “Allow preorders without a date.” This intentionally differs from staging's required preorder date. Absence is a valid NULL, not a synthetic promise. Local preorders remain publishable/purchasable under other rules; show no estimate specified. Staff may set/update/clear an estimate; retain original quoted estimate/absence in accepted order evidence.
-
-The date is informational: passing/clearing/changing it never cancels/expires/reorders paid FIFO, resolves coupons or triggers automatic credit/refund. Actual full stock and existing review rules govern delivery; unpaid payment-window expiry remains unchanged. Exact automatic date-change notifications and paid cancellation/queue-hold workflow are still separate choices.
-
-Candidate fields are nullable product date and nullable order quote snapshot, without another physical table. FR-069 / SC-038 and future T095/T096 cover this choice. Current counts: 27 tables, 69 requirements, 38 success criteria, 96 tasks; T001 setup complete and 95 unchecked. Specification only.
+The earlier “allow preorders without a date” answer was interpreted as allowing optional admin estimates and nullable product/order date fields. The owner subsequently clarified that admins will not define preorder times at all. ADR-42 and revised FR-069 / SC-038 replace that interpretation. No date fields or date-change workflows were implemented; prior documentation remains in Git history.
 
 ## ADR-40 — Paid-preorder cancellation requests through support (owner approval 2026-10-30)
 
@@ -292,3 +288,11 @@ The owner selected 180 days for nonfinancial `bot_activity_events`. Interpret th
 Money, orders, support, coupon revisions, admin audit and other domain evidence keep separate policies and cannot be affected by activity deletion. Do not silently archive raw events forever or retimestamp/recreate an expired replay. Business idempotency remains independent. Protected source archives/backups are not purged by this job; target restore/import must apply the cutoff before activity exposure. Technical permissions, scheduling/backlog monitoring, indexes and backup recovery remain reviewed.
 
 FR-071 / SC-040 and existing future T087–T089 cover the choice. No new table: 27 approved candidate tables, 71 requirements, 40 success criteria, 96 tasks; T001 setup complete, 95 unchecked. Specification only.
+
+## ADR-42 — No preorder date settings or paid fulfillment time cap (owner correction 2026-10-30)
+
+The owner clarified: preorders have no time cap and admins will not define preorder times. Remove the earlier optional availability-date/ETA/quoted-date snapshot design and date-change notification question; do not offer admin/customer date configuration or paid-preorder expiry jobs.
+
+Confirmed-paid local preorders wait indefinitely for the complete quantity or an explicit authorized staff resolution. Elapsed time does not cancel/reorder them, release coupon holds or move money. Keep technical created/paid timestamps for audit/oldest-paid FIFO and the existing 30-minute unpaid external invoice window; it is not a paid fulfillment deadline. Existing support request non-mutation and complete-order-only release remain.
+
+Historical source date promises stay protected and need migration reconciliation; the target does not inherit active legacy date settings. Revised existing FR-069 / SC-038 and future T095/T096, without renumbering or adding a table. Current counts stay 27 tables, 71 requirements, 40 success criteria, 96 tasks; T001 setup complete and 95 unchecked. Documentation only.

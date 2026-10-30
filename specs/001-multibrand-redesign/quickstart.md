@@ -157,13 +157,13 @@ These are future checks, not live staging results. The approved candidate contai
 
 These are specified future checks, not executed live-provider results.
 
-### E1c. Optional local-preorder estimates (FR-069 / SC-038; future checks)
+### E1c. No configured preorder date or paid time cap (FR-069 / SC-038; future checks)
 
-- Create/publish/quote/pay a local preorder with NULL estimate; show no estimate specified and allow full-quantity paid FIFO fulfillment under normal rules.
-- Quote a dated preorder, update and then clear the product estimate, and advance beyond the originally quoted date. Preserve original quote snapshots, paid state, queue priority and whole coupon holds; no automatic cancellation/expiry/credit/refund.
-- Add an estimate to a previously undated product without rewriting that earlier order's quoted absence. Do not fabricate dates for missing legacy values.
-- Still expire an unpaid external order at its payment deadline when no timely evidence exists. Estimate date and payment deadline are independent.
-- Verify nullable date schema/quote handling and no mandatory-date check. Date-change notification policy and paid cancellation/hold remain separate gates; these are future checks, not live results.
+- Create/publish/quote/pay a local preorder without ETA/date/duration inputs. Verify target product/admin/customer contracts and schema do not expose the removed date/snapshot fields or create date-change/fulfillment-expiry jobs.
+- Advance the clock well beyond usual waits: paid order, FIFO priority, full coupon hold and financial history remain; no automatic expiry/cancellation/reorder/credit/refund.
+- Add enough stock to complete the oldest order: fulfill normally under the existing full-quantity FIFO rule. Support ticket activity alone cannot alter it.
+- Verify created/paid audit times remain available, and an unpaid external invoice still follows the separate 30-minute payment window without affecting a confirmed-paid preorder.
+- Preserve/reconcile any genuine source promised dates without erasing source evidence or reintroducing active date settings. These are future checks, not live tests.
 
 ### E1d. Preorder cancellation requests via support (FR-070 / SC-039; future checks)
 

@@ -22,7 +22,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Automated supplier products: ready-to-deliver accounts, keys and codes only, without buyer fulfillment inputs; activation/upgrade/custom supplier flows are excluded.
 - Multiple supplier mappings per product; one account per supplier and one product-level active selection shared across all brands.
 - Supplier choice binds at accepted payment. An unavailable source preserves payment and the paid obligation for administrator review, without automatic fallback or compensation.
-- Local preorder availability dates are optional; missing or passed estimates do not expire paid orders or change FIFO priority.
+- Paid local preorders have no fulfillment time cap or admin-defined availability dates/ETAs; they wait for complete stock or an explicit admin resolution, with no date-change notifications.
 - Deliver the complete requested order quantity. Local preorder FIFO waits for the whole oldest order; incomplete supplier acquisitions remain protected internally with zero customer release.
 - Nonfinancial bot activity events have 180-day rolling retention; financial, order, support and admin-audit history follow separate policies.
 - Paid-preorder cancellation requests go through existing support tickets for manual staff review; support activity does not automatically cancel or pause orders.

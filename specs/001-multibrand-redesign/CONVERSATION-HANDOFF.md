@@ -26,6 +26,7 @@ Start the next conversation with: “Continue AccAbad multi-brand redesign spec-
 - **Owner coupon control supersedes earlier safeguards:** owner may edit coupon percentage, start/end time, enabled status, max uses, effective used count and remaining allowance after creation, including reducing below redeemed/held numbers. Keep actual redemption rows immutable, store effective adjustment separately (e.g. `discounts.usage_adjustment_units`), and audit owner edits. Existing order snapshots are not rewritten.
 - Confirmed bank payment with no stock waits indefinitely for restock or owner-managed outside-bot resolution. The bot cannot infer outside-bot actions. Supplier API uncertain outcomes are reconciled before compensation.
 - Migrate the three legacy databases brand-by-brand with all writers stopped for the migrating brand and in-flight payments reconciled; first-store product catalog only for new active catalog. Decrypt legacy sensitive fields using their original per-brand keys, re-encrypt necessary secrets under new versioned keys (brand-owned secrets per-brand, shared inventory under a platform key), verify restore/reconciliation, then retire legacy keys only when backups/rollback no longer depend on them.
+- Paid local preorders have no configured availability date/ETA or fulfillment time cap. No date inputs or date-change notifications; actual full stock or explicit authorized resolution controls completion.
 - New target orders deliver only the complete requested quantity; supplier subsets stay internal and local preorders wait for full stock. See the latest FR-067 correction below.
 - No GUI admin panel in this scope; secure administrative APIs and audit trail only.
 
@@ -78,7 +79,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Local preorders are fully paid order/unit obligations, separate from prepaid coupon issuance. Shared-product FIFO uses accepted paid time plus order-ID tie-breaker; queued orders retain priority and allocate only when their complete quantity exists, without partial assignment/reservation or smaller-order bypass. Restocking commits durable drain work. Payment/allocation recovery never repeats debit or item assignment. Intentional preorder shortage does not cause immediate-sale rejection, crypto shortage credit or unpaid timeout.
 - Supplier partial/unknown quantities still await admin review; they are not automatic local preorder backlog.
 - [Provider and preorder reconciliation](contracts/supplier-provider-matrix.md) pins all five staging adapters and the preorder handoff at `5752ec9c21e49b93e1d7d9f0b95bb8a7d713737d`. Source review only; no live staging/provider verification. Canboso purchase-only credentials and RoboticVN/RapidX uncertain purchases remain recovery gates.
-- **Next review:** proposed source-mapping relation, singleton provider configuration persistence and blocker field design, then preorder cancellation/hold and optional-date notification details and historical partial-order compatibility. External refunds and records stay off-platform. No code/DDL/migration/deployment or live supplier calls. All 96 implementation tasks remain unchecked.
+- **Next review:** proposed source-mapping relation, singleton provider configuration persistence and blocker field design, then preorder cancellation/hold and historical partial-order compatibility. External refunds and records stay off-platform. No code/DDL/migration/deployment or live supplier calls. All 96 implementation tasks remain unchecked.
 
 ## Owner decision — one active supplier for all brands (2026-10-29)
 
@@ -93,7 +94,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Bind the then-current shared master-product source/account/product/variant with paid state and durable procurement intent locally; call the supplier outside the transaction. Keep customer quote terms fixed and never rebind on replay or later source switches.
 - Owner explicitly approved: **if the selected source is disabled or cannot supply at confirmation, retain payment and paid/unfulfilled liability for administrator review; no silent switch or lost obligation**. Missing selections follow the same review default, retaining known source evidence without fabricating a source/runnable request. No automatic wallet credit, external refund or purchase. Re-enablement alone does not clear staff review.
 - Added FR-066 / SC-035 and updated the model/contracts/future T093–T094 validation. At this earlier decision: **66 requirements, 35 success criteria, 96 unchecked tasks; 26 baseline tables**, subsequently extended by the approvals below. The then-proposed `product_supplier_sources` is subsequently approved as table 27 in the latest decision below. No implementation/DDL/migration/deployment or live API calls.
-- **Partial coupon question superseded:** the owner requires complete-order delivery under the latest FR-067 clarification below. Keep whole claims held until complete fulfillment. Preorder cancellation and optional-date notification behavior, protected singleton provider configuration persistence and exact blocker/transport relations remain open.
+- **Partial coupon question superseded:** the owner requires complete-order delivery under the latest FR-067 clarification below. Keep whole claims held until complete fulfillment. Explicit preorder cancellation outcome policy, protected singleton provider configuration persistence and exact blocker/transport relations remain open.
 
 ## Latest owner correction — deliver the complete order, never an intentional subset (2026-10-29)
 
@@ -113,7 +114,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Recommend typed provider configuration with external protected credential references; exact persistence remains under review. No additional supplier-account table is authorized merely for multi-account support.
 - Keep actual account identity on paid-request snapshots. Same-account key rotation is allowed without rebinding; account replacement cannot silently redirect old requests. Missing original-account access requires administrator review, with no automatic purchase/credit.
 - FR-064 / SC-033 and future T093/T094 checks updated. **67 requirements, 36 success criteria, 96 unchecked tasks; baseline now 27 approved tables** after the source-mapping approval below. No implementation/DDL/migration/deployment or live supplier calls.
-- **Next review:** final constraints and protected provider configuration, FR-068 provider eligibility evidence, then preorder cancellation/optional-date notification policy. The source-mapping relation/table count decision is resolved below.
+- **Next review:** final constraints and protected provider configuration, FR-068 provider eligibility evidence, then preorder cancellation outcome policy. The source-mapping relation/table count decision is resolved below.
 
 ## Latest owner approval — product_supplier_sources is table 27 (2026-10-29)
 
@@ -138,15 +139,11 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Normal customer redemption/use of an already delivered code is allowed. Provider processing/status/export may remain asynchronous; no synchronous-success guarantee is implied. Complete-order-only customer release, one supplier account and accepted-payment source binding remain unchanged.
 - Verify exact product/variant eligibility at mapping publication and pre-purchase; unknown/excluded requirements block payable API checkout. If discovered after payment, retain original source and paid/unfulfilled admin review under FR-066; no fallback purchase or automatic compensation.
 - Added **FR-068 / SC-037** and updated existing future T057/T094 coverage. **27 tables, 68 requirements, 37 success criteria, 96 tasks: T001 setup complete, 95 unchecked.** No implementation/DDL/migration/deployment/live provider calls or new input/activation table.
-- **Next business clarification:** local-preorder cancellation/hold rules, optional-date notification details and bot activity cleanup/privacy design (180-day duration approved under FR-071). Optional availability dates are resolved in the subsequent owner decision below. Final provider proof, wallet/constraint/migration review and legacy-constitution alignment remain open.
+- **Next business clarification:** local-preorder cancellation/hold rules, bot activity cleanup/privacy design (180-day duration approved under FR-071). The no-date/no-paid-time-cap correction is authoritative below. Final provider proof, wallet/constraint/migration review and legacy-constitution alignment remain open.
 
-## Latest owner decision — preorder availability dates optional (2026-10-30)
+## Historical optional-date interpretation — superseded by the latest correction below
 
-- Owner chose **allow local preorders without a date**. Create/publish/purchase remains valid with NULL estimate under other rules; show no estimated date specified, never invent one.
-- Current estimates are optional and may be set/updated/cleared by authorized staff. Preserve the original quoted estimate/absence on accepted orders. Missing/passed/changed dates do not expire/cancel a paid order, change FIFO priority, release coupon holds or trigger compensation.
-- Full-quantity oldest-paid allocation and independent 30-minute unpaid payment deadline remain unchanged. Date-change notifications are not silently added; exact notification and cancellation/hold workflows remain open.
-- Candidate fields: nullable product date and nullable order quote snapshot; no date-history table. Added **FR-069 / SC-038**, updated future T095/T096. **27 tables, 69 requirements, 38 success criteria, 96 tasks; T001 setup complete, 95 unchecked.**
-- Specification only: no code/DDL/migration/deployment/live provider calls. **Cancellation request channel is now resolved as existing support under FR-070 below**; remaining clarification covers explicit admin cancellation outcomes/holds, optional-date notifications and bot activity cleanup/privacy design (180-day duration approved under FR-071). Final constraints/provider/migration evidence and imported-constitution alignment remain open.
+The earlier “without a date” answer was interpreted as optional admin estimates. The owner has clarified no preorder dates/times will be defined and no paid fulfillment time cap exists. Revised FR-069 / SC-038 and the latest correction below remove the proposed nullable product/order date fields and date-change notification question. No implementation or migration occurred.
 
 ## Latest owner decision — cancellation requests through existing support (2026-10-30)
 
@@ -154,7 +151,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - No dedicated cancellation button, endpoint, table or automatic queue hold/request state. Ticket creation/replies/assignment/closure/reopening and message text do not cancel/pause/reorder an order, release coupons, move money or prove an external refund.
 - An actual order resolution requires a separate authorized actor/reason-audited admin action under reviewed outcome rules, serialized against allocation and retaining paid history. The support-channel choice does not decide final paid-cancellation coupon/internal-wallet disposition or erase paid liability.
 - Added **FR-070 / SC-039**, updated future T025/T026/T046/T096. **27 tables, 70 requirements, 39 success criteria, 96 tasks; T001 setup complete, 95 unchecked.**
-- No application code/DDL/migration/deployment/live calls. Remaining business choices: explicit admin cancellation outcome/hold and coupon policy, optional-date notification behavior, and bot activity cleanup/privacy implementation details (duration is 180 days under FR-071); final constraints/provider/migration proof and legacy-constitution alignment still need review.
+- No application code/DDL/migration/deployment/live calls. Remaining business choices: explicit admin cancellation outcome/hold and coupon policy, and bot activity cleanup/privacy implementation details (duration is 180 days under FR-071); final constraints/provider/migration proof and legacy-constitution alignment still need review.
 
 ## Latest owner decision — 180-day nonfinancial bot activity retention (2026-10-30)
 
@@ -163,4 +160,13 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Activity expiry never deletes/cascades into financial, order, coupon/revision, support, delivery or admin-audit history, and business idempotency is independent. These records and source/backups have separate retention policies.
 - Do not reintroduce expired activity by retimestamping replays; apply the cutoff before target restored/imported activity is exposed. This does not authorize deleting protected source archives/backups or purging live data.
 - Added **FR-071 / SC-040**, updated future T087–T089. **27 tables, 71 requirements, 40 success criteria, 96 tasks; T001 setup complete, 95 unchecked.**
-- Remaining review: event taxonomy/privacy and technical cleanup/restore behavior; optional-preorder date-change notifications; explicit admin cancellation outcome/hold/coupon policy; final wallet/FK/provider/migration proof and imported-constitution alignment. No code/DDL/migration/deployment/live collection/deletion.
+- Remaining review: event taxonomy/privacy and technical cleanup/restore behavior; explicit admin cancellation outcome/hold/coupon policy; final wallet/FK/provider/migration proof and imported-constitution alignment. No code/DDL/migration/deployment/live collection/deletion.
+
+## Latest owner correction — preorders have no dates or paid fulfillment time cap (2026-10-30)
+
+- Owner clarified that **admins will not define times for preorders and there is no paid fulfillment time cap**. No availability estimate/date/ETA, promised date, maximum paid wait or date-change notifications. Remove the earlier product estimate and quoted-date snapshot proposals; do not implement their inputs/jobs.
+- Confirmed-paid orders stay in oldest-paid complete-order FIFO indefinitely until full stock or an explicit authorized admin resolution. Time alone cannot cancel/reorder them, release coupon holds or move money. Support requests still do not mutate orders.
+- Keep technical created/paid timestamps and the separate previously approved 30-minute unpaid external invoice window. That payment window is not a time cap on paid preorder fulfillment.
+- Preserve/reconcile genuine legacy date promises as source historical evidence under FR-027; do not silently erase them or expose new target date configuration.
+- Revised existing **FR-069 / SC-038**, updated model/inventory/contracts/review/future T095/T096 and recorded ADR-42. **27 tables, 71 requirements, 40 success criteria, 96 tasks; T001 setup complete, 95 unchecked.**
+- No code/DDL/migration/deployment/live calls. The date-change notification question is removed. Remaining review covers actual admin cancellation outcome/hold/coupon policy, event taxonomy/privacy/cleanup details, final wallet/FK/provider/migration proof and inherited-constitution alignment.
