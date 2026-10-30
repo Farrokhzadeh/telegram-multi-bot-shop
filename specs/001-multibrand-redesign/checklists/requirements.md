@@ -157,3 +157,8 @@
 
 - [x] Owner approved automatic selected-supplier procurement after valid whole-order 100%-off coupon checkout, with no separate admin approval or customer wallet/external payment; bind at committed no-payment-required acceptance and hold uses until complete fulfillment (FR-073 / SC-042, ADR-46).
 - [ ] Review typed zero-due acceptance/source/claim guards and verify SC-042 after implementation authorization. 27-table count and 96-task count remain unchanged.
+
+## Supplier cost increase guard — owner approval (2026-10-30)
+
+- [x] Owner allows supplier cost increases up to and including 10%; larger increases require admin review, with customer terms fixed (FR-074 / SC-043, ADR-47).
+- [ ] Review exact immutable acceptance-time cost/currency/evidence fields, request-specific override ceiling and provider-enforced charge-cap capability before automatic procurement/DDL; verify SC-043 after implementation authorization. No new table or live purchase is authorized.
