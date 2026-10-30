@@ -197,4 +197,4 @@
 - [x] Check 84 stable FR IDs, 53 stable SC IDs, 28 table names and 96 task IDs; only T001 is checked in the implementation backlog.
 - [x] Select one canonical field/key/state/transaction contract and map every FR/SC to planned task owners; correct conflicting active checkout/coupon/source/staff/retention language.
 - [x] Produce a concrete constitution alignment proposal without altering the active constitution, application, scripts or source evidence.
-- [ ] Ratify E1 through the explicit governance procedure; verify provider E2, legacy E3, runtime E4, operational E5 and release E6 at their assigned stages. No static checklist item proves runtime behavior.
+- [ ] Apply the owner-ratified 2.0.0 amendment and verify E1 through the explicit governance procedure; verify provider E2, legacy E3, runtime E4, operational E5 and release E6 at their assigned stages. No static checklist item proves runtime behavior.

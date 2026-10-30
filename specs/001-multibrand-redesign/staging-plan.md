@@ -2,7 +2,7 @@
 
 **Decision date:** 2026-10-30. **Owner choice:** same production server.
 **Status:** documentation design only; no environment has been created or inspected.
-The constitution amendment remains unratified. No application implementation, infrastructure
+The owner ratified the 2.0.0 amendment on 2026-10-30; [application and alignment](constitution-ratification.md) remain step 2, with the active constitution unchanged and E1 open. No application implementation, infrastructure
 change, migration, real payment, supplier call or Telegram message is authorized by this plan.
 
 This fills the environment-planning gap behind T007/T080/T081. The approved business baseline

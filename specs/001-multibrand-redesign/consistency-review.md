@@ -5,13 +5,15 @@
 
 [Canonical schema](schema-contract.md) · [traceability](requirements-traceability.md) · [current inventory](database-table-review.md) · [constitution proposal](constitution-alignment-proposal.md).
 
+**Governance status update, 2026-10-30:** the owner completed step 1 by ratifying the exact reviewed amendment; see [constitution-ratification.md](constitution-ratification.md). Step 2 (active-file application and alignment review) is pending. E1 remains open, the active constitution remains 1.1.0, and the original review below is not a new completed alignment run.
+
 ## Findings
 
 Locations identify the review input; corrected counterparts are in this change. FIXED DESIGN means a specification choice, not a tested database/provider implementation.
 
 | ID | Category | Severity | Input location | Finding | Disposition |
 |---|---|---|---|---|---|
-| C1 | Constitution | CRITICAL | constitution principles II/III; plan Constitution Check | Imported fleet/schema mandates conflict with approved shared target. | OPEN E1: concrete amendment prepared; active constitution unchanged. |
+| C1 | Constitution | CRITICAL | constitution principles II/III; plan Constitution Check | Imported fleet/schema mandates conflict with approved shared target. | OPEN E1: owner ratification recorded; step 2 application/alignment pending; active constitution unchanged. |
 | I1 | Routing | HIGH | spec FR-019/052; backend WalletCheckout/CryptoSettlement; T033/T039 | Immediate local-shortage compensation/instant allocation could swallow accepted mixed/supplier paths. | FIXED: explicit order-kind/route dispatcher and local-only compensation scope. |
 | I2 | Availability | HIGH | spec SC-044/046, FR-075/077; catalog tasks | Supplier-only unavailable/read rules contradicted local-only outage exemption. | FIXED: selected local coverage first; fresh remote read only for positive remainder. |
 | I3 | Coupon | HIGH | spec FR-056 vs FR-053/058; claim contract | New-cap/expiry/current-eligibility revalidation at fulfillment could invalidate protected old holds. | FIXED: creation validates current capacity; fulfillment validates the pinned immutable granting revision/held claim and whole manifest. |

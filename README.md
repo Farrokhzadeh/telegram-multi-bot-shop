@@ -44,7 +44,8 @@ The feature contains **84 functional requirements, 53 success criteria and 96 pl
 - [Consistency findings and remaining evidence gates](specs/001-multibrand-redesign/consistency-review.md)
 - [Canonical 28-table field and constraint contract](specs/001-multibrand-redesign/schema-contract.md)
 - [84-requirement / 53-criterion task traceability](specs/001-multibrand-redesign/requirements-traceability.md)
-- [Concrete constitution alignment proposal](specs/001-multibrand-redesign/constitution-alignment-proposal.md)
+- [Owner-ratified constitution amendment; application pending](specs/001-multibrand-redesign/constitution-alignment-proposal.md)
+- [Step 1 ratification record and remaining step 2](specs/001-multibrand-redesign/constitution-ratification.md)
 
 The documentation review does not claim a schema was executed or providers verified. The imported constitution remains unchanged; its alignment and the report's stage-specific evidence gates are explicit.
 

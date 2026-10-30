@@ -257,3 +257,12 @@ The earlier “without a date” answer was interpreted as optional admin estima
 - Manual staging deployment from a reviewed immutable main artifact is a proposed planning default; no workflow or deployment is authorized/created. Real provider/Telegram activation and actual cutover retain their separate evidence/authorization gates.
 - The constitution proposal now explicitly accommodates shared-host staging and clarifies continued legacy operation and dependency-based old-key retention; it remains **unratified**, with the active constitution unchanged.
 - No core business clarification was reopened, no FR/SC/table/task was added, and only T001 remains complete: **28 tables, 84 requirements, 53 success criteria, 96 tasks; 95 unchecked**. Documentation only; E1–E6 remain.
+
+
+## Owner ratification — step 1 complete (2026-10-30)
+
+- The owner's instruction “do 1” ratifies the exact 2.0.0 constitution amendment reviewed at commit 2c869fa23733fe1087f6fb12527eb6a644878b0a; see [constitution-ratification.md](constitution-ratification.md) for the pinned source/blob, date, rationale and scope.
+- This supersedes earlier unratified-status notes in this chronology. The replacement text for principles II/III, unchanged I/IV–VII and governance, metadata and risk controls are approved without reopening business choices.
+- Step 2 remains pending: apply the approved active constitution/version/impact metadata, then rerun alignment review. The active constitution remains 1.1.0 and E1 stays open until that is complete; no new alignment result or full-design readiness is claimed.
+- No implementation/deployment/live operations are authorized. E2–E6 remain stage-specific evidence gates; T007 and all other unfinished tasks remain unchecked.
+- Baseline unchanged: **28 tables, 84 requirements, 53 success criteria, 96 tasks; only T001 complete, 95 unchecked**. Documentation-only ratification record; no schema, runtime, key or production changes.
