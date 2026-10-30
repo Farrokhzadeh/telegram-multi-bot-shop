@@ -247,3 +247,13 @@ The earlier “without a date” answer was interpreted as optional admin estima
 - Planned traceability is 84/84 FR and 53/53 SC, with no task unaccounted for; this is not runtime evidence. 96 tasks remain, only T001 setup complete.
 - The active constitution is unchanged and incompatible fleet assumptions are E1. A concrete constitution-alignment-proposal.md is prepared, not ratified. E2 provider, E3 legacy, E4 runtime, E5 operational privacy/identity and E6 release proof remain stage-specific gates. No new core business questionnaire is needed absent a concrete incompatible finding.
 - No code/DDL/migration, live API/provider/Telegram, financial mutation or deletion occurred. The PowerShell prerequisite script was unavailable; its paths/selector/artifacts were checked directly.
+
+
+## Staging hosting clarification — 2026-10-30
+
+- The owner selected **Same production server** through the question tool, with no answer deadline.
+- [staging-plan.md](staging-plan.md) fills the previous environment-plan gap: one shared test backend with three test brands, separate runtime/PostgreSQL/roles/volumes, test-only identities/keys/data and fake transports initially. Concrete separation/resource controls are engineering planning defaults, not observed infrastructure.
+- The server remains a common failure/resource boundary. Qualify limits/headroom and an independent staging stop; no host-destructive tests on the shared server. Migration rehearsals use authorized disposable source copies, not an actual production-writer freeze.
+- Manual staging deployment from a reviewed immutable main artifact is a proposed planning default; no workflow or deployment is authorized/created. Real provider/Telegram activation and actual cutover retain their separate evidence/authorization gates.
+- The constitution proposal now explicitly accommodates shared-host staging and clarifies continued legacy operation and dependency-based old-key retention; it remains **unratified**, with the active constitution unchanged.
+- No core business clarification was reopened, no FR/SC/table/task was added, and only T001 remains complete: **28 tables, 84 requirements, 53 success criteria, 96 tasks; 95 unchecked**. Documentation only; E1–E6 remain.

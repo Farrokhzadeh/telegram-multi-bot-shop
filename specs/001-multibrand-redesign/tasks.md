@@ -25,7 +25,7 @@
 - [ ] T004 [P] Initialize `tests/Platform.UnitTests/`, `tests/Platform.IntegrationTests/`, `tests/Platform.ContractTests/`, and `tests/Platform.AotSmoke/` with a disposable Postgres fixture runner and fake Telegram/provider transports.
 - [ ] T005 [P] Add pinned package restore, formatting, security/secret scanning and Linux Native AOT publish+run workflow in `.github/workflows/backend-ci.yml`; fail on unexpected trim/AOT warnings.
 - [ ] T006 Capture a read-only inventory of legacy source model/DDL migrations, Fernet prefixes/key derivation, payment callbacks, supplier integrations, Telegram callbacks, job handlers and brand environment mapping in `specs/001-multibrand-redesign/contracts/legacy-source-inventory.md`; label source-only versus live evidence.
-- [ ] T007 Define release gates, staging identities, immutable artifact rules and protected runtime evidence still required before cutover in `ops/RELEASE_GATES.md`; do not request or copy production keys yet. Resolve E1 using the concrete constitution-alignment-proposal.md through explicit governance amendment before claiming design ratification; documentation review alone does not ratify it.
+- [ ] T007 Use the owner-selected same-production-server staging-plan.md to define release gates, exact staging identities/separation, immutable artifact rules and protected runtime evidence still required before cutover in `ops/RELEASE_GATES.md`; do not request or copy production keys yet. Resolve E1 using the concrete constitution-alignment-proposal.md through explicit governance amendment before claiming design ratification; documentation review alone does not ratify it.
 
 **Checkpoint**: New repository foundation and offline source map reviewed; Native AOT skeleton publishes and runs against fake integrations.
 
@@ -168,12 +168,12 @@
 ## Phase 10 — Cross-cutting validation and release readiness
 
 - [ ] T074 [P] Complete all scenario commands and redacted fixture evidence in `specs/001-multibrand-redesign/quickstart.md` and `tests/Platform.AotSmoke/`. Use requirements-traceability.md to run every applicable SC assertion, retaining planned/unexecuted versus observed evidence labels.
-- [ ] T075 [P] Run and document brand-isolation, callback-forgery, secret leakage, media access and admin authorization review in `ops/SECURITY_REVIEW.md`.
-- [ ] T076 Prove every published host executable runs under the intended Linux AOT runtime and measured CPU/RSS/startup against the legacy baseline in `ops/PERFORMANCE_EVIDENCE.md`; don't invent absolute requirements before measurement.
+- [ ] T075 [P] Qualify staging/production data, secrets, routes and recipient separation under staging-plan.md; run and document brand-isolation, callback-forgery, secret leakage, media access and admin authorization review in `ops/SECURITY_REVIEW.md`.
+- [ ] T076 Prove every published host executable runs under the intended Linux AOT runtime and measured CPU/RSS/startup against the legacy baseline in `ops/PERFORMANCE_EVIDENCE.md`; don't invent absolute requirements before measurement. Qualify same-server staging resource limits and independent stop controls under staging-plan.md; no host-destructive tests on the production server.
 - [ ] T077 Verify durable worker restart, 50-buyer last stock, 100-replay crypto settlement, no-JSON relational schema, unified Telegram delivery recovery and supplier reconciliation as one acceptance run in `tests/Platform.IntegrationTests/AcceptanceSuite.cs`.
 - [ ] T078 Stress-test the order reference generator from T033 for concurrency and historical ID collision in `tests/Platform.IntegrationTests/OrderIdTests.cs`.
 - [ ] T079 Define 95% catalog-to-checkout user acceptance sampling/measurement protocol and evidence template in `ops/USER_ACCEPTANCE_PROTOCOL.md`; publish the result before release.
-- [ ] T080 Confirm staging backup/restore, provider identity, old-key escrow, exact source image, frozen schema, brand writer ownership and operator approval in `ops/RELEASE_GATES.md`; hard-stop if any check fails.
+- [ ] T080 Rehearse only against authorized disposable source copies/staging destinations under staging-plan.md, without stopping actual production writers; confirm staging backup/restore, provider identity, old-key escrow, exact source image, frozen schema, brand writer ownership and operator approval in `ops/RELEASE_GATES.md`; hard-stop if any check fails.
 - [ ] T081 Obtain explicit separate release decision and prepare immutable staging/canary manifests in `ops/compose/` after all gates; never auto-deploy production from a feature or task completion.
 
 ## Payment deadline / lean-identity remediation (US8, must complete before release)

@@ -201,6 +201,8 @@ Expected: every wallet equals its frozen source balance, an incomplete ledger ca
 
 ### G. Stage rehearsal (only after operator authorization)
 
+Use [staging-plan.md](staging-plan.md): staging shares the production server but has separate runtime, database/volumes, test identities, keys and resource limits. The following freeze/ownership steps run on authorized disposable source copies during rehearsal; stopping actual production writers belongs only to a separately authorized E6 cutover. No host-destructive tests run on the shared server.
+
 - Confirm immutable release identity, backup and restore result.
 - Stop **all** writers for one brand and reconcile inflight callbacks and deliveries.
 - Empty/disable active source stock for that brand deliberately; ensure no remaining legacy brand may allocate new-platform stock.

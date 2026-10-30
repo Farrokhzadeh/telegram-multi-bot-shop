@@ -10,7 +10,7 @@
 
 Build a lean, brand-neutral backend serving three independently presented Telegram shops. One shared commerce core controls brand-scoped users/wallets, a shared catalog and inventory, atomic wallet checkout, asynchronous external payment reconciliation, supplier fulfillment, campaigns, and brand-independent operational configuration. Each brand has its own bot token, encryption keyring and state. Administration is exposed via authenticated APIs **only**; no dashboard, frontend, UI framework or website is part of this plan. AI answering is a separately deployable service, outside the commerce codebase's execution path.
 
-The historical `feature/001-csharp-native-aot` branch is a source of proven ideas/probes, not a greenfield codebase to merge wholesale. Old databases and code remain read-only reference inputs until an expressly approved migration rehearsal.
+The historical `feature/001-csharp-native-aot` branch is a source of proven ideas/probes, not a greenfield codebase to merge wholesale. Existing legacy shops remain operational under their existing owners until each brand's separately authorized freeze. Captured source evidence is read-only; review/migration tooling must not alter production sources.
 
 ## Technical Context
 
@@ -43,6 +43,15 @@ The source fleet constitution is imported unchanged in `.specify/memory/constitu
 6. **Small VPS**: Native AOT is an optimization objective verified by published executable, CPU/RSS/startup measures, and functional checks—not a reason to weaken correctness.
 
 **Assessment after repository transfer**: feature design constraints remain documented; legacy-constitution alignment, live-data evidence and operational release gates remain OPEN. No implementation or cutover approval is inferred.
+
+## Staging environment — same production server
+
+The owner selected same-server staging on 2026-10-30. [staging-plan.md](staging-plan.md)
+defines the proposed separate runtime/database/volumes/test bots/keys, fake integrations,
+resource qualification, safe reset/restore and manual promotion sequence. Three test brands
+exercise the shared target. The host remains a common failure boundary; staging must stop
+independently and host-destructive tests are excluded from this server. Actual resources and
+identities remain unverified. No deployment or constitution ratification is implied.
 
 ## Project Structure
 

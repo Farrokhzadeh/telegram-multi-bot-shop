@@ -7,6 +7,12 @@
 
 **Current design references:** [canonical schema](schema-contract.md), [traceability](requirements-traceability.md), [consistency findings and gates](consistency-review.md). Requirement/criterion IDs remain stable; historical approvals do not add parallel runtime rules.
 
+## Clarifications
+
+### Session 2026-10-30
+
+- Q: Where should the new platform's staging environment run? → A: Same production server. Plan separate staging containers, database/roles/volumes, test bot identities, data and keys, with qualified resource limits and a shared host failure boundary. See [staging-plan.md](staging-plan.md). This answer selects hosting only; it does not ratify the constitution, authorize implementation/deployment or complete runtime evidence.
+
 ## User Scenarios & Testing
 
 ### User Story 1 — Independent branded customer experience (P1)

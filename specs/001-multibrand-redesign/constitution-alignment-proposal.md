@@ -14,7 +14,7 @@ The inherited governance says: “Any exceptions require a written rationale, ri
 
 ### II. Preserve source data, identities, obligations, and encryption (NON-NEGOTIABLE)
 
-Existing production/staging databases, source schemas, key formats and instance bindings remain authoritative read-only migration evidence until an explicitly authorized cutover. Never assume similarly named source/target entities are compatible. A new separately reviewed target schema may normalize tables and assign target identities only with explicit source-to-target provenance, repeatable import, exact money/denomination preservation and reconciliation of every outstanding paid obligation.
+Existing legacy shops remain operational under their existing owners until each brand's separately authorized freeze. Captured production/staging evidence, source schemas, key formats and instance bindings remain authoritative read-only migration inputs; review and migration tooling must not alter production sources. Never assume similarly named source/target entities are compatible. A new separately reviewed target schema may normalize tables and assign target identities only with explicit source-to-target provenance, repeatable import, exact money/denomination preservation and reconciliation of every outstanding paid obligation.
 
 Preserve source primary identifiers and historical references in protected evidence/mappings, including actual partial deliveries, prepaid entitlements and legacy external-refund archives. No current price or guessed ownership may reconstruct historical money or erase liability. Unexpected multi-product orders, non-USD wallets or unrepresentable source facts block the affected import until reviewed.
 
@@ -26,9 +26,9 @@ Legacy Fernet, previous-key and approved legacy/plaintext readers remain migrati
 
 The approved target may run one shared commerce backend, relational database, catalog/local stock pool and globally authorized administrative API for at least three separately branded Telegram bots. Brand/customer access, customer presentation, wallet accounting, bank destinations, encrypted brand secrets and audit attribution remain isolated. Shared inventory decryption has an independently restricted scope. Explicitly approved shared provider/merchant accounts do not merge customer balances or authorize automatic supplier fallback.
 
-Shared infrastructure has a common failure/upgrade boundary; do not claim physical per-brand failure isolation. Define and test per-brand writer ownership, callback routing, stop/resume controls and rollback/reconciliation within that shared core. Keep staging credentials/data and all production traffic separate. Consolidated host/process choices require measured qualification, not implied deployment permission.
+Shared infrastructure has a common failure/upgrade boundary; do not claim physical per-brand failure isolation. Define and test per-brand writer ownership, callback routing, stop/resume controls and rollback/reconciliation within that shared core. Keep staging credentials/data and all production traffic separate. The owner-selected staging environment may share the production server only with separately qualified runtime, database/volume, secret, routing and resource boundaries and an independent stop procedure. It shares the host failure boundary; host-destructive staging tests must not run there. See [staging-plan.md](staging-plan.md); this hosting choice does not authorize deployment. Consolidated host/process choices require measured qualification, not implied deployment permission.
 
-Migrate brands one at a time from verified frozen checkpoints after stopping all old writers for the affected brand. Stock must never be saleable by old and new systems simultaneously. Use verified immutable artifacts, backup/restore drills and retained keys/images; real production cutover requires a separate explicit operator decision. A target failure or rollback must preserve all brands' accepted money and committed background obligations.
+Migrate brands one at a time from verified frozen checkpoints after stopping all old writers for the affected brand. Stock must never be saleable by old and new systems simultaneously. Use verified immutable artifacts, backup/restore drills and retained keys/images. Retain protected legacy keys for as long as any retained encrypted archive, backup or rollback procedure depends on them; real production cutover requires a separate explicit operator decision. A target failure or rollback must preserve all brands' accepted money and committed background obligations.
 
 ## Proposed metadata and unchanged principles
 
@@ -40,6 +40,7 @@ Principles I and IV–VII remain unchanged: explicit parity exceptions, reliable
 
 | Change | Risk | Required control |
 |---|---|---|
+| Same-server staging | Test load, restore mistakes or host failures can affect production | Separate runtime/data/secrets/routes, qualified resource limits, independent stop and no host-destructive tests |
 | Shared DB/core | A failure or bad migration can affect several brands | Static tenant guards, shared-stock serialisation, staged rehearsal, platform restore and per-brand writer ownership |
 | New target IDs/schema | Mis-mapping or dropped legacy semantics | Protected snapshots, alias/key maps, repeat imports and signed reconciliation |
 | New encryption scopes | Wrong-key disclosure or unrecoverable history | Migration-only old readers, new-context re-encryption, key separation and roundtrip/restore proof |
