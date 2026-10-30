@@ -51,13 +51,32 @@ The documentation review does not claim a schema was executed or providers verif
 
 ## Spec-kit
 
-Existing spec-kit 1.2.0 configuration, templates, PowerShell scripts and ten generic integration skills are included under `.specify/` and `.agents/skills/`. Their scripts/skills are copied unchanged from the source revision. The active feature is selected by `.specify/feature.json`.
+Spec Kit **1.2.0 uses Bash/Linux commands** under `.specify/scripts/bash/`; all ten
+generic command skills and the integration settings select the shell variant. The six
+scripts are based on [upstream commit 4ca46a0](https://github.com/github/spec-kit/tree/4ca46a0706a662b1edc07086ef16f021820c2db0/scripts/bash).
+The upstream MIT license is included alongside them. Interpreter discovery in `common.sh` and
+`create-new-feature.sh` uses captured input instead of `/dev/fd` process substitution, so the
+full resolver also runs in restricted Linux workspaces. Existing templates, feature selection,
+business requirements and application task statuses are preserved.
 
-With PowerShell installed, inspect paths from the repository root:
+Use Bash and Python 3; preset/extension manifest composition requires PyYAML. `jq` is optional.
+Set `TMPDIR` to a writable temporary directory in environments without `/tmp`.
+The active feature is selected by `.specify/feature.json`, independently of the Git branch.
+No PowerShell runtime or Spec Kit CLI installation is needed for these commands.
 
-```powershell
-pwsh -File .specify/scripts/powershell/check-prerequisites.ps1 -PathsOnly -Json
+Run from the repository root:
+
+```bash
+bash .specify/scripts/bash/check-prerequisites.sh --paths-only --json
+bash .specify/scripts/bash/resolve-template.sh constitution-template --json
+bash .specify/scripts/bash/check-prerequisites.sh --json --require-spec --require-tasks --include-tasks
+python3 .specify/tests/test_linux_tooling.py
 ```
+
+Template resolution preserves project overrides, ordered preset composition, extensions and
+the core fallback. A resolver failure still blocks the dependent command. Path inspection
+does not rewrite the feature selector, and setup preserves existing plan/task content.
+The tooling tests use disposable fixtures; they do not execute application tests or live operations.
 
 Continue specification clarification/review. The presence of implementation commands and a future task backlog does not authorize running implementation or deployment workflows.
 

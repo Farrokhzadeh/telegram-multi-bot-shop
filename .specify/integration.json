@@ -6,7 +6,7 @@
   ],
   "integration_settings": {
     "generic": {
-      "script": "ps",
+      "script": "sh",
       "raw_options": "--commands-dir .agents/skills --skills",
       "parsed_options": {
         "commands_dir": ".agents/skills",

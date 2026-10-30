@@ -6,6 +6,8 @@ Start with `specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md`, then the spe
 
 Read consistency-review.md, schema-contract.md and requirements-traceability.md in the feature directory before continuing design/implementation planning. The new schema contract selects field names and constraints; dated research is history. The owner ratified the exact 2.0.0 amendment on 2026-10-30; see specs/001-multibrand-redesign/constitution-ratification.md. Step 2 (active-file application and alignment review) remains pending, so the active constitution is still 1.1.0 and E1 is open. No runtime test/provider evidence is implied. Only T001 remains complete.
 
+Spec Kit tooling uses Bash/Linux scripts in `.specify/scripts/bash/` with `--json` and long-form options. Use the installed command skills; do not invoke the removed PowerShell scripts. The six Bash scripts are pinned to upstream Spec Kit 1.2.0, with full template composition and fail-closed resolution preserved. This tooling change authorizes no application work.
+
 The active feature directory is selected by `.specify/feature.json`. Installed spec-kit commands are development support; their presence is not implementation authorization. Only repository setup T001 is complete under the user's transfer authorization; the remaining 95 tasks are unchecked and application implementation remains deferred.
 
 The source `Farrokhzadeh/AccAbad-Shop` and pinned source commits are evidence, not this repository's runtime implementation. Historical paths such as `apps/`, `src/`, `ops/` and `tests/` in specifications may name source evidence or future targets. Check the document context before treating a path as an existing local file.

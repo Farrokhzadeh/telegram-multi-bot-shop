@@ -266,3 +266,10 @@ The earlier “without a date” answer was interpreted as optional admin estima
 - Step 2 remains pending: apply the approved active constitution/version/impact metadata, then rerun alignment review. The active constitution remains 1.1.0 and E1 stays open until that is complete; no new alignment result or full-design readiness is claimed.
 - No implementation/deployment/live operations are authorized. E2–E6 remain stage-specific evidence gates; T007 and all other unfinished tasks remain unchecked.
 - Baseline unchanged: **28 tables, 84 requirements, 53 success criteria, 96 tasks; only T001 complete, 95 unchecked**. Documentation-only ratification record; no schema, runtime, key or production changes.
+
+## Linux Spec Kit tooling — 2026-10-30
+
+- The owner explicitly requested replacing the inherited PowerShell commands with Linux commands. Spec Kit remains pinned to 1.2.0; six Bash scripts come from upstream commit `4ca46a0706a662b1edc07086ef16f021820c2db0`, with a narrow interpreter-discovery compatibility patch in `common.sh`/`create-new-feature.sh` to avoid `/dev/fd` process substitution. Upstream MIT license is included.
+- All ten generic command skills, shell selection and ownership manifests now use Bash/long-form flags. The obsolete PowerShell scripts are removed. The existing feature selector and templates are preserved; scripts retain full project/preset/extension/core resolution and fail-closed composition.
+- Fifteen offline tooling checks pass, including ordered/disabled presets, wrap failures, extension priority, exact JSON content, selector non-mutation, existing plan/task preservation, safe paths and Unicode dry runs. The actual 001 feature prerequisite command and constitution template resolver execute successfully. These are development-tool checks, not application/runtime/provider qualification.
+- Only tooling and its documentation changed in this transition. The ratified constitution amendment is the already-authorized next operation; do not infer completed application/alignment or close E1 from the tooling repair. T001 alone remains complete; approved 28/84/53/96 counts and E2–E6 remain unchanged.
