@@ -152,3 +152,8 @@
 
 - [x] Owner chose that any verified supplier bonus items actually received go to admins, with the customer receiving only the complete ordered quantity (FR-072 / SC-041, ADR-45).
 - [ ] Review typed bonus/customer attribution, protected admin content access, request/item deduplication and recovery before DDL; verify SC-041 after implementation authorization. No new table or live bonus delivery is approved.
+
+## Fully coupon-covered supplier checkout — owner approved (2026-10-30)
+
+- [x] Owner approved automatic selected-supplier procurement after valid whole-order 100%-off coupon checkout, with no separate admin approval or customer wallet/external payment; bind at committed no-payment-required acceptance and hold uses until complete fulfillment (FR-073 / SC-042, ADR-46).
+- [ ] Review typed zero-due acceptance/source/claim guards and verify SC-042 after implementation authorization. 27-table count and 96-task count remain unchanged.
