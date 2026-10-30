@@ -93,7 +93,7 @@ Per-unit rows retain immutable item identities, but acquired supplier content is
 
 - `discount_revisions`: one immutable typed settings snapshot on coupon creation and every owner edit; unique coupon revision and a matching `audit_events` record for actor/time/reason. `discounts.revision` advances with the current owner-editable fields and new history row under one coupon lock. Record edit-time actual redeemed and held counters for audit context. Genuine `discount_uses` and accepted price snapshots remain immutable; normal redemptions do not create owner-edit revisions.
 - `bot_activity_events`: one brand membership `user_id`, whitelisted event/action codes, typed optional product/order/support reference, source/update/flow context, deterministic dedupe key and timestamp. Record meaningful bot commands, menus, product views, button actions, quantity/checkout changes, genuine abandoned/expired flows and actionable errors. Source update IDs are not identity credentials; cross-brand references fail database guards. No raw DM text, callback content, receipts, coupons, credentials or JSON metadata. The bot's `users.flow_*` is current state only; `telegram_deliveries` is outgoing evidence, and money tables remain authoritative.
-- **Pending for DDL:** owner-approved event taxonomy, retention/privacy schedule, query indexes and legacy `user_activity.details` typed mapping or explicitly reconciled archival evidence. The design approval does not authorize collecting data in production or changing application code.
+- **Pending for DDL:** event taxonomy, privacy/access controls, 180-day cleanup/query indexes and backup/restore behavior under FR-071, plus legacy `user_activity.details` mapping or reconciled source archival evidence. The retention duration is owner-approved as 180 days. The design approval does not authorize collecting data in production or changing application code.
 
 ## State machines
 
@@ -168,3 +168,9 @@ Freeze an authoritative **USD** source balance per `(brand,telegram_id)`, map ea
 4. Verify every ciphertext roundtrip and migrated row mapping before writer activation; encrypted data never enters logs or reconciliation exports.
 5. Keep old key backups as long as any old encrypted snapshot/rollback artifact exists; delete only after validated retention expiry.
 6. During sequential cutover, old/new consumers never write same brand or sell the same stock item; reconcile outstanding provider callbacks before DNS/ingress handoff.
+
+## Bot activity expiry (owner approval 2026-10-30)
+
+`bot_activity_events.occurred_at` is the original trusted UTC event time. Retain operational rows at or newer than `now_utc - 180 days`; hide and delete only strictly older rows. An indexed bounded-batch maintenance path can delete expired rows as the explicit exception to append-only activity, with least-privilege permissions and restart-safe progress. No new table or per-brand indefinite override is implied.
+
+Activity is a child evidence stream: its expiry cannot delete/cascade into referenced domain rows or control financial/order replay protection. Other histories and protected source archives/backups follow separate policies. Do not retimestamp/recreate expired events or automatically move raw events into indefinite archives. Apply the same cutoff before exposing restored/imported target activity. FR-071 / SC-040; no live deletion/collection.

@@ -40,7 +40,7 @@ This is the API/event **contract inventory** for planning. Exact OpenAPI schemas
 | `POST /v1/admin/support/tickets/{id}/reply` | staff response | append-only reply, durable customer delivery |
 | `POST /v1/admin/support/tickets/{id}/transition` | assign, wait, close | versioned status, actor and audit |
 | `GET /v1/admin/audit` | inspect admin action history | private pagination and redaction |
-| `GET /v1/admin/bot-activity` | filter customer behavior events by brand, member, time and whitelisted event/action | authenticated admin only; stable pagination, scoped lookups, configured retention and no raw private-message payload |
+| `GET /v1/admin/bot-activity` | filter customer behavior events by brand, member, time and whitelisted event/action | authenticated admin only; stable pagination, scoped lookups, FR-071 180-day original-UTC-time cutoff and no raw private-message payload |
 | `GET /v1/admin/operations` | worker/payment/supplier backlogs | redacted operational state |
 
 Admin reads must be paginated and support stable filtering; exact query fields and auth schema are Phase 3 contract tests. This is not a graphical panel and does not impose a frontend.
@@ -109,8 +109,14 @@ A separate existing authorized admin order-resolution action, under reviewed out
 ## Approved history contract (2026-10-29; no implementation authorized)
 
 - A coupon's initial issuance and every owner edit append **exactly one** immutable `discount_revisions` typed state and matching `audit_events` row while advancing `discounts.revision` atomically. Rejected or replayed commands add no revision. Redemptions add only domain usage facts, never a synthetic owner edit.
-- A bot activity event has a membership-owned, server-approved action code and one deterministic idempotency identity. `user_id` is the authenticated brand membership; `telegram_update_id` is evidence, never an authorization token. Store whitelisted typed context only. Customer-facing endpoints cannot list cross-brand event histories; only authenticated admins can inspect filtered timelines. Exact event taxonomy and retention duration remain a pre-DDL business/policy gate.
+- A bot activity event has a membership-owned, server-approved action code and one deterministic idempotency identity. `user_id` is the authenticated brand membership; `telegram_update_id` is evidence, never an authorization token. Store whitelisted typed context only. Customer-facing endpoints cannot list cross-brand event histories; only authenticated admins can inspect filtered timelines. The retention duration is owner-approved at 180 days under FR-071; exact taxonomy/privacy/access, expiry permissions/indexes and backup/restore behavior remain pre-DDL review.
 - Neither activity nor audit events replace `orders`, `payments`, `wallet_entries`, `discount_uses`, `telegram_deliveries` or support messages as the authoritative durable business record. No provider credentials, raw DM/callback payloads or private payment evidence in activity records.
+
+## Bot activity retention contract (owner approval 2026-10-30)
+
+Activity queries expose only `occurred_at >= trusted_now_utc - 180 days`; a privileged bounded/resumable maintenance command deletes only older `bot_activity_events`. Retain equality at the cutoff. This is the explicit append-only exception for expired activity, not a general delete API or permission to mutate unexpired records.
+
+No domain-record cascade, financial idempotency dependency, hidden indefinite raw-event archive or replay retimestamping. Preserve separate policies for money/orders/support/audit, source archives and backups; restore/import must apply the target activity cutoff before exposure. Exact scheduling/lag monitoring/index/role/backup implementation remains reviewed. FR-071 / SC-040; no live deletion or new table.
 
 ## External AI integration seam
 

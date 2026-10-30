@@ -73,7 +73,7 @@
 - [x] Owner corrected **off-bot bank-resolution**: the bot cannot infer delivery/refund; administrators handle outcomes themselves. No automatic coupon redemption/release from unknown external events. Paid order/coupon hold remains until an explicit authenticated, audited staff adjustment. **Owner explicitly removed the prior cap-floor and prepaid-liability editing guard**: owner can change coupon percent, total/per-user usage limits, effective used count, expiration/start dates, activation and brand-scoped eligibility, including reducing a limit below redeemed+held or shortening prepaid entitlement validity. Signed `usage_adjustment_units` keeps effective-used overrides separate from historical `redeemed_count`; row locks and `audit_events` preserve attribution without vetoing the requested edit.
 - [x] Owner approved adding typed append-only `discount_revisions` and `bot_activity_events` as 24th and 25th **design** tables (2026-10-29); no executable schema or implementation permission.
 - [x] Owner selected tracking **all meaningful** private-DM customer bot actions with whitelisted typed context, per-brand membership and replay deduplication; no raw messages, callback payloads, secrets or JSON metadata.
-- [ ] Define and approve event taxonomy, privacy/retention policy, admin activity query scope and legacy `user_activity.details` reconciliation before DDL.
+- [ ] Finalize event taxonomy/privacy controls, FR-071 180-day cleanup/read/index/restore design, admin activity query scope and legacy `user_activity.details` reconciliation before DDL; the retention duration is approved below.
 - [ ] Prove coupon edit version/actor linkage, immutable snapshots and correct at-edit actual redemption/held context in the reviewed final relational constraints.
 - [x] Owner approved `supplier_request_attempts` as table 26, typed immutable evidence per actual supplier submit/lookup/export call; one order-level `supplier_requests` batch may produce several brand-encrypted per-unit `fulfillments`. The default for 3 delivered of 5 requested is two paid/unfulfilled pending explicit administrator review, never automatic re-purchase/compensation.
 - [ ] Prove live supplier API idempotency, batch/remote-item identity, replayed exports and legacy `SupplierProcurementAttempt` import without duplicate delivery.
@@ -137,3 +137,11 @@
 - [x] Keep paid history and external-refund exclusion; no automatic coupon/wallet/stock state changes from ticket text/status. Table count remains 27.
 - [ ] Settle actual admin cancellation outcome/hold and coupon/internal-wallet policy separately; request-channel approval does not settle paid liabilities.
 - [ ] After implementation authorization, verify support replay/isolation and explicit admin-resolution/allocation races.
+
+## 180-day activity retention approval (2026-10-30)
+
+- [x] Owner chose 180 elapsed days for nonfinancial `bot_activity_events`, from original trusted UTC event time; financial/order/support/admin-audit history remains under separate policies.
+- [x] Add FR-071 / SC-040 and future T087–T089: shared read/cleanup cutoff, boundary equality retained, bounded restart-safe delete role, no domain cascade/indefinite raw archive/replay retimestamping.
+- [x] Preserve separate protected source/backups retention and require cutoff before target restore/import exposure; no live deletion or table-count change.
+- [ ] Finalize taxonomy/privacy, cutoff index, permissions, scheduling/backlog monitoring and backup restoration details before implementation.
+- [ ] After implementation authorization, validate expiry boundaries, cleanup/replay/concurrency recovery, domain-history isolation and independent financial idempotency.

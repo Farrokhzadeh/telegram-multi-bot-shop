@@ -24,10 +24,11 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Supplier choice binds at accepted payment. An unavailable source preserves payment and the paid obligation for administrator review, without automatic fallback or compensation.
 - Local preorder availability dates are optional; missing or passed estimates do not expire paid orders or change FIFO priority.
 - Deliver the complete requested order quantity. Local preorder FIFO waits for the whole oldest order; incomplete supplier acquisitions remain protected internally with zero customer release.
+- Nonfinancial bot activity events have 180-day rolling retention; financial, order, support and admin-audit history follow separate policies.
 - Paid-preorder cancellation requests go through existing support tickets for manual staff review; support activity does not automatically cancel or pause orders.
 - External refunds and their records stay outside the platform.
 
-The feature contains **70 functional requirements, 39 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
+The feature contains **71 functional requirements, 40 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
 
 ## Spec-kit
 

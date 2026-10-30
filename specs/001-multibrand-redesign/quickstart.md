@@ -47,9 +47,17 @@ Expected: zero foreign-brand data in customer output; admin audit identifies eac
 
 - In separate Brand A/B/C private-DM fixtures, execute start, menu/navigation, product view, button action, quantity selection, checkout progression, support entry, a real flow timeout/abandonment transition and an actionable error. Expect one typed `bot_activity_events` entry per **logical** event, linked only to the originating `users.id`.
 - Replay Telegram updates and the timeout worker 100 times; deterministic event keys prevent duplicates while separate legitimate actions remain distinct. Wrong-brand `order_id` or `support_ticket_id` event references fail at the PostgreSQL boundary. Query by time, brand, membership and action through authorized pagination; customer access to another brand's timeline is forbidden.
-- Prove no raw DM message body, callback data, coupon code, credential, receipt, provider secret or JSON payload persists; domain orders/ledgers are still authoritative. Verify the approved retention and legacy `user_activity` archival/reconciliation plan without deleting protected source evidence.
+- Prove no raw DM message body, callback data, coupon code, credential, receipt, provider secret or JSON payload persists; domain orders/ledgers are still authoritative. Verify FR-071's 180-day operational retention and legacy `user_activity` archival/reconciliation plan without deleting protected source evidence.
 
 Expected: accurate brand-isolated behavioral history, no duplicate replay spam, and no private message capture or money-source ambiguity.
+
+### B3. 180-day bot activity retention (FR-071 / SC-040; future checks)
+
+- Freeze trusted UTC time and insert events just newer than, exactly at and just older than the 180-day cutoff. Read filtering and cleanup agree; retain equality and delete only older activity.
+- Interrupt/replay bounded cleanup while new events arrive. No unexpired/foreign-purpose records are removed; monitor cleanup lag/errors without copying event contents.
+- Verify users, orders, payments, ledgers, coupon revisions, support, admin audit and delivery evidence remain unchanged. Financial/domain replay tests still pass after old analytics rows are deleted.
+- Restore/import expired target activity or replay an old logical event: preserve original time and apply the cutoff before exposure, without a new timestamp or indefinite raw-event archive. Protected source archives/backups remain outside this cleanup.
+- Review indexes, least-privilege delete scope, scheduling/monitoring and backup restore behavior before implementation. These are future validation cases, not executed database deletion.
 
 ### C. Atomic wallet checkout
 
