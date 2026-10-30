@@ -157,6 +157,14 @@ These are specified future checks, not executed live-provider results.
 - Still expire an unpaid external order at its payment deadline when no timely evidence exists. Estimate date and payment deadline are independent.
 - Verify nullable date schema/quote handling and no mandatory-date check. Date-change notification policy and paid cancellation/hold remain separate gates; these are future checks, not live results.
 
+### E1d. Preorder cancellation requests via support (FR-070 / SC-039; future checks)
+
+- Open an existing order-linked ticket for the customer's paid queued preorder. Reject foreign-member/brand order links with no information leak.
+- Create/reply/assign/close/reopen the ticket and replay updates: payment, FIFO priority, coupon holds, balance and stock stay unchanged; no cancellation-specific button/endpoint/request state or automatic queue pause is created.
+- Confirm normal complete-order fulfillment remains eligible while support discussion is open. Support text/status cannot authorize financial/order transitions.
+- For a separately approved admin resolution, verify actor/reason audit, retained paid history and serialization with allocation so stale workers cannot allocate afterward. Do not invent cancellation settlement/coupon rules or require external payout evidence.
+- Keep final admin cancellation outcome/hold and coupon/internal-wallet policy as separate gates before implementation. These are future checks, not live test results.
+
 ### E2. Human support without AI
 
 - Disable or disconnect the entire AI service.

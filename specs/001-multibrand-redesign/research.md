@@ -220,7 +220,7 @@ The old Django supplier/preorder refund rows are historical evidence; preserve v
 
 **Consequences:** A paid local preorder may wait for stock; immediate-sale stock rejection and FR-019 crypto shortage credit do not apply to its intentional backlog. Paid remainders do not expire with unpaid invoices. Supplier 3-of-5 remains administrator-reviewed. Local preorder unit obligations are separate from an advance purchase issuing an N-use prepaid coupon.
 
-**Open:** cancellation/hold and optional-date notification behavior (optional dates are resolved in ADR-39), complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
+**Open:** explicit admin cancellation outcome/hold policy (request channel resolved as support in ADR-40) and optional-date notification behavior (optional dates are resolved in ADR-39), complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
 
 ## ADR-34 — Bind supplier at accepted payment; retain unavailable-source paid obligations (owner approval 2026-10-29)
 
@@ -276,3 +276,11 @@ The owner selected “Allow preorders without a date.” This intentionally diff
 The date is informational: passing/clearing/changing it never cancels/expires/reorders paid FIFO, resolves coupons or triggers automatic credit/refund. Actual full stock and existing review rules govern delivery; unpaid payment-window expiry remains unchanged. Exact automatic date-change notifications and paid cancellation/queue-hold workflow are still separate choices.
 
 Candidate fields are nullable product date and nullable order quote snapshot, without another physical table. FR-069 / SC-038 and future T095/T096 cover this choice. Current counts: 27 tables, 69 requirements, 38 success criteria, 96 tasks; T001 setup complete and 95 unchecked. Specification only.
+
+## ADR-40 — Paid-preorder cancellation requests through support (owner approval 2026-10-30)
+
+The owner selected existing support tickets for customers requesting cancellation of a paid local preorder waiting for stock. Reuse existing checked order-linked support conversation and manual staff response. No dedicated cancellation button, endpoint, table or automatic request-state workflow is authorized.
+
+Opening/closing/replying to a ticket does not pause/reorder FIFO, cancel an order, release coupons, move money or prove an outside payout. A separate authenticated/audited admin order-state action is required for actual resolution, serialized against allocation and preserving paid history. Selecting this channel does not decide final cancellation outcome/hold, coupon disposition or internal wallet compensation. Existing exclusion of external refund execution/recordkeeping remains.
+
+FR-070 / SC-039 and future T025/T026/T046/T096 carry the review. Current counts: 27 tables, 70 requirements, 39 success criteria, 96 tasks; T001 setup complete, 95 unchecked. Specification only.

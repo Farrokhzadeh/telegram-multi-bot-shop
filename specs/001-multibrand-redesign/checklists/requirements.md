@@ -90,7 +90,7 @@
 - [x] Owner approved source binding at accepted wallet/crypto/bank payment and retention of accepted payment plus paid/unfulfilled admin review when the selected source is disabled/unavailable; no silent fallback, automatic credit or lost obligation. FR-066 / SC-035 cover replay/race and unpaid-order cases.
 - [x] Owner confirmed one configured account per provider across products/brands; no account pools or per-mapping credentials/account selection. Retain original account identity on paid requests and block silent account replacement during reconciliation.
 - [ ] Finalize singleton provider configuration persistence and snapshot/blocker fields; finalize approved table 27 `product_supplier_sources` constraints. Approved physical baseline is 27.
-- [ ] Finalize preorder cancellation/hold and optional-date notification policy, full-manifest access/transport guards and historical partial-delivery compatibility before executable schema or implementation.
+- [ ] Finalize explicit admin preorder cancellation outcome/hold and optional-date notification policy (request channel resolved as support under FR-070), full-manifest access/transport guards and historical partial-delivery compatibility before executable schema or implementation.
 - [ ] After implementation authorization, validate paid FIFO across brands, serialized allocation, complete-order/multi-message restart recovery and unchanged immediate-sale/supplier safety using approved fixtures.
 
 ## Notes
@@ -127,5 +127,13 @@
 - [x] Owner approved local preorders without dates, valid NULL estimates and no invented delivery promise.
 - [x] Add FR-069 / SC-038 and future T095/T096 coverage: nullable create/publish/checkout, immutable quote evidence, authorized update/clear and no date-driven paid-state/queue/coupon/money transition.
 - [x] Keep unpaid payment deadline separate and 27-table count unchanged.
-- [ ] Specify automatic estimate-change notification behavior and paid cancellation/hold workflow before implementation.
+- [ ] Specify automatic estimate-change notification behavior and actual admin paid-cancellation outcome/hold policy before implementation; request channel is support under FR-070.
 - [ ] After implementation is authorized, validate nullable fields and missing/passed/edited/cleared estimates using synthetic fixtures.
+
+## Support-based cancellation request approval (2026-10-30)
+
+- [x] Owner chose existing support tickets for paid queued preorder cancellation requests; no dedicated button/endpoint/table or automatic queue hold.
+- [x] Add FR-070 / SC-039 and future T025/T026/T046/T096: same-owner/brand order links, support-operation non-mutation, manual staff response and audited actual admin actions serialized with allocation.
+- [x] Keep paid history and external-refund exclusion; no automatic coupon/wallet/stock state changes from ticket text/status. Table count remains 27.
+- [ ] Settle actual admin cancellation outcome/hold and coupon/internal-wallet policy separately; request-channel approval does not settle paid liabilities.
+- [ ] After implementation authorization, verify support replay/isolation and explicit admin-resolution/allocation races.

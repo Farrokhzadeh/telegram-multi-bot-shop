@@ -212,3 +212,7 @@ Validate exact provider product/variant requirements at mapping publication and 
 ## Optional preorder estimate field review (2026-10-30)
 
 Owner approved local preorders without a date (FR-069). Use nullable typed product estimate and, where quoted, nullable immutable order estimate snapshot; absence is valid and displayed as unspecified. No mandatory-date constraint, fake date default or new date-history table. Staff may update/clear the current estimate without rewriting accepted evidence. Missing/passed/changed dates do not affect paid FIFO, coupon or financial state; unpaid payment expiry stays separate. Notification details and cancellation remain open. Candidate stays **27 tables**.
+
+## Cancellation requests reuse support (owner approval 2026-10-30)
+
+Paid local-preorder cancellation requests use existing `support_tickets`/`support_messages` and checked same-customer/brand `order_id`. No dedicated cancellation table, button, endpoint or request-state fields are needed. Support message/status changes never mutate FIFO/order/coupon/money state; staff decisions use a separate authorized audited admin order action under reviewed outcome/hold rules, serialized against allocation. Preserve original payments/history and keep external refund evidence off-platform. Final paid-cancellation coupon/internal-wallet disposition is not decided by the request channel. FR-070 / SC-039; **27 tables**.
