@@ -89,7 +89,7 @@
 - [x] Owner confirmed one master-product active supplier selection shared across all three brands; no per-brand override. Existing bound requests retain their original supplier snapshot.
 - [x] Owner approved source binding at accepted wallet/crypto/bank payment and retention of accepted payment plus paid/unfulfilled admin review when the selected source is disabled/unavailable; no silent fallback, automatic credit or lost obligation. FR-066 / SC-035 cover replay/race and unpaid-order cases.
 - [x] Owner confirmed one configured account per provider across products/brands; no account pools or per-mapping credentials/account selection. Retain original account identity on paid requests and block silent account replacement during reconciliation.
-- [ ] Finalize singleton provider configuration persistence and snapshot/blocker fields; finalize approved table 27 `product_supplier_sources` constraints. Approved physical baseline is 27.
+- [ ] Finalize singleton provider configuration persistence and snapshot/blocker fields; finalize approved table 27 `product_supplier_sources` constraints. Approved physical baseline is 28.
 - [ ] Finalize explicit admin preorder cancellation outcome/hold (request channel resolved as support under FR-070), full-manifest access/transport guards and historical partial-delivery compatibility before executable schema or implementation.
 - [ ] After implementation authorization, validate paid FIFO across brands, serialized allocation, complete-order/multi-message restart recovery and unchanged immediate-sale/supplier safety using approved fixtures.
 
@@ -118,7 +118,7 @@
 
 - [x] Record ready-to-deliver accounts/keys/codes only for first-release automated supplier products, without customer-provided fulfillment inputs.
 - [x] Exclude input-collecting activation/slot/upgrade and manual/custom supplier delivery; preserve ordinary delivered-code use, asynchronous processing and complete-order release.
-- [x] Add FR-068 / SC-037 and existing future T057/T094 coverage; 27-table count unchanged, only repository setup T001 complete.
+- [x] Add FR-068 / SC-037 and existing future T057/T094 coverage; 28-table count unchanged, only repository setup T001 complete.
 - [ ] Verify exact provider product/variant eligibility, publication/pre-purchase guards and post-payment type-change admin review using authorized fixtures before implementing adapters.
 - [ ] Reconcile historical excluded product obligations without silently dropping or reclassifying source evidence.
 
@@ -126,7 +126,7 @@
 
 - [x] Owner clarified that admins will not define preorder dates/times and paid preorders have no fulfillment time cap; supersede the earlier optional-date interpretation.
 - [x] Revise FR-069 / SC-038 and future T095/T096: remove product estimate/order-date snapshot proposals, admin ETA inputs and date-change/paid-expiry jobs.
-- [x] Preserve indefinite paid full-order FIFO, technical audit/paid timestamps and the separate unpaid payment window; 27-table count unchanged.
+- [x] Preserve indefinite paid full-order FIFO, technical audit/paid timestamps and the separate unpaid payment window; 28-table count unchanged.
 - [ ] After implementation authorization, verify time passage cannot cancel/reorder paid preorders, alter coupons/money or enable removed date settings.
 - [ ] Reconcile genuine legacy promised dates without deleting historical evidence or reintroducing target date configuration.
 
@@ -134,7 +134,7 @@
 
 - [x] Owner chose existing support tickets for paid queued preorder cancellation requests; no dedicated button/endpoint/table or automatic queue hold.
 - [x] Add FR-070 / SC-039 and future T025/T026/T046/T096: same-owner/brand order links, support-operation non-mutation, manual staff response and audited actual admin actions serialized with allocation.
-- [x] Keep paid history and external-refund exclusion; no automatic coupon/wallet/stock state changes from ticket text/status. Table count remains 27.
+- [x] Keep paid history and external-refund exclusion; no automatic coupon/wallet/stock state changes from ticket text/status. Table count remains 28.
 - [x] Owner chose admin-managed repayment outside the shop after approved paid local-preorder cancellation: no cancellation wallet credit/debit reversal, payout call or external payout record; preserve original payment/debit history and audit the order-state action without asserting repayment completion (FR-070 / SC-039, ADR-43).
 - [x] Owner approved returning all still-held coupon uses automatically and exactly once with paid-local-preorder cancellation, atomically with the authorized order action. Coupon terms/expiry/limits, redeemed facts and owner usage adjustments stay unchanged; no renewal/replacement or release from support activity (FR-070 / SC-039, ADR-44).
 - [ ] Finalize exact admin cancellation state/hold representation and verify cancellation/allocation concurrency after implementation authorization; outside-shop repayment is not inferred or proven by an order audit.
@@ -156,7 +156,7 @@
 ## Fully coupon-covered supplier checkout — owner approved (2026-10-30)
 
 - [x] Owner approved automatic selected-supplier procurement after valid whole-order 100%-off coupon checkout, with no separate admin approval or customer wallet/external payment; bind at committed no-payment-required acceptance and hold uses until complete fulfillment (FR-073 / SC-042, ADR-46).
-- [ ] Review typed zero-due acceptance/source/claim guards and verify SC-042 after implementation authorization. 27-table count and 96-task count remain unchanged.
+- [ ] Review typed zero-due acceptance/source/claim guards and verify SC-042 after implementation authorization. 28-table count and 96-task count remain unchanged.
 
 ## Supplier cost increase guard — owner approval (2026-10-30)
 
@@ -171,5 +171,10 @@
 ## Opt-in one-time restock alerts — owner approval (2026-10-30)
 
 - [x] Owner approved one-time restock notifications only for customers who explicitly opt in (FR-076 / SC-045, ADR-49).
-- [ ] Review/approve proposed table 28 `product_stock_subscriptions` and typed job/delivery origins; the approved inventory is still 27.
+- [x] Owner approved `product_stock_subscriptions` as table 28; add numbered inventory/logical relation and checked job/delivery origins. Final constraints/lifecycle remain reviewed; approved inventory is 28.
 - [ ] Finalize consent/queued-cancellation lifecycle, availability freshness, brand guards and retention; verify SC-045 after implementation authorization. No actual alerts or opt-ins have been created.
+
+## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
+
+- [x] Owner requires updated supplier product data before creating supplier-backed orders; record mandatory direct stock/cost/eligibility refresh and preserve later binding/procurement guards (FR-077 / SC-046, ADR-51).
+- [ ] Review exact typed observation/revision/quote evidence and provider read capabilities/rate-limit behavior; verify SC-046 after implementation authorization. Approved baseline is 28; no live supplier refresh performed.

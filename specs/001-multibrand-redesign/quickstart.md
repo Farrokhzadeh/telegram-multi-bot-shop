@@ -43,7 +43,7 @@ Expected: zero unexpected AOT/trim warnings; each published native executable st
 
 Expected: zero foreign-brand data in customer output; admin audit identifies each allowed mutation; an isolated bot consumer cannot open shared stock without the privileged inventory service.
 
-### B2. Meaningful bot activity (table 25 in the 27-table approved candidate)
+### B2. Meaningful bot activity (table 25 in the 28-table approved candidate)
 
 - In separate Brand A/B/C private-DM fixtures, execute start, menu/navigation, product view, button action, quantity selection, checkout progression, support entry, a real flow timeout/abandonment transition and an actionable error. Expect one typed `bot_activity_events` entry per **logical** event, linked only to the originating `users.id`.
 - Replay Telegram updates and the timeout worker 100 times; deterministic event keys prevent duplicates while separate legitimate actions remain distinct. Wrong-brand `order_id` or `support_ticket_id` event references fail at the PostgreSQL boundary. Query by time, brand, membership and action through authorized pagination; customer access to another brand's timeline is forbidden.
@@ -90,7 +90,7 @@ Expected: a multi-unit wallet purchase commits **all requested units or none**, 
 
 Expected: no phantom/partial coupon redemption, no cross-brand coupon use or hidden cash-refund claim; legacy rounded quote parity and reproducible typed order snapshots **without** an `exchange_rates` table.
 
-### C3. Coupon revision audit (table 24 in the 27-table approved candidate)
+### C3. Coupon revision audit (table 24 in the 28-table approved candidate)
 
 - Issue a coupon and verify its initial `discount_revisions` snapshot. Apply authenticated owner changes to percent-off, caps, effective used, activation/validity and eligibility after some units are genuinely redeemed and others held; verify one new immutable version and one linked `audit_events` actor/time/reason record per edit.
 - Check prior and next revisions reconstruct actual before/after edited settings while current `discounts.redeemed_count`, accepted order price snapshots and historical `discount_uses` are never rewritten. Normal redemption must not create a fake owner-edit revision.
@@ -145,7 +145,7 @@ Expected: uncertain supplier outcome stays pending reconciliation; incomplete 3-
 - Re-run immediate-sale all-or-nothing wallet and crypto compensation scenarios. Supplier 3-of-5 still waits for admin review, outside local FIFO.
 - Gate implementation on source/account/blocker field design, whole-order coupon/manifest guards, remaining cancellation state/hold transition design (no preorder dates under FR-069), historical partial-order compatibility and exact transport links. No staging external-refund workflow is imported.
 
-These are future checks, not live staging results. The approved candidate contains 27 tables, including `product_supplier_sources`; its exact constraints/config and any further transport relations still need review. No new split-delivery table is implied.
+These are future checks, not live staging results. The approved candidate contains 28 tables, including `product_supplier_sources`; its exact constraints/config and any further transport relations still need review. No new split-delivery table is implied.
 
 ### E1b. Supplier product eligibility (FR-068 / SC-037; future checks)
 
@@ -243,4 +243,8 @@ Future SC-044 checks: all three published brands show Out of stock; explicitly h
 
 Restock alerts are voluntary, one-time and brand-scoped; existing jobs/delivery machinery handles notices, without reservation, automatic purchase or interference with paid FIFO. Explicit opt-in is separate from activity history and ordinary campaign consent.
 
-Future SC-045 checks: opt-in/repeated opt-in/foreign callbacks, unsubscribe, all three brands, supplier/local recovery, hidden listings, stock lost before first send, repeated events/restart, activity purge, blocked sender and ambiguous Telegram result, fresh opt-in after completed notice. Prove one logical notification with no financial/order/stock/coupon action. Schema storage remains proposed table 28 pending owner review; no alert or subscription is created by this documentation update.
+Future SC-045 checks: opt-in/repeated opt-in/foreign callbacks, unsubscribe, all three brands, supplier/local recovery, hidden listings, stock lost before first send, repeated events/restart, activity purge, blocked sender and ambiguous Telegram result, fresh opt-in after completed notice. Prove one logical notification with no financial/order/stock/coupon action. Schema storage is approved table 28, with exact fields/constraints still reviewed; no alert or subscription is created by this documentation update.
+
+## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
+
+Future SC-046 covers stale cache versus direct refresh, every payment method/100%-off checkout, insufficient quantity, timeout/429/malformed or mismatched provider responses, source-switch-before-commit, duplicate request return, and post-creation stock/cost changes. Verify no mutation on pre-creation failure and preserved accepted obligations afterwards. Approved table 28 restock consent also needs the SC-045 lifecycle/brand/delivery checks. No provider or notification test was run.

@@ -10,7 +10,7 @@
 3. Supplier 3-of-5 retains three encrypted internal acquired items but releases zero customer content; the whole paid order requires administrator review. Release only a complete verified set after review clearance.
 4. All external refunds and their recordkeeping remain outside AccAbad.
 
-FR-064/065 and SC-033/034 capture the new behavior. The approved physical baseline now contains **27 tables**, including owner-approved `product_supplier_sources` below. Final constraints/configuration remain reviewed before DDL.
+FR-064/065 and SC-033/034 capture the new behavior. The approved physical baseline now contains **28 tables**, including owner-approved `product_supplier_sources` below. Final constraints/configuration remain reviewed before DDL.
 
 ## First-release eligible product scope — owner approved (2026-10-30)
 
@@ -57,7 +57,7 @@ Paid requests still retain the actual original account identity. Same-account ke
 
 **Unavailable selected source — owner-approved default:** if the source is disabled, missing or known unable to supply at acceptance, retain accepted payment and a visible paid/unfulfilled administrator-review obligation. Retain the selected identity where known and a typed blocker; do not fabricate usable mapping or runnable procurement when absent. Re-enabling/replacing the shared source does not automatically clear that review gate. A source becoming unavailable after binding also retains its original request identity and paid liability. No silent fallback, repeat purchase, wallet credit or external refund. Known checkout invalidity may be rejected before payment is accepted; the rule never authorizes discarding money already accepted. Existing expired/replaced late-crypto recovery remains wallet recovery, without supplier purchasing. Exact typed blocker/snapshot storage and zero-due acceptance fields remain pre-DDL design review items; FR-073 resolves automatic coupon-covered supplier procurement.
 
-The approved candidate now contains **27** tables, including this mapping relation. Protected config persistence and verified transport relationships remain technical review items; unneeded multi-account support and rejected partial-delivery behavior do not justify additional tables.
+The approved candidate now contains **28** tables, including this mapping relation. Protected config persistence and verified transport relationships remain technical review items; unneeded multi-account support and rejected partial-delivery behavior do not justify additional tables.
 
 ## Local preorder reconciliation
 
@@ -79,7 +79,7 @@ The [staging preorder handoff](https://github.com/Farrokhzadeh/AccAbad-Shop/blob
 
 ## Before executable schema or implementation
 
-- Apply the approved shared master-product selection scope; settle singleton protected configuration persistence and typed binding/blocker fields, then verify the 27-table candidate's final constraints. Do not treat table approval as implementation or migration authorization.
+- Apply the approved shared master-product selection scope; settle singleton protected configuration persistence and typed binding/blocker fields, then verify the 28-table candidate's final constraints. Do not treat table approval as implementation or migration authorization.
 - Apply corrected no-date/no-paid-time-cap FR-069 and support request channel FR-070; settle remaining admin cancellation state/hold transition design (outside-shop repayment is approved), validate whole-order coupon/manifest guards and reconcile historical partial-delivery evidence.
 - Prove batch/event unit membership, provider item dedupe and encrypted response recovery. Canboso's original response may be irrecoverable if the process dies after remote success but before durable capture; a database transaction cannot make that external boundary atomic. Such a gap requires manual reconciliation, not a blind repurchase or invented delivery.
 - Verify provider currency, idempotency semantics/key lifetime and result-retrieval shapes with authorized fixtures/provider tests later. Do not treat this matrix as completion evidence.
@@ -112,4 +112,8 @@ This is the owner's final answer: the earlier immediate hide answer is supersede
 
 Restock alerts are voluntary, one-time and brand-scoped; existing jobs/delivery machinery handles notices, without reservation, automatic purchase or interference with paid FIFO. Explicit opt-in is separate from activity history and ordinary campaign consent.
 
-Use verified selected-source availability for supplier alerts, with no fallback to an unselected provider. Local alerts assess saleable stock only after paid-preorder FIFO and exclude admin-only bonuses. Availability repair still does not clear old accepted-order review blockers. Durable consent needs the separately proposed subscription relation; provider polling/freshness remains a technical review item, not live API authorization.
+Use verified selected-source availability for supplier alerts, with no fallback to an unselected provider. Local alerts assess saleable stock only after paid-preorder FIFO and exclude admin-only bonuses. Availability repair still does not clear old accepted-order review blockers. Durable consent uses approved table 28 `product_stock_subscriptions`; provider polling/freshness remains a technical review item, not live API authorization.
+
+## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
+
+Each adapter must provide current product stock/cost/currency/eligibility for the exact selected mapping before new order creation; where no detail endpoint exists, a validated fresh product-list read may supply that evidence. Provider rate limits/failures block creation with retry guidance, not stale cache success. No supplier endpoint is called in this documentation change. Accepted-payment and pre-purchase revalidation/cost-cap capability gates remain unchanged.

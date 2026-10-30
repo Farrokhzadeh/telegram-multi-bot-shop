@@ -2,7 +2,7 @@
 
 This repository currently contains the AccAbad multi-brand redesign specification and existing spec-kit support. The user's authorized scope is specification/schema review and repository transfer. Do not implement application code, create/apply migrations, deploy, call live suppliers/payments/Telegram or change production data without a later explicit instruction.
 
-Start with `specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md`, then the specification, table review, data model, plan and tasks. Preserve all current approved decisions, including the 27-table candidate, one supplier account, shared product-level source selection, binding at accepted payment, administrator review for blocked paid orders and complete-order-only delivery.
+Start with `specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md`, then the specification, table review, data model, plan and tasks. Preserve all current approved decisions, including the 28-table candidate, one supplier account, shared product-level source selection, binding at accepted payment, administrator review for blocked paid orders and complete-order-only delivery, approved table 28 `product_stock_subscriptions`, and mandatory direct supplier stock/cost/eligibility refresh before creating new supplier-backed orders. This refresh does not bind unpaid orders or change immutable terms of existing orders.
 
 The active feature directory is selected by `.specify/feature.json`. Installed spec-kit commands are development support; their presence is not implementation authorization. Only repository setup T001 is complete under the user's transfer authorization; the remaining 95 tasks are unchecked and application implementation remains deferred.
 
