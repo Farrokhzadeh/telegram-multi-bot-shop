@@ -143,7 +143,7 @@ Expected: uncertain supplier outcome stays pending reconciliation; incomplete 3-
 - Test wallet, verified crypto and accepted bank preorder payment: full payment persists once and absent units remain queued, without immediate-order shortage credit. Paid remainders survive the unpaid timer. Queue fairness spans brands; customer data does not.
 - Prepare a complete order manifest before any customer credential/file/link release; exercise all access paths and interrupt/resume multi-message Telegram transport. No partial business batch, duplicate logical fulfillment or coupon redemption; remote sends retain the existing best-effort duplicate limitation.
 - Re-run immediate-sale all-or-nothing wallet and crypto compensation scenarios. Supplier 3-of-5 still waits for admin review, outside local FIFO.
-- Gate implementation on source/account/blocker field design, whole-order coupon/manifest guards, cancellation/hold/date policy, historical partial-order compatibility and exact transport links. No staging external-refund workflow is imported.
+- Gate implementation on source/account/blocker field design, whole-order coupon/manifest guards, remaining cancellation state/hold and coupon rules (no preorder dates under FR-069), historical partial-order compatibility and exact transport links. No staging external-refund workflow is imported.
 
 These are future checks, not live staging results. The approved candidate contains 27 tables, including `product_supplier_sources`; its exact constraints/config and any further transport relations still need review. No new split-delivery table is implied.
 
@@ -171,7 +171,7 @@ These are specified future checks, not executed live-provider results.
 - Create/reply/assign/close/reopen the ticket and replay updates: payment, FIFO priority, coupon holds, balance and stock stay unchanged; no cancellation-specific button/endpoint/request state or automatic queue pause is created.
 - Confirm normal complete-order fulfillment remains eligible while support discussion is open. Support text/status cannot authorize financial/order transitions.
 - For a separately approved admin resolution, verify actor/reason audit, retained paid history and serialization with allocation so stale workers cannot allocate afterward. Do not invent cancellation settlement/coupon rules or require external payout evidence.
-- Keep final admin cancellation outcome/hold and coupon/internal-wallet policy as separate gates before implementation. These are future checks, not live test results.
+- For approved paid local-preorder cancellation, verify outside-shop repayment policy with no cancellation wallet credit/debit reversal, payout call or external payout record; original payment/debit history stays intact and the order audit does not assert repayment completion. Replay must not change money. Keep exact admin state/hold and held-coupon disposition as separate gates before implementation. These are future checks, not live test results.
 
 ### E2. Human support without AI
 

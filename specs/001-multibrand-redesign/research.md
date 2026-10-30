@@ -220,7 +220,7 @@ The old Django supplier/preorder refund rows are historical evidence; preserve v
 
 **Consequences:** A paid local preorder may wait for stock; immediate-sale stock rejection and FR-019 crypto shortage credit do not apply to its intentional backlog. Paid remainders do not expire with unpaid invoices. Supplier 3-of-5 remains administrator-reviewed. Local preorder unit obligations are separate from an advance purchase issuing an N-use prepaid coupon.
 
-**Open:** explicit admin cancellation outcome/hold policy (request channel resolved as support in ADR-40), complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
+**Open:** remaining admin cancellation state/hold and coupon rules policy (request channel resolved as support in ADR-40), complete-manifest access/transport guards, historical partial-order compatibility and exact physical source/blocker fields. Source binding at accepted payment is resolved in ADR-34. Reuse existing orders/units/jobs/transport where sufficient; a dedicated batch relation needs evidence. Staging external-refund recording stays excluded. Review only.
 
 ## ADR-34 — Bind supplier at accepted payment; retain unavailable-source paid obligations (owner approval 2026-10-29)
 
@@ -277,7 +277,7 @@ The earlier “allow preorders without a date” answer was interpreted as allow
 
 The owner selected existing support tickets for customers requesting cancellation of a paid local preorder waiting for stock. Reuse existing checked order-linked support conversation and manual staff response. No dedicated cancellation button, endpoint, table or automatic request-state workflow is authorized.
 
-Opening/closing/replying to a ticket does not pause/reorder FIFO, cancel an order, release coupons, move money or prove an outside payout. A separate authenticated/audited admin order-state action is required for actual resolution, serialized against allocation and preserving paid history. Selecting this channel does not decide final cancellation outcome/hold, coupon disposition or internal wallet compensation. Existing exclusion of external refund execution/recordkeeping remains.
+Opening/closing/replying to a ticket does not pause/reorder FIFO, cancel an order, release coupons, move money or prove an outside payout. A separate authenticated/audited admin order-state action is required for actual resolution, serialized against allocation and preserving paid history. At this channel-only decision, payment disposition remained open; ADR-43 subsequently fixes outside-shop repayment without cancellation wallet credit. Exact cancellation state/hold and coupon rules remain open. Existing exclusion of external refund execution/recordkeeping remains.
 
 FR-070 / SC-039 and future T025/T026/T046/T096 carry the review. Current counts: 27 tables, 70 requirements, 39 success criteria, 96 tasks; T001 setup complete, 95 unchecked. Specification only.
 
@@ -296,3 +296,9 @@ The owner clarified: preorders have no time cap and admins will not define preor
 Confirmed-paid local preorders wait indefinitely for the complete quantity or an explicit authorized staff resolution. Elapsed time does not cancel/reorder them, release coupon holds or move money. Keep technical created/paid timestamps for audit/oldest-paid FIFO and the existing 30-minute unpaid external invoice window; it is not a paid fulfillment deadline. Existing support request non-mutation and complete-order-only release remain.
 
 Historical source date promises stay protected and need migration reconciliation; the target does not inherit active legacy date settings. Revised existing FR-069 / SC-038 and future T095/T096, without renumbering or adding a table. Current counts stay 27 tables, 71 requirements, 40 success criteria, 96 tasks; T001 setup complete and 95 unchecked. Documentation only.
+
+## ADR-43 — Admin handles approved preorder cancellation repayment outside the shop (owner approval 2026-10-30)
+
+For an approved paid local-preorder cancellation, the administrator handles repayment outside the shop. The cancellation creates no wallet credit or reversal of the original wallet debit, no payout execution and no external payout amount/reference/receipt/status record. Keep original accepted payments, debits and obligation history; audit the authorized order-state action with actor/reason, without asserting or proving repayment completion. Support activity and unknown outside actions remain non-authoritative. Held-coupon disposition and exact admin cancellation state/hold transitions still require separate review. This does not alter independently approved late-crypto or immediate-sale shortage wallet compensation. FR-070 / SC-039; 27 tables unchanged.
+
+This resolves the payment-disposition choice after approval, not automatic cancellation, a queue hold on support contact or coupon release. Revised existing FR-070 / SC-039 and future T046/T096; no new table or financial/refund workflow. Counts remain 27 approved candidate tables, 71 requirements, 40 success criteria and 96 tasks; only T001 setup is complete. Specification only; no money moved, code implemented or migrations applied.

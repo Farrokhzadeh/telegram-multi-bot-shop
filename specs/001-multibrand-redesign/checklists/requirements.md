@@ -77,7 +77,7 @@
 - [ ] Prove coupon edit version/actor linkage, immutable snapshots and correct at-edit actual redemption/held context in the reviewed final relational constraints.
 - [x] Owner approved `supplier_request_attempts` as table 26, typed immutable evidence per actual supplier submit/lookup/export call; one order-level `supplier_requests` batch may produce several brand-encrypted per-unit `fulfillments`. The default for 3 delivered of 5 requested is two paid/unfulfilled pending explicit administrator review, never automatic re-purchase/compensation.
 - [ ] Prove live supplier API idempotency, batch/remote-item identity, replayed exports and legacy `SupplierProcurementAttempt` import without duplicate delivery.
-- [x] Owner rejected intentional partial customer delivery. For new orders hold the whole coupon claim until complete allocation/fulfillment redeems it once; FR-067 / SC-036 replace the partial-unit coupon choice. Historical partial-order migration and paid-cancellation policy remain gated.
+- [x] Owner rejected intentional partial customer delivery. For new orders hold the whole coupon claim until complete allocation/fulfillment redeems it once; FR-067 / SC-036 replace the partial-unit coupon choice. Historical partial-order migration and paid-cancellation state/hold and coupon rules remain gated; repayment is outside the shop under ADR-43.
 - [ ] Operator approve remaining column compaction, historical supplier/product compatibility, **archive-only legacy refund preservation** and retained legacy pricing-policy decisions before final DDL.
 
 ## Source selection and local-preorder review (2026-10-29)
@@ -135,7 +135,8 @@
 - [x] Owner chose existing support tickets for paid queued preorder cancellation requests; no dedicated button/endpoint/table or automatic queue hold.
 - [x] Add FR-070 / SC-039 and future T025/T026/T046/T096: same-owner/brand order links, support-operation non-mutation, manual staff response and audited actual admin actions serialized with allocation.
 - [x] Keep paid history and external-refund exclusion; no automatic coupon/wallet/stock state changes from ticket text/status. Table count remains 27.
-- [ ] Settle actual admin cancellation outcome/hold and coupon/internal-wallet policy separately; request-channel approval does not settle paid liabilities.
+- [x] Owner chose admin-managed repayment outside the shop after approved paid local-preorder cancellation: no cancellation wallet credit/debit reversal, payout call or external payout record; preserve original payment/debit history and audit the order-state action without asserting repayment completion (FR-070 / SC-039, ADR-43).
+- [ ] Settle remaining exact admin cancellation state/hold transitions and held-coupon disposition separately; outside-shop repayment is not inferred or proven by an order audit.
 - [ ] After implementation authorization, verify support replay/isolation and explicit admin-resolution/allocation races.
 
 ## 180-day activity retention approval (2026-10-30)
