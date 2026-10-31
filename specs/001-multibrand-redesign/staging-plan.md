@@ -6,7 +6,7 @@ Constitution 3.0.0 is active: the [2.0.0 shared-core amendment](constitution-rat
 change, migration, real payment, supplier call or Telegram message is authorized by this plan.
 
 This fills the environment-planning gap behind T007/T080/T081. The approved business baseline
-remains 28 tables, FR-001–084, SC-001–053 and 96 tasks. Later offline work completed T001–T008 and T013; [RELEASE_GATES.md](../../ops/RELEASE_GATES.md) defines staging identity requirements, while actual staging provision/verification remains future work. T008 schema execution occurred only in disposable synthetic databases, not this staging environment.
+remains 28 tables, FR-001–084, SC-001–053 and 96 tasks. Later offline work completed T001–T009 and T013; [RELEASE_GATES.md](../../ops/RELEASE_GATES.md) defines staging identity requirements, while actual staging provision/verification remains future work. Schema/session qualification occurred only in disposable synthetic databases, not this staging environment.
 See [the evidence gates](consistency-review.md#evidence-gates-owners-and-required-proof),
 [the implementation plan](plan.md) and [the constitution proposal](constitution-alignment-proposal.md).
 

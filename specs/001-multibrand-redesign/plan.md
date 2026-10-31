@@ -1,8 +1,8 @@
 # Implementation Plan: Multi-Brand Commerce Backend
 
 **Feature**: `001-multibrand-redesign` | **Date**: 2026-10-26 | **Spec**: [spec.md](spec.md)  
-**Specification repository**: `Farrokhzadeh/telegram-multi-bot-shop`, documentation baseline on `main`; imported from `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`. Current offline schema work uses `impl/002-relational-baseline`, stacked on `impl/001-offline-foundation`.
-**Status**: The owner authorized the initial offline foundation and then T008 on 2026-10-31. T001–T008 and T013 are complete; see [task status](tasks.md), [foundation evidence](../../ops/OFFLINE_QUALIFICATION.md) and [schema/operator evidence](../../ops/SCHEMA_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production/staging migration execution and deployment remain outside these batches.
+**Specification repository**: `Farrokhzadeh/telegram-multi-bot-shop`, documentation baseline on `main`; imported from `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`. Current helper work uses `impl/003-transaction-money`, stacked on the qualified `impl/002-relational-baseline` branch.
+**Status**: The owner authorized the initial offline foundation, T008 and then T009 on 2026-10-31. T001–T009 and T013 are complete; see [task status](tasks.md), [foundation evidence](../../ops/OFFLINE_QUALIFICATION.md), [schema/operator evidence](../../ops/SCHEMA_QUALIFICATION.md) and [transaction/money evidence](../../ops/TRANSACTION_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production/staging migration execution and deployment remain outside these batches.
 
 **Current review:** [consistency-review.md](consistency-review.md). Types/relationships are selected in [schema-contract.md](schema-contract.md); ownership is mapped in [requirements-traceability.md](requirements-traceability.md). Older dated clarification notes below are rationale, not competing field alternatives.
 

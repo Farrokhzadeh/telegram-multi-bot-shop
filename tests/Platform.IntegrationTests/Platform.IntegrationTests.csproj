@@ -9,6 +9,7 @@
     <ProjectReference Include="../../src/Platform.Persistence/Platform.Persistence.csproj" />
     <PackageReference Include="Npgsql" />
     <Compile Include="../Shared/DisposablePostgres.cs" Link="Shared/DisposablePostgres.cs" />
+    <Compile Include="../Shared/DropCommitReplyProxy.cs" Link="Shared/DropCommitReplyProxy.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio">
