@@ -123,6 +123,9 @@ await using (var database = await DisposablePostgres.CreateAsync())
         throw new InvalidOperationException("Native schema application/reapplication failed.");
     }
 
+    await OutboxQualification.RunAsync(database.Data);
+    Console.WriteLine("PASS: native typed outbox enqueue, deduplication, lease renewal and stale-generation fences.");
+
     string? operatorPath = Environment.GetEnvironmentVariable("SHOP_SCHEMA_RUNNER_PATH");
     if (operatorPath is not null)
     {

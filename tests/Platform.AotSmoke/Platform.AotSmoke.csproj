@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/OutboxQualification.cs" Link="Shared/OutboxQualification.cs" />
     <Compile Include="../Shared/CipherQualification.cs" Link="Shared/CipherQualification.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
