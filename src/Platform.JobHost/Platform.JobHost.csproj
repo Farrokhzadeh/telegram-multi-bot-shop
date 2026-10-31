@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+    <OutputType>Exe</OutputType>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../Platform.Persistence/Platform.Persistence.csproj" />
+    <ProjectReference Include="../Platform.Fulfillment/Platform.Fulfillment.csproj" />
+    <ProjectReference Include="../Platform.Campaigns/Platform.Campaigns.csproj" />
+    <ProjectReference Include="../Platform.Telegram/Platform.Telegram.csproj" />
+  </ItemGroup>
+</Project>

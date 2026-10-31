@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PublishAot>true</PublishAot>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
+    <ProjectReference Include="../../src/Platform.Persistence/Platform.Persistence.csproj" />
+    <PackageReference Include="Npgsql" />
+    <Compile Include="../Shared/DisposablePostgres.cs" Link="Shared/DisposablePostgres.cs" />
+    <None Include="../fixtures/legacy-fernet-synthetic.json" Link="fixtures/legacy-fernet-synthetic.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

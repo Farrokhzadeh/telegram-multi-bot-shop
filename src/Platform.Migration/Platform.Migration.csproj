@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../Platform.Security/Platform.Security.csproj" />
+    <ProjectReference Include="../Platform.Persistence/Platform.Persistence.csproj" />
+  </ItemGroup>
+</Project>

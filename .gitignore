@@ -22,3 +22,8 @@ node_modules/
 # Local editor/OS files
 .DS_Store
 Thumbs.db
+*.user
+*.suo
+packages/
+coverage/
+TestResults/

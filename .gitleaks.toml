@@ -1,0 +1,6 @@
+title = "Shop source scan; public synthetic crypto vectors only"
+[extend]
+useDefault = true
+[[allowlists]]
+description = "Public synthetic interoperability vectors; never deployment keys"
+paths = ['''^tests/fixtures/legacy-fernet-synthetic\.json$''']

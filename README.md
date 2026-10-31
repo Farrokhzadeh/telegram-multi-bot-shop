@@ -2,7 +2,7 @@
 
 AccAbad multi-brand redesign: the specification home for three independently branded Telegram shops sharing a commerce backend, product catalog and stock pool.
 
-**Status: specification review only.** No application implementation, executable database migrations, deployment or live integrations are included.
+**Status: offline foundation and qualification in progress (owner authorized 2026-10-31).** Hosts support synthetic qualification only; business runtime, production migrations, deployment and real integrations remain disabled.
 
 ## Start here
 
@@ -38,7 +38,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Use the order ID directly for customers. Each bot has its own public admin contact; closed restock subscriptions are retained for 180 days.
 - External refunds and their records stay outside the platform.
 
-The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining 95 tasks are unchecked and application implementation remains deferred. Remaining schema/provider/migration decisions are listed in the handoff.
+The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining tasks stay unchecked until verified. The owner has now authorized the initial offline foundation/qualification batch. Remaining schema/provider/migration decisions are listed in the handoff.
 
 ## Review deliverables
 

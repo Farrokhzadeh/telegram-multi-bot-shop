@@ -2,7 +2,7 @@
 
 **Input**: [spec.md](spec.md), [plan.md](plan.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/backend-contracts.md](contracts/backend-contracts.md), [quickstart.md](quickstart.md)  
 **Scope**: **Backend only** — no admin/dashboard UI, frontend, or embedded AI answering service.  
-**Status**: Proposed implementation backlog in `Farrokhzadeh/telegram-multi-bot-shop`; repository/spec-kit transfer completes setup task T001; the remaining 95 tasks stay unchecked and application implementation remains deferred. No live-data access or deployment authorized.
+**Status**: Offline foundation and qualification authorized by `/spec-kit implement` on 2026-10-31. T001 is complete; setup and migration-only cipher qualification are in progress. Mark tasks complete only after required evidence. Customer commerce features, live-data/key access, production migrations, deployment and real integrations remain outside this batch.
 
 **Canonical review references:** [schema-contract.md](schema-contract.md), [requirements-traceability.md](requirements-traceability.md), [consistency-review.md](consistency-review.md). Schema fragments are authored as one complete baseline in T008; downstream story tasks qualify its contracts. Earlier future file paths are module targets, not existing files or permission for duplicate CREATE statements.
 
