@@ -2,7 +2,7 @@
 
 AccAbad multi-brand redesign: the specification home for three independently branded Telegram shops sharing a commerce backend, product catalog and stock pool.
 
-**Status: offline foundation, 28-table schema, transaction/money helpers and trusted brand context implemented and qualified (2026-10-31).** T001–T020 are complete. Hosts support synthetic qualification only; the schema runner is explicitly invoked against disposable test databases. Business runtime, production/staging migration execution, deployment and real integrations remain disabled.
+**Status: offline foundation, 28-table schema, transaction/money helpers and trusted brand context implemented and qualified (2026-10-31).** T001–T021 are complete. Hosts support synthetic qualification only; the schema runner is explicitly invoked against disposable test databases. Business runtime, production/staging migration execution, deployment and real integrations remain disabled.
 
 ## Start here
 
@@ -24,6 +24,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - [Independent administrator authority qualification](ops/ADMIN_AUTH_QUALIFICATION.md)
 - [Combined foundation checkpoint](ops/FOUNDATION_QUALIFICATION.md)
 - [Brand membership and private-flow qualification](ops/BRAND_USERS_QUALIFICATION.md)
+- [Channel policy and localization qualification](ops/BRAND_POLICY_QUALIFICATION.md)
 - [Release gates and environment identities](ops/RELEASE_GATES.md)
 
 ## Current approved decisions
@@ -50,7 +51,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Use the order ID directly for customers. Each bot has its own public admin contact; closed restock subscriptions are retained for 180 days.
 - External refunds and their records stay outside the platform.
 
-The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. **Twenty tasks are complete; 76 remain.** The latest owner-authorized brand/user qualification passed 227 tests and five Linux native executable probes, with zero build warnings/errors. Source/provider compatibility and operational release evidence remain separate gates.
+The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. **Twenty-one tasks are complete; 75 remain.** The latest owner-authorized channel-policy qualification passed 240 tests and five Linux native executable probes, with zero build warnings/errors. Source/provider compatibility and operational release evidence remain separate gates.
 
 ## Review deliverables
 

@@ -1,6 +1,6 @@
 # T021 channel policy and localization
 
-Qualification pending. Offline/synthetic only, with no Telegram membership request or message sent. The canonical 28-table schema and original migration/catalog identity are unchanged.
+Qualified at source commit `356ed432952a19e8ea73b47a6b7976dfe92dd4cb`, tree `e3ad353bfe4537ab73718d0b2c09bb8bddaf98d6`. Offline/synthetic only, with no Telegram membership request or message sent. The canonical 28-table schema and original migration/catalog identity are unchanged.
 
 BrandPolicyStore reads only the authenticated active bot's membership, required active channels, branding and designated active verified public contact. Unsupported customer language falls back to that brand's configured default; built-in English/Persian text never accepts a provider error as customer content. Localization includes out-of-stock, one-time restock opt-in/cancellation and informational availability wording with no date/stock reservation promise. Consent, publication/current stock, durable alert delivery and catalog projection remain their later tasks.
 
@@ -13,3 +13,15 @@ Verified active staff and explicitly disabled brand enforcement skip membership 
 SetEnforcementAsync requires a current independent admin session, expected policy revision and previous flag, then atomically appends the typed before/after audit and changes only that brand's require_channel_join flag/revision. Same-command replay returns its original resulting revision without repeating writes; collisions/current-epoch failures or stale revisions roll back. Configured channel rows remain intact. Contact provisioning remains T044; reads suppress disabled/unverified/invalid handles and never expose the staff roster or other brands' contact/assets. Staff-chat notices/bonus access remain separate delivery/admin tasks.
 
 The typed bounded QueryManyAsync projection supports required-channel enumeration without JSON/array storage, exposing no connection/reader. It invalidates each row handle and fails/aborts on projection errors, extra result sets or more than 1000 rows; excess channel configuration fails closed rather than silently ignoring checks. New project references remain acyclic; lockfile edits describe project edges and existing pinned transitive packages only, with no package-version change. Tests exercise ordinary membership statuses, bypass/re-enable/audit replay, real two-channel verified staff across all brands and revocation, unknown/error/cancelled checks, forged actor/scope, policy/list changes, single-use proof and brand-specific contact/asset/language output. Native execution repeats policy read/revalidation/localization without transport. Live ingress, merchant/privacy/operator qualification, full business runtime and release gates remain incomplete.
+
+## Observed evidence
+
+[CI run 41240374584](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41240374584), job `124652863781`, passed 240 tests (101 unit, 93 PostgreSQL integration, 46 contract), zero failed/skipped, zero build warnings/errors and every required workflow step: locked restore/audit, secret scan, formatting, Compose render and five native executables. The native database probe passed channel-policy revalidation and Persian stock localization with no membership transport call. T021 is complete for this offline module scope. Runtime activation, verified ingress and full business/release qualification remain separate.
+
+| Native executable | SHA-256 |
+|---|---|
+| Api | `22e88e6a4430b51585443bb2a715b2f99b797a694304e4a035ed3834d3bca26c` |
+| BotHost | `7c737e59c847d065b16561483f303a88129b0467a7d939f11a7097002da5b797` |
+| JobHost | `7a70b47087c13f5235cd88300334310d941703beb0bb4216277f6582b548fc15` |
+| SchemaRunner | `1a22589d41ea92f8f034a5f8082c42b7e043854aafe1f5c38d501888afa7ffea` |
+| AotSmoke | `0e4fc070085765e48a78d571bffa2aedbf89d2b7d83f7587e62be3f7a986c6e4` |
