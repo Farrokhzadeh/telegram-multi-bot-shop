@@ -2,7 +2,7 @@
 
 AccAbad multi-brand redesign: the specification home for three independently branded Telegram shops sharing a commerce backend, product catalog and stock pool.
 
-**Status: offline foundation, 28-table schema, transaction/money helpers and trusted brand context implemented and qualified (2026-10-31).** T001–T011 and T013 are complete. Hosts support synthetic qualification only; the schema runner is explicitly invoked against disposable test databases. Business runtime, production/staging migration execution, deployment and real integrations remain disabled.
+**Status: offline foundation, 28-table schema, transaction/money helpers and trusted brand context implemented and qualified (2026-10-31).** T001–T013 are complete. Hosts support synthetic qualification only; the schema runner is explicitly invoked against disposable test databases. Business runtime, production/staging migration execution, deployment and real integrations remain disabled.
 
 ## Start here
 
@@ -18,6 +18,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - [Exact money, transaction ownership and recovery evidence](ops/TRANSACTION_QUALIFICATION.md)
 - [Trusted brand context and rejected switching evidence](ops/BRAND_CONTEXT_QUALIFICATION.md)
 - [Versioned configuration and secret-file qualification](ops/SECRET_FILES_QUALIFICATION.md)
+- [Authenticated ciphertext qualification](ops/CIPHER_QUALIFICATION.md)
 - [Release gates and environment identities](ops/RELEASE_GATES.md)
 
 ## Current approved decisions
@@ -44,7 +45,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Use the order ID directly for customers. Each bot has its own public admin contact; closed restock subscriptions are retained for 180 days.
 - External refunds and their records stay outside the platform.
 
-The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. **Twelve tasks are complete; 84 remain.** The latest owner-authorized secret-file qualification passed 171 tests and five Linux native executable probes, with zero build warnings/errors. Source/provider compatibility and operational release evidence remain separate gates.
+The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. **Thirteen tasks are complete; 83 remain.** The latest owner-authorized cipher qualification passed 172 tests and five Linux native executable probes, with zero build warnings/errors. Source/provider compatibility and operational release evidence remain separate gates.
 
 ## Review deliverables
 

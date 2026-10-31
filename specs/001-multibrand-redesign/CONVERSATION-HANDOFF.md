@@ -335,3 +335,8 @@ The owner said "do next" after T009. This authorized the immutable bot-to-brand 
 T011 passed 171 tests and all five native executables in [CI run 41218689562](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41218689562) at f21a0f84a2fa161e836984e0787c107413528b8a. See [secret-file evidence](../../ops/SECRET_FILES_QUALIFICATION.md). Versioned grants and contexts must match exactly; no bot gets inventory keys. Compose is a render-only disabled contract, not a deployment.
 
 The owner explicitly authorized merging all completed work into main and continuing directly there with task-batched commits and no confirmation pauses for small subsequent tasks. PRs #1–#4 are merged. Current progress: T001–T011 and T013 complete, 12/96, 84 unchecked. T012 is next. Earlier branch/next-work notes are historical. Live credentials/data/integrations and deployment remain outside authorization.
+
+
+## T012 complete — 2026-10-31
+
+SC02 AES-256-GCM envelopes bind scope, table, row, field and exact key ID, with random nonces and no plaintext fallback. Independent public-vector, old-key, corruption/truncation, wrong-context and inventory-permission probes passed in managed/native execution. [CI 41233255842](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41233255842) at d2218bf233182c158ad6726a0653ecce3c7db6a2 passed 172 tests and all five native executables. See [cipher evidence](../../ops/CIPHER_QUALIFICATION.md). T001–T013 complete: 13/96, 83 unchecked. Work continues directly on main, grouped by task, without confirmation pauses. T014 diagnostics is next; live operations remain gated.
