@@ -2,7 +2,7 @@
 
 AccAbad multi-brand redesign: the specification home for three independently branded Telegram shops sharing a commerce backend, product catalog and stock pool.
 
-**Status: offline foundation and qualification in progress (owner authorized 2026-10-31).** Hosts support synthetic qualification only; business runtime, production migrations, deployment and real integrations remain disabled.
+**Status: initial offline foundation implemented and qualified (2026-10-31).** T001–T007 and T013 are complete. Hosts support synthetic qualification only; business runtime, production migrations, deployment and real integrations remain disabled.
 
 ## Start here
 
@@ -12,7 +12,9 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - [Logical data model](specs/001-multibrand-redesign/data-model.md)
 - [Supplier and preorder review](specs/001-multibrand-redesign/contracts/supplier-provider-matrix.md)
 - [Architecture plan](specs/001-multibrand-redesign/plan.md)
-- [Future implementation tasks](specs/001-multibrand-redesign/tasks.md)
+- [Implementation tasks and completion status](specs/001-multibrand-redesign/tasks.md)
+- [Offline build, test and Native AOT evidence](ops/OFFLINE_QUALIFICATION.md)
+- [Release gates and environment identities](ops/RELEASE_GATES.md)
 
 ## Current approved decisions
 
@@ -38,7 +40,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Use the order ID directly for customers. Each bot has its own public admin contact; closed restock subscriptions are retained for 180 days.
 - External refunds and their records stay outside the platform.
 
-The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. Repository setup T001 is complete; the remaining tasks stay unchecked until verified. The owner has now authorized the initial offline foundation/qualification batch. Remaining schema/provider/migration decisions are listed in the handoff.
+The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. **Eight tasks are complete; 88 remain.** The initial owner-authorized offline foundation passed 10 tests and four Linux native executable probes, with zero build warnings/errors. Remaining schema/provider/migration decisions are listed in the handoff.
 
 ## Review deliverables
 
@@ -48,7 +50,7 @@ The feature contains **84 functional requirements, 53 success criteria and 96 pl
 - [Applied 2.0.0 shared-core amendment and historical approval source](specs/001-multibrand-redesign/constitution-alignment-proposal.md)
 - [2.0.0 owner ratification and application status](specs/001-multibrand-redesign/constitution-ratification.md)
 
-Constitution 3.0.0 is active, including the applied shared-core amendment and owner-approved saved-order-message delivery recovery. The 2026-10-31 alignment reanalysis passed; E1 is closed for governance only. E2–E6 remain stage-specific proof requirements. Documentation does not claim schema execution, provider/runtime qualification or implementation/release authorization.
+Constitution 3.0.0 is active, including the applied shared-core amendment and owner-approved saved-order-message delivery recovery. The 2026-10-31 alignment reanalysis passed; E1 is closed for governance only. E2–E6 remain stage-specific proof requirements. The governance review does not itself qualify runtime or authorize a release; the separately authorized foundation's limited executable evidence is recorded above.
 
 ## Spec-kit
 
@@ -79,13 +81,13 @@ the core fallback. A resolver failure still blocks the dependent command. Path i
 does not rewrite the feature selector, and setup preserves existing plan/task content.
 The tooling tests use disposable fixtures; they do not execute application tests or live operations.
 
-Continue specification clarification/review. The presence of implementation commands and a future task backlog does not authorize running implementation or deployment workflows.
+The owner separately authorized the initial offline foundation/qualification batch. Command availability alone does not extend that authorization to later customer features or live operations.
 
 ## Provenance and scope
 
 Imported on 2026-10-29 from `Farrokhzadeh/AccAbad-Shop`, branch `feature/001-csharp-native-aot`, commit [`7fcc4a7`](https://github.com/Farrokhzadeh/AccAbad-Shop/commit/7fcc4a7a35337405dd69195fc6c92474748c4513).
 
-The original repository remains the source for legacy Django code, historical migrations and pinned supplier evidence. This repository contains the current redesign documents and spec-kit support, plus repository routing/provenance metadata. Legacy application/deployment code, environment files, databases and credentials were not imported.
+The original repository remains the source for legacy Django code, historical migrations and pinned supplier evidence. This repository contains the redesign documents, Spec Kit support and the new offline .NET foundation. Legacy application/deployment code was not imported wholesale; environment files, databases and credentials were not imported.
 
 The active [constitution](.specify/memory/constitution.md) is version 3.0.0. Its amendment records preserve the original 2026-10-15 adoption, the pinned 2.0.0 shared-core approval and the 2026-10-31 owner-authorized delivery recovery amendment. Governance alignment does not authorize implementation or release.
 

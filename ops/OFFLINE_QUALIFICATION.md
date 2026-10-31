@@ -28,6 +28,31 @@ The three hosts accept `--qualify`; ordinary startup exits 78. The API's explici
 
 ## Current evidence
 
-Build/test/native qualification is in progress on `impl/001-offline-foundation`. No task is marked complete from a queued or failed workflow. The local SDK archive passed Microsoft's published SHA-512 check, but CoreCLR startup fails in the restricted workspace with HRESULT 0x8007000E; local native/runtime success is not claimed. The isolated GitHub Actions runner supplies the executable evidence.
+Qualification passed on `impl/001-offline-foundation` in [GitHub Actions run 41187355132](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41187355132), job `124496869419`, at commit [`a74d8d8f208f1b36ae6a122216eace07c85411a0`](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/commit/a74d8d8f208f1b36ae6a122216eace07c85411a0), tree `78d85c8f5fef3655df0e26aa10bdaebf27ca9240`, on 2026-10-31. All workflow steps completed successfully.
+
+| Check | Observed result |
+|---|---|
+| Toolchain / dependencies | SDK 10.0.403; Npgsql 10.0.3; locked restore succeeded for all 15 projects |
+| Database | PostgreSQL 18.6, exact `server_version_num=180006`; pulled image digest `sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4` |
+| Build / formatting | Release build: zero warnings and zero errors; whitespace verification passed |
+| Security | Gitleaks 8.30.1 scan and NuGet dependency audit passed under warnings-as-errors |
+| Unit tests | 5 passed, 0 failed/skipped; includes 9 Python-generated Fernet vectors, tamper/wrong-key rejection and plaintext/mapping regression cases |
+| Integration tests | 2 passed, 0 failed/skipped; exact decimal mapping, rollback and server identity in disposable databases |
+| Transport contract tests | 3 passed, 0 failed/skipped; lost-send, repeated-edit and original supplier-purchase reconciliation simulations |
+| Native execution | All three hosts and AotSmoke published as Linux x64 ELF executables and ran successfully; default host startup exits 78 |
+| Native API / dependencies | Loopback liveness, 503 readiness, 401 without the public test header and source-generated JSON passed; native AES-GCM, Fernet and Npgsql probes passed |
+
+The run recorded these executable SHA-256 values. They identify qualification probes from the cited commit, not a production release bundle.
+
+| Executable | SHA-256 |
+|---|---|
+| `Platform.Api` | `ff572ed3a510d3302ae50f05a51a9ed2003ef5d5cacaaaac4f152f370ae5eaaf` |
+| `Platform.BotHost` | `0fa95709a51e60b2613bc223121dc071dcd2665a02b3d6b43c25aab3af1bdf32` |
+| `Platform.JobHost` | `ace00b74535fe9460c320afc5192d6e04958032a751390a677d091fc7b9ed604` |
+| `Platform.AotSmoke` | `1ff3733ed9c54c21d4869c26af052445e9267c7769b732e476a1697d3ab51239` |
+
+T002–T007 and independent migration-only T013 are complete for this scope. T007 defines requirements/default identities; actual staging provisioning, measured headroom and real identity acceptance remain future work. T013 pure reader vectors live in the unit suite, with independent native execution; the transport contract suite owns the HTTP failure simulations. The target schema, new keyrings/envelope and durable commerce workers are not implemented.
+
+The local SDK archive passed Microsoft's published SHA-512 check, but CoreCLR startup fails in the restricted workspace with HRESULT 0x8007000E; local native/runtime success is not claimed. The isolated GitHub Actions runner supplies the executable evidence. Later documentation commits do not change which commit these recorded hashes identify.
 
 E1 remains closed for governance alignment. E2/E3/E5/E6 remain unqualified; E4 evidence is limited to the actual successful probes and does not imply full-platform readiness. The reviewer-owned requirements checklist is left unchanged. No production data/keys, real supplier/FX/payment/Telegram calls, staging deployment, customer messages, payouts or source mutations occur.
