@@ -143,6 +143,33 @@ public sealed class DbSession : IAsyncDisposable
         finally { Exit(); }
     }
 
+    public async Task<IReadOnlyList<T>> QueryManyAsync<T>(DbStatement statement, Func<DbRow, T> project, int maximumRows,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        ArgumentNullException.ThrowIfNull(project);
+        if (maximumRows is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(maximumRows));
+        EnterActive();
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await using var command = statement.CreateCommand(connection, transaction, options.ClientTimeoutSeconds);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var results = new List<T>();
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                if (results.Count == maximumRows) throw new InvalidOperationException("Query row limit exceeded.");
+                var row = new DbRow(reader);
+                try { results.Add(project(row)); }
+                finally { row.Invalidate(); }
+            }
+            if (await reader.NextResultAsync(cancellationToken)) throw new InvalidOperationException("Only one result set is allowed.");
+            return results.AsReadOnly();
+        }
+        catch (Exception error) { throw RecordFailure(error, DbPhase.Executing, cancellationToken); }
+        finally { Exit(); }
+    }
+
     public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
         EnterActive();

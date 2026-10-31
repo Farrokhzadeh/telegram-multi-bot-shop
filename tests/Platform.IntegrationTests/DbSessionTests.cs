@@ -270,6 +270,27 @@ public sealed class DbSessionTests
         }
     }
 
+    [Fact]
+    public async Task BoundedMultirowProjectionInvalidatesHandlesAndRejectsOverflowAtomically()
+    {
+        await using var database = await CreateAsync();
+        var factory = new DbSessionFactory(database.Data);
+        await using (var read = await factory.BeginAsync(Ct))
+        {
+            var rows = await read.QueryManyAsync(new DbStatement("SELECT generate_series(1,2)"), row => row, 2, Ct);
+            Assert.Equal(2, rows.Count);
+            Assert.All(rows, row => Assert.Throws<InvalidOperationException>(() => row.GetInt32(0)));
+        }
+        Guid product = Guid.NewGuid();
+        await using (var overflow = await factory.BeginAsync(Ct))
+        {
+            await overflow.ExecuteAsync(Product(product, "public rollback"), Ct);
+            await Assert.ThrowsAsync<DbOperationException>(() => overflow.QueryManyAsync(new DbStatement("SELECT generate_series(1,3)"), row => row.GetInt32(0), 2, Ct));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => overflow.CommitAsync(Ct));
+        }
+        Assert.Equal(0, await CountAsync(database, product));
+    }
+
     private static DbStatement Product(Guid id, string title) => new(
         "INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','immediate',$2)", DbValue.Uuid(id), DbValue.Text(title));
 

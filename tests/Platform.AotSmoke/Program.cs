@@ -8,6 +8,7 @@ using Platform.Migration;
 using Platform.Persistence;
 using Platform.Security;
 using Platform.Testing;
+using Platform.Telegram;
 
 NativeHostSmokeTests.VerifyInventoryIsolation();
 CipherQualification.Run();
@@ -170,6 +171,19 @@ await using (var database = await DisposablePostgres.CreateAsync())
         if (!rejected) throw new InvalidOperationException("Native stale customer callback was accepted.");
     }
     Console.WriteLine("PASS: native brand-scoped membership, preferences, DM destination and stale-flow rollback.");
+    BrandPolicySnapshot nativePolicy;
+    await using (var readPolicy = await userSessions.BeginAsync())
+        nativePolicy = await BrandPolicyStore.ReadAsync(readPolicy, customerContext!, 97001);
+    ChannelAccess? channelAccess = await BrandPolicy.CheckChannelsAsync(nativePolicy, 97001,
+        (_, _, _) => throw new InvalidOperationException("Bypassed native channel transport was called."));
+    await using (var applyPolicy = await userSessions.BeginAsync())
+    {
+        if (channelAccess is null || Localization.Text(nativePolicy, CustomerText.OutOfStock) != "ناموجود")
+            throw new InvalidOperationException("Native localized policy failed.");
+        await channelAccess.RequireCurrentAsync(applyPolicy, customerContext!, 97001);
+        await applyPolicy.CommitAsync();
+    }
+    Console.WriteLine("PASS: native channel-policy revalidation and localized stock notice with no transport call.");
 
     string? operatorPath = Environment.GetEnvironmentVariable("SHOP_SCHEMA_RUNNER_PATH");
     if (operatorPath is not null)

@@ -11,6 +11,7 @@
     <Compile Include="../Shared/CipherQualification.cs" Link="Shared/CipherQualification.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../../src/Platform.Telegram/Platform.Telegram.csproj" />
     <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
     <ProjectReference Include="../../src/Platform.Persistence/Platform.Persistence.csproj" />
     <PackageReference Include="Npgsql" />

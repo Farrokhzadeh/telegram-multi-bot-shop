@@ -11,6 +11,7 @@
     <Compile Include="../../src/Platform.Api/AdminGuardMiddleware.cs" Link="Api/AdminGuardMiddleware.cs" />
     <Compile Include="../Shared/AdminQualification.cs" Link="Shared/AdminQualification.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../../src/Platform.Telegram/Platform.Telegram.csproj" />
     <ProjectReference Include="../../src/Platform.Persistence/Platform.Persistence.csproj" />
     <PackageReference Include="Npgsql" />
     <Compile Include="../Shared/DisposablePostgres.cs" Link="Shared/DisposablePostgres.cs" />
