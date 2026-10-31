@@ -1,14 +1,14 @@
 # Multi-brand redesign — conversation handoff (updated 2026-10-31)
 
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
-**Branch:** documentation baseline `main`; current schema work `impl/002-relational-baseline`, stacked on `impl/001-offline-foundation`
+**Branch:** documentation baseline `main`; current helper work `impl/003-transaction-money`, stacked on `impl/002-relational-baseline`
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  
 **Feature documents:** `specs/001-multibrand-redesign/`  
-**Status:** Offline foundation, migration-only cipher and T008 forward-schema qualification complete on 2026-10-31. See the latest implementation record below, [foundation evidence](../../ops/OFFLINE_QUALIFICATION.md) and [schema evidence](../../ops/SCHEMA_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production/staging migration execution and deployment remain outside these batches.
+**Status:** Offline foundation, migration-only cipher, forward schema and T009 transaction/money qualification complete on 2026-10-31. See the latest record below, [foundation](../../ops/OFFLINE_QUALIFICATION.md), [schema](../../ops/SCHEMA_QUALIFICATION.md) and [transaction evidence](../../ops/TRANSACTION_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production/staging migration execution and deployment remain outside these batches.
 
 ## Where to continue
 
-Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/002-relational-baseline`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. T009 is next. Preserve approved business decisions and the limited offline authorization; earlier documentation-only status notes describe their historical snapshots.
+Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/003-transaction-money`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. T010 is next. Preserve approved business decisions and the limited offline authorization; earlier status notes describe their historical snapshots.
 
 Historical decision sections retain counts from their approval stage; the latest decision below and current inventory define the active baseline.
 
@@ -305,3 +305,15 @@ The owner said "do next" after the foundation report identified T008. This separ
 - [CI run 41207382338](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41207382338) passed at `774043e16be60730905ea488670ab57f7318daa2`: 52 tests (15 unit, 34 integration, 3 transport contract), zero build warnings/errors and five Linux native executables including the operator. Exact SQL/image/executable hashes, protocol, scope and reproduction are in [SCHEMA_QUALIFICATION.md](../../ops/SCHEMA_QUALIFICATION.md). All 16 projects restore under dependency lockfiles. Local PostgreSQL 18.6 PGlite checks supplement the native CI proof.
 
 **Current counts:** 28 tables, 84 FR, 53 SC, 96 tasks; **T001–T008 and T013 complete, 87 unchecked**. E1 remains closed for governance; E4 has the recorded forward-schema/foundation evidence only. E2/E3/E5/E6 remain unqualified. The reviewer-owned checklist is unchanged. Next unfinished task: T009, parameterized transaction sessions and typed money/currency helpers. No real credentials, source rows, live supplier/payment/FX/Telegram calls, staging/production migrations, deployment or live financial mutation occurred.
+
+
+## T009 exact money and transaction sessions — 2026-10-31
+
+The owner said "continue" after the T008 report identified T009. This authorized parameterized Npgsql sessions, typed exact decimal/currency helpers and connection/lease error policy with disposable synthetic and Linux Native AOT qualification. Work is on `impl/003-transaction-money`, stacked on the qualified T008 branch. No merge, live customer handler, source import, staging/production change or deployment is implied.
+
+- Added `Money`/`ExactDecimal` with distinct USD/USDT/TOMAN codes, matching-currency arithmetic and integer-coefficient representability checks. Parsing and arithmetic reject rounding/overflow/nonterminating results. NUMERIC money reads use explicit text projection and exact parsing; no new legacy precision, FX, discount or currency-conversion rule is inferred.
+- Added typed positional scalar parameters and one data-statement surface. Each session owns a private connection/transaction, explicit commit, configured transaction-local timeouts/UTC and safe failure metadata. Typed row projections cannot expose the connection or survive their callback. Failed commands, mapping, cardinality, cancellation or fences prevent a later partial commit. Disposal rolls back uncommitted work with a separate cleanup token.
+- Known backend aborts and unknown commit outcomes remain separate. There is no automatic application/statement retry callback. Serialization/lock conflicts require rollback and re-evaluation; lost commit replies require fresh authoritative reconciliation of the original durable identity. Explicit rollback cannot relabel uncertainty. Lease owner/generation/expiry row fences stop stale writers without authorizing a remote retry; actual outbox/supplier workers remain later tasks.
+- [CI run 41212609660](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41212609660) passed at `1b4649366e9f9bc3c8fd9a3f696f279164c4a862`: 107 tests (58 unit, 46 integration, 3 transport contract), zero build warnings/errors and all five native executables. The native fault proxy dropped a server-confirmed COMMIT acknowledgement; the client retained unknown outcome and a fresh connection observed exactly one effect. Exact source/image/executable hashes, protocol and reproduction are in [TRANSACTION_QUALIFICATION.md](../../ops/TRANSACTION_QUALIFICATION.md). The canonical 28-table SQL digest remains `fa57b9c12b395a7a47bed8fc92586dac66ea652baf1e84ca0e8ebb727e3cc27d`.
+
+**Current counts:** 28 tables, 84 FR, 53 SC, 96 tasks; **T001–T009 and T013 complete, 86 unchecked**. E1 remains closed for governance, with E4 evidence limited to the tested foundation/schema/helpers. E2/E3/E5/E6 remain unqualified. The reviewer-owned requirements checklist is unchanged. Next unfinished task: T010, trusted brand identity and rejection of caller-supplied brand switching. No real credentials/source rows, live supplier/payment/FX/Telegram calls, staging/production operations, customer messages or live financial mutation occurred.

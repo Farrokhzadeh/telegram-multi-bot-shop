@@ -2,6 +2,8 @@
 
 **Scope:** T008, authorized by the owner's "do next" on 2026-10-31. This adds the 28-table forward baseline and tests it with synthetic data. It does not import historical data, apply a staging/production migration, enable a customer feature or close E2–E6.
 
+**Later batch:** T009 transaction/money helpers are now qualified in [TRANSACTION_QUALIFICATION.md](TRANSACTION_QUALIFICATION.md). Remaining-task statements and test/executable identities below describe the cited T008 source snapshot.
+
 ## What is implemented
 
 `migrations/0001_core.sql` declares all 28 tables before attaching cyclic foreign keys and static guards. It uses UUID entity keys, membership-derived ownership, bounded scalar fields, finite exact NUMERIC without a fixed scale, finite timestamps, typed origins and explicit controlled vocabularies. It adds no schema-history table, JSON/jsonb/array/EAV state, supplier-account table, refund record or stored order total.
