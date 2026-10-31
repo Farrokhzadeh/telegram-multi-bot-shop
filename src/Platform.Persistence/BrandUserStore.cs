@@ -116,14 +116,24 @@ public static class BrandUserStore
     private static void Reject(DbSession session) { session.RejectApplication(); throw new UnauthorizedAccessException("Customer membership or flow is unavailable."); }
     private static string StateCode(CustomerFlowState state) => state switch
     {
-        CustomerFlowState.Idle => "idle", CustomerFlowState.Catalog => "catalog", CustomerFlowState.Quantity => "quantity",
-        CustomerFlowState.Payment => "payment", CustomerFlowState.Receipt => "receipt", CustomerFlowState.Support => "support",
-        CustomerFlowState.Discounts => "discounts", _ => throw new ArgumentOutOfRangeException(nameof(state))
+        CustomerFlowState.Idle => "idle",
+        CustomerFlowState.Catalog => "catalog",
+        CustomerFlowState.Quantity => "quantity",
+        CustomerFlowState.Payment => "payment",
+        CustomerFlowState.Receipt => "receipt",
+        CustomerFlowState.Support => "support",
+        CustomerFlowState.Discounts => "discounts",
+        _ => throw new ArgumentOutOfRangeException(nameof(state))
     };
     private static CustomerFlowState ParseState(string code) => code switch
     {
-        "idle" => CustomerFlowState.Idle, "catalog" => CustomerFlowState.Catalog, "quantity" => CustomerFlowState.Quantity,
-        "payment" => CustomerFlowState.Payment, "receipt" => CustomerFlowState.Receipt, "support" => CustomerFlowState.Support,
-        "discounts" => CustomerFlowState.Discounts, _ => throw new InvalidOperationException("Unknown customer flow state.")
+        "idle" => CustomerFlowState.Idle,
+        "catalog" => CustomerFlowState.Catalog,
+        "quantity" => CustomerFlowState.Quantity,
+        "payment" => CustomerFlowState.Payment,
+        "receipt" => CustomerFlowState.Receipt,
+        "support" => CustomerFlowState.Support,
+        "discounts" => CustomerFlowState.Discounts,
+        _ => throw new InvalidOperationException("Unknown customer flow state.")
     };
 }
