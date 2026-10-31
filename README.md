@@ -102,4 +102,4 @@ The original repository remains the source for legacy Django code, historical mi
 
 The active [constitution](.specify/memory/constitution.md) is version 3.0.0. Its amendment records preserve the original 2026-10-15 adoption, the pinned 2.0.0 shared-core approval and the 2026-10-31 owner-authorized delivery recovery amendment. Governance alignment does not authorize implementation or release.
 
-The user redirected this transfer to `telegram-multi-bot-shop`; `door-bell` was not modified.
+The user redirected this transfer to `telegram-multi-bot-shop`;

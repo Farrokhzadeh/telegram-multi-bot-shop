@@ -133,7 +133,7 @@ Before freezing physical tables, decide how to retain typed **before/after coupo
 - Approved candidate remains **27 tables**, with 67 requirements, 36 success criteria and 96 planned tasks. Repository setup T001 is complete under the transfer authorization; the remaining 95 tasks are unchecked and application implementation remains deferred. One account per supplier, shared product-level selection across brands, accepted-payment binding, blocked-source admin review and complete-order-only delivery remain unchanged.
 - The 12 feature documents and existing spec-kit templates/scripts/skills were transferred. Legacy Django code, application spikes, deployment workflows, runtime configuration, databases and credentials were not transferred or executed. Historical source references still point to the original repository.
 - Original fleet constitution is retained unchanged as imported source governance. Its old physical-fleet/schema assumptions need reconciliation with the accepted multi-brand design before implementation; importing it does not revoke the owner's approved decisions or ratify a new deployment policy.
-- The user authorized this repository transfer, not implementation, migrations or deployment. The original repository remains the legacy source reference; `door-bell` was not modified.
+- The user authorized this repository transfer, not implementation, migrations or deployment. The original repository remains the legacy source reference; 
 
 ## Latest owner decision — supplier items ready to deliver only (2026-10-30)
 
