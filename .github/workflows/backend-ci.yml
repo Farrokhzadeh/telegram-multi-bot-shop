@@ -29,7 +29,7 @@ jobs:
       SHOP_TEST_ALLOW_DATABASE_CREATION: '1'
       SHOP_TEST_POSTGRES_ADMIN: Host=127.0.0.1;Port=5432;Database=shop_test_control;Username=shop_test_runner;Password=public-synthetic-ci-password;Include Error Detail=false
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
@@ -44,20 +44,21 @@ jobs:
           echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           /tmp/gitleaks dir . --redact --config .gitleaks.toml
-      - name: Restore pinned dependencies (bootstrap lock capture)
-        run: dotnet restore Platform.sln -r linux-x64 --use-lock-file
-      - name: Record public dependency lock metadata
-        if: always()
-        run: python3 ops/ci/emit-lockfiles.py
+      - name: Restore locked dependencies
+        run: dotnet restore Platform.sln -r linux-x64 --locked-mode
       - name: Build
         run: dotnet build Platform.sln -c Release --no-restore
       - name: Formatting
         run: dotnet format whitespace Platform.sln --verify-no-changes --no-restore
       - name: Test synthetic and disposable contracts
-        run: dotnet test Platform.sln -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory artifacts/test-results
+        shell: bash
+        run: |
+          for suite in UnitTests IntegrationTests ContractTests; do
+            dotnet test "tests/Platform.${suite}/Platform.${suite}.csproj" -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory "artifacts/test-results/${suite}"
+          done
       - name: Publish and run Linux Native AOT
         run: bash ops/ci/native-smoke.sh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: offline-qualification-${{ github.sha }}

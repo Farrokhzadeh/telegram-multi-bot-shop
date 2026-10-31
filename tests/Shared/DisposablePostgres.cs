@@ -16,7 +16,7 @@ public sealed class DisposablePostgres : IAsyncDisposable
 
     public NpgsqlDataSource Data { get; }
 
-    public static async Task<DisposablePostgres> CreateAsync()
+    public static async Task<DisposablePostgres> CreateAsync(CancellationToken cancellationToken = default)
     {
         if (Environment.GetEnvironmentVariable("SHOP_TEST_ALLOW_DATABASE_CREATION") != "1")
         {
@@ -38,7 +38,7 @@ public sealed class DisposablePostgres : IAsyncDisposable
         try
         {
             await using var command = admin.CreateCommand($"CREATE DATABASE \"{name}\"");
-            await command.ExecuteNonQueryAsync();
+            await command.ExecuteNonQueryAsync(cancellationToken);
             options.Database = name;
             return new DisposablePostgres(admin,
                 new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(), name);
