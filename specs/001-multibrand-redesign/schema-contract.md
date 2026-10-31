@@ -1,7 +1,7 @@
 # Canonical schema contract — 28-table forward design
 
-**Reviewed:** 2026-10-30. **Input:** main at 350a4d90ebfe6e4082d94820910806bb96c2484e.
-**Status:** selected documentation design, not executable DDL or implementation approval. The business baseline remains FR-001–084 / SC-001–053. Evidence gates E1–E6 in [consistency-review.md](consistency-review.md) prevent an implementation/release readiness claim.
+**Reviewed baseline:** 2026-10-30. **Updated:** 2026-10-31 for the owner-approved FR-015 saved-message recovery contract. **Original input:** main at 350a4d90ebfe6e4082d94820910806bb96c2484e.
+**Status:** selected documentation design, not executable DDL or implementation approval. The business baseline remains FR-001–084 / SC-001–053. E1 governance alignment is complete; E2–E6 in [consistency-review.md](consistency-review.md) retain their proof requirements. No implementation/release readiness is implied.
 
 This file selects concrete types, ownership, keys and cross-row guards for new target data. It replaces alternative pointer/flag, duplicate timestamp, recipient and ledger-source proposals in earlier model notes. Historical decisions remain in research.md and Git history. Source/provider compatibility must be proved before importing historical rows or enabling real procurement.
 
@@ -99,7 +99,7 @@ UUID id PK, brand_id FK brands, recipient_kind TEXT(customer_dm/staff_chat), use
 Typed nullable origin FKs: campaign_id/campaign_batch_id, discount_id, order_id, fulfillment_id, support_message_id, product_stock_subscription_id, supplier_request_id, audit_event_id. Purpose-specific cardinality guards, not one generic payload.
 Recipient XOR: customer -> user and no staff_chat_id; staff -> configured trusted staff_chat_id, no user, staff-only case/bonus purpose. No customer credential/campaign/restock body may target a group. Customer DM target is always users.telegram_id; no duplicate customer chat_id.
 Campaign composite FK uses (campaign_id,campaign_batch_id,brand_id); partial UNIQUE(campaign_batch_id,user_id) covers all language variants. Customer manifest UNIQUE(order_id,delivery_generation,part_no,purpose); one restock logical alert per subscription; staff notice uniqueness by exact case/bonus origin and generation. Edit requires target ID and authoritative state recheck.
-No guaranteed exactly-once Telegram receipt. Retry the same durable intent; never repurchase/redeem to compensate for an uncertain send.
+No guaranteed exactly-once Telegram receipt or customer read confirmation. For order credentials prefer action=edit using a validated, durably saved order-message target_message_id; bind the target to the correct bot/member/order and immutable delivery_generation, and recheck authoritative state before dispatch. Retry that same edit/intent, suppress saved successful sends and retain outcomes. Use status=uncertain for an unresolved new-message send and pause automatic credential resends pending reconciliation or explicit authorized recovery. Missing/uneditable anchors and file/multi-part deliveries require explicit recovery handling; never silently substitute a fresh credential message. Protected complete-manifest access and the paid obligation survive recovery. No new table/column is required; qualify the status vocabulary and guards in T034/T049/T052. Never repurchase/redeem to compensate for an uncertain send.
 
 ### 18. support_tickets
 UUID id PK, user_id FK users, order_id FK nullable, category/status/source TEXT, assigned_admin_id FK nullable, created_at/updated_at/closed_at. Linked order must have the same membership, not merely the same brand. Ticket state/text cannot mutate order/stock/coupon/money.

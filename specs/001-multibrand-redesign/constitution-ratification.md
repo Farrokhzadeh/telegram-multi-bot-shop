@@ -3,8 +3,7 @@
 **Ratification date:** 2026-10-30 (Europe/Skopje).
 **Decision:** approved by the project owner in this conversation through the instruction
 “do 1”, referring to step 1, constitution ratification.
-**Status:** owner ratification recorded; active-file application and alignment review remain
-step 2. This record does not make an implementation or release readiness claim.
+**Current status, 2026-10-31:** the approved 2.0.0 amendment is applied. Active constitution 3.0.0 additionally records the separately owner-authorized delivery recovery change. See consistency-review.md for alignment status. This historical approval record makes no implementation or release readiness claim.
 
 ## Exact approved subject
 
@@ -33,15 +32,14 @@ The approved amendment:
 - Accepts the proposal's written rationale and risk/control table as the governance
   amendment record; the listed controls still require their assigned evidence.
 
-## Application remains pending — step 2
+## Historical step 2 — application subsequently completed
 
 At this decision, [the active constitution](../../.specify/memory/constitution.md) remains
 version 1.1.0, blob `a202123617e90da99249484acfd965b333cae48f`.
 Step 2 applies the approved exact replacements and version/impact metadata as a separate
 governance change, then reruns constitution alignment analysis.
 
-E1's owner-approval element is now recorded; E1 remains open until application and alignment
-review finish. No checklist or T007 completion is inferred. Do not describe the full design
+At ratification E1's owner-approval element was recorded; application and alignment were then pending. Application is now complete; the latest consistency review determines E1 status. No checklist or T007 completion is inferred. Do not describe the full design
 as ratified or ready for implementation from this record alone.
 
 ## Preserved scope and evidence gates

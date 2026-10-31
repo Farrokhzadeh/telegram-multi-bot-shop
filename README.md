@@ -17,12 +17,13 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 ## Current approved decisions
 
 - C#/.NET 10 Native AOT backend and PostgreSQL; no graphical admin UI in scope.
-- 28 proposed relational tables, no JSON/JSONB/EAV business-state columns.
+- 28 approved relational table contracts, no JSON/JSONB/EAV business-state columns.
 - Brand-isolated users, USD wallets, orders and payments; shared catalog/stock.
 - Automated supplier products: ready-to-deliver accounts, keys and codes only, without buyer fulfillment inputs; activation/upgrade/custom supplier flows are excluded.
 - Multiple supplier mappings per product; one account per supplier and one product-level active selection shared across all brands.
 - Supplier choice binds at accepted payment. An unavailable source preserves payment and the paid obligation for administrator review, without automatic fallback or compensation.
 - Paid local preorders have no fulfillment time cap or admin-defined availability dates/ETAs; they wait for complete stock or an explicit admin resolution, with no date-change notifications.
+- Prefer editing a saved, validated order message for credential delivery; uncertain new sends require explicit recovery without blind replacement messages.
 - Deliver the complete requested order quantity. Local preorder FIFO waits for the whole oldest order; incomplete supplier acquisitions remain protected internally with zero customer release.
 - Nonfinancial bot activity events have 180-day rolling retention; financial, order, support and admin-audit history follow separate policies.
 - Paid-preorder cancellation requests go through existing support tickets for manual staff review; support activity does not automatically cancel or pause orders. Once cancellation is approved, the admin handles repayment outside the shop; cancellation creates no wallet credit or external payout record. All held coupon uses return automatically with approved cancellation, keeping their original expiry and current eligibility.
@@ -44,10 +45,10 @@ The feature contains **84 functional requirements, 53 success criteria and 96 pl
 - [Consistency findings and remaining evidence gates](specs/001-multibrand-redesign/consistency-review.md)
 - [Canonical 28-table field and constraint contract](specs/001-multibrand-redesign/schema-contract.md)
 - [84-requirement / 53-criterion task traceability](specs/001-multibrand-redesign/requirements-traceability.md)
-- [Owner-ratified constitution amendment; application pending](specs/001-multibrand-redesign/constitution-alignment-proposal.md)
-- [Step 1 ratification record and remaining step 2](specs/001-multibrand-redesign/constitution-ratification.md)
+- [Applied 2.0.0 shared-core amendment and historical approval source](specs/001-multibrand-redesign/constitution-alignment-proposal.md)
+- [2.0.0 owner ratification and application status](specs/001-multibrand-redesign/constitution-ratification.md)
 
-The documentation review does not claim a schema was executed or providers verified. The imported constitution remains unchanged; its alignment and the report's stage-specific evidence gates are explicit.
+Constitution 3.0.0 is active, including the applied shared-core amendment and owner-approved saved-order-message delivery recovery. The 2026-10-31 alignment reanalysis passed; E1 is closed for governance only. E2–E6 remain stage-specific proof requirements. Documentation does not claim schema execution, provider/runtime qualification or implementation/release authorization.
 
 ## Spec-kit
 
@@ -86,6 +87,6 @@ Imported on 2026-10-29 from `Farrokhzadeh/AccAbad-Shop`, branch `feature/001-csh
 
 The original repository remains the source for legacy Django code, historical migrations and pinned supplier evidence. This repository contains the current redesign documents and spec-kit support, plus repository routing/provenance metadata. Legacy application/deployment code, environment files, databases and credentials were not imported.
 
-The source constitution is preserved unchanged in [`.specify/memory/constitution.md`](.specify/memory/constitution.md). It describes legacy fleet/schema governance; reconcile that context with accepted multi-brand decisions before implementation rather than treating this file transfer as a new constitutional ratification.
+The active [constitution](.specify/memory/constitution.md) is version 3.0.0. Its amendment records preserve the original 2026-10-15 adoption, the pinned 2.0.0 shared-core approval and the 2026-10-31 owner-authorized delivery recovery amendment. Governance alignment does not authorize implementation or release.
 
 The user redirected this transfer to `telegram-multi-bot-shop`; `door-bell` was not modified.

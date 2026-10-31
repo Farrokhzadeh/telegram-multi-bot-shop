@@ -1,15 +1,15 @@
-# Constitution alignment amendment — owner ratified; application pending
+# Constitution alignment amendment 2.0.0 — applied; historical approval text
 
-**Prepared:** 2026-10-30. **Current constitution:** version 1.1.0 at [the imported source file](../../.specify/memory/constitution.md), unchanged.
+**Prepared:** 2026-10-30. **Historical input:** inherited version 1.1.0. **Current status, 2026-10-31:** this 2.0.0 amendment is applied; the [active constitution](../../.specify/memory/constitution.md) is now 3.0.0 following the separately owner-authorized delivery recovery amendment. The pinned approval text remains authoritative for 2.0.0; dated procedure below records its original approval stage.
 **Owner-ratified amendment:** 2.0.0, a major change because physical fleet/schema assumptions change.
-**Ratified:** 2026-10-30; see [the exact approval record](constitution-ratification.md). Active-file application and alignment review remain step 2; E1 is still open.
+**Ratified:** 2026-10-30; see [the exact approval record](constitution-ratification.md). Application is complete. See the latest consistency review for alignment status; E2–E6 retain separate evidence requirements.
 **Authority:** already approved shared-backend/28-table requirements. This proposal adds no production, migration, live-provider or deployment permission.
 
 ## Why an amendment is needed
 
 The imported constitution requires existing table/key types and per-instance database/stage binding (II) and three fully isolated production deployments/databases/admin credentials (III). The approved redesign deliberately uses a new normalized target, shared backend/catalog/inventory/database, global admins and selected shared provider accounts, while retaining branded customer isolation and safe source preservation.
 
-The inherited governance says: “Any exceptions require a written rationale, risk assessment, approval, and a version amendment”. The owner ratified the exact proposal at commit 2c869fa23733fe1087f6fb12527eb6a644878b0a on 2026-10-30; the pinned approval source is recorded separately. Application to the active constitution and alignment analysis remain pending. Do not undo approved business decisions to simulate compliance or silently edit the constitution during analysis.
+The inherited governance says: “Any exceptions require a written rationale, risk assessment, approval, and a version amendment”. The owner ratified the exact proposal at commit 2c869fa23733fe1087f6fb12527eb6a644878b0a on 2026-10-30; the pinned approval source is recorded separately. At ratification, application and alignment analysis were pending; application is now complete and the latest review supplies current alignment status. Do not undo approved business decisions to simulate compliance or silently edit the constitution during analysis.
 
 ## Ratified exact replacement for principle II
 
@@ -48,8 +48,8 @@ Principles I and IV–VII remain unchanged: explicit parity exceptions, reliable
 | Global staff/private group | Internal notices could leak if routed as customer content | Independent active admin auth, trusted staff-only recipient kind, metadata-only notices and protected secret retrieval |
 | Shared supplier/merchant | Wrong account replay or common merchant disclosure | Original account binding, verified callback origin, safe retry/cost contracts and operator privacy acceptance |
 
-## Application procedure
+## Historical application procedure — completed for 2.0.0
 
-Step 1 is complete: owner ratification of the pinned exact replacement, metadata and risk table is recorded in constitution-ratification.md. Step 2 remains: apply the amendment as a separate governance change with version/impact metadata. Re-run constitution alignment analysis before calling the design ratified. Do not mark runtime/provider/migration tasks complete from ratification alone.
+Step 1 is complete: owner ratification of the pinned exact replacement, metadata and risk table is recorded in constitution-ratification.md. At that approval stage, step 2 remained: apply the amendment as a separate governance change with version/impact metadata. Re-run constitution alignment analysis before calling the design ratified. Do not mark runtime/provider/migration tasks complete from ratification alone.
 
-This ratification record does not modify the active constitution file; its current version remains 1.1.0 until step 2.
+This records the original two-stage procedure. The separately applied active constitution has since advanced through 2.0.0 to 3.0.0; see its amendment records and the latest consistency review. The pinned 2.0.0 approval is not retroactively changed.

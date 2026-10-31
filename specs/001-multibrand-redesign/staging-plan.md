@@ -2,7 +2,7 @@
 
 **Decision date:** 2026-10-30. **Owner choice:** same production server.
 **Status:** documentation design only; no environment has been created or inspected.
-The owner ratified the 2.0.0 amendment on 2026-10-30; [application and alignment](constitution-ratification.md) remain step 2, with the active constitution unchanged and E1 open. No application implementation, infrastructure
+Constitution 3.0.0 is active: the [2.0.0 shared-core amendment](constitution-ratification.md) and the owner-approved delivery recovery amendment are applied. The 2026-10-31 alignment reanalysis passed and closes E1 for governance only; E2–E6 remain stage-specific gates. No application implementation, infrastructure
 change, migration, real payment, supplier call or Telegram message is authorized by this plan.
 
 This fills the environment-planning gap behind T007/T080/T081. The approved business baseline
@@ -101,4 +101,4 @@ No deployment configuration or pipeline is created here.
 
 All these tasks remain unchecked. Actual host inventory/headroom, test bot/contact identities,
 runtime versions, deployed separation, provider behavior and restore results are unverified.
-E1–E6 retain their existing stage boundaries; writing this plan closes none of those evidence gates.
+The latest consistency review determines E1 governance status; E2–E6 retain their stage boundaries. Writing this staging plan closes no runtime/provider/release proof gate.

@@ -1,6 +1,6 @@
 # Requirements and acceptance traceability
 
-**Reviewed:** 2026-10-30 against main at 350a4d90ebfe6e4082d94820910806bb96c2484e, with this audit's corrections.
+**Reviewed baseline:** 2026-10-30 at 350a4d90ebfe6e4082d94820910806bb96c2484e. **Updated:** 2026-10-31 for owner-authorized six-finding remediation and saved-order-message recovery; read-only alignment reanalysis passed with E1 closed for governance only.
 **Meaning:** planned coverage only. 84/84 functional requirements and 53/53 success criteria have named backlog owners; none of the application tests has run. Only T001 repository setup is complete; T002–T096 remain unchecked.
 
 [Specification](spec.md), [tasks](tasks.md), [schema contract](schema-contract.md), [review and evidence gates](consistency-review.md).
@@ -101,7 +101,7 @@
 | SC-001 | In the cross-brand isolation acceptance suite, zero foreign-brand customer records, media, support… | T018, T023, T075 |
 | SC-002 | In 50 simultaneous wallet purchase attempts for one local stock item, exactly… | T027, T035 |
 | SC-003 | Replaying the same paid provider event 100 times results in exactly one… | T037, T042 |
-| SC-004 | Repeated interruption and restart tests result in zero lost recorded delivery/payment obligations… | T017, T035, T052, T077 |
+| SC-004 | Repeated interruption and restart tests result in zero lost recorded delivery/payment obligations… | T017, T034, T035, T052, T077 |
 | SC-005 | Every production cutover brand achieves 100% reconciliation of recorded opening balances and… | T061, T066, T068, T069, T080 |
 | SC-006 | An authenticated administrator can configure a product for three brands, inspect all… | T043, T045, T046, T048 |
 | SC-007 | Existing purchase, staff support and payment confirmation journeys remain available when AI… | T026, T071, T073 |
@@ -133,7 +133,7 @@
 | SC-033 | Configure one shop product with Akunding and RoboticVN sources, including separate RoboticVN… | T094 |
 | SC-034 | At zero stock pay preorder A for five, then B for two… | T096 |
 | SC-035 | Create an unpaid supplier order while source A is active, switch the… | T094 |
-| SC-036 | Hold five coupon uses on a paid five-unit order. With only three… | T092, T096 |
+| SC-036 | Hold five coupon uses on a paid five-unit order. With only three… | T034, T092, T096 |
 | SC-037 | Accept verified ready-account/key/code mappings for the exact provider product/variant. Reject a ProdSeller-style… | T057, T094 |
 | SC-038 | Create, publish, quote and fully pay a local preorder without any availability/ETA/deadline/duration… | T096 |
 | SC-039 | A customer opens an existing support ticket about their paid queued preorder,… | T026, T096 |
@@ -162,4 +162,4 @@ T079 is the SC-008 human acceptance sampling/protocol owner; this is not a fabri
 
 No task is unaccounted for across functional, acceptance or architecture/evidence ownership.
 
-E1–E6 in the review report remain unsatisfied evidence gates. A row in this matrix is a mapping, not test success, schema ratification, provider verification or permission to execute the task. Validate each test's exact assertions against the full criterion rather than only this abbreviated cue.
+The latest review determines E1 constitutional alignment; E2–E6 remain unqualified at their documented stages. A row in this matrix is a mapping, not test success, schema ratification, provider verification or permission to execute the task. Validate each test's exact assertions against the full criterion rather than only this abbreviated cue.

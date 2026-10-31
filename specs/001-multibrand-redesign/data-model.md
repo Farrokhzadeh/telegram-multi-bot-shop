@@ -1,6 +1,6 @@
 # Logical model and transaction states
 
-**Reviewed:** 2026-10-30. **Scope:** 28-table forward documentation design only.
+**Reviewed baseline:** 2026-10-30. **Updated:** 2026-10-31 for saved-order-message recovery. **Scope:** 28-table forward documentation design only.
 Fields/types/constraints are selected in [schema-contract.md](schema-contract.md); [database-table-review.md](database-table-review.md) is the inventory. [requirements-traceability.md](requirements-traceability.md) maps all approved requirements and success criteria to planned work. Research/Git history records earlier proposals, not extra active alternatives.
 
 ## Identity, configuration and ownership
@@ -35,7 +35,7 @@ Immediate local-only checkout allocates its entire quantity/debits/redeems in on
 
 Unit kind/source/item identity and supplier attempts remain separate facts. Supplier subsets are encrypted acquired evidence, not completed goods; missing items and unresolved review block every customer reveal route. Bonus items are admin_held inventory evidence, never customer units or automatic shared stock.
 
-After all goods are verified and holds/review clear, set one immutable delivery_generation/manifest, redeem the whole held coupon and queue stable content parts atomically. Part delivery resumes that prepared manifest; a Telegram crash cannot trigger another purchase, debit or redemption. PostgreSQL does not promise atomic Telegram receipt.
+After all goods are verified and holds/review clear, set one immutable delivery_generation/manifest, redeem the whole held coupon and queue stable content parts atomically. Delivery recovery reuses that prepared manifest. Prefer editing the existing order message with a durably saved, validated bot/member/order/message ID. Authorize the complete manifest first; retry the same target and generation after rechecking current order state. Suppress known successful sends. Missing/uneditable anchors and file/multi-part delivery require explicit recovery handling, with no silent new-message fallback. An uncertain new credential-message send pauses automatic resending and remains observable for reconciliation or explicit authorized recovery; preserve the paid obligation and protected access to the same complete manifest. This does not promise exactly-once Telegram receipt or customer read confirmation. A Telegram crash cannot trigger another purchase, debit, allocation or redemption; PostgreSQL does not promise atomic Telegram receipt.
 
 ## Financial resolution
 

@@ -1,4 +1,4 @@
-# Multi-brand redesign — conversation handoff (updated 2026-10-30)
+# Multi-brand redesign — conversation handoff (updated 2026-10-31)
 
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
 **Branch:** `main`  
@@ -273,3 +273,11 @@ The earlier “without a date” answer was interpreted as optional admin estima
 - All ten generic command skills, shell selection and ownership manifests now use Bash/long-form flags. The obsolete PowerShell scripts are removed. The existing feature selector and templates are preserved; scripts retain full project/preset/extension/core resolution and fail-closed composition.
 - Fifteen offline tooling checks pass, including ordered/disabled presets, wrap failures, extension priority, exact JSON content, selector non-mutation, existing plan/task preservation, safe paths and Unicode dry runs. The actual 001 feature prerequisite command and constitution template resolver execute successfully. These are development-tool checks, not application/runtime/provider qualification.
 - Only tooling and its documentation changed in this transition. The ratified constitution amendment is the already-authorized next operation; do not infer completed application/alignment or close E1 from the tooling repair. T001 alone remains complete; approved 28/84/53/96 counts and E2–E6 remain unchanged.
+
+## Current owner-authorized remediation — 2026-10-31
+
+This update supersedes earlier current-status claims that the constitution was unchanged/unratified or its application remained pending. Constitution 3.0.0 is active: 2.0.0 principles II/III are applied and the owner authorized principle IV recovery after choosing edits to an existing saved order message. Prefer validated saved-target edits; suppress known successes, retain complete-manifest/business idempotency and pause uncertain new credential sends for explicit recovery without silent replacements. Files/multi-part and missing/uneditable anchors require qualified recovery; no exactly-once Telegram receipt/read claim is made.
+
+The owner accepted the local-only crypto shortage-credit scope and authorized the remaining six-finding corrections. Supplier refresh now validates only the uncovered remainder (five requested minus three eligible local means two supplier units), with the full-local exemption and complete-order release unchanged. Prepaid issuance and late crypto disposition use approved FR-055/057; target fields use inherit/override/clear, payment_method, quote_currency and historical-only legacy_kind. Preserve original pinned approval text and dated research as history.
+
+The 2026-10-31 read-only alignment reanalysis passed and closes E1 for governance only; E2 provider, E3 legacy, E4 runtime, E5 identity/privacy and E6 release proof remain separate gates. Baseline stays 28 tables, 84 FR, 53 SC and 96 tasks, with T001 alone checked. Documentation/governance work authorizes no application implementation, migrations, live integrations, production data/key access, deployment, financial mutation or deletion.
