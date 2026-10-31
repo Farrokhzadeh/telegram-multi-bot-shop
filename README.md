@@ -2,7 +2,7 @@
 
 AccAbad multi-brand redesign: the specification home for three independently branded Telegram shops sharing a commerce backend, product catalog and stock pool.
 
-**Status: offline foundation, 28-table schema and transaction/money helpers implemented and qualified (2026-10-31).** T001–T009 and T013 are complete. Hosts support synthetic qualification only; the schema runner is explicitly invoked against disposable test databases. Business runtime, production/staging migration execution, deployment and real integrations remain disabled.
+**Status: offline foundation, 28-table schema, transaction/money helpers and trusted brand context implemented and qualified (2026-10-31).** T001–T010 and T013 are complete. Hosts support synthetic qualification only; the schema runner is explicitly invoked against disposable test databases. Business runtime, production/staging migration execution, deployment and real integrations remain disabled.
 
 ## Start here
 
@@ -16,6 +16,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - [Offline build, test and Native AOT evidence](ops/OFFLINE_QUALIFICATION.md)
 - [28-table schema, operator protocol and qualification evidence](ops/SCHEMA_QUALIFICATION.md)
 - [Exact money, transaction ownership and recovery evidence](ops/TRANSACTION_QUALIFICATION.md)
+- [Trusted brand context and rejected switching evidence](ops/BRAND_CONTEXT_QUALIFICATION.md)
 - [Release gates and environment identities](ops/RELEASE_GATES.md)
 
 ## Current approved decisions
@@ -42,7 +43,7 @@ AccAbad multi-brand redesign: the specification home for three independently bra
 - Use the order ID directly for customers. Each bot has its own public admin contact; closed restock subscriptions are retained for 180 days.
 - External refunds and their records stay outside the platform.
 
-The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. **Ten tasks are complete; 86 remain.** The latest owner-authorized transaction/money qualification passed 107 tests and five Linux native executable probes, with zero build warnings/errors. Source/provider compatibility and operational release evidence remain separate gates.
+The feature contains **84 functional requirements, 53 success criteria and 96 planned tasks**. **Eleven tasks are complete; 85 remain.** The latest owner-authorized trusted-brand qualification passed 146 tests and five Linux native executable probes, with zero build warnings/errors. Source/provider compatibility and operational release evidence remain separate gates.
 
 ## Review deliverables
 
