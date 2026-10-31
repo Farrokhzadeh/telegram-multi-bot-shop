@@ -350,3 +350,8 @@ Safe structured completion logs exclude raw request, identity and exception cont
 ## T015 complete — 2026-10-31
 
 The typed durable store covers all 18 job kinds, transactional deduplication, competing workers, server-clock leases/generations, stale-owner rollback, bounded local retries and blocked generic recovery of supplier/Telegram work. [CI 41235165153](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41235165153) at 41ed3ef0dd741de9447c2bf02f8e9cc6aabaf4eb passed 188 tests and all five native executables. [Outbox evidence](../../ops/OUTBOX_QUALIFICATION.md). T001–T015 complete: 15/96, 81 unchecked. T016 is in progress directly on main; no task confirmation pauses. Scheduler evidence never permits remote replay. Live operations and deployment remain gated.
+
+
+## T016 complete — 2026-10-31
+
+Independent password/bearer sessions, current-epoch command revalidation, typed append-only audit/idempotency, two-channel staff binding and revocation passed [CI 41237167656](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41237167656) at 32ebaef3c3aef87d7af595fbd9d2792cc2a096f6: 205 tests and five native executables. [Administrator evidence](../../ops/ADMIN_AUTH_QUALIFICATION.md). Existing canonical auth tables are reused; no duplicate auth migration is needed. Actual Telegram transport verification (T022), online login/rate/TLS/bootstrap and deployment remain gated. T001–T016 complete: 16/96, 80 unchecked. T017 cross-module foundation qualification is in progress on main; continue without confirmation.

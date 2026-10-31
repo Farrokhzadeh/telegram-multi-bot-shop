@@ -1,6 +1,6 @@
 # T016 independent administrator authority
 
-Pending CI. Offline/synthetic foundation only. No public account bootstrap, online login route, real credentials, Telegram calls/messages, host activation or deployment.
+Qualified at source commit 32ebaef3c3aef87d7af595fbd9d2792cc2a096f6, tree b852c4fa510785e47e6aa2b30b3a4efe5cd943ab. Offline/synthetic foundation only. No public account bootstrap, online login route, real credentials, Telegram calls/messages, host activation or deployment.
 
 ## Passwords, sessions and transport
 
@@ -31,3 +31,15 @@ T008 already defined admins, admin_sessions, audit_events and binding fields. Th
 Tests use generated tokens and synthetic password/verifier data in disposable databases. They cover salts/verifier rejection, canonical secret handling, session hash storage, disabled/external/unknown/wrong credentials, expiry/logout/current-epoch revocation, cached-context rollback, audit collision/immutability, actual positive bearer guard and rejected customer claims/cookies, two-channel completion, replay, wrong sender, expiry/epoch mismatch and immediate staff revocation. A published native probe repeats real database session/audit/binding/revocation operations; actual HTTP probes reject bot identity at the administrator boundary. E2/E3/E5/E6 remain unqualified; E4 is limited to recorded probes.
 
 Primary references: https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html and https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.rfc2898derivebytes.pbkdf2?view=net-10.0.
+
+## Observed evidence
+
+[CI run 41237167656](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41237167656), job `124643536964`, passed all workflow steps: 205 tests (101 unit, 62 PostgreSQL integration, 42 contract), zero failed/skipped and zero build warnings/errors, secret scan, locked restore/audit, formatting, Compose render validation and five Linux native executables. The actual native database probe passed session issuance/current-epoch validation, audit deduplication/collision, staged Telegram binding and immediate revocation. Native HTTP proved bot/admin-looking headers grant no backend authority. T016 is complete for this synthetic foundation scope; actual verified Telegram ingress and online credential/transport activation remain later tasks.
+
+| Native executable | SHA-256 |
+|---|---|
+| Api | `a994beced9dbd3cc130767b1738c0f496f96fd94a250a834b34a688ae89027d6` |
+| BotHost | `ffadb2a6e3ec55ebf3587c2ca13b5dc30a19797739ff2b374027e485dc7337c9` |
+| JobHost | `ff8d89d095aa69b4113d756368f5f388fe49f8cd1a1940355ca0720f5c08a922` |
+| SchemaRunner | `454b5c472d282e43d3e5bb4d8bcd055b2997663c94d24eb9e70116a0b7cc47bc` |
+| AotSmoke | `406c40ba8c3f65b0b08a5df58f93ae20dc1cc0011383256582300914b80a6a94` |
