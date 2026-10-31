@@ -230,6 +230,22 @@ public sealed class RelationalSchemaTests
         await RejectAsync(database, AttemptSql(1, "submit", "11.000000000000000001", "NULL"));
         await ExecuteAsync(database, AttemptSql(1, "submit", "11", "NULL"));
         await ExecuteAsync(database, "UPDATE shop.supplier_request_attempts SET outcome='unknown',finished_at=CURRENT_TIMESTAMP");
+        await ExecuteAsync(database, """
+            UPDATE shop.supplier_requests SET status='unknown';
+            INSERT INTO shop.wallets(user_id) VALUES ('00000000-0000-0000-0000-000000000101');
+            INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
+            VALUES ('00000000-0000-0000-0000-000000000903','admin','00000000-0000-0000-0000-000000000301','00000000-0000-0000-0000-000000000001',
+                'supplier_credit','supplier_request','00000000-0000-0000-0000-000000000602','public unresolved-credit rejection',gen_random_uuid())
+            """);
+        await RejectAsync(database, """
+            UPDATE shop.wallets SET balance=10,version=1 WHERE user_id='00000000-0000-0000-0000-000000000101';
+            INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,order_id,supplier_request_id,admin_id,audit_event_id,reason)
+            VALUES ('00000000-0000-0000-0000-000000000904','00000000-0000-0000-0000-000000000101',10,10,1,'supplier_wallet_credit',true,'public-unknown-credit',
+                '00000000-0000-0000-0000-000000000404','00000000-0000-0000-0000-000000000602','00000000-0000-0000-0000-000000000301','00000000-0000-0000-0000-000000000903','public unresolved-credit rejection');
+            UPDATE shop.orders SET fulfillment_status='compensated',resolution_kind='supplier_wallet_credit',resolution_admin_id='00000000-0000-0000-0000-000000000301',
+                resolution_audit_event_id='00000000-0000-0000-0000-000000000903',resolution_at=CURRENT_TIMESTAMP,resolution_wallet_entry_id='00000000-0000-0000-0000-000000000904'
+            WHERE id='00000000-0000-0000-0000-000000000404'
+            """);
         await RejectAsync(database, AttemptSql(2, "submit", "11", "NULL"));
         string submitId = await ScalarAsync<string>(database, "SELECT id::text FROM shop.supplier_request_attempts WHERE attempt_no=1");
         await ExecuteAsync(database, AttemptSql(2, "status_lookup", "NULL", "'" + submitId + "'"));
@@ -276,6 +292,7 @@ public sealed class RelationalSchemaTests
                 'local_import','allocated','{{unit}}',CURRENT_TIMESTAMP);
             """;
         await RejectAsync(database, Allocation("00000000-0000-0000-0000-000000000611", "11"));
+        await RejectAsync(database, "UPDATE shop.orders SET fulfillment_status='acquiring' WHERE id='00000000-0000-0000-0000-000000000404'");
         await ExecuteAsync(database, "UPDATE shop.orders SET hold_at=CURRENT_TIMESTAMP,hold_admin_id='00000000-0000-0000-0000-000000000301',hold_reason='public test hold' WHERE id='00000000-0000-0000-0000-000000000404'");
         await RejectAsync(database, Allocation("00000000-0000-0000-0000-000000000613", "33"));
         await ExecuteAsync(database, "UPDATE shop.orders SET hold_at=NULL,hold_admin_id=NULL,hold_reason=NULL WHERE id='00000000-0000-0000-0000-000000000404'");
@@ -351,6 +368,36 @@ public sealed class RelationalSchemaTests
             VALUES ('00000000-0000-0000-0000-000000000602','00000000-0000-0000-0000-000000000404',2,'00000000-0000-0000-0000-000000000601',1,'synthetic','public-account',
                 'public-external-product','public-intent',decode(repeat('11',32),'hex'),'pending',10,'USD','public-quote',CURRENT_TIMESTAMP)
             """);
+    }
+
+    [Fact]
+    public async Task CompensationPostsOnlyWithItsMatchingTerminalOrderAndCannotReplay()
+    {
+        await using var database = await CreateAsync();
+        await SeedSupplierAsync(database);
+        await ExecuteAsync(database, """
+            UPDATE shop.supplier_requests SET status='failed';
+            INSERT INTO shop.wallets(user_id) VALUES ('00000000-0000-0000-0000-000000000101');
+            INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
+            VALUES ('00000000-0000-0000-0000-000000000903','admin','00000000-0000-0000-0000-000000000301','00000000-0000-0000-0000-000000000001',
+                'supplier_credit','supplier_request','00000000-0000-0000-0000-000000000602','public reconciled synthetic resolution',gen_random_uuid())
+            """);
+        const string credit = """
+            UPDATE shop.wallets SET balance=20,version=1 WHERE user_id='00000000-0000-0000-0000-000000000101';
+            INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,order_id,supplier_request_id,admin_id,audit_event_id,reason)
+            VALUES ('00000000-0000-0000-0000-000000000904','00000000-0000-0000-0000-000000000101',20,20,1,'supplier_wallet_credit',true,'public-reconciled-credit',
+                '00000000-0000-0000-0000-000000000404','00000000-0000-0000-0000-000000000602','00000000-0000-0000-0000-000000000301','00000000-0000-0000-0000-000000000903','public reconciled synthetic resolution');
+            """;
+        const string resolution = """
+            UPDATE shop.orders SET fulfillment_status='compensated',resolution_kind='supplier_wallet_credit',resolution_admin_id='00000000-0000-0000-0000-000000000301',
+                resolution_audit_event_id='00000000-0000-0000-0000-000000000903',resolution_at=CURRENT_TIMESTAMP,resolution_wallet_entry_id='00000000-0000-0000-0000-000000000904'
+            WHERE id='00000000-0000-0000-0000-000000000404';
+            """;
+        await RejectAsync(database, credit);
+        await ExecuteTransactionAsync(database, credit + resolution);
+        Assert.Equal(20m, await ScalarAsync<decimal>(database, "SELECT balance FROM shop.wallets"));
+        await RejectAsync(database, credit + resolution);
+        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='supplier_wallet_credit'"));
     }
 
     private const string UserA = "00000000-0000-0000-0000-000000000101";

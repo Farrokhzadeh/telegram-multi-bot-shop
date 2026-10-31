@@ -1140,7 +1140,8 @@ BEGIN
         PERFORM require_true(o.payment_method='crypto' AND o.payment_status IN ('expired','cancelled'),'late_crypto_origin');
     ELSIF NEW.movement_kind='supplier_wallet_credit' THEN
         SELECT * INTO STRICT r FROM supplier_requests WHERE id=NEW.supplier_request_id;
-        PERFORM require_true(r.order_id=o.id AND o.payment_status IN ('paid','not_required') AND o.payment_method <> 'no_payment_required','supplier_credit_order');
+        PERFORM require_true(r.order_id=o.id AND r.status IN ('failed','resolved') AND o.payment_status IN ('paid','not_required')
+            AND o.payment_method <> 'no_payment_required','supplier_credit_order');
     END IF;
     IF NEW.audit_event_id IS NOT NULL THEN
         PERFORM require_true(EXISTS(SELECT 1 FROM audit_events WHERE id=NEW.audit_event_id AND actor_kind='admin'
@@ -1184,6 +1185,10 @@ BEGIN
         SELECT balance_after INTO previous_balance FROM wallet_entries WHERE user_id=entry.user_id AND is_posting AND posting_version=entry.posting_version-1;
     END IF;
     PERFORM require_true(previous_balance IS NOT NULL AND entry.balance_after=previous_balance+entry.signed_amount,'posting_exact_chain');
+    IF entry.movement_kind IN ('immediate_crypto_shortage_credit','late_crypto_credit','supplier_wallet_credit') THEN
+        PERFORM require_true(EXISTS(SELECT 1 FROM orders WHERE id=entry.order_id AND user_id=entry.user_id
+            AND resolution_kind=entry.movement_kind AND resolution_wallet_entry_id=entry.id),'compensation_requires_order_resolution');
+    END IF;
     RETURN NULL;
 END $$;
 CREATE CONSTRAINT TRIGGER wallet_posting_consistency AFTER INSERT OR UPDATE ON wallets DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_wallet_posting();
@@ -1326,6 +1331,9 @@ BEGIN
     SELECT coalesce(sum(requested_quantity),0) INTO remote_count FROM supplier_requests WHERE order_id=oid AND status NOT IN ('failed','resolved');
     PERFORM require_true(local_count+remote_count<=o.quantity,'bound_split_quantity');
     IF o.is_preorder THEN PERFORM require_true(local_count IN (0,o.quantity),'preorder_whole_allocation'); END IF;
+    IF o.is_preorder AND o.payment_status IN ('paid','not_required') AND local_count=0 AND o.resolution_kind IS NULL THEN
+        PERFORM require_true(o.fulfillment_status IN ('waiting_stock','requires_admin'),'unallocated_preorder_stays_in_fifo');
+    END IF;
     PERFORM require_true(NOT EXISTS(SELECT 1 FROM fulfillments f WHERE f.order_id=oid AND f.kind='local' AND f.status IN ('acquired','ready','released')
         AND NOT EXISTS(SELECT 1 FROM inventory_items i WHERE i.assigned_fulfillment_id=f.id)),'local_unit_allocation_authority');
     IF o.release_authorized_at IS NOT NULL OR o.fulfillment_status IN ('ready','delivering','completed') THEN
@@ -1344,7 +1352,8 @@ BEGIN
         AND (o.release_authorized_at IS NULL OR manifest_generation IS DISTINCT FROM o.delivery_generation)),'unit_release_generation');
     IF o.resolution_wallet_entry_id IS NOT NULL THEN
         PERFORM require_true(EXISTS(SELECT 1 FROM wallet_entries WHERE id=o.resolution_wallet_entry_id AND user_id=o.user_id
-            AND order_id=o.id AND movement_kind=o.resolution_kind AND is_posting),'resolution_ledger_link');
+            AND order_id=o.id AND movement_kind=o.resolution_kind AND is_posting
+            AND (o.resolution_kind<>'supplier_wallet_credit' OR (admin_id=o.resolution_admin_id AND audit_event_id=o.resolution_audit_event_id))),'resolution_ledger_link');
     END IF;
     IF TG_TABLE_NAME='discount_uses' THEN
         IF NEW.status='redeemed' THEN
