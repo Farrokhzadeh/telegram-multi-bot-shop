@@ -184,6 +184,17 @@ await using (var database = await DisposablePostgres.CreateAsync())
         await applyPolicy.CommitAsync();
     }
     Console.WriteLine("PASS: native channel-policy revalidation and localized stock notice with no transport call.");
+    byte[] webhookSecret = SHA256.HashData("public synthetic native route fixture"u8);
+    using (var verifier = new TelegramWebhookVerifier(customerContext!, webhookSecret))
+    {
+        var update = verifier.Verify([TelegramFixture.Header(webhookSecret)], TelegramFixture.Body("/menu", updateId: 930001, actorId: 97001, chatId: 97001));
+        var router = new UpdateRouter(userSessions, (_, _, _) => throw new InvalidOperationException("Navigation called availability transport."));
+        var routed = await router.RouteAsync(update);
+        var replayed = await router.RouteAsync(update);
+        if (routed.Code != UpdateRouteCode.Menu || replayed.Code != UpdateRouteCode.Duplicate || routed.FlowRevision != replayed.FlowRevision)
+            throw new InvalidOperationException("Native verified Telegram routing failed.");
+    }
+    Console.WriteLine("PASS: native verified private update routing and replay suppression with no transport.");
 
     string? operatorPath = Environment.GetEnvironmentVariable("SHOP_SCHEMA_RUNNER_PATH");
     if (operatorPath is not null)

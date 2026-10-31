@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
+    <Compile Include="../Shared/TelegramFixture.cs" Link="Shared/TelegramFixture.cs" />
     <Compile Include="../Shared/FoundationQualification.cs" Link="Shared/FoundationQualification.cs" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <Compile Include="../../src/Platform.Api/AdminGuardMiddleware.cs" Link="Api/AdminGuardMiddleware.cs" />

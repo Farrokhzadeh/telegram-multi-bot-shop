@@ -10,6 +10,7 @@ for host in Api BotHost JobHost; do
   "artifacts/native/${host}/Platform.${host}" || status=$?
   test "$status" -eq 78
 done
+artifacts/native/BotHost/Platform.BotHost --qualify-ingress
 dotnet publish src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/SchemaRunner
 file artifacts/native/SchemaRunner/Platform.SchemaRunner
 sha256sum artifacts/native/SchemaRunner/Platform.SchemaRunner
