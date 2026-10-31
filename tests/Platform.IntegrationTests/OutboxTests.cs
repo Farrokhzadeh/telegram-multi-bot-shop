@@ -52,7 +52,7 @@ public sealed class OutboxTests
             await transaction.CommitAsync(Ct);
             return lease;
         }));
-        Assert.Single(claimed.Where(lease => lease is not null));
+        Assert.Single(claimed, lease => lease is not null);
     }
 
     [Fact]
