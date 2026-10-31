@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/FoundationQualification.cs" Link="Shared/FoundationQualification.cs" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <Compile Include="../../src/Platform.Api/AdminGuardMiddleware.cs" Link="Api/AdminGuardMiddleware.cs" />
     <Compile Include="../Shared/AdminQualification.cs" Link="Shared/AdminQualification.cs" />

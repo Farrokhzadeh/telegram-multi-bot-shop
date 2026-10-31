@@ -3,11 +3,13 @@ using System.Text;
 using System.Text.Json;
 using NpgsqlTypes;
 using Platform.Core;
+using Platform.AotSmoke;
 using Platform.Migration;
 using Platform.Persistence;
 using Platform.Security;
 using Platform.Testing;
 
+NativeHostSmokeTests.VerifyInventoryIsolation();
 CipherQualification.Run();
 Console.WriteLine("PASS: native SC02 golden vector, scope/row/field/key binding, corruption and inventory isolation.");
 
@@ -123,6 +125,8 @@ await using (var database = await DisposablePostgres.CreateAsync())
         throw new InvalidOperationException("Native schema application/reapplication failed.");
     }
 
+    await NativeHostSmokeTests.VerifyDatabaseAsync(database.Data);
+    Console.WriteLine("PASS: native foundation 28-table/zero-JSON metadata and independent inventory-key boundaries.");
     await AdminQualification.RunAsync(database.Data);
     Console.WriteLine("PASS: native administrator sessions, audit idempotency, two-channel binding and immediate revocation.");
     await OutboxQualification.RunAsync(database.Data);

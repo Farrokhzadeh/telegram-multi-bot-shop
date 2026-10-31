@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/FoundationQualification.cs" Link="Shared/FoundationQualification.cs" />
     <Compile Include="../Shared/AdminQualification.cs" Link="Shared/AdminQualification.cs" />
     <Compile Include="../Shared/OutboxQualification.cs" Link="Shared/OutboxQualification.cs" />
     <Compile Include="../Shared/CipherQualification.cs" Link="Shared/CipherQualification.cs" />
