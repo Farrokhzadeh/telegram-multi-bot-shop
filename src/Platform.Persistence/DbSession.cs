@@ -119,7 +119,7 @@ public sealed class DbSession : IAsyncDisposable
         finally { Exit(); }
     }
 
-    public async Task<T> QuerySingleAsync<T>(DbStatement statement, Func<NpgsqlDataReader, T> project,
+    public async Task<T> QuerySingleAsync<T>(DbStatement statement, Func<DbRow, T> project,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(statement);
@@ -131,7 +131,10 @@ public sealed class DbSession : IAsyncDisposable
             await using var command = statement.CreateCommand(connection, transaction, options.ClientTimeoutSeconds);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken)) throw new InvalidOperationException("Query requires exactly one row.");
-            T result = project(reader);
+            var row = new DbRow(reader);
+            T result;
+            try { result = project(row); }
+            finally { row.Invalidate(); }
             if (await reader.ReadAsync(cancellationToken) || await reader.NextResultAsync(cancellationToken))
                 throw new InvalidOperationException("Query requires exactly one result row.");
             return result;

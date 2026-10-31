@@ -34,8 +34,8 @@ public readonly struct DbValue
         return new(type, null);
     }
 
-    public static Money ReadMoney(NpgsqlDataReader reader, int ordinal, Currency currency) =>
-        Platform.Core.Money.Parse(reader.GetString(ordinal), currency); // Project numeric::text; never use a rounding conversion.
+    public static Money ReadMoney(DbRow row, int ordinal, Currency currency) =>
+        Platform.Core.Money.Parse(row.GetString(ordinal), currency); // Project numeric::text; never use a rounding conversion.
 
     internal NpgsqlParameter ToParameter()
     {
@@ -50,6 +50,31 @@ public readonly struct DbValue
         {
             throw new ArgumentOutOfRangeException(nameof(type));
         }
+    }
+}
+
+// A projection can read typed fields, but cannot obtain the owning connection/transaction.
+// Escaped row handles become unusable as soon as the synchronous projection returns.
+public sealed class DbRow
+{
+    private readonly NpgsqlDataReader reader;
+    private bool valid = true;
+    internal DbRow(NpgsqlDataReader reader) => this.reader = reader;
+    internal void Invalidate() => valid = false;
+    private void RequireActive() { if (!valid) throw new InvalidOperationException("Database row projection is complete."); }
+    public bool IsDBNull(int ordinal) { RequireActive(); return reader.IsDBNull(ordinal); }
+    public string GetString(int ordinal) { RequireActive(); return reader.GetString(ordinal); }
+    public int GetInt32(int ordinal) { RequireActive(); return reader.GetInt32(ordinal); }
+    public long GetInt64(int ordinal) { RequireActive(); return reader.GetInt64(ordinal); }
+    public bool GetBoolean(int ordinal) { RequireActive(); return reader.GetBoolean(ordinal); }
+    public Guid GetGuid(int ordinal) { RequireActive(); return reader.GetGuid(ordinal); }
+    public byte[] GetBinary(int ordinal) { RequireActive(); return reader.GetFieldValue<byte[]>(ordinal); }
+    public DateTime GetUtc(int ordinal)
+    {
+        RequireActive();
+        DateTime value = reader.GetDateTime(ordinal);
+        _ = DbValue.Utc(value);
+        return value;
     }
 }
 

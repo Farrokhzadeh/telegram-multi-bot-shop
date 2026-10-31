@@ -67,5 +67,9 @@ public sealed class DbStatementPolicyTests
         Assert.Equal(DbRecovery.Cancel, DbFailurePolicy.Classify(new OperationCanceledException(), DbPhase.Executing).Recovery);
         Assert.Equal(DbRecovery.Reject, DbFailurePolicy.Classify(new PostgresException("private detail", "ERROR", "ERROR", "42601"), DbPhase.Executing).Recovery);
         Assert.Equal(DbRecovery.Reject, DbFailurePolicy.Classify(new PostgresException("private detail", "ERROR", "ERROR", "28P01"), DbPhase.Opening).Recovery);
+        var malformed = DbFailurePolicy.Classify(new PostgresException("private detail", "ERROR", "ERROR", "private-detail"), DbPhase.Committing);
+        Assert.Null(malformed.SqlState);
+        Assert.Equal(DbRecovery.ReconcileBeforeRetry, malformed.Recovery);
+        Assert.DoesNotContain("private-detail", new DbOperationException(malformed).ToString(), StringComparison.Ordinal);
     }
 }

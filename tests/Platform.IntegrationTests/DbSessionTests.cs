@@ -235,6 +235,41 @@ public sealed class DbSessionTests
         Assert.Equal(1L, await CountAsync(database, id));
     }
 
+    [Fact]
+    public async Task ProjectionCannotRetainAnActiveReaderOrHideCardinalityErrors()
+    {
+        await using var database = await CreateAsync();
+        await using var session = await new DbSessionFactory(database.Data).BeginAsync(Ct);
+        DbRow row = await session.QuerySingleAsync(new DbStatement("SELECT 'public projection'::text"), r => r, Ct);
+        Assert.Throws<InvalidOperationException>(() => row.GetString(0));
+        var error = await Assert.ThrowsAsync<DbOperationException>(() => session.QuerySingleAsync(
+            new DbStatement("SELECT n FROM generate_series(1,2) n"), r => r.GetInt32(0), Ct));
+        Assert.Equal(DbRecovery.Reject, error.Failure.Recovery);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => session.CommitAsync(Ct));
+    }
+
+    [Fact]
+    public async Task SameOwnerCannotUseAnExpiredLeaseOrAnEarlierGeneration()
+    {
+        await using var database = await CreateAsync();
+        Guid expired = Guid.NewGuid(), newer = Guid.NewGuid();
+        var factory = new DbSessionFactory(database.Data);
+        await using (var seed = await factory.BeginAsync(Ct))
+        {
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.jobs(id,job_kind,status,locked_by,lease_until,attempts,dedupe_key) VALUES ($1,'activity_cleanup','leased','public-same-owner',CURRENT_TIMESTAMP-INTERVAL '1 second',1,'public-expired-lease'),($2,'activity_cleanup','leased','public-same-owner',CURRENT_TIMESTAMP+INTERVAL '1 minute',2,'public-newer-lease')",
+                DbValue.Uuid(expired), DbValue.Uuid(newer)), Ct);
+            await seed.CommitAsync(Ct);
+        }
+        foreach (Guid id in new[] { expired, newer })
+        {
+            await using var stale = await factory.BeginAsync(Ct);
+            var error = await Assert.ThrowsAsync<DbOperationException>(() => stale.ExecuteLeaseFencedAsync(new DbStatement(
+                "UPDATE shop.jobs SET status='succeeded',locked_by=NULL,lease_until=NULL,completed_at=CURRENT_TIMESTAMP WHERE id=$1 AND locked_by='public-same-owner' AND attempts=1 AND lease_until>clock_timestamp()",
+                DbValue.Uuid(id)), Ct));
+            Assert.Equal(DbRecovery.StopLeaseOwner, error.Failure.Recovery);
+        }
+    }
+
     private static DbStatement Product(Guid id, string title) => new(
         "INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','immediate',$2)", DbValue.Uuid(id), DbValue.Text(title));
 
