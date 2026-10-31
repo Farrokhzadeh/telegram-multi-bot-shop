@@ -28,6 +28,7 @@ public sealed class RelationalSchemaTests
     [InlineData("ALTER TABLE shop.orders DROP CONSTRAINT orders_quantity_check")]
     [InlineData("ALTER TABLE shop.orders DISABLE TRIGGER orders_guard")]
     [InlineData("CREATE TABLE shop.unapproved_history (id integer)")]
+    [InlineData("CREATE TYPE shop.unreviewed AS ENUM ('unreviewed')")]
     [InlineData("COMMENT ON SCHEMA shop IS 'unreviewed'")]
     public async Task CatalogOrMarkerDriftFailsWithoutSilentlyRepairing(string mutation)
     {
@@ -328,6 +329,7 @@ public sealed class RelationalSchemaTests
         Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM shop.bot_activity_events"));
         await ExecuteAsync(database, "INSERT INTO shop.product_stock_subscriptions(id,user_id,product_id,created_at) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000101','00000000-0000-0000-0000-000000000201',CURRENT_TIMESTAMP-INTERVAL '500 days')");
         await RejectAsync(database, "DELETE FROM shop.product_stock_subscriptions");
+        await RejectAsync(database, "INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,outcome_code,idempotency_key) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000101','quantity','command','start','accepted','public-invalid-registry-pair')");
     }
 
     private static string AttemptSql(int number, string operation, string amount, string parent) => $$"""

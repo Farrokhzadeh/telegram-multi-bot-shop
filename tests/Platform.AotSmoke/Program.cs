@@ -93,7 +93,8 @@ await using (var database = await DisposablePostgres.CreateAsync())
             await File.WriteAllTextAsync(manifestPath, manifest.ToFileText());
             var operatorConnection = new Npgsql.NpgsqlConnectionStringBuilder(
                 Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")
-                ?? throw new InvalidOperationException("Synthetic control identity is missing.")) { Database = manifest.Database };
+                ?? throw new InvalidOperationException("Synthetic control identity is missing."))
+            { Database = manifest.Database };
             await File.WriteAllTextAsync(connectionPath, operatorConnection.ConnectionString);
             if (OperatingSystem.IsLinux())
             {

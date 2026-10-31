@@ -39,12 +39,12 @@ public static class SchemaRunner
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         await ExecuteAsync(connection, transaction,
             "SET LOCAL lock_timeout='5s'; SET LOCAL statement_timeout='60s'; SET LOCAL search_path=pg_catalog; SET LOCAL TIME ZONE 'UTC'", cancellationToken);
-        await using (var identity = new NpgsqlCommand("SELECT current_database(),current_user,current_setting('server_version_num')", connection, transaction))
+        await using (var identity = new NpgsqlCommand("SELECT current_database(),current_user,current_setting('server_version_num'),pg_get_userbyid(datdba) FROM pg_database WHERE datname=current_database()", connection, transaction))
         await using (var reader = await identity.ExecuteReaderAsync(cancellationToken))
         {
             await reader.ReadAsync(cancellationToken);
             if (reader.GetString(0) != manifest.Database || reader.GetString(1) != manifest.Username ||
-                reader.GetString(2) != manifest.ServerVersion.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                reader.GetString(2) != manifest.ServerVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) || reader.GetString(3) != manifest.Username)
             {
                 throw new InvalidOperationException("Connected database identity mismatch.");
             }
@@ -150,6 +150,10 @@ public static class SchemaRunner
                 UNION ALL
                 SELECT 'D|'||t.typname||'|'||format_type(t.typbasetype,t.typtypmod)||'|'||t.typnotnull::text
                     FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='shop' AND t.typtype='d'
+                UNION ALL
+                SELECT 'Y|'||t.typname||'|'||t.typtype::text||'|'||coalesce(format_type(nullif(t.typbasetype,0),t.typtypmod),'')||'|'||coalesce(format_type(nullif(t.typelem,0),-1),'')||'|'||
+                    coalesce((SELECT string_agg(e.enumlabel,'|' ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid=t.oid),'')
+                    FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='shop'
                 UNION ALL
                 SELECT 'A|'||c.relname||'|'||coalesce(c.relacl::text,'') FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='shop' AND c.relkind='r'
                 UNION ALL

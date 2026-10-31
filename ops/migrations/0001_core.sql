@@ -717,6 +717,16 @@ id uuid PRIMARY KEY,
     idempotency_key short_text NOT NULL,
     occurred_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (user_id,idempotency_key),
+    CHECK ((event_type='navigation' AND action_code IN ('start','catalog_open','product_open')) OR
+           (event_type='quantity' AND action_code='quantity_enter') OR
+           (event_type='checkout' AND action_code='checkout_open') OR
+           (event_type='support' AND action_code IN ('support_open','support_reply')) OR
+           (event_type='subscription' AND action_code IN ('subscribe','unsubscribe')) OR
+           (event_type='discount' AND action_code='discounts_open') OR
+           (event_type='policy' AND action_code='policy_check')),
+    CHECK (action_code NOT IN ('product_open','quantity_enter','checkout_open','subscribe','unsubscribe') OR product_id IS NOT NULL),
+    CHECK (action_code <> 'quantity_enter' OR quantity_selected IS NOT NULL),
+    CHECK (action_code <> 'support_reply' OR support_ticket_id IS NOT NULL),
     CHECK (isfinite(occurred_at))
 );
 

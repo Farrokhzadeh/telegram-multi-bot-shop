@@ -1,0 +1,8 @@
+environment=qualification
+revision=0001
+sql_sha256=REPLACE_WITH_REVIEWED_SQL_SHA256
+host=127.0.0.1
+port=5432
+database=shop_qualification_REPLACE_WITH_32_HEX_CHARACTERS
+username=shop_test_runner
+server_version=180006
