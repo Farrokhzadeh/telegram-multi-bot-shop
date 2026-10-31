@@ -6,6 +6,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../../src/Platform.Security/Platform.Security.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Compile Include="../../src/Platform.Api/BrandContextMiddleware.cs" Link="Api/BrandContextMiddleware.cs" />
     <Compile Include="../Shared/FakeTransports.cs" Link="Shared/FakeTransports.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />

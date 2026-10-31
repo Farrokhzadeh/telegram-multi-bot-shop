@@ -1,14 +1,14 @@
 # Multi-brand redesign — conversation handoff (updated 2026-10-31)
 
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
-**Branch:** documentation baseline `main`; current helper work `impl/003-transaction-money`, stacked on `impl/002-relational-baseline`
+**Branch:** documentation baseline `main`; current foundation work `impl/004-brand-context`, stacked on `impl/003-transaction-money`
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  
 **Feature documents:** `specs/001-multibrand-redesign/`  
-**Status:** Offline foundation, migration-only cipher, forward schema and T009 transaction/money qualification complete on 2026-10-31. See the latest record below, [foundation](../../ops/OFFLINE_QUALIFICATION.md), [schema](../../ops/SCHEMA_QUALIFICATION.md) and [transaction evidence](../../ops/TRANSACTION_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production/staging migration execution and deployment remain outside these batches.
+**Status:** Offline foundation, migration-only cipher, forward schema, transaction/money and T010 trusted-brand qualification complete on 2026-10-31. See the latest record below, [foundation](../../ops/OFFLINE_QUALIFICATION.md), [schema](../../ops/SCHEMA_QUALIFICATION.md), [transaction](../../ops/TRANSACTION_QUALIFICATION.md) and [trusted-brand evidence](../../ops/BRAND_CONTEXT_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production/staging migration execution and deployment remain outside these batches.
 
 ## Where to continue
 
-Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/003-transaction-money`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. T010 is next. Preserve approved business decisions and the limited offline authorization; earlier status notes describe their historical snapshots.
+Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/004-brand-context`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. T011 is next. Preserve approved business decisions and the limited offline authorization; earlier status notes describe their historical snapshots.
 
 Historical decision sections retain counts from their approval stage; the latest decision below and current inventory define the active baseline.
 
@@ -317,3 +317,14 @@ The owner said "continue" after the T008 report identified T009. This authorized
 - [CI run 41212609660](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41212609660) passed at `1b4649366e9f9bc3c8fd9a3f696f279164c4a862`: 107 tests (58 unit, 46 integration, 3 transport contract), zero build warnings/errors and all five native executables. The native fault proxy dropped a server-confirmed COMMIT acknowledgement; the client retained unknown outcome and a fresh connection observed exactly one effect. Exact source/image/executable hashes, protocol and reproduction are in [TRANSACTION_QUALIFICATION.md](../../ops/TRANSACTION_QUALIFICATION.md). The canonical 28-table SQL digest remains `fa57b9c12b395a7a47bed8fc92586dac66ea652baf1e84ca0e8ebb727e3cc27d`.
 
 **Current counts:** 28 tables, 84 FR, 53 SC, 96 tasks; **T001–T009 and T013 complete, 86 unchecked**. E1 remains closed for governance, with E4 evidence limited to the tested foundation/schema/helpers. E2/E3/E5/E6 remain unqualified. The reviewer-owned requirements checklist is unchanged. Next unfinished task: T010, trusted brand identity and rejection of caller-supplied brand switching. No real credentials/source rows, live supplier/payment/FX/Telegram calls, staging/production operations, customer messages or live financial mutation occurred.
+
+
+## T010 trusted brand context — 2026-10-31
+
+The owner said "do next" after T009. This authorized the immutable bot-to-brand foundation and rejection of customer-supplied brand switching on `impl/004-brand-context`, stacked on qualified T009. Production authentication/secret loading, Telegram ingress, customer commerce, live operations and deployment remain outside this batch.
+
+- Added immutable server-owned bot registration snapshots and a context without public construction/setters. Only an exact successful authentication ticket's registered scheme and opaque subject can supply brand/bot/deployment/config revision. Disabled, unknown, ambiguous, admin-scheme and unauthenticated identities fail closed. Customer Telegram IDs do not supply bot scope.
+- Protected customer endpoints opt into metadata after routing/authentication. Bare `HttpContext.User`, request headers, decoded query parameters, route values and JSON properties cannot select or override scope. Structural JSON inspection includes nested/escaped selectors, limits bytes/depth in memory, preserves accepted bytes and clears/zeros owned request state after success/failure/cancellation. Unmarked endpoints get no implicit context. Admin selection remains separate future authorization work.
+- [CI run 41216628580](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41216628580) passed at `0ce28f764a417ba700cc1d5a2b1c043e56ea942d`: 146 tests (70 unit, 46 integration, 30 contract), zero build warnings/errors and all five Linux native executables. The actual API accepted registered synthetic A/B tickets and rejected selector attempts. Its public fake identity fixture exists only in explicit loopback qualification mode; readiness stayed 503 and normal startup stayed exit 78. Exact source/tree/run/image/executable hashes and scope are in [BRAND_CONTEXT_QUALIFICATION.md](../../ops/BRAND_CONTEXT_QUALIFICATION.md). The 28-table SQL digest is unchanged.
+
+**Current counts:** 28 tables, 84 FR, 53 SC, 96 tasks; **T001–T010 and T013 complete, 85 unchecked**. E1 remains governance-only closed, E4 is limited to recorded probes, and E2/E3/E5/E6 remain unqualified. The reviewer-owned requirements checklist is unchanged (92/126 checked). Next unfinished task: T011, versioned configuration and read-only service secret-file loading for separate brand/shared-inventory keyrings. No real credentials/source rows, live supplier/payment/FX/Telegram calls, staging/production operations, customer messages or live financial mutation occurred.

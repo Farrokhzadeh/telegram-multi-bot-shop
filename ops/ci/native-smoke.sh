@@ -30,3 +30,16 @@ done
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/health/ready)" = 503
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/qualification)" = 401
 curl --fail --silent -H 'X-Qualification-Token: public-synthetic-probe' http://127.0.0.1:18080/qualification | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["mode"]=="synthetic-qualification" and d["applicationReady"] is False'
+customer_url=http://127.0.0.1:18080/qualification/customer-context
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$customer_url")" = 401
+test "$(curl --fail --silent -H 'X-Qualification-Bot: a' "$customer_url")" = aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+test "$(curl --fail --silent -H 'X-Qualification-Bot: b' "$customer_url")" = bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' -H 'X-Brand-Id: bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' "$customer_url")" = 400
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' "$customer_url?%62randId=foreign")" = 400
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' "$customer_url/foreign")" = 400
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' -H 'Content-Type: application/json' --data '{"nested":[{"brand_id":"foreign"}]}' "$customer_url")" = 400
+test "$(curl --fail --silent -H 'X-Qualification-Bot: a' -H 'Content-Type: application/json' --data '{"text":"brand_id is ordinary message text"}' "$customer_url")" = aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' -H 'Content-Type: application/json' --data '{' "$customer_url")" = 400
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' --data 'text=synthetic' "$customer_url")" = 415
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/health/ready)" = 503
+echo 'T010 native HTTP probes passed: registered A/B identities, rejected selectors, bounded JSON boundary; readiness remains false.'
