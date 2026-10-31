@@ -134,8 +134,11 @@ public static class OutboxStore
         ? checked((int)value.TotalSeconds) : throw new ArgumentOutOfRangeException(nameof(value), "Duration requires 1–300 whole seconds.");
     private static string ErrorCode(JobError error) => error switch
     {
-        JobError.Transient => "transient", JobError.Busy => "busy", JobError.InvalidOrigin => "invalid_origin",
-        JobError.RemoteOutcomeUnknown => "remote_outcome_unknown", JobError.AttemptLimit => "attempt_limit",
+        JobError.Transient => "transient",
+        JobError.Busy => "busy",
+        JobError.InvalidOrigin => "invalid_origin",
+        JobError.RemoteOutcomeUnknown => "remote_outcome_unknown",
+        JobError.AttemptLimit => "attempt_limit",
         _ => throw new ArgumentOutOfRangeException(nameof(error))
     };
 }
