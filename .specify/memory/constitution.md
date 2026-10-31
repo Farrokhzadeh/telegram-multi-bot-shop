@@ -55,7 +55,28 @@ them; real production cutover requires a separate explicit operator decision. A 
 rollback must preserve all brands' accepted money and committed background obligations.
 
 ### IV. Reliable financial and background side effects (NON-NEGOTIABLE)
-A purchase or receipt approval MUST NOT charge/credit twice, allocate stock twice, deliver credentials repeatedly, or lose a committed job on crash. Keep PostgreSQL-backed durable jobs and recovery semantics (dedupe, transactional enqueue, leases, retries, persisted delivery markers). In-memory Channels MAY be used for bounded wake-up/dispatch, not as the sole record of outstanding business work. External callbacks/webhooks require verification and replay protection.
+
+A purchase or receipt approval MUST NOT charge or credit twice, allocate stock twice, create
+duplicate logical fulfillment, or lose a committed job on crash. Customer credential release
+requires an authorized complete-order manifest. Delivery recovery MUST reuse that manifest and
+its durable delivery intents without repeating procurement, financial movements, allocation or
+coupon redemption.
+
+For order credential delivery, prefer editing an existing order message whose bot, membership,
+order and message ID have been validated and durably saved. Retry an edit against that same
+message and authorized manifest; recheck current order state and generation before editing so
+stale work cannot overwrite the current result. Suppress known successful duplicate sends and
+persist available delivery markers. Missing or uneditable messages, files and multi-part
+delivery require explicit recovery handling; never silently fall back to a new credential
+message after an uncertain outcome. Uncertain new-message sends MUST retain a durable recovery
+state and pause automatic resending pending reconciliation or explicit authorized recovery.
+Preserve the paid obligation and protected access to the same complete manifest. Do not promise
+exactly-once remote Telegram receipt or that a customer has read a message.
+
+Keep PostgreSQL-backed durable jobs and recovery semantics: deduplication, transactional
+enqueue, leases, retries and persisted delivery markers. In-memory Channels MAY provide bounded
+wake-up/dispatch, but MUST NOT be the sole record of outstanding business work. External
+callbacks/webhooks require verification and replay protection.
 
 ### V. Security, tenant scope, and privacy
 Every administrative action requires authentication, authorization, CSRF defenses for state-changing browser requests, and tenant-bound object lookups. Telegram callbacks MUST authorize the actor and the target operation. Never put bot tokens or passwords in URLs, repositories, logs, or config templates. Retain scoped media permissions, secure session cookies, encryption key separation, least privilege, redaction, and secret-free backups/reports. Sensitive media and credentials remain accessible only to authorized users.
@@ -76,6 +97,37 @@ Maintain feature-to-code-to-test traceability for critical flows. Prioritize tar
 
 ## Amendment record
 
+### 3.0.0 — 2026-10-31
+
+The owner authorized the remaining reviewed fixes through "fix next things also", after
+accepting the distinction between logical fulfillment and remote Telegram receipt and selecting
+editing an existing order message with a saved ID as the preferred delivery path. This is a
+governance/documentation authorization, not application implementation or live-operation approval.
+
+- Input: active 2.0.0 constitution, blob `bebe289131002492ecd72df768d9c81e4c9a073e`;
+  the six-finding alignment review and subsequent owner delivery clarification in this conversation.
+- Major version rationale: principle IV's absolute prohibition on repeated remote credential
+  messages is redefined as exactly-once local business effects with explicit transport uncertainty.
+- Retained controls: one charge/credit, stock allocation, logical fulfillment and coupon
+  redemption; durable jobs, verified callbacks, complete-manifest release and brand authorization.
+- Duplicate-message risk: a lost send result may hide an accepted message. Prefer a validated
+  saved order-message edit, suppress known successful sends, and pause uncertain new-message
+  resends for explicit recovery. Files/multi-part and missing/uneditable-anchor cases require
+  qualified recovery handling, never a blind replacement send.
+- Delay risk: pausing an uncertain send may delay automatic delivery. Preserve the obligation,
+  protected complete-manifest access and an observable recovery case; never mark it sent by guess.
+- Wrong/stale edit risk: validate bot/member/order/message linkage and current generation/state;
+  qualify crash, concurrent-edit and recovery cases under T034/T052/T077 and E4 before use.
+- Principles I–III and V–VII, development/release gates and Governance remain unchanged.
+  Original adoption remains 2026-10-15; the approved 2.0.0 record remains historical evidence.
+
+E1 closure requires the separate alignment review; this amendment alone is not a readiness claim.
+See the latest [consistency review](../../specs/001-multibrand-redesign/consistency-review.md)
+for current governance status. E2–E6 retain their stage-specific proof and authorization gates.
+The baseline remains 28 tables, 84 requirements, 53 success criteria and 96 tasks; only T001
+is complete. No application implementation, migration execution, deployment, production data/key
+access, live integration, financial mutation or deletion is authorized by this amendment.
+
 ### 2.0.0 — 2026-10-30
 
 The owner ratified this amendment on 2026-10-30. The original constitution was adopted on
@@ -95,8 +147,9 @@ The owner ratified this amendment on 2026-10-30. The original constitution was a
   The staging-plan link in principle III is relocated for this file's directory.
 - This record and the risk table preserve the approved written rationale/impact evidence.
 
-The governance amendment is applied. The separate constitution alignment analysis remains
-pending; do not close E1 or claim full design readiness from this file update alone.
+At application of 2.0.0, the governance amendment was applied and the separate constitution
+alignment review was pending. This historical record does not close E1 or establish readiness;
+the latest amendment and consistency review determine current governance status.
 Provider E2, legacy E3, runtime E4, identity/privacy E5 and release E6 retain their
 [documented stages and required proof](../../specs/001-multibrand-redesign/consistency-review.md#evidence-gates-owners-and-required-proof).
 No application implementation, migration execution, live integration, financial mutation or
@@ -117,4 +170,4 @@ production cutover is authorized by this amendment. Only repository setup T001 i
 
 This constitution supersedes feature plans. Any exceptions require a written rationale, risk assessment, approval, and a version amendment (MAJOR removes/weakens safeguards, MINOR adds principles, PATCH clarifies wording). A checked checklist means verified evidence, not an intention. The C# feature remains a **draft migration design**, not an authorized production cutover.
 
-**Version**: 2.0.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-30
+**Version**: 3.0.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-31
