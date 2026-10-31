@@ -57,7 +57,7 @@ public sealed class RelationalSchemaTests
         var manifest = SchemaManifest.ForQualification(database.Data.ConnectionString);
         SchemaReceipt[] results = await Task.WhenAll(Enumerable.Range(0, 2)
             .Select(_ => SchemaRunner.ApplyAsync(database.Data, manifest, Ct)));
-        Assert.Single(results.Where(r => r.Applied));
+        Assert.Single(results, r => r.Applied);
         Assert.Single(results.Select(r => r.CatalogSha256).Distinct());
     }
 
