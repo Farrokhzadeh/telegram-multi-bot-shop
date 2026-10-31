@@ -34,6 +34,12 @@ public static class BrandPolicyStore
         bool staff = await AdminBindingStore.IsVerifiedStaffAsync(session, verifiedActorId, ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, null, ct);
         if (member.Blocked || member.Banned) Deny(session);
+        bool reachable = await session.QuerySingleAsync(new DbStatement("""
+            WITH member AS (SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 AND telegram_id=$3
+                AND blocked_at IS NULL AND banned_at IS NULL FOR SHARE)
+            SELECT EXISTS(SELECT 1 FROM member)
+            """, DbValue.Uuid(member.Id), DbValue.Uuid(context.BrandId), DbValue.Bigint(verifiedActorId)), row => row.GetBoolean(0), ct);
+        if (!reachable) Deny(session);
         var policy = await session.QuerySingleAsync(new DbStatement("""
             SELECT b.policy_version,b.require_channel_join,b.public_name,b.logo_asset_ref,
                 (SELECT a.public_contact_handle FROM shop.admins a WHERE a.id=b.customer_support_admin_id AND a.disabled_at IS NULL
