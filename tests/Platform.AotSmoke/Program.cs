@@ -123,6 +123,8 @@ await using (var database = await DisposablePostgres.CreateAsync())
         throw new InvalidOperationException("Native schema application/reapplication failed.");
     }
 
+    await AdminQualification.RunAsync(database.Data);
+    Console.WriteLine("PASS: native administrator sessions, audit idempotency, two-channel binding and immediate revocation.");
     await OutboxQualification.RunAsync(database.Data);
     Console.WriteLine("PASS: native typed outbox enqueue, deduplication, lease renewal and stale-generation fences.");
 

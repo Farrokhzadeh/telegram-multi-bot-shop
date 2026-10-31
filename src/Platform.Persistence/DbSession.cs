@@ -210,6 +210,17 @@ public sealed class DbSession : IAsyncDisposable
         finally { Exit(); }
     }
 
+    internal void RejectApplication()
+    {
+        EnterActive();
+        try
+        {
+            LastFailure = new DbFailure(DbFailureKind.InvalidData, DbRecovery.Reject);
+            State = DbSessionState.Aborted;
+        }
+        finally { Exit(); }
+    }
+
     private Exception RecordFailure(Exception error, DbPhase phase, CancellationToken cancellationToken)
     {
         DbFailure failure = error is DbOperationException safe ? safe.Failure : DbFailurePolicy.Classify(error, phase);

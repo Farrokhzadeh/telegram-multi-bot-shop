@@ -18,6 +18,9 @@ app.Urls.Clear();
 app.Urls.Add("http://127.0.0.1:18080");
 app.UseMiddleware<DiagnosticsMiddleware>((Action<string>)Console.WriteLine);
 app.UseRouting();
+// No online administrator verifier is enabled in this loopback foundation host.
+app.UseMiddleware<AdminGuardMiddleware>((Func<AdminToken, CancellationToken, Task<AuthenticatedAdmin?>>)
+    ((_, _) => Task.FromResult<AuthenticatedAdmin?>(null)));
 // Public synthetic identities exist only in this explicit loopback qualification host.
 // This fixture is not a production credential handler or a verified Telegram ingress.
 var qualificationBrands = new BotBrandRegistry([
@@ -41,6 +44,8 @@ app.Use(async (context, next) =>
 });
 app.UseMiddleware<BrandContextMiddleware>(qualificationBrands);
 app.MapFoundationDiagnostics();
+app.MapGet("/qualification/admin-boundary", () => Results.Text("authorized"))
+    .RequireAdministrator();
 app.MapGet("/qualification/fault", static IResult () => throw new InvalidOperationException("public-synthetic-private-detail"));
 app.MapGet("/qualification", static IResult (HttpContext context) =>
 {

@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platform.Api/AdminGuardMiddleware.cs" Link="Api/AdminGuardMiddleware.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../../src/Platform.Security/Platform.Security.csproj" />
     <Compile Include="../../src/Platform.Api/DiagnosticsEndpoints.cs" Link="Api/DiagnosticsEndpoints.cs" />

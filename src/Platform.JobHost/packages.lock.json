@@ -46,7 +46,8 @@
         "type": "Project",
         "dependencies": {
           "Npgsql": "[10.0.3, )",
-          "Platform.Core": "[1.0.0, )"
+          "Platform.Core": "[1.0.0, )",
+          "Platform.Security": "[1.0.0, )"
         }
       },
       "platform.telegram": {
@@ -62,6 +63,12 @@
         "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        }
+      },
+      "platform.security": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Core": "[1.0.0, )"
         }
       }
     },

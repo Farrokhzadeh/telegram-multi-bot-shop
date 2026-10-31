@@ -5,7 +5,9 @@ namespace Platform.Core;
 
 public enum ErrorKind { None, InvalidRequest, Unauthenticated, Forbidden, NotFound, Conflict, Unavailable, Canceled, Internal }
 
-public sealed class SafeOperationException : Exception
+public interface ISafeApiError { ErrorKind Kind { get; } }
+
+public sealed class SafeOperationException : Exception, ISafeApiError
 {
     public ErrorKind Kind { get; }
     public SafeOperationException(ErrorKind kind) : base("Operation rejected.")
@@ -19,7 +21,7 @@ public static class ErrorPolicy
 {
     public static ErrorKind Classify(Exception exception) => exception switch
     {
-        SafeOperationException safe => safe.Kind,
+        ISafeApiError safe => safe.Kind,
         OperationCanceledException => ErrorKind.Canceled,
         UnauthorizedAccessException => ErrorKind.Forbidden,
         TimeoutException => ErrorKind.Unavailable,

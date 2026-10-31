@@ -57,3 +57,5 @@ identifier=str(uuid.UUID(response['requestId']))
 assert any(line.lower().strip()=='x-request-id: '+identifier for line in headers.splitlines())
 PY
 echo 'T014 native HTTP probes passed: safe error JSON and server correlation; readiness remains false.'
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' -H 'X-Admin: true' http://127.0.0.1:18080/qualification/admin-boundary)" = 401
+echo 'T016 native HTTP boundary passed: bot identity and admin-looking headers grant no backend privilege.'

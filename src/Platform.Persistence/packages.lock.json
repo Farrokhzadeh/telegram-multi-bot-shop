@@ -32,6 +32,12 @@
       },
       "platform.core": {
         "type": "Project"
+      },
+      "platform.security": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Core": "[1.0.0, )"
+        }
       }
     },
     "net10.0/linux-x64": {}
