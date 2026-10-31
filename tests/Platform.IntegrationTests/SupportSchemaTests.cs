@@ -82,7 +82,7 @@ public sealed class SupportSchemaTests
             """);
         await RejectAsync(database, "UPDATE shop.support_messages SET asset_ref='changed'");
         await RejectAsync(database, "DELETE FROM shop.support_messages WHERE ticket_id='00000000-0000-0000-0000-000000000602'");
-        await RejectAsync(database, "TRUNCATE shop.support_messages");
+        await RejectAsync(database, "TRUNCATE shop.support_messages CASCADE");
     }
 
     [Fact]
