@@ -8,6 +8,9 @@ using Platform.Persistence;
 using Platform.Security;
 using Platform.Testing;
 
+CipherQualification.Run();
+Console.WriteLine("PASS: native SC02 golden vector, scope/row/field/key binding, corruption and inventory isolation.");
+
 var status = new QualificationStatus("AotSmoke", "synthetic-qualification", false);
 string json = JsonSerializer.Serialize(status, PlatformJsonContext.Default.QualificationStatus);
 if (JsonSerializer.Deserialize(json, PlatformJsonContext.Default.QualificationStatus) != status)

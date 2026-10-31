@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/CipherQualification.cs" Link="Shared/CipherQualification.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
