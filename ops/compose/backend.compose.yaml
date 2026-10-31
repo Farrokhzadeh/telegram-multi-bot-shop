@@ -1,0 +1,84 @@
+# T011 configuration contract only. No published image, ports, database or live startup.
+# File-backed Compose secrets preserve host ownership/mode: provision each source as 0400
+# owned by its service UID (or reviewed 0440 group access). uid/gid/mode below are intent,
+# not proof that Compose remaps file-backed secrets. The loader checks actual file modes.
+name: shop-backend-configuration
+x-isolated: &isolated
+  profiles: [configuration-only]
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  network_mode: none
+  restart: "no"
+  environment:
+    SHOP_SECRET_DIRECTORY: /run/secrets
+    SHOP_SECRET_MANIFEST: service-config.json
+services:
+  api:
+    <<: *isolated
+    image: ${SHOP_API_IMAGE:?Set a reviewed immutable image digest}
+    user: "10001:10001"
+    entrypoint: [/app/Platform.Api]
+    command: []
+    secrets:
+      - {source: api_config, target: service-config.json, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_brand_a, target: brand-a-k1, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_brand_b, target: brand-b-k1, uid: "10001", gid: "10001", mode: 0400}
+      - {source: api_brand_c, target: brand-c-k1, uid: "10001", gid: "10001", mode: 0400}
+  bot-a:
+    <<: *isolated
+    image: ${SHOP_BOT_IMAGE:?Set a reviewed immutable image digest}
+    user: "10011:10011"
+    entrypoint: [/app/Platform.BotHost]
+    command: []
+    secrets:
+      - {source: bot_a_config, target: service-config.json, uid: "10011", gid: "10011", mode: 0400}
+      - {source: bot_a_key, target: brand-a-k1, uid: "10011", gid: "10011", mode: 0400}
+  bot-b:
+    <<: *isolated
+    image: ${SHOP_BOT_IMAGE:?Set a reviewed immutable image digest}
+    user: "10012:10012"
+    entrypoint: [/app/Platform.BotHost]
+    command: []
+    secrets:
+      - {source: bot_b_config, target: service-config.json, uid: "10012", gid: "10012", mode: 0400}
+      - {source: bot_b_key, target: brand-b-k1, uid: "10012", gid: "10012", mode: 0400}
+  bot-c:
+    <<: *isolated
+    image: ${SHOP_BOT_IMAGE:?Set a reviewed immutable image digest}
+    user: "10013:10013"
+    entrypoint: [/app/Platform.BotHost]
+    command: []
+    secrets:
+      - {source: bot_c_config, target: service-config.json, uid: "10013", gid: "10013", mode: 0400}
+      - {source: bot_c_key, target: brand-c-k1, uid: "10013", gid: "10013", mode: 0400}
+  jobs:
+    <<: *isolated
+    image: ${SHOP_JOB_IMAGE:?Set a reviewed immutable image digest}
+    user: "10021:10021"
+    entrypoint: [/app/Platform.JobHost]
+    command: []
+    secrets:
+      - {source: jobs_config, target: service-config.json, uid: "10021", gid: "10021", mode: 0400}
+      - {source: jobs_brand_a, target: brand-a-k1, uid: "10021", gid: "10021", mode: 0400}
+      - {source: jobs_brand_b, target: brand-b-k1, uid: "10021", gid: "10021", mode: 0400}
+      - {source: jobs_brand_c, target: brand-c-k1, uid: "10021", gid: "10021", mode: 0400}
+      - {source: inventory_key, target: inventory-k1, uid: "10021", gid: "10021", mode: 0400}
+# Source files stay outside repository/images/.env. Same brand key material is shared only
+# with that brand's authorized services; use separately permissioned copies for distinct UIDs.
+secrets:
+  api_config: {file: "${SHOP_API_CONFIG_FILE:?Set protected manifest path}"}
+  bot_a_config: {file: "${SHOP_BOT_A_CONFIG_FILE:?Set protected manifest path}"}
+  bot_b_config: {file: "${SHOP_BOT_B_CONFIG_FILE:?Set protected manifest path}"}
+  bot_c_config: {file: "${SHOP_BOT_C_CONFIG_FILE:?Set protected manifest path}"}
+  jobs_config: {file: "${SHOP_JOBS_CONFIG_FILE:?Set protected manifest path}"}
+  api_brand_a: {file: "${SHOP_API_BRAND_A_FILE:?Set protected key path}"}
+  api_brand_b: {file: "${SHOP_API_BRAND_B_FILE:?Set protected key path}"}
+  api_brand_c: {file: "${SHOP_API_BRAND_C_FILE:?Set protected key path}"}
+  bot_a_key: {file: "${SHOP_BOT_A_KEY_FILE:?Set protected key path}"}
+  bot_b_key: {file: "${SHOP_BOT_B_KEY_FILE:?Set protected key path}"}
+  bot_c_key: {file: "${SHOP_BOT_C_KEY_FILE:?Set protected key path}"}
+  jobs_brand_a: {file: "${SHOP_JOBS_BRAND_A_FILE:?Set protected key path}"}
+  jobs_brand_b: {file: "${SHOP_JOBS_BRAND_B_FILE:?Set protected key path}"}
+  jobs_brand_c: {file: "${SHOP_JOBS_BRAND_C_FILE:?Set protected key path}"}
+  inventory_key: {file: "${SHOP_INVENTORY_KEY_FILE:?Set independently authorized inventory key path}"}

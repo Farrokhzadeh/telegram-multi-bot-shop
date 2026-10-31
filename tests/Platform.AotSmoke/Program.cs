@@ -5,6 +5,7 @@ using NpgsqlTypes;
 using Platform.Core;
 using Platform.Migration;
 using Platform.Persistence;
+using Platform.Security;
 using Platform.Testing;
 
 var status = new QualificationStatus("AotSmoke", "synthetic-qualification", false);
@@ -69,6 +70,45 @@ using (var vectors = JsonDocument.Parse(File.ReadAllText(
         }
     }
 }
+
+using (var files = new SyntheticSecretFiles())
+{
+    using var snapshot = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+    var registry = new BotBrandRegistry([new("native-bot", "a", SyntheticSecretFiles.BrandA, 101,
+        SyntheticSecretFiles.Deployment, 7, true)]);
+    var principal = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+        [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "a")], "native-bot"));
+    if (!registry.TryResolveAuthenticated("native-bot", principal, out var context) ||
+        snapshot.CurrentBrandKeyId(context!) != "current" ||
+        snapshot.UseBrandKey(context!, "old", value => value.Length) != 32 ||
+        snapshot.UseInventoryKey("current", value => value.Length) != 32)
+        throw new InvalidOperationException("Native secret-file load failed.");
+    var expected = File.ReadAllBytes(Path.Combine(files.Root, "a-current"));
+    try
+    {
+        if (!snapshot.UseBrandKey(context!, "current", value => CryptographicOperations.FixedTimeEquals(expected, value)))
+            throw new InvalidOperationException("Native key bytes did not match the protected source file.");
+    }
+    finally { CryptographicOperations.ZeroMemory(expected); }
+    bool denied = false;
+    try { using var invalid = SecretFiles.Load(files.Root, "service-config.json", files.Grant(revision: 8)); }
+    catch (SecretConfigurationException error) when (error.InnerException is null) { denied = true; }
+    if (!denied) throw new InvalidOperationException("Native configuration revision was not checked.");
+    files.WriteManifest(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]);
+    using var bot = SecretFiles.Load(files.Root, "service-config.json",
+        files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]));
+    denied = false;
+    try { bot.UseInventoryKey("current", value => value.Length); }
+    catch (SecretConfigurationException) { denied = true; }
+    if (!denied) throw new InvalidOperationException("Native bot inventory access was accepted.");
+    File.Delete(Path.Combine(files.Root, "a-current"));
+    File.CreateSymbolicLink(Path.Combine(files.Root, "a-current"), Path.Combine(files.Root, "b-current"));
+    denied = false;
+    try { using var invalid = SecretFiles.Load(files.Root, "service-config.json", files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA])); }
+    catch (SecretConfigurationException error) when (error.InnerException is null) { denied = true; }
+    if (!denied) throw new InvalidOperationException("Native secret symlink was accepted.");
+}
+Console.WriteLine("PASS: native versioned secret files, historical key lookup, independent inventory authorization and no-follow paths.");
 
 await using (var database = await DisposablePostgres.CreateAsync())
 {

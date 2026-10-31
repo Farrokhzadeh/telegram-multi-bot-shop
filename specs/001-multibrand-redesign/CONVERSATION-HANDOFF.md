@@ -8,7 +8,7 @@
 
 ## Where to continue
 
-Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/004-brand-context`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. T011 is next. Preserve approved business decisions and the limited offline authorization; earlier status notes describe their historical snapshots.
+Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `main`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. T012 is next. Preserve approved business decisions and the limited offline authorization; earlier status notes describe their historical snapshots.
 
 Historical decision sections retain counts from their approval stage; the latest decision below and current inventory define the active baseline.
 
@@ -328,3 +328,10 @@ The owner said "do next" after T009. This authorized the immutable bot-to-brand 
 - [CI run 41216628580](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41216628580) passed at `0ce28f764a417ba700cc1d5a2b1c043e56ea942d`: 146 tests (70 unit, 46 integration, 30 contract), zero build warnings/errors and all five Linux native executables. The actual API accepted registered synthetic A/B tickets and rejected selector attempts. Its public fake identity fixture exists only in explicit loopback qualification mode; readiness stayed 503 and normal startup stayed exit 78. Exact source/tree/run/image/executable hashes and scope are in [BRAND_CONTEXT_QUALIFICATION.md](../../ops/BRAND_CONTEXT_QUALIFICATION.md). The 28-table SQL digest is unchanged.
 
 **Current counts:** 28 tables, 84 FR, 53 SC, 96 tasks; **T001–T010 and T013 complete, 85 unchecked**. E1 remains governance-only closed, E4 is limited to recorded probes, and E2/E3/E5/E6 remain unqualified. The reviewer-owned requirements checklist is unchanged (92/126 checked). Next unfinished task: T011, versioned configuration and read-only service secret-file loading for separate brand/shared-inventory keyrings. No real credentials/source rows, live supplier/payment/FX/Telegram calls, staging/production operations, customer messages or live financial mutation occurred.
+
+
+## T011 and main-branch workflow — 2026-10-31
+
+T011 passed 171 tests and all five native executables in [CI run 41218689562](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41218689562) at f21a0f84a2fa161e836984e0787c107413528b8a. See [secret-file evidence](../../ops/SECRET_FILES_QUALIFICATION.md). Versioned grants and contexts must match exactly; no bot gets inventory keys. Compose is a render-only disabled contract, not a deployment.
+
+The owner explicitly authorized merging all completed work into main and continuing directly there with task-batched commits and no confirmation pauses for small subsequent tasks. PRs #1–#4 are merged. Current progress: T001–T011 and T013 complete, 12/96, 84 unchecked. T012 is next. Earlier branch/next-work notes are historical. Live credentials/data/integrations and deployment remain outside authorization.

@@ -44,6 +44,8 @@ jobs:
           echo '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz' | sha256sum --check
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           /tmp/gitleaks dir . --redact --config .gitleaks.toml
+      - name: Validate secret mount contract (render only)
+        run: python3 ops/ci/check-secret-compose.py
       - name: Restore locked dependencies
         run: dotnet restore Platform.sln -r linux-x64 --locked-mode
       - name: Build

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "deploymentId": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+  "service": "BotHost",
+  "brands": [
+    {
+      "brandId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "currentKeyId": "k1",
+      "keys": [
+        { "id": "k1", "file": "brand-a-k1" }
+      ]
+    }
+  ],
+  "inventory": null
+}
