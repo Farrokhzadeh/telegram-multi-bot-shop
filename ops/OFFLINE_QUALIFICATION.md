@@ -2,6 +2,8 @@
 
 **Scope:** T002–T007 setup and the migration-only T013 reader, using public synthetic fixtures. No customer commerce feature or live integration is implemented by this batch. Task completion and observed results are recorded only after the corresponding CI checks pass.
 
+**Later batch:** The separately authorized T008 baseline and operator now passed qualification. See [SCHEMA_QUALIFICATION.md](SCHEMA_QUALIFICATION.md) for current schema evidence. The project/test counts and not-yet-implemented statements below describe the initial cited source snapshot, not a reversal of the later T008 result.
+
 ## Reproduce
 
 Use .NET SDK 10.0.403, a supported Linux x64 native compiler/zlib toolchain and a disposable PostgreSQL 18.6 instance. The repository pins Npgsql 10.0.3 and test dependencies through central versions and per-project lockfile hashes. CI uses isolated synthetic PostgreSQL identities from RELEASE_GATES.md.

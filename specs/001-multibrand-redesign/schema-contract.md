@@ -3,6 +3,8 @@
 **Reviewed baseline:** 2026-10-30. **Updated:** 2026-10-31 for the owner-approved FR-015 saved-message recovery contract. **Original input:** main at 350a4d90ebfe6e4082d94820910806bb96c2484e.
 **Status:** selected documentation design, not executable DDL or implementation approval. The business baseline remains FR-001–084 / SC-001–053. E1 governance alignment is complete; E2–E6 in [consistency-review.md](consistency-review.md) retain their proof requirements. No implementation/release readiness is implied.
 
+**Later implementation:** The owner separately authorized T008. The matching [explicit baseline](../../ops/migrations/0001_core.sql) and operator passed disposable PostgreSQL/Linux Native AOT qualification; see [SCHEMA_QUALIFICATION.md](../../ops/SCHEMA_QUALIFICATION.md). This document remains the field/constraint authority. Real source compatibility and customer/live runtime readiness remain unqualified.
+
 This file selects concrete types, ownership, keys and cross-row guards for new target data. It replaces alternative pointer/flag, duplicate timestamp, recipient and ledger-source proposals in earlier model notes. Historical decisions remain in research.md and Git history. Source/provider compatibility must be proved before importing historical rows or enabling real procurement.
 
 ## Common types and ownership
@@ -196,4 +198,4 @@ One protected active supplier account per provider and one shared NOWPayments ac
 
 All 28 base tables/column types are declared before cyclic FKs/triggers are attached in the reviewed explicit migration sequence; constraint validation finishes before any worker/service writes. Story tasks qualify/assert that baseline rather than creating duplicate tables. The migration runner is operator-invoked, never daemon startup. Do not silently add schema-history/import-checkpoint tables: use an immutable external release/import manifest plus a transactionally applied schema-revision metadata marker and catalog assertions. Any later proposal for an extra physical table needs its own inventory decision.
 
-This design has not been applied to PostgreSQL. E1 constitution alignment, E2 real provider/time/cost/item contracts, E3 protected legacy denomination/cardinality/precision, E4 database/crypto/AOT probes, E5 merchant/private-chat disclosure and E6 restore/cutover proof remain gates. Never infer implementation or production approval from this document.
+The T008 baseline has been applied only to disposable synthetic PostgreSQL 18.6 destinations. E1 governance is aligned; E2 real provider/time/cost/item contracts, E3 protected legacy denomination/cardinality/precision, remaining E4 service/crypto/failure probes, E5 merchant/private-chat disclosure and E6 restore/cutover proof remain gates. Never infer source import, full customer runtime or production approval from this document.

@@ -32,12 +32,18 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Platform.ContractTests", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Platform.AotSmoke", "tests\Platform.AotSmoke\Platform.AotSmoke.csproj", "{E9D80D89-F8A7-59B0-8919-28DB4F2C8285}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Platform.SchemaRunner", "src/Platform.SchemaRunner/Platform.SchemaRunner.csproj", "{880EA632-A764-555E-80CE-06FD861F1357}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{880EA632-A764-555E-80CE-06FD861F1357}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{880EA632-A764-555E-80CE-06FD861F1357}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{880EA632-A764-555E-80CE-06FD861F1357}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{880EA632-A764-555E-80CE-06FD861F1357}.Release|Any CPU.Build.0 = Release|Any CPU
 		{110D04FF-AD13-5525-8D69-C97738A1D637}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{110D04FF-AD13-5525-8D69-C97738A1D637}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{110D04FF-AD13-5525-8D69-C97738A1D637}.Release|Any CPU.ActiveCfg = Release|Any CPU

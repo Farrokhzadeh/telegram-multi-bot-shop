@@ -10,8 +10,14 @@ for host in Api BotHost JobHost; do
   "artifacts/native/${host}/Platform.${host}" || status=$?
   test "$status" -eq 78
 done
+dotnet publish src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/SchemaRunner
+file artifacts/native/SchemaRunner/Platform.SchemaRunner
+sha256sum artifacts/native/SchemaRunner/Platform.SchemaRunner
+status=0
+artifacts/native/SchemaRunner/Platform.SchemaRunner || status=$?
+test "$status" -eq 78
 dotnet publish tests/Platform.AotSmoke/Platform.AotSmoke.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/AotSmoke
-artifacts/native/AotSmoke/Platform.AotSmoke
+SHOP_SCHEMA_RUNNER_PATH="$PWD/artifacts/native/SchemaRunner/Platform.SchemaRunner" artifacts/native/AotSmoke/Platform.AotSmoke
 file artifacts/native/AotSmoke/Platform.AotSmoke
 sha256sum artifacts/native/AotSmoke/Platform.AotSmoke
 artifacts/native/Api/Platform.Api --serve-qualification &

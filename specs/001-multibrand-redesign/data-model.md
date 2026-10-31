@@ -3,6 +3,8 @@
 **Reviewed baseline:** 2026-10-30. **Updated:** 2026-10-31 for saved-order-message recovery. **Scope:** 28-table forward documentation design only.
 Fields/types/constraints are selected in [schema-contract.md](schema-contract.md); [database-table-review.md](database-table-review.md) is the inventory. [requirements-traceability.md](requirements-traceability.md) maps all approved requirements and success criteria to planned work. Research/Git history records earlier proposals, not extra active alternatives.
 
+The later owner-authorized T008 implemented and qualified the forward schema on disposable data; [SCHEMA_QUALIFICATION.md](../../ops/SCHEMA_QUALIFICATION.md) records that limited evidence. The service flows below remain planned until their individual implementation tasks pass; this logical document is not a full-runtime qualification.
+
 ## Identity, configuration and ownership
 
 A users row is one brand membership, unique by brand and Telegram ID. Wallets, orders, coupon claims, support and customer alerts derive ownership from it. Globally unique order ID is the customer/support/admin reference; knowing it authorizes nothing. Admin authentication is independent, globally scoped and revocable. A verified staff Telegram link permits channel exemption, not credential-free backend mutations.
