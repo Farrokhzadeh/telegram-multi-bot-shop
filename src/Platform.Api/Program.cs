@@ -16,6 +16,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var app = builder.Build();
 app.Urls.Clear();
 app.Urls.Add("http://127.0.0.1:18080");
+app.UseMiddleware<DiagnosticsMiddleware>((Action<string>)Console.WriteLine);
 app.UseRouting();
 // Public synthetic identities exist only in this explicit loopback qualification host.
 // This fixture is not a production credential handler or a verified Telegram ingress.
@@ -39,8 +40,8 @@ app.Use(async (context, next) =>
     await next(context);
 });
 app.UseMiddleware<BrandContextMiddleware>(qualificationBrands);
-app.MapGet("/health/live", () => Results.Text("qualification-only"));
-app.MapGet("/health/ready", () => Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
+app.MapFoundationDiagnostics();
+app.MapGet("/qualification/fault", static IResult () => throw new InvalidOperationException("public-synthetic-private-detail"));
 app.MapGet("/qualification", static IResult (HttpContext context) =>
 {
     if (!string.Equals(context.Request.Headers["X-Qualification-Token"],

@@ -1,0 +1,11 @@
+# T014 safe diagnostics foundation
+
+Pending CI. No business runtime activation, real integrations or deployment.
+
+The outer API middleware generates a fresh UUID for every request, ignores caller-supplied request IDs, exposes X-Request-Id and supplies a request-scoped typed accessor. Context is cleared in finally. Structured completion records contain only fixed Api component, generated request ID, response status, allowlisted error code and an aborted flag. No URL, route values, query, headers, request/response body, principal, brand/customer identifier, exception message/type/stack/Data or arbitrary message field is logged. Dependency-specific exception metadata remains at its existing safe domain boundary; no raw exception serializer is introduced.
+
+Explicit SafeOperationException kinds map to generic 400/401/403/404/409/503 errors; unknown exceptions become internal_error with status 500. Caller cancellation maps to canceled; responses already started or disconnected are aborted without appending an error payload. Error responses contain only code and generated requestId, with source-generated JSON. A logging sink failure increments a safe dropped-event counter and never replays a handler or prints a raw fallback exception. Monitoring/alerts for that counter and audited privileged business events remain later operational tasks.
+
+Health endpoints are isolated in DiagnosticsEndpoints.cs. Liveness identifies the qualification host; readiness stays 503. A successful key, database or HTTP probe cannot promote the incomplete platform to ready. Ordinary Api/BotHost/JobHost invocations still exit 78. Existing default logging providers remain cleared in qualification mode; the new sink serializes only the closed diagnostic schema.
+
+Contract tests use synthetic private markers in URL, query, headers and exceptions, check that logs/responses exclude them, verify independent correlations, typed error mappings, cancellation and a failing sink without repeated effects. The actual Native AOT API fault probe checks a generic 500 body and matching correlation header; existing brand-context/readiness probes continue. No new package, schema, customer handler, secret or live operation is involved.

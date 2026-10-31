@@ -43,3 +43,17 @@ test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualif
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' --data 'text=synthetic' "$customer_url")" = 415
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/health/ready)" = 503
 echo 'T010 native HTTP probes passed: registered A/B identities, rejected selectors, bounded JSON boundary; readiness remains false.'
+curl --silent --dump-header artifacts/native/fault-headers.txt --output artifacts/native/fault-response.json http://127.0.0.1:18080/qualification/fault
+python3 - <<'PY'
+import json,uuid
+from pathlib import Path
+headers=Path('artifacts/native/fault-headers.txt').read_text()
+body=Path('artifacts/native/fault-response.json').read_text()
+assert '500' in headers.splitlines()[0]
+assert 'public-synthetic-private-detail' not in body
+response=json.loads(body)
+assert response['code']=='internal_error'
+identifier=str(uuid.UUID(response['requestId']))
+assert any(line.lower().strip()=='x-request-id: '+identifier for line in headers.splitlines())
+PY
+echo 'T014 native HTTP probes passed: safe error JSON and server correlation; readiness remains false.'
