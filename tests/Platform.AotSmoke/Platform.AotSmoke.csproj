@@ -10,6 +10,7 @@
     <ProjectReference Include="../../src/Platform.Persistence/Platform.Persistence.csproj" />
     <PackageReference Include="Npgsql" />
     <Compile Include="../Shared/DisposablePostgres.cs" Link="Shared/DisposablePostgres.cs" />
+    <Compile Include="../Shared/DropCommitReplyProxy.cs" Link="Shared/DropCommitReplyProxy.cs" />
     <None Include="../fixtures/legacy-fernet-synthetic.json" Link="fixtures/legacy-fernet-synthetic.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

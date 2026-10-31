@@ -127,6 +127,37 @@ await using (var database = await DisposablePostgres.CreateAsync())
     {
         throw new InvalidOperationException("Native Npgsql decimal mapping failed.");
     }
+
+    var sessions = new DbSessionFactory(database.Data);
+    await using (var session = await sessions.BeginAsync())
+    {
+        Money expected = Money.Parse("123456789012.123456789012", Currency.Usd);
+        Money actual = await session.QuerySingleAsync(new DbStatement("SELECT $1::numeric::text", DbValue.Money(expected, Currency.Usd)),
+            r => DbValue.ReadMoney(r, 0, Currency.Usd));
+        if (expected != actual || ExactDecimal.Divide(1, 8) != 0.125m)
+            throw new InvalidOperationException("Native exact money mapping failed.");
+        await session.CommitAsync();
+    }
+    var synthetic = new Npgsql.NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")
+        ?? throw new InvalidOperationException("Synthetic control identity is missing."))
+    { Database = manifest.Database };
+    await using var proxy = new DropCommitReplyProxy(synthetic.ConnectionString);
+    await using var proxyData = proxy.CreateClientDataSource();
+    Guid effect = Guid.NewGuid();
+    await using (var uncertain = await new DbSessionFactory(proxyData).BeginAsync())
+    {
+        await uncertain.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','immediate',$2)",
+            DbValue.Uuid(effect), DbValue.Text("public native lost acknowledgement")));
+        bool rejected = false;
+        try { await uncertain.CommitAsync(); }
+        catch (DbOperationException error) when (error.Failure.Recovery == DbRecovery.ReconcileBeforeRetry) { rejected = true; }
+        await proxy.CommitObserved.WaitAsync(TimeSpan.FromSeconds(10));
+        if (!rejected || uncertain.State != DbSessionState.OutcomeUnknown)
+            throw new InvalidOperationException("Native unknown commit policy failed.");
+    }
+    await using var verify = await sessions.BeginAsync();
+    long effects = await verify.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products WHERE id=$1", DbValue.Uuid(effect)), r => r.GetInt64(0));
+    if (effects != 1) throw new InvalidOperationException("Native committed effect reconciliation failed.");
 }
 
-Console.WriteLine("PASS: native JSON, AES-GCM scope, legacy Fernet, 28-table schema/operator and disposable PostgreSQL/Npgsql.");
+Console.WriteLine("PASS: native JSON, AES-GCM scope, legacy Fernet, schema/operator, exact money, sessions and lost-commit reconciliation.");
