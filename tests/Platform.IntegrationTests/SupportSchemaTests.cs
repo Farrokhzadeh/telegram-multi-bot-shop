@@ -60,9 +60,9 @@ public sealed class SupportSchemaTests
             INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_telegram_id,body_ciphertext,body_key_id)
             VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','customer',7099,decode('02','hex'),'public-synthetic-key')
             """);
-        await ExecuteAsync(database, """
+        await ExecuteAsync(database, $$"""
             INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_admin_id,body_ciphertext,body_key_id)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','admin','" + AdminA + "',decode('03','hex'),'public-synthetic-key')
+            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','admin','{{AdminA}}',decode('03','hex'),'public-synthetic-key')
             """);
         await RejectAsync(database, """
             INSERT INTO shop.support_messages(id,ticket_id,sender_kind,body_ciphertext,body_key_id)
@@ -90,13 +90,13 @@ public sealed class SupportSchemaTests
     {
         await using var database = await CreateAsync();
         await ExecuteAsync(database, "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES ('00000000-0000-0000-0000-000000000603'," + UserA + ",'general','admin')");
-        await RejectAsync(database, """
+        await RejectAsync(database, $$"""
             INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
-            VALUES (gen_random_uuid(),'admin','" + AdminA + "','00000000-0000-0000-0000-000000000002','support_assign','support_ticket','00000000-0000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
+            VALUES (gen_random_uuid(),'admin','{{AdminA}}','00000000-0000-0000-0000-000000000002','support_assign','support_ticket','00000000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
             """);
-        await ExecuteAsync(database, """
+        await ExecuteAsync(database, $$"""
             INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
-            VALUES (gen_random_uuid(),'admin','" + AdminA + "','00000000-0000-0000-0000-000000000001','support_assign','support_ticket','00000000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
+            VALUES (gen_random_uuid(),'admin','{{AdminA}}','00000000-0000-0000-0000-000000000001','support_assign','support_ticket','00000000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
             """);
     }
 
@@ -106,16 +106,16 @@ public sealed class SupportSchemaTests
         try
         {
             await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
-            await ExecuteTransactionAsync(database, """
+            await ExecuteTransactionAsync(database, $$"""
                 INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
                 VALUES ('00000000-0000-0000-0000-000000000001','sa','public-sa','public sa','iran','fa','public_sa',1001,decode('01','hex'),'public-key-a'),
                        ('00000000-0000-0000-0000-000000000002','sb','public-sb','public sb','international','en','public_sb',1002,decode('02','hex'),'public-key-b');
                 INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES
-                    ('" + UserA + "','00000000-0000-0000-0000-000000000001',7001,'fa'),
-                    ('" + UserB + "','00000000-0000-0000-0000-000000000002',7001,'en'),
-                    ('" + UserA2 + "','00000000-0000-0000-0000-000000000001',7002,'fa');
+                    ('{{UserA}}','00000000-0000-0000-0000-000000000001',7001,'fa'),
+                    ('{{UserB}}','00000000-0000-0000-0000-000000000002',7001,'en'),
+                    ('{{UserA2}}','00000000-0000-0000-0000-000000000001',7002,'fa');
                 INSERT INTO shop.admins(id,login,authentication_mode,password_verifier)
-                    VALUES ('" + AdminA + "','public-support-admin','password','public-synthetic-verifier');
+                    VALUES ('{{AdminA}}','public-support-admin','password','public-synthetic-verifier');
                 INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES
                     ('00000000-0000-0000-0000-000000000201','manual','immediate','public synthetic product');
                 INSERT INTO shop.brand_products(brand_id,product_id,price_usdt) VALUES
