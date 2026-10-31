@@ -4,3 +4,8 @@ useDefault = true
 [[allowlists]]
 description = "Public synthetic interoperability vectors; never deployment keys"
 paths = ['''^tests/fixtures/legacy-fernet-synthetic\.json$''']
+
+[[allowlists]]
+description = "Exact public header used only by the loopback qualification probe"
+regexTarget = "match"
+regexes = ['''X-Qualification-Token: public-synthetic-probe''']
