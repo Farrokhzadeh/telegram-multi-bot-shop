@@ -132,6 +132,45 @@ await using (var database = await DisposablePostgres.CreateAsync())
     await OutboxQualification.RunAsync(database.Data);
     Console.WriteLine("PASS: native typed outbox enqueue, deduplication, lease renewal and stale-generation fences.");
 
+    var userSessions = new DbSessionFactory(database.Data);
+    Guid customerBrand = Guid.NewGuid(), customerDeployment = Guid.NewGuid();
+    var customerRegistry = new BotBrandRegistry([new("native-customer", "public-customer", customerBrand, 91001, customerDeployment, 1, true)]);
+    var customerPrincipal = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+        [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "public-customer")], "native-customer"));
+    if (!customerRegistry.TryResolveAuthenticated("native-customer", customerPrincipal, out var customerContext))
+        throw new InvalidOperationException("Native customer identity failed.");
+    await using (var seed = await userSessions.BeginAsync())
+    {
+        await seed.ExecuteAsync(new DbStatement("""
+            INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
+            VALUES ($1,'public-customer','public customer','public customer','international','en','public_customer',91001,$2,'public-key',true)
+            """, DbValue.Uuid(customerBrand), DbValue.Binary([1])));
+        await seed.CommitAsync();
+    }
+    BrandUser nativeMember;
+    await using (var start = await userSessions.BeginAsync())
+    {
+        nativeMember = await BrandUserStore.ObservePrivateAsync(start, customerContext!, 97001);
+        await BrandUserStore.SetPreferencesAsync(start, customerContext!, 97001, nativeMember.Id, "fa", true);
+        await BrandUserStore.TransitionAsync(start, customerContext!, 97001, nativeMember.Id, 0, CustomerFlowState.Catalog);
+        await start.CommitAsync();
+    }
+    await using (var read = await userSessions.BeginAsync())
+    {
+        var member = await BrandUserStore.RequireAsync(read, customerContext!, 97001, nativeMember.Id);
+        if (member.Language != "fa" || !member.MarketingOptOut || member.Flow.Revision != 1 ||
+            await BrandUserStore.ResolvePrivateDestinationAsync(read, customerContext!, nativeMember.Id) != 97001)
+            throw new InvalidOperationException("Native scoped customer state failed.");
+    }
+    await using (var stale = await userSessions.BeginAsync())
+    {
+        bool rejected = false;
+        try { await BrandUserStore.TransitionAsync(stale, customerContext!, 97001, nativeMember.Id, 0, CustomerFlowState.Idle); }
+        catch (UnauthorizedAccessException) { rejected = stale.State == DbSessionState.Aborted; }
+        if (!rejected) throw new InvalidOperationException("Native stale customer callback was accepted.");
+    }
+    Console.WriteLine("PASS: native brand-scoped membership, preferences, DM destination and stale-flow rollback.");
+
     string? operatorPath = Environment.GetEnvironmentVariable("SHOP_SCHEMA_RUNNER_PATH");
     if (operatorPath is not null)
     {
