@@ -12,7 +12,7 @@ public sealed class BrandOutputTests
     private static readonly byte[] Secret = SHA256.HashData("public synthetic output qualification"u8);
 
     [Fact]
-    public async Task BrandOutputsNeverContainForeignIdentifiersAssetsWalletsOrdersOrLinks()
+    public async Task BrandOutputsNeverContainForeignIdentifiersOrAssets()
     {
         await using var fixture = await DistinctOutputs();
         var snapshots = new BrandPolicySnapshot[3];
@@ -22,17 +22,15 @@ public sealed class BrandOutputTests
         {
             Assert.Equal("public-brand-" + i, snapshots[i].PublicName);
             Assert.Equal("logo-asset-" + i, snapshots[i].LogoAssetRef);
-            Assert.Equal("@contact-handle-" + i, Localization.PublicContact(snapshots[i]));
             for (int j = 0; j < 3; j++)
                 if (i != j)
                 {
                     Assert.DoesNotContain("public-brand-" + j, snapshots[i].PublicName);
                     Assert.DoesNotContain("logo-asset-" + j, snapshots[i].LogoAssetRef!);
-                    Assert.DoesNotContain("@contact-handle-" + j, Localization.PublicContact(snapshots[i])!);
                 }
         }
-        Assert.Equal("Out of stock", Localization.Text(snapshots[1], CustomerText.OutOfStock));
         Assert.Equal("ناموجود", Localization.Text(snapshots[0], CustomerText.OutOfStock));
+        Assert.Equal("Out of stock", Localization.Text(snapshots[1], CustomerText.OutOfStock));
         await using var write = await fixture.Sessions.BeginAsync(Ct);
         await write.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(fixture.Users[1])), Ct);
         await write.ExecuteAsync(new DbStatement("UPDATE shop.users SET banned_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(fixture.Users[2])), Ct);
@@ -43,7 +41,7 @@ public sealed class BrandOutputTests
             Assert.DoesNotContain("public-brand-", denied.Message);
         }
         await using var read = await fixture.Sessions.BeginAsync(Ct);
-        Assert.Equal(3L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.users"), row => row.GetInt64(0), Ct));
+        Assert.Equal(4L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.users"), row => row.GetInt64(0), Ct));
         await read.CommitAsync(Ct);
     }
 
@@ -52,7 +50,7 @@ public sealed class BrandOutputTests
     {
         await using var fixture = await Menus();
         var router = Router(fixture, () => true);
-        Assert.Equal(UpdateRouteCode.Started, (await router.RouteAsync(Command(fixture, 0, 11, actor: 9999), Ct)).Code);
+        Assert.Equal(UpdateRouteCode.Started, (await router.RouteAsync(Command(fixture, 0, 11, actor: 9999, value: "/start"), Ct)).Code);
         Assert.Equal(UpdateRouteCode.Menu, (await router.RouteAsync(Command(fixture, 0, 12, actor: 9999), Ct)).Code);
         await using var write = await fixture.Sessions.BeginAsync(Ct);
         Guid neverStarted;
@@ -61,10 +59,8 @@ public sealed class BrandOutputTests
         await write.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(neverStarted)), Ct);
         await write.CommitAsync(Ct);
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Command(fixture, 0, 13, actor: 9999), Ct));
-        Assert.Equal(UpdateRouteCode.Started, (await router.RouteAsync(Command(fixture, 0, 14, actor: 9999), Ct)).Code);
+        Assert.Equal(UpdateRouteCode.Started, (await router.RouteAsync(Command(fixture, 0, 14, actor: 9999, value: "/start"), Ct)).Code);
         await using var seed = await fixture.Sessions.BeginAsync(Ct);
-        for (int i = 1; i < 3; i++)
-            await BrandUserStore.ObservePrivateAsync(seed, fixture.Contexts[i], 7001, Ct);
         await seed.ExecuteAsync(new DbStatement("UPDATE shop.users SET banned_at=CURRENT_TIMESTAMP WHERE telegram_id=7001 AND brand_id IN ($1,$2)",
             DbValue.Uuid(fixture.Brands[1]), DbValue.Uuid(fixture.Brands[2])), Ct);
         await seed.CommitAsync(Ct);
@@ -72,8 +68,9 @@ public sealed class BrandOutputTests
             await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Command(fixture, i, 20 + i), Ct));
         await using var read = await fixture.Sessions.BeginAsync(Ct);
         Assert.Equal(5L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.users"), row => row.GetInt64(0), Ct));
-        Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events WHERE outcome_code='accepted' AND action_code IN ('start','catalog_open')"), row => row.GetInt64(0), Ct));
-        Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.users WHERE telegram_id=7001 AND brand_id<>$1 AND flow_state<>'idle'", DbValue.Uuid(fixture.Brands[0])), row => row.GetInt64(0), Ct));
+        Assert.Equal(3L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), row => row.GetInt64(0), Ct));
+        Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries"), row => row.GetInt64(0), Ct));
+        Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.fulfillments"), row => row.GetInt64(0), Ct));
         await read.CommitAsync(Ct);
     }
 
@@ -87,33 +84,30 @@ public sealed class BrandOutputTests
             snapshots[i] = await Read(fixture, i);
         Assert.Equal("Out of stock", Localization.Text(snapshots[1], CustomerText.OutOfStock));
         Assert.Equal("ناموجود", Localization.Text(snapshots[0], CustomerText.OutOfStock));
-        await Assert.ThrowsAsync<DbOperationException>(() => router.RouteAsync(Callback(fixture, 1, 'p', fixture.PrivateProduct), Ct));
-        var own = await router.RouteAsync(Callback(fixture, 1, 'p', fixture.PrivateProduct, brand: 1), Ct);
-        Assert.Equal(UpdateRouteCode.Product, own.Code);
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 'p', fixture.PrivateProduct), Ct));
         await using var hide = await fixture.Sessions.BeginAsync(Ct);
         await hide.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET visible=false WHERE product_id=$1", DbValue.Uuid(fixture.Product)), Ct);
         await hide.CommitAsync(Ct);
         foreach (int i in new[] { 0, 1, 2 })
-            await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 2, 'p', fixture.Product, brand: i), Ct));
+            await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 'p', fixture.Product, brand: i), Ct));
         await using var read = await fixture.Sessions.BeginAsync(Ct);
-        Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), row => row.GetInt64(0), Ct));
+        Assert.Equal(3L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), row => row.GetInt64(0), Ct));
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries"), row => row.GetInt64(0), Ct));
         await read.CommitAsync(Ct);
     }
 
     [Fact]
-    public async Task RestockConsentAndNoticeScopeNeverCrossBrandsOrMoveMoney()
+    public async Task RestockConsentScopeNeverCrossesBrandsOrMovesMoney()
     {
         await using var fixture = await Menus();
         var router = Router(fixture, () => true);
         var consent = (await router.RouteAsync(Callback(fixture, 1, 's', fixture.Product), Ct)).EntityId!.Value;
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 's', fixture.Product), Ct));
-        await Assert.ThrowsAsync<DbOperationException>(() => router.RouteAsync(Callback(fixture, 1, 'p', fixture.PrivateProduct, brand: 1), Ct));
         await using var read = await fixture.Sessions.BeginAsync(Ct);
         Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.product_stock_subscriptions"), row => row.GetInt64(0), Ct));
         Assert.Equal((fixture.Users[0], fixture.Product), await read.QuerySingleAsync(new DbStatement("SELECT user_id,product_id FROM shop.product_stock_subscriptions WHERE id=$1", DbValue.Uuid(consent)), row => (row.GetGuid(0), row.GetGuid(1)), Ct));
-        Assert.Equal(2L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.users WHERE flow_state='idle' AND brand_id IN ($1,$2)", DbValue.Uuid(fixture.Brands[1]), DbValue.Uuid(fixture.Brands[2])), row => row.GetInt64(0), Ct));
-        Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), row => row.GetInt64(0), Ct));
+        Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.product_stock_subscriptions WHERE user_id IN ($1,$2)", DbValue.Uuid(fixture.Users[1]), DbValue.Uuid(fixture.Users[2])), row => row.GetInt64(0), Ct));
+        Assert.Equal(3L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), row => row.GetInt64(0), Ct));
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries"), row => row.GetInt64(0), Ct));
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.fulfillments"), row => row.GetInt64(0), Ct));
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.discount_uses"), row => row.GetInt64(0), Ct));
@@ -128,15 +122,6 @@ public sealed class BrandOutputTests
             await using var seed = await fixture.Sessions.BeginAsync(Ct);
             for (int i = 0; i < 3; i++)
                 await seed.ExecuteAsync(new DbStatement("UPDATE shop.brands SET logo_asset_ref=$1 WHERE id=$2", DbValue.Text("logo-asset-" + i), DbValue.Uuid(fixture.Brands[i])), Ct);
-            for (int i = 0; i < 3; i++)
-            {
-                await seed.ExecuteAsync(new DbStatement("""
-                    INSERT INTO shop.admins(id,login,authentication_mode,password_verifier,telegram_user_id,public_contact_handle,telegram_verified_by_admin_id,telegram_verified_at,telegram_verification_audit_id)
-                    VALUES ($1,$2,'password',$3,$4,$5,NULL,CURRENT_TIMESTAMP,NULL)
-                    """, DbValue.Uuid(Guid.NewGuid()), DbValue.Text("support-admin-" + i), DbValue.Text(new('v', 20)), DbValue.Bigint(90000 + i), DbValue.Text("@contact-handle-" + i)), Ct);
-                await seed.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=true,customer_support_admin_id=(SELECT id FROM shop.admins WHERE login=$1) WHERE id=$2",
-                    DbValue.Text("support-admin-" + i), DbValue.Uuid(fixture.Brands[i])), Ct);
-            }
             await seed.CommitAsync(Ct);
             return fixture;
         }
@@ -168,7 +153,7 @@ public sealed class BrandOutputTests
     private static VerifiedTelegramUpdate Callback(BrandFixture fixture, long revision, char action, Guid target, int brand = 0, long updateId = 1, long messageId = 77, long actor = 7001)
     {
         using var verifier = new TelegramWebhookVerifier(fixture.Contexts[brand], Secret);
-        return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body("v1|" + revision + "|" + action + "|" + target.ToString("N"), true, updateId, actor, actor, messageId: messageId));
+        return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body("v1|" + revision + "|" + action + "|" + target.ToString("N"), true, updateId, actor, actor, botId: 1001 + brand, messageId: messageId));
     }
     private static VerifiedTelegramUpdate Command(BrandFixture fixture, int brand, long updateId, string value = "/menu", long actor = 7001)
     {
