@@ -20,6 +20,11 @@ public static class LegacyFernetReader
     {
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(rawKeys);
+        if (kind is not (LegacyFieldKind.Secret or LegacyFieldKind.Json or LegacyFieldKind.Text))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
         if (value.Length == 0)
         {
             return "";
@@ -35,7 +40,10 @@ public static class LegacyFernetReader
         };
         if (prefix is null)
         {
-            if (allowSourcePlaintext && !value.StartsWith("enc", StringComparison.Ordinal))
+            bool encryptedMarker = value.StartsWith("enc:", StringComparison.Ordinal) ||
+                value.StartsWith("encjson:", StringComparison.Ordinal) ||
+                value.StartsWith("enctext:", StringComparison.Ordinal);
+            if (allowSourcePlaintext && !encryptedMarker)
             {
                 return value;
             }

@@ -35,14 +35,23 @@ public sealed class LegacyCipherTests
             LegacyFieldKind.Secret, vector.GetProperty("keys").EnumerateArray().Select(v => v.GetString()!)));
     }
 
-    [Fact]
-    public void PlaintextRequiresAnExplicitSourceMappingException()
+    [Theory]
+    [InlineData("public fixture")]
+    [InlineData("encrypted historical note")]
+    public void PlaintextRequiresAnExplicitSourceMappingException(string plaintext)
     {
         Assert.Throws<CryptographicException>(() =>
-            LegacyFernetReader.Decrypt("public fixture", LegacyFieldKind.Text, []));
-        Assert.Equal("public fixture", LegacyFernetReader.Decrypt(
-            "public fixture", LegacyFieldKind.Text, [], allowSourcePlaintext: true));
+            LegacyFernetReader.Decrypt(plaintext, LegacyFieldKind.Text, []));
+        Assert.Equal(plaintext, LegacyFernetReader.Decrypt(
+            plaintext, LegacyFieldKind.Text, [], allowSourcePlaintext: true));
         Assert.Throws<CryptographicException>(() => LegacyFernetReader.Decrypt(
             "encjson:v2:invalid", LegacyFieldKind.Json, [], allowSourcePlaintext: true));
+    }
+
+    [Fact]
+    public void UnknownFieldMappingIsRejectedEvenForPlaintext()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => LegacyFernetReader.Decrypt(
+            "public fixture", (LegacyFieldKind)99, [], allowSourcePlaintext: true));
     }
 }

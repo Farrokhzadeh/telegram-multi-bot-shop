@@ -4,12 +4,16 @@ mkdir -p artifacts/native
 for host in Api BotHost JobHost; do
   dotnet publish "src/Platform.${host}/Platform.${host}.csproj" -c Release -r linux-x64 --no-restore -o "artifacts/native/${host}"
   "artifacts/native/${host}/Platform.${host}" --qualify
+  file "artifacts/native/${host}/Platform.${host}"
+  sha256sum "artifacts/native/${host}/Platform.${host}"
   status=0
   "artifacts/native/${host}/Platform.${host}" || status=$?
   test "$status" -eq 78
 done
 dotnet publish tests/Platform.AotSmoke/Platform.AotSmoke.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/AotSmoke
 artifacts/native/AotSmoke/Platform.AotSmoke
+file artifacts/native/AotSmoke/Platform.AotSmoke
+sha256sum artifacts/native/AotSmoke/Platform.AotSmoke
 artifacts/native/Api/Platform.Api --serve-qualification &
 api_pid=$!
 trap 'kill "$api_pid" 2>/dev/null || true' EXIT
