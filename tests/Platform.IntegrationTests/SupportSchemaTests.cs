@@ -92,11 +92,11 @@ public sealed class SupportSchemaTests
         await ExecuteAsync(database, "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES ('00000000-0000-0000-0000-000000000603'," + UserA + ",'general','admin')");
         await RejectAsync(database, $$"""
             INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
-            VALUES (gen_random_uuid(),'admin','{{AdminA}}','00000000-0000-0000-0000-000000000002','support_assign','support_ticket','00000000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
+            VALUES (gen_random_uuid(),'admin','{{AdminA}}','00000000-0000-0000-0000-000000000002','support_assign','support_ticket','00000000-0000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
             """);
         await ExecuteAsync(database, $$"""
             INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
-            VALUES (gen_random_uuid(),'admin','{{AdminA}}','00000000-0000-0000-0000-000000000001','support_assign','support_ticket','00000000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
+            VALUES (gen_random_uuid(),'admin','{{AdminA}}','00000000-0000-0000-0000-000000000001','support_assign','support_ticket','00000000-0000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
             """);
     }
 
@@ -119,7 +119,7 @@ public sealed class SupportSchemaTests
                 INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES
                     ('00000000-0000-0000-0000-000000000201','manual','immediate','public synthetic product');
                 INSERT INTO shop.brand_products(brand_id,product_id,price_usdt) VALUES
-                    ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-000000000201',10);
+                    ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000201',10);
                 """ + OrderSql(OrderA, UserA) + OrderSql(OrderA2, UserA2, true));
             return database;
         }
