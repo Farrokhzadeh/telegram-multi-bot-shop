@@ -1,14 +1,14 @@
 # Multi-brand redesign — conversation handoff (updated 2026-10-31)
 
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
-**Branch:** `main`  
+**Branch:** documentation baseline `main`; implementation `impl/001-offline-foundation`
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  
 **Feature documents:** `specs/001-multibrand-redesign/`  
-**Status:** Specification/architecture only. No production migration, implementation, frontend, or deployment authorized.
+**Status:** Offline foundation and migration-only cipher qualification authorized on 2026-10-31. See the latest implementation record below and [qualification evidence](../../ops/OFFLINE_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production migrations and deployment remain outside this batch.
 
 ## Where to continue
 
-Start the next conversation with: “Continue AccAbad multi-brand redesign spec-kit in `Farrokhzadeh/telegram-multi-bot-shop`, branch `main`, from `specs/001-multibrand-redesign/`. Review the handoff, spec, plan, data-model, database-table-review, research, quickstart and tasks. Continue schema clarification; do not implement without review.”
+Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/001-offline-foundation`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. Preserve approved business decisions and the limited offline authorization; earlier documentation-only status notes describe their historical snapshots.
 
 Historical decision sections retain counts from their approval stage; the latest decision below and current inventory define the active baseline.
 
@@ -281,3 +281,15 @@ This update supersedes earlier current-status claims that the constitution was u
 The owner accepted the local-only crypto shortage-credit scope and authorized the remaining six-finding corrections. Supplier refresh now validates only the uncovered remainder (five requested minus three eligible local means two supplier units), with the full-local exemption and complete-order release unchanged. Prepaid issuance and late crypto disposition use approved FR-055/057; target fields use inherit/override/clear, payment_method, quote_currency and historical-only legacy_kind. Preserve original pinned approval text and dated research as history.
 
 The 2026-10-31 read-only alignment reanalysis passed and closes E1 for governance only; E2 provider, E3 legacy, E4 runtime, E5 identity/privacy and E6 release proof remain separate gates. Baseline stays 28 tables, 84 FR, 53 SC and 96 tasks, with T001 alone checked. Documentation/governance work authorizes no application implementation, migrations, live integrations, production data/key access, deployment, financial mutation or deletion.
+
+## Owner-authorized offline implementation — 2026-10-31
+
+The owner issued `/spec-kit implement` for the proposed offline foundation/qualification batch. This supersedes earlier implementation-deferred statements for T002–T007 and independent migration-only T013 only. Work is isolated on `impl/001-offline-foundation`; the `main` documentation baseline is unchanged by this branch.
+
+- Created the 15-project .NET 10 solution, three guarded host skeletons, inward-only libraries and four test harnesses. Pinned SDK 10.0.403, central dependency versions and all 15 lockfiles; CI enforces locked restore, warning-free build, formatting, dependency/secret scans and Linux Native AOT execution.
+- Added a strictly disposable PostgreSQL fixture and fake Telegram/supplier HTTP handlers. Native probes exercise JSON, AES-GCM context rejection, Npgsql numeric mapping and the migration-only Fernet reader. These are dependency/harness evidence, not completed customer delivery, procurement, new ciphertext envelopes or commerce workers.
+- Captured a pinned, read-only legacy source inventory, 65 migration paths/hashes and inspected source anchors. Nine independently Python-generated public Fernet vectors cover source prefixes/derivation and previous-key fallback; wrong-key/tamper and explicit plaintext mapping checks fail closed. Real source data/keys and deployed contracts remain unqualified.
+- Defined T007 release/identity requirements in `ops/RELEASE_GATES.md`. Names are explicit engineering defaults; actual staging bots, database/host separation, contacts, keys and resource headroom still need protected operational acceptance. Nothing was deployed or provisioned on the production server.
+- [CI run 41187355132](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41187355132) passed at `a74d8d8f208f1b36ae6a122216eace07c85411a0`: 10 tests (5 unit, 2 integration, 3 transport contract), zero build warnings/errors, four native executables and guarded native API probes. Exact versions, image/executable hashes, reproduction and limitations are in [OFFLINE_QUALIFICATION.md](../../ops/OFFLINE_QUALIFICATION.md). The local CoreCLR limitation is documented; executable proof comes from CI.
+
+**Current counts:** 28 approved table contracts, 84 FR, 53 SC, 96 tasks; **T001–T007 and T013 complete, 88 unchecked**. E1 remains closed for governance; E4 has only the listed foundation evidence, and E2/E3/E5/E6 remain unqualified. The requirements checklist was left unchanged. The next unfinished task is T008, the canonical 28-table schema/SchemaRunner; it is outside the completed batch. Preserve the scope boundary: no customer commerce feature, live integration, production data/key access, production migration, deployment, customer message, financial mutation or source write occurred.

@@ -1,0 +1,81 @@
+{
+  "classification": "PUBLIC SYNTHETIC TEST DATA. No source customer data or real keys.",
+  "source": "Farrokhzadeh/AccAbad-Shop@7fcc4a7a35337405dd69195fc6c92474748c4513/apps/common/crypto.py",
+  "source_blob": "37629fe383d75f17682825ff75b3154637ebaa1e",
+  "generated_with": "Python cryptography 50.0.2; fixed public test keys, IVs and timestamp; no TTL as in source",
+  "vectors": [
+    {
+      "kind": "Secret",
+      "keys": [
+        "public-test-active"
+      ],
+      "plaintext": "synthetic account",
+      "ciphertext": "enc:v1:gAAAAABf7mYAAAAAAAAAAAAAAAAAAAAAACkc4uFn5bLunShtW53uQVnwjVGES8q7n8vmvscLIh9w5POuwjOynTafdeGJ4q7kHUTFhGOuUugdBOXZGVcLpbc="
+    },
+    {
+      "kind": "Secret",
+      "keys": [
+        "public-test-active"
+      ],
+      "plaintext": "legacy prefix",
+      "ciphertext": "enc:gAAAAABf7mYAAQEBAQEBAQEBAQEBAQEBAUFQr56keOevUzzfkEMz-YQoypHNME-xc8ioOXgYdZtMdcDYvC_1gsOXjpwXV2n-_A=="
+    },
+    {
+      "kind": "Json",
+      "keys": [
+        "public-test-active"
+      ],
+      "plaintext": "{\"fixture\":\"داده آزمایشی\",\"units\":5}",
+      "ciphertext": "encjson:v1:gAAAAABf7mYAAgICAgICAgICAgICAgICAggkgb1_9_HSCAt8vQGETig0W1Z44LD82XcSdEQze4J_BHVbrTeZujhCzUeeWmK5w_X79TJgWDSi2zHZAMVFmPQkY0VWO7QrT5gWFNLoQVVc"
+    },
+    {
+      "kind": "Text",
+      "keys": [
+        "public-test-active"
+      ],
+      "plaintext": "synthetic key / نمونه",
+      "ciphertext": "enctext:v1:gAAAAABf7mYAAwMDAwMDAwMDAwMDAwMDAwFCBAISqNcv4U4JG4amnnJXMl_J57hVQ5uSqx9WE7WMqYcSq2GXQ_Zm_67qeYtWxja8foIPHE0JdlNOuhZ7TTc="
+    },
+    {
+      "kind": "Secret",
+      "keys": [
+        "fernet:AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      ],
+      "plaintext": "prefixed raw Fernet key",
+      "ciphertext": "enc:v1:gAAAAABf7mYABAQEBAQEBAQEBAQEBAQEBL_wjvo1JWp4H1CRyyIPqbsI2HEqv2r47qPhj0Ui5zhhuchIuqa4_TylcLyxTA6u0kTY0kE4sae0Uz27MXOVZRI="
+    },
+    {
+      "kind": "Text",
+      "keys": [
+        "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      ],
+      "plaintext": "raw Fernet key",
+      "ciphertext": "enctext:v1:gAAAAABf7mYABQUFBQUFBQUFBQUFBQUFBeI6lvm-1CF7FSPG_kMQI6EO2DF44BEDsmqbRY2jqAGQ-zlQhgQV7J6EKfRwelDJzw=="
+    },
+    {
+      "kind": "Secret",
+      "keys": [
+        "fernet:public-prefixed-passphrase"
+      ],
+      "plaintext": "hash after prefix removal",
+      "ciphertext": "enc:v1:gAAAAABf7mYABgYGBgYGBgYGBgYGBgYGBu1LOIf8INaYdCRoaOm_7Zv4WuYeq1SEOYvDx3ILpBjft10Gs5SvNTRa_Yobiz_v0iY9dAznoRpLF4guOn01oqs="
+    },
+    {
+      "kind": "Secret",
+      "keys": [
+        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "plaintext": "invalid 44-character raw text hashes",
+      "ciphertext": "enc:v1:gAAAAABf7mYABwcHBwcHBwcHBwcHBwcHB7g21HVgmv0XUUqH8D28CKaY4UCeHfH7BAtRRt-baN29b0anCL81ZBmBbcTkImphDuFxkDQ4KIfZpAlMqpIBA6kiH7_d_hcLLsBCRJgXFYhi"
+    },
+    {
+      "kind": "Secret",
+      "keys": [
+        "public-test-active",
+        "public-test-previous"
+      ],
+      "plaintext": "previous-key fallback",
+      "ciphertext": "enc:v1:gAAAAABf7mYACAgICAgICAgICAgICAgICMGEDmAaKwaLTxKxalQIdcMjUFRnShuKPddoSf51nOGUbEWu5h_psBQfyOn2cwQkG21sHCnpwIFtmEdyVUeZ-2o="
+    }
+  ]
+}

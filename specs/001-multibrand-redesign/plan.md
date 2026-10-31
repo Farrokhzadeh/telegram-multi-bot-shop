@@ -1,8 +1,8 @@
 # Implementation Plan: Multi-Brand Commerce Backend
 
 **Feature**: `001-multibrand-redesign` | **Date**: 2026-10-26 | **Spec**: [spec.md](spec.md)  
-**Specification repository**: `Farrokhzadeh/telegram-multi-bot-shop`, branch `main`; imported from `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513` (implementation and deployment remain unapproved)  
-**Status**: Backend-only architecture plan, suitable for task breakdown after source evidence; no deployment authority.
+**Specification repository**: `Farrokhzadeh/telegram-multi-bot-shop`, documentation baseline on `main`; imported from `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`. Offline implementation uses `impl/001-offline-foundation`.
+**Status**: The owner authorized T002–T007 and migration-only T013 offline qualification on 2026-10-31. See [task status](tasks.md) and [executable evidence](../../ops/OFFLINE_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production migrations and deployment remain outside this batch.
 
 **Current review:** [consistency-review.md](consistency-review.md). Types/relationships are selected in [schema-contract.md](schema-contract.md); ownership is mapped in [requirements-traceability.md](requirements-traceability.md). Older dated clarification notes below are rationale, not competing field alternatives.
 

@@ -3,6 +3,8 @@
 **Review input:** owner-authorized documentation corrections based on main at 114958a3a7d6117dbc2b536a18cfdec2e2452151, followed by constitution 3.0.0 and the corresponding specification/plan/task updates. **Scope:** governance and specification documentation only.
 **Outcome:** read-only Spec Kit alignment reanalysis passed: all six findings resolved in documentation, with zero remaining critical/high/medium findings in this rerun. E1 is closed for constitutional alignment only. No application/runtime/provider/migration/release qualification or implementation authorization is claimed.
 
+**Subsequent implementation record:** The owner later authorized the limited offline T002–T007/T013 batch. The counts, authorization and next-work statements in this review describe its earlier documentation snapshot. Current completion and executable evidence live in [tasks.md](tasks.md) and [OFFLINE_QUALIFICATION.md](../../ops/OFFLINE_QUALIFICATION.md); [RELEASE_GATES.md](../../ops/RELEASE_GATES.md) defines the operational follow-up. This does not change the review result or close E2–E6.
+
 [Canonical schema](schema-contract.md) · [traceability](requirements-traceability.md) · [active constitution](../../.specify/memory/constitution.md) · [historical 2.0.0 ratification](constitution-ratification.md).
 
 ## Six-finding remediation
