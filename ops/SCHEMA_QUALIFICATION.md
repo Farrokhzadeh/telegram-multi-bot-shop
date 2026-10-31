@@ -74,4 +74,25 @@ The source registry is command/callback/flow/system; outcomes are accepted/rejec
 
 The local PostgreSQL 18.6 PGlite 0.5.14 engine has loaded the full baseline and exercised the catalog, ownership, finite-number, whole-manifest, coupon-history, wallet-chain, supplier-acquisition, preorder and cutoff checks. This is a local SQL check, not Linux x64/.NET execution evidence.
 
-Full .NET/PostgreSQL 18.6 integration and Linux Native AOT qualification is in progress on `impl/002-relational-baseline`. T008 stays unchecked until the required CI checks pass. Exact successful commit/run and native results will be recorded here after completion.
+Full qualification passed in [CI run 41207382338](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41207382338), job `124555133012`, at commit [`774043e16be60730905ea488670ab57f7318daa2`](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/commit/774043e16be60730905ea488670ab57f7318daa2), tree `f3f7970c66dbf08168250f99113d28f66d581e1e`. All steps completed successfully. T008 is complete for this offline forward-schema scope; E3 real-source compatibility and live operational gates remain open.
+
+| Check | Observed result |
+|---|---|
+| Build / dependencies | SDK 10.0.403, 16 projects, locked restore, zero build warnings/errors, formatting and NuGet audit passed |
+| Security | Default Gitleaks 8.30.1 rules passed with existing narrow public-fixture exceptions |
+| Database | PostgreSQL 18.6 / `180006`; image digest `sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4` |
+| Tests | 52 passed, zero failed/skipped: 15 unit, 34 PostgreSQL integration and 3 transport contract |
+| Schema failure probes | Exact registry/no forbidden columns; wrong manifest and partial schema; rollback; concurrent operators; repeat/drift checks including disabled guards and added types |
+| Integrity probes | Membership/brand links, payment XOR/assets/uniqueness, finite/exact money, matching immutable wallet postings, complete manifests and saved anchors, typed jobs, immutable coupon grants/owner edits, supplier caps/unknowns/item identity, FIFO holds/whole allocation, retention cutoff and terminal compensation/replay |
+| Native execution | API, bot, job, SchemaRunner and AotSmoke publish and run on Linux x64; ordinary hosts/operator reject startup without explicit configuration; guarded API remains not ready |
+| Native operator | Applies/verifies the 28-table schema through the native dependency probe, invokes the separate native operator with protected files and validates its external receipt |
+
+The reviewed SQL SHA-256 is `fa57b9c12b395a7a47bed8fc92586dac66ea652baf1e84ca0e8ebb727e3cc27d`. The following hashes identify the qualification binaries from the cited commit, not a production release bundle. Later documentation commits do not change which source revision these hashes identify.
+
+| Executable | SHA-256 |
+|---|---|
+| `Platform.Api` | `5b5bade54cab1a5f011faada9c3b18eef44f8204cf479ceb5b2c0e5db9b7d93e` |
+| `Platform.BotHost` | `95f6e7268ce95c3cbafe9d9ec41659cf82daf60780264cb1b31cfbec3e26bcce` |
+| `Platform.JobHost` | `9df186b28082fe59fd47b5403f50da21235d1831e05b33df3b88fda5c4946e49` |
+| `Platform.SchemaRunner` | `acf5f96706e413d191737a138985546b1851ec6df63cee4106f89b96930d5e14` |
+| `Platform.AotSmoke` | `34ab3ac75644ede81593ab0bae1437f711d44b49e9705d753a509999e70b3d3c` |

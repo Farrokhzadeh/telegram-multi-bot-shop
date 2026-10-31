@@ -1,14 +1,14 @@
 # Multi-brand redesign — conversation handoff (updated 2026-10-31)
 
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
-**Branch:** documentation baseline `main`; implementation `impl/001-offline-foundation`
+**Branch:** documentation baseline `main`; current schema work `impl/002-relational-baseline`, stacked on `impl/001-offline-foundation`
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  
 **Feature documents:** `specs/001-multibrand-redesign/`  
-**Status:** Offline foundation and migration-only cipher qualification authorized on 2026-10-31. See the latest implementation record below and [qualification evidence](../../ops/OFFLINE_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production migrations and deployment remain outside this batch.
+**Status:** Offline foundation, migration-only cipher and T008 forward-schema qualification complete on 2026-10-31. See the latest implementation record below, [foundation evidence](../../ops/OFFLINE_QUALIFICATION.md) and [schema evidence](../../ops/SCHEMA_QUALIFICATION.md). Customer commerce features, production data/keys, real integrations, production/staging migration execution and deployment remain outside these batches.
 
 ## Where to continue
 
-Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/001-offline-foundation`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. Preserve approved business decisions and the limited offline authorization; earlier documentation-only status notes describe their historical snapshots.
+Continue AccAbad multi-brand redesign Spec Kit in `Farrokhzadeh/telegram-multi-bot-shop` from `impl/002-relational-baseline`. Read the latest implementation record, task status and qualification evidence, then the canonical schema, plan and contracts. T009 is next. Preserve approved business decisions and the limited offline authorization; earlier documentation-only status notes describe their historical snapshots.
 
 Historical decision sections retain counts from their approval stage; the latest decision below and current inventory define the active baseline.
 
@@ -293,3 +293,15 @@ The owner issued `/spec-kit implement` for the proposed offline foundation/quali
 - [CI run 41187355132](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41187355132) passed at `a74d8d8f208f1b36ae6a122216eace07c85411a0`: 10 tests (5 unit, 2 integration, 3 transport contract), zero build warnings/errors, four native executables and guarded native API probes. Exact versions, image/executable hashes, reproduction and limitations are in [OFFLINE_QUALIFICATION.md](../../ops/OFFLINE_QUALIFICATION.md). The local CoreCLR limitation is documented; executable proof comes from CI.
 
 **Current counts:** 28 approved table contracts, 84 FR, 53 SC, 96 tasks; **T001–T007 and T013 complete, 88 unchecked**. E1 remains closed for governance; E4 has only the listed foundation evidence, and E2/E3/E5/E6 remain unqualified. The requirements checklist was left unchanged. The next unfinished task is T008, the canonical 28-table schema/SchemaRunner; it is outside the completed batch. Preserve the scope boundary: no customer commerce feature, live integration, production data/key access, production migration, deployment, customer message, financial mutation or source write occurred.
+
+
+## T008 forward schema and operator qualification — 2026-10-31
+
+The owner said "do next" after the foundation report identified T008. This separately authorized writing the canonical baseline and explicit runner and applying/qualifying them on disposable synthetic databases. It did not authorize live customer features, production/staging database changes, source-data/key access or deployment. Work is isolated on `impl/002-relational-baseline`, stacked on the first draft foundation PR; no merge or release is implied.
+
+- Added all 28 explicit tables/types first, then validated cyclic FKs and typed cross-row guards. There is no extra history/checkpoint/refund/account table, JSON/jsonb/array/EAV state or stored order total. Later schema story tasks qualify/evolve this existing baseline.
+- Added a separate Native AOT `Platform.SchemaRunner` executable. It binds a protected external manifest to the reviewed embedded SQL and exact disposable identity/server/owner, applies one transaction, and atomically records SQL/catalog digests in schema metadata. Repeat runs verify unchanged state; partial schemas, wrong manifests and catalog/guard/type drift fail without repair. It writes a new protected external receipt. Normal API/bot/job startup never applies DDL.
+- Qualified ownership, finite/exact numbers, payment XOR/assets, immutable quote/history and exact wallet posting chains; whole manifests and saved order anchors; typed jobs; coupon owner edits/grants; supplier cap/unknown/item checks; whole FIFO allocations/holds; elapsed cutoff equality; and compensation's bidirectional terminal-order/ledger identity with rollback/replay checks. This is schema integrity evidence, not completed handlers, callback verification, new encryption envelopes or actual remote fulfillment.
+- [CI run 41207382338](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41207382338) passed at `774043e16be60730905ea488670ab57f7318daa2`: 52 tests (15 unit, 34 integration, 3 transport contract), zero build warnings/errors and five Linux native executables including the operator. Exact SQL/image/executable hashes, protocol, scope and reproduction are in [SCHEMA_QUALIFICATION.md](../../ops/SCHEMA_QUALIFICATION.md). All 16 projects restore under dependency lockfiles. Local PostgreSQL 18.6 PGlite checks supplement the native CI proof.
+
+**Current counts:** 28 tables, 84 FR, 53 SC, 96 tasks; **T001–T008 and T013 complete, 87 unchecked**. E1 remains closed for governance; E4 has the recorded forward-schema/foundation evidence only. E2/E3/E5/E6 remain unqualified. The reviewer-owned checklist is unchanged. Next unfinished task: T009, parameterized transaction sessions and typed money/currency helpers. No real credentials, source rows, live supplier/payment/FX/Telegram calls, staging/production migrations, deployment or live financial mutation occurred.
