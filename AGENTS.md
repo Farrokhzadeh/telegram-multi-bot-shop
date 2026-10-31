@@ -29,3 +29,5 @@ The owner subsequently said "do next steps without stopping": continue the remai
 T012 qualified on main: 172 tests and five native executables passed at d2218bf233182c158ad6726a0653ecce3c7db6a2 (CI 41233255842). See ops/CIPHER_QUALIFICATION.md. T001–T013 complete, 83 tasks remain. Continue T014 diagnostics next; the owner has authorized continued offline implementation without task confirmation.
 
 T014 qualified at 27c27ffd92b4504b91c39eddeb5faa7ff91fb397, CI 41233767226: 180 tests and five native executables. T001–T014 complete (14/96), 82 unchecked. Continue T015 typed outbox; see ops/DIAGNOSTICS_QUALIFICATION.md. Remain on main, batch changes by task, and continue without task confirmation. Live operations remain gated.
+
+T015 qualified at 41ed3ef0dd741de9447c2bf02f8e9cc6aabaf4eb, CI 41235165153: 188 tests and five native executables. T001–T015 complete (15/96), 81 unchecked. Continue T016 independent administrator sessions/audit/two-channel staff binding; see ops/OUTBOX_QUALIFICATION.md. Remain on main and continue without confirmation; live operations remain gated.

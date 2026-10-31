@@ -345,3 +345,8 @@ SC02 AES-256-GCM envelopes bind scope, table, row, field and exact key ID, with 
 ## T014 complete — 2026-10-31
 
 Safe structured completion logs exclude raw request, identity and exception content; generated request UUIDs correlate safe errors. Readiness remains false. [CI 41233767226](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41233767226) at 27c27ffd92b4504b91c39eddeb5faa7ff91fb397 passed 180 tests and all five native executables. [Diagnostics evidence](../../ops/DIAGNOSTICS_QUALIFICATION.md). T001–T014 complete, 14/96, 82 unchecked. T015 typed durable jobs is in progress on main; keep its checkbox unchecked until qualified. Continue without task confirmation; no live operations/deployment.
+
+
+## T015 complete — 2026-10-31
+
+The typed durable store covers all 18 job kinds, transactional deduplication, competing workers, server-clock leases/generations, stale-owner rollback, bounded local retries and blocked generic recovery of supplier/Telegram work. [CI 41235165153](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41235165153) at 41ed3ef0dd741de9447c2bf02f8e9cc6aabaf4eb passed 188 tests and all five native executables. [Outbox evidence](../../ops/OUTBOX_QUALIFICATION.md). T001–T015 complete: 15/96, 81 unchecked. T016 is in progress directly on main; no task confirmation pauses. Scheduler evidence never permits remote replay. Live operations and deployment remain gated.
