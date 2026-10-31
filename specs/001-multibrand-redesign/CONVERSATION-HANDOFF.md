@@ -355,3 +355,10 @@ The typed durable store covers all 18 job kinds, transactional deduplication, co
 ## T016 complete — 2026-10-31
 
 Independent password/bearer sessions, current-epoch command revalidation, typed append-only audit/idempotency, two-channel staff binding and revocation passed [CI 41237167656](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41237167656) at 32ebaef3c3aef87d7af595fbd9d2792cc2a096f6: 205 tests and five native executables. [Administrator evidence](../../ops/ADMIN_AUTH_QUALIFICATION.md). Existing canonical auth tables are reused; no duplicate auth migration is needed. Actual Telegram transport verification (T022), online login/rate/TLS/bootstrap and deployment remain gated. T001–T016 complete: 16/96, 80 unchecked. T017 cross-module foundation qualification is in progress on main; continue without confirmation.
+
+
+## T017 complete and branch 5 reconciliation — 2026-10-31
+
+The missing IntegrationTests compile link for SyntheticSecretFiles was fixed on main. [CI 41238819442](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41238819442) at f63ded5bcbe17e58afddf7901745249bf96f6880, tree 884838d7cb3e2a8d410d3e5e519f30ff742d95aa, passed 207 tests (101 unit, 64 integration, 42 contract), all required checks and five native executables. [Foundation evidence](../../ops/FOUNDATION_QUALIFICATION.md) records hashes, initial failure and scope. T001–T017 complete: 17/96, 79 unchecked. The canonical 28-table schema is unchanged. Branch impl/005-secret-files at f21a0f8 was checked by direct tree/content comparison: its changes, including exact key-byte probes, are already in main; no cherry-pick is needed. The clean local reconstructed checkout matches the qualified remote tree.
+
+Continue T018 onward directly on main with task-batched commits and synthetic fixtures/disposable databases, without task confirmation. This explicitly supersedes earlier implementation-deferred/business-handler notes for offline work. No deployment, real credentials/source rows or live Telegram/payment/supplier services. Reviewer checklists remain read-only; full business-runtime and operational release gates are incomplete.
