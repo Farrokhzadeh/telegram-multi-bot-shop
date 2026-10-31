@@ -18,10 +18,10 @@ public sealed class SupportSchemaTests
     public async Task TicketLifecycleStaffAssignmentAndPreorderLinkAreMembershipScoped()
     {
         await using var database = await CreateAsync();
-        const string ticket = "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES ('00000000-0000-0000-0000-000000000601'," + UserA + ",'general','customer')";
+        const string ticket = "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES ('00000000-0000-0000-0000-000000000601','" + UserA + "','general','customer')";
         await ExecuteAsync(database, ticket);
-        await RejectAsync(database, "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES (gen_random_uuid()," + UserA2 + ",'preorder_cancellation','customer')");
-        await RejectAsync(database, "INSERT INTO shop.support_tickets(id,user_id,order_id,category,source) VALUES (gen_random_uuid()," + UserA2 + "," + OrderA + ",'preorder_cancellation','customer')");
+        await RejectAsync(database, "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES (gen_random_uuid(),'" + UserA2 + "','preorder_cancellation','customer')");
+        await RejectAsync(database, "INSERT INTO shop.support_tickets(id,user_id,order_id,category,source) VALUES (gen_random_uuid(),'" + UserA2 + "','" + OrderA + "','preorder_cancellation','customer')");
         await ExecuteAsync(database, "UPDATE shop.support_tickets SET status='assigned',assigned_admin_id='" + AdminA + "',updated_at=CURRENT_TIMESTAMP WHERE id='00000000-0000-0000-0000-000000000601'");
         await RejectAsync(database, "UPDATE shop.support_tickets SET assigned_admin_id=gen_random_uuid() WHERE id='00000000-0000-0000-0000-000000000601'", PostgresErrorCodes.ForeignKeyViolation);
         await RejectAsync(database, "UPDATE shop.support_tickets SET status='closed' WHERE id='00000000-0000-0000-0000-000000000601'");
@@ -38,7 +38,7 @@ public sealed class SupportSchemaTests
     public async Task OrderLinkedPreorderCancellationTicketIsMembershipScopedAndKeepsFinancialState()
     {
         await using var database = await CreateAsync();
-        const string ticket = "INSERT INTO shop.support_tickets(id,user_id,order_id,category,source) VALUES ('00000000-0000-0000-0000-000000000604'," + UserA2 + "," + OrderA2 + ",'preorder_cancellation','customer')";
+        const string ticket = "INSERT INTO shop.support_tickets(id,user_id,order_id,category,source) VALUES ('00000000-0000-0000-0000-000000000604','" + UserA2 + "','" + OrderA2 + "','preorder_cancellation','customer')";
         await ExecuteAsync(database, ticket);
         await RejectAsync(database, "UPDATE shop.support_tickets SET user_id='" + UserA + "' WHERE id='00000000-0000-0000-0000-000000000604'");
         Assert.Equal("paid", await ScalarAsync<string>(database, "SELECT payment_status FROM shop.orders WHERE id='" + OrderA2 + "'"));
@@ -50,7 +50,7 @@ public sealed class SupportSchemaTests
     public async Task SupportMessagesAreAppendOnlySenderScopedAndMediaCapable()
     {
         await using var database = await CreateAsync();
-        const string ticket = "INSERT INTO shop.support_tickets(id,user_id,order_id,category,source) VALUES ('00000000-0000-0000-0000-000000000602'," + UserA2 + "," + OrderA2 + ",'preorder_cancellation','customer')";
+        const string ticket = "INSERT INTO shop.support_tickets(id,user_id,order_id,category,source) VALUES ('00000000-0000-0000-0000-000000000602','" + UserA2 + "','" + OrderA2 + "','preorder_cancellation','customer')";
         await ExecuteAsync(database, ticket);
         await ExecuteAsync(database, """
             INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_telegram_id,body_ciphertext,body_key_id)
@@ -89,7 +89,7 @@ public sealed class SupportSchemaTests
     public async Task SupportTicketAuditReferencesRequireTheMembershipBrandScope()
     {
         await using var database = await CreateAsync();
-        await ExecuteAsync(database, "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES ('00000000-0000-0000-0000-000000000603'," + UserA + ",'general','admin')");
+        await ExecuteAsync(database, "INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES ('00000000-0000-0000-0000-000000000603','" + UserA + "','general','admin')");
         await RejectAsync(database, $$"""
             INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
             VALUES (gen_random_uuid(),'admin','{{AdminA}}','00000000-0000-0000-0000-000000000002','support_assign','support_ticket','00000000-0000-0000-0000-000000000603','public synthetic assignment',gen_random_uuid())
