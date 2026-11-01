@@ -170,7 +170,7 @@ public sealed class CatalogStore
                 AND (d.kind<>'prepaid_entitlement' OR EXISTS(SELECT 1 FROM shop.orders s WHERE s.id=d.source_order_id AND s.user_id=$3 AND s.product_id=$2 AND s.order_kind='prepaid_units' AND s.payment_status='paid'))
             ORDER BY d.id FOR UPDATE OF d
             """, DbValue.Uuid(context.BrandId), DbValue.Uuid(data.ProductId), DbValue.Uuid(data.Member)), row => new Candidate(row.GetGuid(0), row.GetGuid(1), row.GetBinary(2), row.GetString(3), ExactDecimal.Parse(row.GetString(4)),
-                row.IsDBNull(5) ? null : row.GetInt64(5), row.GetInt64(6), row.GetInt64(7), row.IsDBNull(8) ? null : row.GetInt64(8), BigInteger.Parse(row.GetString(9), CultureInfo.InvariantCulture), BigInteger.Parse(row.GetString(10), CultureInfo.InvariantCulture)), 10000, ct);
+                row.IsDBNull(5) ? null : row.GetInt64(5), row.GetInt64(6), row.GetInt64(7), row.IsDBNull(8) ? null : row.GetInt64(8), BigInteger.Parse(row.GetString(9), CultureInfo.InvariantCulture), BigInteger.Parse(row.GetString(10), CultureInfo.InvariantCulture)), 1000, ct);
         var coupons = new List<QuoteCoupon>(rows.Count);
         var cipher = new BrandCipher(secrets);
         foreach (Candidate candidate in rows)
