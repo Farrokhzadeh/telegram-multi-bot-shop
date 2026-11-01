@@ -277,6 +277,8 @@ public sealed class HumanSupportTests
             Assert.Equal(request, await SupportStore.RecordStaffReplyAsync(reply, actor, ticket, "public-reply", ct: Ct, requestId: request));
             await reply.CommitAsync(Ct);
         }
+        await using (var changed = await fixture.Sessions.BeginAsync(Ct))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => SupportStore.RecordStaffReplyAsync(changed, actor, ticket, "public-changed-reply", ct: Ct, requestId: request));
         Assert.Equal(1L, await CountAll(fixture, "SELECT count(*) FROM shop.telegram_deliveries"));
         await using (var close = await fixture.Sessions.BeginAsync(Ct))
         {

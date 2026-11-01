@@ -80,11 +80,12 @@ public static class SupportStore
         Ticket t = await RequireTicketAsync(session, ticketId, ct);
         Guid messageId = requestId ?? Guid.NewGuid();
         if (messageId == Guid.Empty) throw new ArgumentException("Invalid message identity.");
-        var prior = await session.QuerySingleAsync<(Guid Ticket, Guid? Admin)?>(new DbStatement("SELECT m.ticket_id,m.sender_admin_id FROM (SELECT 1) seed LEFT JOIN shop.support_messages m ON m.id=$1", DbValue.Uuid(messageId)),
-            row => row.IsDBNull(0) ? ((Guid Ticket, Guid? Admin)?)null : (row.GetGuid(0), row.IsDBNull(1) ? (Guid?)null : row.GetGuid(1)), ct);
-        if (prior.HasValue)
+        Reply? prior = await session.QuerySingleAsync<Reply?>(new DbStatement("SELECT m.ticket_id,m.sender_admin_id,m.asset_ref,m.body_ciphertext,m.body_key_id FROM (SELECT 1) seed LEFT JOIN shop.support_messages m ON m.id=$1", DbValue.Uuid(messageId)),
+            row => row.IsDBNull(0) ? null : new Reply(row.GetGuid(0), row.IsDBNull(1) ? null : row.GetGuid(1), row.IsDBNull(2) ? null : row.GetString(2), row.IsDBNull(3) ? null : row.GetBinary(3), row.IsDBNull(4) ? null : row.GetString(4)), ct);
+        if (prior is not null)
         {
-            if (prior.Value.Ticket != ticketId || prior.Value.Admin != actor.AdminId) Deny(session);
+            if (prior.Ticket != ticketId || prior.Admin != actor.AdminId || prior.Asset != assetRef || prior.Key != bodyKeyId ||
+                (prior.Body is null) != (bodyCiphertext is null) || (prior.Body is not null && !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(prior.Body, bodyCiphertext!))) Deny(session);
             return messageId;
         }
         if (t.Status == "closed") Deny(session);
@@ -184,5 +185,6 @@ public static class SupportStore
         throw new UnauthorizedAccessException("Support ticket or message is unavailable.");
     }
 
+    private sealed record Reply(Guid Ticket, Guid? Admin, string? Asset, byte[]? Body, string? Key);
     private sealed record Ticket(Guid Id, Guid UserId, Guid BrandId, string Category, string Status, Guid? OrderId, Guid? AssignedAdminId);
 }
