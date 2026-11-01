@@ -193,6 +193,25 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
+    public async Task ApproveCostAsync(AuthenticatedAdmin actor, BrandContext context, Guid request, long expectedRevision, decimal maximumUnitCost, string currency, Guid command, CancellationToken ct = default)
+    {
+        AdminCommand.Revision(expectedRevision);
+        if (maximumUnitCost <= 0) throw new ArgumentOutOfRangeException(nameof(maximumUnitCost));
+        await using var session = await sessions.BeginAsync(ct);
+        try
+        {
+            if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.ApproveCost, AuditEntity.SupplierRequest, request, context.BrandId, AuditReason.OperatorReview, command,
+                AdminCommand.Hash("supplier-cost-approval-v1", request.ToString("D"), expectedRevision.ToString(System.Globalization.CultureInfo.InvariantCulture), ExactDecimal.Format(maximumUnitCost), currency), expectedRevision, expectedRevision + 1), ct)) return;
+            var binding = await LockAsync(session, context, request, ct);
+            bool safe = await session.QuerySingleAsync(new DbStatement("SELECT status='blocked' AND review_code='cost_limit' AND revision=$2 AND NOT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE supplier_request_id=$1 AND operation='submit') AND NOT EXISTS(SELECT 1 FROM shop.jobs WHERE supplier_request_id=$1 AND status='leased') FROM shop.supplier_requests WHERE id=$1", DbValue.Uuid(request), DbValue.Bigint(expectedRevision)), r => r.GetBoolean(0), ct);
+            if (!safe || currency != binding.Currency || maximumUnitCost <= binding.UnitBaseline) throw new InvalidOperationException("Original cost review is unavailable.");
+            await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='pending',review_code=NULL,approved_cost_ceiling=$1,approval_audit_id=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3", DbValue.Numeric(maximumUnitCost), DbValue.Uuid(command), DbValue.Uuid(request)), ct);
+            await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET review_code=NULL,fulfillment_status='acquiring',revision=revision+1 WHERE id=$1 AND review_code='cost_limit'", DbValue.Uuid(binding.OrderId)), ct);
+            await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, request), command, DateTime.UtcNow, ct);
+            await session.CommitAsync(ct);
+        }
+        catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
+    }
     public async Task<SupplierItem> OpenBonusAsync(AuthenticatedAdmin actor, BrandContext context, Guid request, Guid item, Guid command, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);

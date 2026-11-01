@@ -90,7 +90,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
             {
                 Guid request = value.SupplierRequestId!.Value;
                 var remote = await session.QuerySingleAsync(new DbStatement("SELECT revision,status,cost_baseline_amount IS NOT NULL,approval_audit_id IS NOT NULL FROM shop.supplier_requests WHERE id=$1 AND order_id=$2 FOR UPDATE", DbValue.Uuid(request), DbValue.Uuid(order)), r => (Revision: r.GetInt64(0), Status: r.GetString(1), Cost: r.GetBoolean(2), Override: r.GetBoolean(3)), ct);
-                if (remote.Revision != value.ExpectedRequestRevision || remote.Status != "failed" || remote.Override) throw new InvalidOperationException("Supplier outcome requires reconciliation or cost review.");
+                if (remote.Revision != value.ExpectedRequestRevision || remote.Status != "failed") throw new InvalidOperationException("Supplier outcome requires reconciliation or cost review.");
                 bool unsafeEffect = await session.QuerySingleAsync(new DbStatement("""
                     SELECT EXISTS(SELECT 1 FROM shop.jobs WHERE supplier_request_id=$1 AND status='leased') OR
                         EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled') OR

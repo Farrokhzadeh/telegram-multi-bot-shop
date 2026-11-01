@@ -1243,7 +1243,8 @@ BEGIN
     IF NEW.approval_audit_id IS NOT NULL THEN
         PERFORM require_true(EXISTS(SELECT 1 FROM audit_events WHERE id=NEW.approval_audit_id AND actor_kind='admin' AND action='approve_cost'
             AND entity_kind='supplier_request' AND entity_id=NEW.id AND brand_id=order_brand(NEW.order_id)
-            AND new_revision=NEW.revision),'request_cost_approval');
+            AND (new_revision=NEW.revision OR (TG_OP='UPDATE' AND NEW.approval_audit_id=OLD.approval_audit_id
+                AND NEW.approved_cost_ceiling=OLD.approved_cost_ceiling AND new_revision<=NEW.revision))),'request_cost_approval');
     END IF;
     IF TG_OP='UPDATE' THEN
         PERFORM require_true(ROW(NEW.id,NEW.order_id,NEW.requested_quantity,NEW.product_supplier_source_id,NEW.source_revision,

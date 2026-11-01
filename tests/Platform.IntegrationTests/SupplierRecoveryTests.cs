@@ -159,6 +159,60 @@ public sealed class SupplierRecoveryTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='requires_admin' AND review_code='partial_acquisition' AND release_authorized_at IS NULL", Ct));
         Assert.Null(await ClaimOptional(f, JobKind.PrepareManifest));
     }
+    [Fact]
+    public async Task AuditedCostOverrideChangesOnlyTheExplicitCeilingAndPreservesTheAcceptanceBaseline()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        Guid order = await SupplierFixture.AcceptAsync(f, 1, Ct);
+        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var port = new SyntheticSupplier { UnitCost = 2 };
+        var worker = new SupplierFulfillmentWorker(store, port, port);
+        var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
+        var binding = await store.ReadAsync(f.Context(0), lease, Ct);
+        await worker.RunAsync(f.Context(0), lease, Ct);
+        Assert.Equal(0, port.Submits);
+        var admin = await f.AdminAsync(Ct);
+        Guid command = Guid.NewGuid();
+        await store.ApproveCostAsync(admin, f.Context(0), binding.RequestId, 0, 2, "USD", command, Ct);
+        await store.ApproveCostAsync(admin, f.Context(0), binding.RequestId, 0, 2, "USD", command, Ct);
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        Assert.Equal(1, port.Submits);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='succeeded' AND cost_baseline_amount=1 AND approved_cost_ceiling=2 AND approval_audit_id IS NOT NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE max_charge_amount=2", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE id='" + order.ToString("D") + "' AND unit_price_usdt=10 AND review_code IS NULL", Ct));
+    }
+    [Fact]
+    public async Task FullyCouponCoveredZeroBalanceSupplierOrderRedeemsOnlyAtCompleteManifestWithoutMoneyOrExpiry()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        await Coupon(f, 100);
+        await SupplierFixture.AcceptAsync(f, 5, Ct);
+        var port = new SyntheticSupplier();
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.payments", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind IN ('expire_order_payment','verify_payment','issue_prepaid_coupon')", Ct));
+        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, Ct), Ct);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=5", Ct));
+        Assert.Equal(5L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+    }
+    [Fact]
+    public async Task SourceDisabledAfterAcceptanceRetainsBindingAndPaidObligationWithoutFallback()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        Guid source = await SupplierFixture.ConfigureAsync(f, Ct);
+        await SupplierFixture.AcceptAsync(f, 1, Ct);
+        await using (var edit = await f.Sessions.BeginAsync(Ct))
+        { await edit.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET enabled=false,revision=revision+1 WHERE id=$1", DbValue.Uuid(source)), Ct); await edit.CommitAsync(Ct); }
+        var port = new SyntheticSupplier();
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        Assert.Equal(0, port.Submits);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='blocked' AND source_revision=1 AND review_code='source_disabled'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='requires_admin' AND release_authorized_at IS NULL", Ct));
+    }
     internal static async Task Coupon(CheckoutFixture f, int percent)
     {
         var admin = await f.AdminAsync(Ct);
