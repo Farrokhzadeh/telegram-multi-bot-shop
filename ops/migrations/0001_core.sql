@@ -1406,8 +1406,10 @@ BEGIN
     PERFORM require_true(NEW.attempt_no=previous_no+1 AND NEW.outcome='in_flight','attempt_sequence_intent_first');
     IF NEW.operation='submit' THEN
         PERFORM require_true(r.status IN ('pending','in_flight') AND NEW.max_charge_amount<=coalesce(r.approved_cost_ceiling,r.cost_baseline_amount*1.10),'attempt_cost_ceiling');
-        PERFORM require_true(NOT EXISTS(SELECT 1 FROM supplier_request_attempts WHERE supplier_request_id=r.id AND operation='submit'
-            AND outcome IN ('in_flight','succeeded','timeout','unknown')),'unknown_submit_requires_reconciliation');
+        PERFORM require_true(NOT EXISTS(SELECT 1 FROM supplier_request_attempts a WHERE a.supplier_request_id=r.id AND a.operation='submit'
+            AND ((a.outcome='failed' AND a.error_code='confirmed_no_effect' AND a.evidence_ref IS NOT NULL) OR
+                (a.outcome IN ('timeout','unknown') AND EXISTS(SELECT 1 FROM supplier_request_attempts lookup WHERE lookup.parent_submit_attempt_id=a.id
+                    AND lookup.operation='status_lookup' AND lookup.outcome='failed' AND lookup.error_code='confirmed_no_effect' AND lookup.evidence_ref IS NOT NULL))) IS NOT TRUE),'unknown_submit_requires_reconciliation');
         IF EXISTS(SELECT 1 FROM supplier_request_attempts WHERE supplier_request_id=r.id AND operation='submit') THEN
             PERFORM require_true(EXISTS(SELECT 1 FROM audit_events WHERE id=NEW.admin_authorization_audit_id AND actor_kind='admin'
                 AND action='retry_supplier' AND entity_kind='supplier_request' AND entity_id=r.id AND new_revision=r.revision
