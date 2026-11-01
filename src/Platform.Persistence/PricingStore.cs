@@ -41,6 +41,8 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
         byte[] digest = Digest(context, key, code);
         var command = new AuditCommand(commandId, AuditAction.CouponIssue, AuditEntity.Discount, terms.Id, context.BrandId, AuditReason.OperatorReview, Guid.NewGuid(), Commitment(terms, digest), newRevision: 0);
         if (!await AdminAuditStore.AppendAsync(session, actor, command, ct)) return terms.Id;
+        if (terms.MemberId is Guid member) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 FOR UPDATE) u", DbValue.Uuid(member), DbValue.Uuid(context.BrandId)), row => row.GetInt64(0), ct);
+        if (terms.ProductId is Guid product) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(product)), row => row.GetInt64(0), ct);
         await LockBrandAsync(session, context, ct);
         byte[] plain = Encoding.UTF8.GetBytes(code);
         byte[] encrypted;
@@ -80,6 +82,7 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
                 found = await session.QuerySingleAsync(new DbStatement("""
                     SELECT d.id FROM (SELECT 1) seed LEFT JOIN shop.discounts d ON d.brand_id=$1 AND d.code_key_id=$2 AND d.code_digest=$3 AND d.active
                         AND (d.eligible_user_id IS NULL OR d.eligible_user_id=$4) AND (d.starts_at IS NULL OR d.starts_at<=clock_timestamp()) AND (d.ends_at IS NULL OR d.ends_at>clock_timestamp())
+                        AND (d.kind<>'prepaid_entitlement' OR EXISTS(SELECT 1 FROM shop.orders s WHERE s.id=d.source_order_id AND s.user_id=$4 AND s.product_id=d.product_id AND s.order_kind='prepaid_units' AND s.payment_status='paid'))
                     """, DbValue.Uuid(context.BrandId), DbValue.Text(key), DbValue.Binary(digest), DbValue.Uuid(member.Id)), row => row.IsDBNull(0) ? (Guid?)null : row.GetGuid(0), ct);
                 if (found is not null) break;
             }
@@ -97,6 +100,7 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
         BrandUser member = await RequireCustomerAsync(session, context, verifiedActorId, ct);
         var value = await session.QuerySingleAsync(new DbStatement("""
             SELECT d.code_ciphertext,d.code_key_id FROM (SELECT 1) seed LEFT JOIN shop.discounts d ON d.id=$1 AND d.brand_id=$2 AND (d.eligible_user_id IS NULL OR d.eligible_user_id=$3)
+                AND (d.kind<>'prepaid_entitlement' OR EXISTS(SELECT 1 FROM shop.orders s WHERE s.id=d.source_order_id AND s.user_id=$3 AND s.product_id=d.product_id AND s.order_kind='prepaid_units' AND s.payment_status='paid'))
             """, DbValue.Uuid(discountId), DbValue.Uuid(context.BrandId), DbValue.Uuid(member.Id)), row => row.IsDBNull(0) ? null : new ProtectedCode(row.GetBinary(0), row.GetString(1)), ct);
         if (value is null) Reject(session);
         byte[] plain = new BrandCipher(secrets).Decrypt(context, "discounts", discountId, "code_ciphertext", value.Key, value.Content);
