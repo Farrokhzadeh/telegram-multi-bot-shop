@@ -11,6 +11,8 @@ using Platform.Security;
 using Platform.Testing;
 using Platform.Telegram;
 
+await BrandAdministrationQualification.RunAsync();
+Console.WriteLine("PASS: native encrypted bot token rotation, verified channel configuration and audited replay.");
 await PaymentSettlementFixture.RunNativeAsync();
 Console.WriteLine("PASS: native authenticated payment lookup, atomic local settlement and replay.");
 NativeHostSmokeTests.VerifyInventoryIsolation();
