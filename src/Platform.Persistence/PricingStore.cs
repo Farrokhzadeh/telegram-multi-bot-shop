@@ -117,11 +117,11 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.discounts WHERE id=$1 AND brand_id=$2 FOR UPDATE) d", DbValue.Uuid(discountId), DbValue.Uuid(context.BrandId)), row => row.GetInt64(0), ct);
         var order = await session.QuerySingleAsync<ClaimOrder?>(new DbStatement("""
             SELECT o.id,o.quantity,o.currency,o.unit_price_usdt::text,o.unit_price_toman::text,o.auto_price_toman_snapshot,o.fx_rate_snapshot::text,
-                o.fx_source_snapshot,o.fx_fetched_at_snapshot,o.discount_pct_snapshot::text,o.discount_units_snapshot,o.price_calculation_version,o.payment_status
+                o.fx_source_snapshot,o.fx_fetched_at_snapshot,o.discount_pct_snapshot::text,o.discount_units_snapshot,o.price_calculation_version,o.payment_status,o.pricing_rounding_step_snapshot::text
             FROM (SELECT 1) seed LEFT JOIN (SELECT * FROM shop.orders WHERE id=$1 AND user_id=$2 FOR UPDATE) o ON true
             """, DbValue.Uuid(orderId), DbValue.Uuid(member.Id)), row => row.IsDBNull(0) ? null : new ClaimOrder(row.GetInt32(1), row.GetString(2), ExactDecimal.Parse(row.GetString(3)),
                 row.IsDBNull(4) ? null : ExactDecimal.Parse(row.GetString(4)), row.GetBoolean(5), row.IsDBNull(6) ? null : new FxRate(ExactDecimal.Parse(row.GetString(6)), row.GetString(7), row.GetUtc(8)),
-                row.IsDBNull(9) ? null : ExactDecimal.Parse(row.GetString(9)), row.IsDBNull(10) ? null : row.GetInt32(10), row.GetString(11), row.GetString(12)), ct);
+                row.IsDBNull(9) ? null : ExactDecimal.Parse(row.GetString(9)), row.IsDBNull(10) ? null : row.GetInt32(10), row.GetString(11), row.GetString(12), ExactDecimal.Parse(row.GetString(13))), ct);
         if (order is null) Reject(session);
         CouponClaim? existing = await ReadClaimAsync(session, discountId, orderId, ct);
         if (existing is not null)
@@ -133,7 +133,7 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
             SELECT r.id,d.percent_off::text FROM (SELECT 1) seed LEFT JOIN shop.discounts d ON d.id=$1 AND d.brand_id=$2 AND d.active AND (d.starts_at IS NULL OR d.starts_at<=clock_timestamp()) AND (d.ends_at IS NULL OR d.ends_at>clock_timestamp())
             LEFT JOIN shop.discount_revisions r ON r.discount_id=d.id AND r.revision_no=d.revision
             """, DbValue.Uuid(discountId), DbValue.Uuid(context.BrandId)), row => row.IsDBNull(0) ? null : new Grant(row.GetGuid(0), ExactDecimal.Parse(row.GetString(1))), ct);
-        if (grant is null || order.Status is "expired" or "cancelled" || order.Percent != grant.Percent || order.Units != order.Quantity || order.Version != PricingPolicy.Version) Reject(session);
+        if (grant is null || order.Status is "expired" or "cancelled" || order.Percent != grant.Percent || order.Units != order.Quantity || order.Version != PricingPolicy.Version || order.Step != PricingPolicy.TomanStep) Reject(session);
         Currency currency = order.Currency == "TOMAN" ? Currency.Toman : Currency.Usd;
         Money original = currency == Currency.Toman ? PricingPolicy.TomanTotal(order.UnitUsdt, order.UnitToman, order.Quantity, 0, order.Automatic, order.Rate) : PricingPolicy.DiscountTotal(order.UnitUsdt, order.Quantity, 0, Currency.Usd);
         Money discounted = currency == Currency.Toman ? PricingPolicy.TomanTotal(order.UnitUsdt, order.UnitToman, order.Quantity, grant.Percent, order.Automatic, order.Rate) : PricingPolicy.DiscountTotal(order.UnitUsdt, order.Quantity, grant.Percent, Currency.Usd);
@@ -172,9 +172,9 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
     public async Task<Guid?> ScheduleFxAsync(BrandContext context, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
-        var state = await session.QuerySingleAsync(new DbStatement("SELECT fx_enabled,fx_fetched_at,clock_timestamp() FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR SHARE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
-            row => (Enabled: row.GetBoolean(0), Fetched: row.IsDBNull(1) ? (DateTime?)null : row.GetUtc(1), Now: row.GetUtc(2)), ct);
-        if (!state.Enabled || state.Fetched > state.Now.AddHours(-1)) return null;
+        var state = await session.QuerySingleAsync(new DbStatement("SELECT fx_enabled,fx_fetched_at,clock_timestamp(),fx_source FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR SHARE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
+            row => (Enabled: row.GetBoolean(0), Fetched: row.IsDBNull(1) ? (DateTime?)null : row.GetUtc(1), Now: row.GetUtc(2), Source: row.IsDBNull(3) ? null : row.GetString(3)), ct);
+        if (!state.Enabled || (state.Source == PricingPolicy.FxSource && state.Fetched > state.Now.AddHours(-1) && state.Fetched <= state.Now)) return null;
         byte[] digest = SHA256.HashData(Encoding.ASCII.GetBytes("brand-fx-v1:" + context.BrandId.ToString("D") + ":" + (state.Now.Ticks / TimeSpan.TicksPerHour).ToString(CultureInfo.InvariantCulture)));
         Guid id = await OutboxStore.EnqueueAsync(session, JobIntent.BrandFx(context.BrandId), new Guid(digest.AsSpan(0, 16)), state.Now, ct);
         await session.CommitAsync(ct);
@@ -259,6 +259,6 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
     private static void Reject(DbSession session) { Poison(session); throw new UnauthorizedAccessException("Coupon or pricing operation is unavailable."); }
     private sealed record ProtectedCode(byte[] Content, string Key);
     private sealed record Grant(Guid Id, decimal Percent);
-    private sealed record ClaimOrder(int Quantity, string Currency, decimal UnitUsdt, decimal? UnitToman, bool Automatic, FxRate? Rate, decimal? Percent, int? Units, string Version, string Status);
+    private sealed record ClaimOrder(int Quantity, string Currency, decimal UnitUsdt, decimal? UnitToman, bool Automatic, FxRate? Rate, decimal? Percent, int? Units, string Version, string Status, decimal Step);
     private sealed record ClaimState(string Payment, bool Release, string Kind, string Fulfillment, string? Resolution);
 }

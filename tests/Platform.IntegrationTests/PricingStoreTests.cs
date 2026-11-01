@@ -177,10 +177,10 @@ public sealed class PricingStoreTests
             byte[] content;
             try { content = new BrandCipher(fixture.Secrets).Encrypt(fixture.Context(0), "fulfillments", unit, "delivered_content", plain); }
             finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain); }
-            await complete.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(order)), Ct);
+            await complete.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,delivery_generation=$1,manifest_asset_ref='public-synthetic-manifest',manifest_digest=decode(repeat('55',32),'hex'),manifest_prepared_at=CURRENT_TIMESTAMP WHERE id=$2", DbValue.Uuid(generation), DbValue.Uuid(order)), Ct);
             await complete.ExecuteAsync(new DbStatement("INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,status,delivered_content,delivered_content_key_id,content_kind,manifest_generation) VALUES ($1,$2,1,'local','ready',$3,'current','text',$4)", DbValue.Uuid(unit), DbValue.Uuid(order), DbValue.Binary(content), DbValue.Uuid(generation)), Ct);
             await complete.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET state='allocated',assigned_fulfillment_id=$1,allocated_at=CURRENT_TIMESTAMP WHERE id=$2", DbValue.Uuid(unit), DbValue.Uuid(stock.Id)), Ct);
-            await complete.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='ready',delivery_generation=$1,manifest_asset_ref='public-synthetic-manifest',manifest_digest=decode(repeat('55',32),'hex'),manifest_prepared_at=CURRENT_TIMESTAMP,release_authorized_at=CURRENT_TIMESTAMP WHERE id=$2", DbValue.Uuid(generation), DbValue.Uuid(order)), Ct);
+            await complete.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='ready',release_authorized_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(order)), Ct);
             Assert.True(await store.TransitionClaimAsync(complete, fixture.Context(0), terms.Id, order, true, Ct));
             Assert.False(await store.TransitionClaimAsync(complete, fixture.Context(0), terms.Id, order, true, Ct));
             await complete.CommitAsync(Ct);
@@ -212,6 +212,20 @@ public sealed class PricingStoreTests
         await using var read = await fixture.Sessions.BeginAsync(Ct);
         Assert.Equal(("123456.7", PricingPolicy.FxSource, true, 2L), await read.QuerySingleAsync(new DbStatement("SELECT current_fx::text,fx_source,fx_error_code IS NULL,policy_version FROM shop.brands WHERE id=$1", DbValue.Uuid(fixture.Brands[0])), row => (row.GetString(0), row.GetString(1), row.GetBoolean(2), row.GetInt64(3)), Ct));
         Assert.Equal("12345", await read.QuerySingleAsync(new DbStatement("SELECT price_toman::text FROM shop.brand_products WHERE brand_id=$1 AND product_id=$2", DbValue.Uuid(fixture.Brands[0]), DbValue.Uuid(fixture.Product)), row => row.GetString(0), Ct));
+    }
+
+    [Fact]
+    public async Task WrongSourceCannotSuppressAnHourlyNobitexRefresh()
+    {
+        await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
+        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        await EnableFx(fixture);
+        await using (var wrong = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await wrong.ExecuteAsync(new DbStatement("UPDATE shop.brands SET current_fx=120000,fx_source='public-other-source',fx_fetched_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(fixture.Brands[0])), Ct);
+            await wrong.CommitAsync(Ct);
+        }
+        Assert.NotNull(await store.ScheduleFxAsync(fixture.Context(0), Ct));
     }
 
     [Fact]
