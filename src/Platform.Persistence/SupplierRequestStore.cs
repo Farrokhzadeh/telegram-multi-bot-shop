@@ -114,7 +114,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     private async Task<bool> ExistingItemsMatchAsync(DbSession session, BrandContext context, SupplierBinding binding, SupplierOutcome result, CancellationToken ct)
     {
         int newCustomers = 0;
-        int available = await session.QuerySingleAsync(new DbStatement("SELECT count(*)::integer FROM shop.fulfillments WHERE order_id=$1 AND status='unfilled'", DbValue.Uuid(binding.OrderId)), r => r.GetInt32(0), ct);
+        int available = await session.QuerySingleAsync(new DbStatement("SELECT quantity-(SELECT count(*)::integer FROM shop.fulfillments WHERE order_id=$1 AND status<>'unfilled') FROM shop.orders WHERE id=$1", DbValue.Uuid(binding.OrderId)), r => r.GetInt32(0), ct);
         foreach (var item in result.Items)
         {
             var existing = await session.QueryManyAsync(new DbStatement("""
@@ -140,7 +140,13 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             if (exists) continue;
             if (item.Disposition == SupplierItemDisposition.Customer)
             {
-                Guid id = await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.fulfillments WHERE order_id=$1 AND status='unfilled' ORDER BY unit_no LIMIT 1 FOR UPDATE", DbValue.Uuid(binding.OrderId)), r => r.GetGuid(0), ct);
+                var slots = await session.QueryManyAsync(new DbStatement("SELECT id FROM shop.fulfillments WHERE order_id=$1 AND status='unfilled' ORDER BY unit_no LIMIT 1 FOR UPDATE", DbValue.Uuid(binding.OrderId)), r => r.GetGuid(0), 1, ct);
+                Guid id = slots.Count == 1 ? slots[0] : Guid.CreateVersion7();
+                if (slots.Count == 0) await session.ExecuteAsync(new DbStatement("""
+                    INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,supplier_request_id)
+                    SELECT $1,$2,(SELECT min(n) FROM generate_series(1,o.quantity) n WHERE NOT EXISTS(SELECT 1 FROM shop.fulfillments f WHERE f.order_id=o.id AND f.unit_no=n)),'supplier',$3
+                    FROM shop.orders o WHERE o.id=$2
+                    """, DbValue.Uuid(id), DbValue.Uuid(binding.OrderId), DbValue.Uuid(binding.RequestId)), ct);
                 byte[] cipher = new BrandCipher(secrets).Encrypt(context, "fulfillments", id, "delivered_content", item.Content.Span);
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.fulfillments SET kind='supplier',status='acquired',supplier_request_id=$1,remote_item_ref=$2,supplier_item_key=$3,delivered_content=$4,delivered_content_key_id=$5,content_kind=$6 WHERE id=$7",
                     DbValue.Uuid(binding.RequestId), DbValue.Text(item.Reference), DbValue.Binary(key), DbValue.Binary(cipher), DbValue.Text(secrets.CurrentBrandKeyId(context)), DbValue.Text(item.ContentKind), DbValue.Uuid(id)), ct);
