@@ -133,3 +133,18 @@ requested_quantity is the positive remote remainder, with cost baseline scoped t
 ## Canonical persistence selected by consistency review
 
 [Schema contract](../schema-contract.md) selects the one product pointer, typed observation/cost/account snapshots, positive remote remainder, submit-parent/remote-key attempt evidence and admin_held bonus storage without a 29th table. Disabling a selected mapping is allowed but cannot authorize a new purchase. Partial/unknown items remain internal; provider item identity and enforceable charge ceiling must be independently proved before enabling each adapter. Current adapter source is not that proof.
+
+
+## Phase 7 provider-neutral offline checkpoint (2026-11-01)
+
+Synthetic adapters now exercise a committed original intent, explicit per-unit maximum charge, exact bound identity/currency, protected response archival, status lookup, encrypted customer/bonus attribution and complete manifests. These fixtures do not demonstrate any real provider's current capability. No real provider adapter or transport is enabled, and T057 remains unchecked.
+
+| Provider | Automatic procurement gate | Required evidence before implementation/enablement |
+|---|---|---|
+| Akunding | Closed | Sanitized authoritative currency, charge ceiling, original intent/order recovery, stable item identities and credential replay |
+| ProdSeller | Closed | Sanitized exact ready-item/type contract, currency, maximum charge, remote deduplication/recovery and stable credential identities |
+| RoboticVN | Closed | Sanitized product/variant eligibility, currency, enforceable charge ceiling and original ambiguous-purchase/credential recovery |
+| Canboso | Closed | Sanitized maximum charge, original purchase/credential recovery, stable identities and explicit customer/bonus attribution |
+| RapidX | Closed | Sanitized currency and ready-item wire shapes, maximum charge, original ambiguous-purchase recovery and stable credential identities |
+
+A generic HTTP retry flag, historical source comment, local intent, configured account reference or synthetic capability flag supplies none of this evidence. Provider-specific direct pre-checkout refresh and exact response parsing remain gated with the adapter. Public documentation/source evidence may be reviewed read-only; live service calls, credentials and source database rows remain excluded. See `ops/SUPPLIER_QUALIFICATION.md` for the executable offline scope and `supplier-failure-policy.md` for retained liabilities and explicit decisions.
