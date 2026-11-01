@@ -71,7 +71,9 @@ public sealed class TelegramWebhookVerifier : IDisposable
             {
                 sender = message.GetProperty("from");
                 value = message.GetProperty("text").GetString() ?? throw new TelegramIngressRejectedException();
-                if (value is not ("/start" or "/menu" or "/support" or "/discounts") && !(value.Length == 82 && value.StartsWith("/bind ", StringComparison.Ordinal))) throw new TelegramIngressRejectedException();
+                if (value.Length is < 1 or > 4096 || string.IsNullOrWhiteSpace(value)) throw new TelegramIngressRejectedException();
+                if (value.StartsWith('/') && value is not ("/start" or "/menu" or "/support" or "/discounts") &&
+                    !(value.Length == 82 && value.StartsWith("/bind ", StringComparison.Ordinal)) && !IsSupportCommand(value)) throw new TelegramIngressRejectedException();
             }
             long actorId = Number(sender, "id", true);
             if (sender.GetProperty("is_bot").GetBoolean()) throw new TelegramIngressRejectedException();
@@ -82,6 +84,9 @@ public sealed class TelegramWebhookVerifier : IDisposable
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
         { throw new TelegramIngressRejectedException(); }
     }
+
+    internal static bool IsSupportCommand(string value) => value == "/support" ||
+        (value.StartsWith("/support ", StringComparison.Ordinal) && Guid.TryParseExact(value[9..], "D", out Guid id) && id != Guid.Empty && id.ToString("D") == value[9..]);
 
     private static long Number(JsonElement value, string name, bool positive)
     {

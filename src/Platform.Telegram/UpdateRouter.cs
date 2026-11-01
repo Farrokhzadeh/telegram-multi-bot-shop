@@ -10,13 +10,19 @@ public sealed record UpdateRouteResult(UpdateRouteCode Code, long FlowRevision, 
 public sealed class UpdateRouter
 {
     private readonly DbSessionFactory sessions;
+    private readonly HumanSupportRouter? support;
     private readonly Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock;
-    public UpdateRouter(DbSessionFactory sessions, Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock)
-    { this.sessions = sessions; this.observeRestock = observeRestock; }
+    public UpdateRouter(DbSessionFactory sessions, Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock, HumanSupportRouter? support = null)
+    { this.sessions = sessions; this.observeRestock = observeRestock; this.support = support; }
 
     public async Task<UpdateRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(update);
+        if (support is not null && !update.IsCallback && (TelegramWebhookVerifier.IsSupportCommand(update.Value) || !update.Value.StartsWith('/')))
+        {
+            HumanSupportRouteResult result = await support.RouteAsync(update, ct);
+            return new(result.Busy ? UpdateRouteCode.Busy : UpdateRouteCode.Support, 0, result.TicketId);
+        }
         Callback? callback = update.IsCallback ? ParseCallback(update.Value) : null;
         RestockObservation? observation = null;
         if (callback?.Action == 's')
