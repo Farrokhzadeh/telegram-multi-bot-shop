@@ -28,7 +28,7 @@ public sealed class PaymentSettlementTests
         await using (var disable = await f.Sessions.BeginAsync(Ct))
         {
             await disable.ExecuteAsync(new DbStatement("UPDATE shop.brands SET allow_wallet_topup=false,zero_balance_topup=false,policy_version=policy_version+1"), Ct);
-            await disable.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked=true WHERE id=$1", DbValue.Uuid(f.Users[0])), Ct);
+            await disable.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(f.Users[0])), Ct);
             await disable.CommitAsync(Ct);
         }
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN"))
@@ -102,7 +102,7 @@ public sealed class PaymentSettlementTests
         var order = await fixture.OrderAsync(ct: Ct);
         Assert.Equal(5m, order.Due);
         await using (var retire = await f.Sessions.BeginAsync(Ct))
-        { await retire.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET state='admin_held'"), Ct); await retire.CommitAsync(Ct); }
+        { await retire.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET state='retired'"), Ct); await retire.CommitAsync(Ct); }
         await fixture.CaptureAsync(order.Payment, order.Origin, order.Due, ct: Ct);
         Assert.Equal(ExternalSettlementRoute.LocalShortageCredit, (await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct)).Route);
         Assert.Equal(PaymentSettlementOutcome.Replayed, (await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct)).Outcome);
