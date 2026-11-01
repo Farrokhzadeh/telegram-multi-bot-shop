@@ -16,8 +16,12 @@ public sealed class BrandAdministrationTests
         var admin = await f.AdminAsync(Ct);
         var store = new BrandAdministrationStore(f.Sessions, f.Secrets);
         var channels = new[] { new RequiredChannel(-10001, "Public channel", "https://t.me/public_channel") };
+        BrandPolicySnapshot original;
+        await using (var read = await f.Sessions.BeginAsync(Ct)) original = await BrandPolicyStore.ReadAsync(read, f.Context(0), CheckoutFixture.Actor(0), Ct);
         Guid command = Guid.NewGuid();
         Assert.Equal(1, await store.SetChannelsAsync(admin, f.Context(0), channels, 0, command, Eligible, Ct));
+        await using (var stale = await f.Sessions.BeginAsync(Ct))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => BrandPolicyStore.RequireCurrentAsync(stale, f.Context(0), CheckoutFixture.Actor(0), original, true, Ct));
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetChannelsAsync(admin, f.Context(0), [], 0, Guid.NewGuid(), Eligible, Ct));
         await Assert.ThrowsAsync<FormatException>(() => store.SetChannelsAsync(admin, f.Context(0), [], 0, command, Eligible, Ct));
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetChannelsAsync(admin, f.Context(0), [], 1, Guid.NewGuid(), (_, _, _) => Task.FromResult(false), Ct));
@@ -44,6 +48,21 @@ public sealed class BrandAdministrationTests
         }, Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE reason='credential_rotation'", Ct));
         Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.brands WHERE octet_length(bot_token_ciphertext)=1", Ct));
+    }
+    [Fact]
+    public async Task VaultRejectsForeignScopeTamperingAndDisposedPlaintext()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        using var token = BotToken.Parse("1001:" + new string('s', 35));
+        var vault = new BotTokenVault(f.Secrets);
+        var encrypted = vault.Protect(f.Context(0), token);
+        Assert.Throws<CipherRejectedException>(() => vault.OpenForTrustedTransport(f.Context(1), encrypted.KeyId, encrypted.Ciphertext));
+        encrypted.Ciphertext[^1] ^= 1;
+        Assert.Throws<CipherRejectedException>(() => vault.OpenForTrustedTransport(f.Context(0), encrypted.KeyId, encrypted.Ciphertext));
+        var previous = token.ForTrustedTransport();
+        token.Dispose();
+        Assert.True(previous.Span.IndexOfAnyExcept((byte)0) < 0);
+        Assert.Throws<ObjectDisposedException>(() => token.ForTrustedTransport());
     }
     [Theory]
     [InlineData("")]

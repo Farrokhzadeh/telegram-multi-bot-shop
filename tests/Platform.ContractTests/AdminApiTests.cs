@@ -86,7 +86,9 @@ public sealed class AdminApiTests
         Assert.DoesNotContain(tokenValue, response, StringComparison.Ordinal);
         Assert.Equal(HttpStatusCode.OK, (await Put(body)).StatusCode);
         Assert.Equal(1, checks);
-        Assert.False((await Put(body.Replace(new string('s', 35), new string('t', 35), StringComparison.Ordinal))).IsSuccessStatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await Put(body.Replace(new string('s', 35), new string('t', 35), StringComparison.Ordinal))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Put("{")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Put(body.Replace("ExpectedRevision", "UnrecognizedRevision", StringComparison.Ordinal))).StatusCode);
         string metadata = await client.GetStringAsync($"/v1/admin/brands/{f.Brands[0]:D}", Ct);
         foreach (string privateValue in new[] { tokenValue, "ciphertext", "KeyId" }) Assert.DoesNotContain(privateValue, metadata, StringComparison.OrdinalIgnoreCase);
         await using (var revoke = await f.Sessions.BeginAsync(Ct))
