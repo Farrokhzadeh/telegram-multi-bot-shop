@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using NpgsqlTypes;
 using Platform.Core;
+using Platform.Fulfillment;
 using Platform.AotSmoke;
 using Platform.Migration;
 using Platform.Persistence;
@@ -196,6 +197,36 @@ await using (var sourceSale = await CheckoutFixture.CreateAsync(balance: 1000, s
         await sourceSale.CountAsync("SELECT count(*) FROM shop.discounts") != 1)
         throw new InvalidOperationException("Native unpaid source creation failed.");
     Console.WriteLine("PASS: native paid-source single-code issuance and unpaid crypto intent without goods, live invoices or fabricated administrator.");
+}
+await using (var deliveryFixture = await CheckoutFixture.CreateAsync())
+{
+    Guid order = OrderIds.New();
+    var localRequest = new LocalCheckoutRequest(order, deliveryFixture.Product, 1, 10);
+    await deliveryFixture.Store.PurchaseLocalAsync(deliveryFixture.Context(0), CheckoutFixture.Actor(0), localRequest);
+    JobLease preparation;
+    await using (var claim = await deliveryFixture.Sessions.BeginAsync())
+    {
+        preparation = await OutboxStore.ClaimAsync(claim, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromSeconds(30)) ?? throw new InvalidOperationException();
+        await claim.CommitAsync();
+    }
+    var deliveryStore = new DeliveryStore(deliveryFixture.Sessions, deliveryFixture.Secrets);
+    if (await deliveryStore.PrepareAsync(deliveryFixture.Context(0), preparation) is not null) throw new InvalidOperationException("Missing anchor silently created a send.");
+    await deliveryStore.AuthorizeSendRecoveryAsync(deliveryFixture.Context(0), await deliveryFixture.AdminAsync(), order, Guid.NewGuid());
+    JobLease sending;
+    await using (var claim = await deliveryFixture.Sessions.BeginAsync())
+    {
+        sending = await OutboxStore.ClaimAsync(claim, JobKind.SendTelegram, Guid.NewGuid(), TimeSpan.FromSeconds(30)) ?? throw new InvalidOperationException();
+        await claim.CommitAsync();
+    }
+    await new LocalDeliveryWorker(deliveryStore).RunAsync(deliveryFixture.Context(0), sending, (dispatch, _) =>
+    {
+        if (dispatch.ChatId != CheckoutFixture.Actor(0) || dispatch.TargetMessageId is not null || dispatch.Content.IsEmpty) throw new InvalidOperationException();
+        return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 601));
+    });
+    if (await deliveryFixture.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'") != 1 ||
+        await deliveryFixture.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'") != 1)
+        throw new InvalidOperationException("Native complete-manifest delivery failed.");
+    Console.WriteLine("PASS: native protected complete manifest, explicit recovery send and saved outcome with synthetic transport.");
 }
 Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
 

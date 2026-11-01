@@ -13,6 +13,7 @@
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
     <Compile Include="../Shared/TelegramFixture.cs" Link="Shared/TelegramFixture.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../../src/Platform.Fulfillment/Platform.Fulfillment.csproj" />
     <ProjectReference Include="../../src/Platform.Telegram/Platform.Telegram.csproj" />
     <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
     <ProjectReference Include="../../src/Platform.Persistence/Platform.Persistence.csproj" />
