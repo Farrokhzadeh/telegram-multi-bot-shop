@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platform.Api/OpenApiContract.cs" Link="Api/OpenApiContract.cs" />
     <Compile Include="../../src/Platform.Api/CampaignEndpoints.cs" Link="Api/CampaignEndpoints.cs" />
     <Compile Include="../../src/Platform.Api/OperationsEndpoints.cs" Link="Api/OperationsEndpoints.cs" />
     <Compile Include="../../src/Platform.Api/OrderAndWalletEndpoints.cs" Link="Api/OrderAndWalletEndpoints.cs" />

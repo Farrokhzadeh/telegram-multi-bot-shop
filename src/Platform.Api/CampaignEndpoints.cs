@@ -27,7 +27,7 @@ public static class CampaignEndpoints
     }
 }
 
-[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectNullableAnnotations = true, RespectRequiredConstructorParameters = true, AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(CampaignLaunch))]
 [JsonSerializable(typeof(CampaignTransition))]
 internal sealed partial class CampaignJsonContext : JsonSerializerContext;

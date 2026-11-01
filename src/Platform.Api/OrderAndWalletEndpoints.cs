@@ -60,7 +60,7 @@ public static class OrderAndWalletEndpoints
     }
 }
 
-[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectNullableAnnotations = true, RespectRequiredConstructorParameters = true, AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(AdminPage<AdminOrder>))]
 [JsonSerializable(typeof(WalletCommand))]
 [JsonSerializable(typeof(ResolutionCommand))]

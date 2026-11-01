@@ -65,6 +65,7 @@ jobs:
         with:
           name: offline-qualification-${{ github.sha }}
           path: |
+            artifacts/contracts/
             artifacts/test-results/
             **/packages.lock.json
           retention-days: 7

@@ -5,6 +5,9 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platform.Api/*.cs" Exclude="../../src/Platform.Api/Program.cs" LinkBase="Api" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Compile Include="../Shared/ApiContractQualification.cs" Link="Shared/ApiContractQualification.cs" />
     <Compile Include="../Shared/BrandAdministrationQualification.cs" Link="Shared/BrandAdministrationQualification.cs" />
     <ProjectReference Include="../../src/Platform.Payments/Platform.Payments.csproj" />
     <Compile Include="../Shared/PaymentSettlementFixture.cs" Link="Shared/PaymentSettlementFixture.cs" />

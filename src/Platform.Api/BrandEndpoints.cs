@@ -50,7 +50,7 @@ public static class BrandEndpoints
 
 }
 
-[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectNullableAnnotations = true, RespectRequiredConstructorParameters = true, AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(BotTokenChange))]
 [JsonSerializable(typeof(RequiredChannelsChange))]
 [JsonSerializable(typeof(BrandConfiguration))]

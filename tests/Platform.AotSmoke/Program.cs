@@ -11,6 +11,8 @@ using Platform.Security;
 using Platform.Testing;
 using Platform.Telegram;
 
+await ApiContractQualification.RunAsync(true);
+Console.WriteLine("PASS: native generated administrator API contract, schemas and mandatory authorization metadata.");
 await BrandAdministrationQualification.RunAsync();
 Console.WriteLine("PASS: native encrypted bot token rotation, verified channel configuration and audited replay.");
 await PaymentSettlementFixture.RunNativeAsync();

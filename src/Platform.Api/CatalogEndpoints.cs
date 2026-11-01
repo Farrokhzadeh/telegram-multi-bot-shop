@@ -56,7 +56,7 @@ public static class CatalogEndpoints
     private static IResult Saved(long revision) => Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
 }
 
-[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectNullableAnnotations = true, RespectRequiredConstructorParameters = true, AllowDuplicateProperties = false)]
 [JsonSerializable(typeof(AdminPage<AdminProduct>))]
 [JsonSerializable(typeof(AdminPage<InventoryMetadata>))]
 [JsonSerializable(typeof(AdminChange<BrandPolicyEdit>))]

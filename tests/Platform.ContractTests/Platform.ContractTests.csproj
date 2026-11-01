@@ -5,6 +5,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platform.Api/PaymentEndpoints.cs" Link="Api/PaymentEndpoints.cs" />
+    <Compile Include="../../src/Platform.Api/ManualDepositEndpoints.cs" Link="Api/ManualDepositEndpoints.cs" />
+    <Compile Include="../Shared/ApiContractQualification.cs" Link="Shared/ApiContractQualification.cs" />
+    <Compile Include="../../src/Platform.Api/OpenApiContract.cs" Link="Api/OpenApiContract.cs" />
     <Compile Include="../../src/Platform.Api/CampaignEndpoints.cs" Link="Api/CampaignEndpoints.cs" />
     <Compile Include="../../src/Platform.Api/OperationsEndpoints.cs" Link="Api/OperationsEndpoints.cs" />
     <ProjectReference Include="../../src/Platform.Payments/Platform.Payments.csproj" />
