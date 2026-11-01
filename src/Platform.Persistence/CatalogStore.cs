@@ -141,7 +141,7 @@ public sealed class CatalogStore
             !accounts.TryGetValue(source.Provider, out string? account) || source.Account != account ? "account_unverified" :
             source.ObservedSourceRevision != source.Revision || source.ObservedAt is not DateTime observed || observed > data.Now || data.Now - observed > TimeSpan.FromSeconds(30) ? "cost_unverified" :
             source.Eligibility != "ready_item" ? "source_ineligible" : source.Availability != "available" || source.Quantity is not int available || available < quantity ? "stock_shortage" : null;
-        if (source is null || source.Cost is not > 0 || source.Currency is null || source.Quote is null || source.ObservedAt is null)
+        if (source is null || source.Cost is not > 0 || source.Currency is null || source.Quote is null || source.ObservedAt is null || source.Account is null)
         {
             await session.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.supplier_requests(id,order_id,requested_quantity,product_supplier_source_id,source_revision,provider_code,account_ref,external_product_id,external_variant_id,

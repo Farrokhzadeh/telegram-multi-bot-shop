@@ -165,9 +165,10 @@ public sealed class PaymentSettlementTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task MixedSupplierSettlementBindsCurrentSourceOrPreservesBlockedPaidObligation(bool disable)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task MixedSupplierSettlementBindsCurrentSourceOrPreservesBlockedPaidObligation(bool disable, bool switchSource)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 3, ct: Ct);
         var fixture = new PaymentSettlementFixture(f);
@@ -187,10 +188,18 @@ public sealed class PaymentSettlementTests
             await edit.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET enabled=false,revision=revision+1"), Ct);
             await edit.CommitAsync(Ct);
         }
+        if (switchSource)
+        {
+            await using var edit = await f.Sessions.BeginAsync(Ct);
+            Guid next = Guid.NewGuid();
+            await edit.ExecuteAsync(new DbStatement("INSERT INTO shop.product_supplier_sources(id,product_id,provider_code,external_product_id,enabled) VALUES ($1,$2,'synthetic','public next product',true)", DbValue.Uuid(next), DbValue.Uuid(f.Product)), Ct);
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.products SET active_supplier_source_id=$1,revision=revision+1", DbValue.Uuid(next)), Ct);
+            await edit.CommitAsync(Ct);
+        }
         await fixture.CaptureAsync(order.Payment, order.Origin, order.Due, ct: Ct);
         Assert.Equal(ExternalSettlementRoute.Supplier, (await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct)).Route);
         Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=2 AND cost_baseline_amount=1 AND status='" + (disable ? "blocked" : "pending") + "'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=2 AND " + (switchSource ? "cost_baseline_amount IS NULL" : "cost_baseline_amount=1") + " AND status='" + (disable || switchSource ? "blocked" : "pending") + "'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE release_authorized_at IS NOT NULL", Ct));
