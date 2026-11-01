@@ -15,8 +15,17 @@ public sealed class WalletCheckoutService(DbSessionFactory sessions, CheckoutSto
         await using (var read = await sessions.BeginAsync(ct)) policy = await BrandPolicyStore.ReadAsync(read, context, verifiedActorId, ct);
         ChannelAccess? access = await BrandPolicy.CheckChannelsAsync(policy, verifiedActorId, checkChannels, ct);
         if (access is null) return new(CheckoutOutcome.Unavailable);
-        PreparedCheckout prepared = await catalog.PrepareAsync(context, verifiedActorId, new(request.ProductId, request.Quantity, request.Payment), ct);
-        return await AcceptAsync(context, verifiedActorId, request, prepared, access, ct);
+        try
+        {
+            PreparedCheckout prepared = await catalog.PrepareAsync(context, verifiedActorId, new(request.ProductId, request.Quantity, request.Payment), ct);
+            return await AcceptAsync(context, verifiedActorId, request, prepared, access, ct);
+        }
+        catch (Exception error) when (error is PricingRejectedException or DiscountQuantityException or UnauthorizedAccessException)
+        {
+            CheckoutResult? committed = await checkout.ReplayAsync(context, verifiedActorId, request, ct);
+            if (committed is not null) return committed;
+            throw;
+        }
     }
 
     public async Task<CheckoutResult> AcceptAsync(BrandContext context, long verifiedActorId, CheckoutRequest request,

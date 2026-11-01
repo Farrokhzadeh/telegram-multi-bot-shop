@@ -125,7 +125,7 @@ public sealed class PreparedCheckoutTests
         await using (var channel = await f.Sessions.BeginAsync(Ct))
         {
             await channel.ExecuteAsync(new DbStatement("UPDATE shop.brands SET require_channel_join=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(f.Brands[0])), Ct);
-            await channel.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_channels(id,brand_id,chat_id,required,active) VALUES (gen_random_uuid(),$1,-1001,true,true)", DbValue.Uuid(f.Brands[0])), Ct);
+            await channel.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_channels(brand_id,chat_id,required,active) VALUES ($1,-1001,true,true)", DbValue.Uuid(f.Brands[0])), Ct);
             await channel.CommitAsync(Ct);
         }
         var service = Service(f);
@@ -164,6 +164,54 @@ public sealed class PreparedCheckoutTests
             await repair.CommitAsync(Ct);
         }
         Assert.Equal(CheckoutOutcome.Purchased, (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct)).Outcome);
+    }
+
+    [Fact]
+    public async Task ValidWalletCheckoutReplacesOnlyAnUnobservedPendingOrderAndCancelsItsExpiry()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 2, ct: Ct);
+        Guid old = await Pending(f, "awaiting_payment");
+        await using (var job = await f.Sessions.BeginAsync(Ct))
+        {
+            await OutboxStore.EnqueueAsync(job, JobIntent.Order(JobKind.ExpireOrderPayment, f.Brands[0], old), old, DateTime.UtcNow, Ct);
+            await job.CommitAsync(Ct);
+        }
+        Assert.Equal(CheckoutOutcome.Purchased, (await Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), Request(f), Member, Ct)).Outcome);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE resolution_kind='replaced' AND payment_status='cancelled'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='expire_order_payment' AND status='cancelled' AND completed_at IS NOT NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+    }
+
+    [Fact]
+    public async Task PendingReviewAndInsufficientFundsPreserveExistingObligationsWithoutNewEffects()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: Ct);
+        await Pending(f, "awaiting_payment");
+        Assert.Equal(CheckoutOutcome.InsufficientBalance, (await Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), Request(f), Member, Ct)).Outcome);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment' AND resolution_kind IS NULL", Ct));
+        await using (var review = await f.Sessions.BeginAsync(Ct))
+        {
+            await review.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='under_review',revision=revision+1"), Ct);
+            await review.CommitAsync(Ct);
+        }
+        Assert.Equal(CheckoutOutcome.Unavailable, (await Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), Request(f), Member, Ct)).Outcome);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='under_review'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+    }
+
+    private static async Task<Guid> Pending(CheckoutFixture f, string status)
+    {
+        Guid id = OrderIds.New();
+        await using var seed = await f.Sessions.BeginAsync(Ct);
+        await seed.ExecuteAsync(new DbStatement("""
+            INSERT INTO shop.orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,unit_price_usdt,
+                auto_price_toman_snapshot,pricing_rounding_step_snapshot,price_calculation_version,brand_public_name_snapshot,product_title_snapshot,
+                payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,payment_due_at)
+            VALUES ($1,$2,$3,1,'product_purchase',$4,'USDT','crypto',10,false,5000,'public pending fixture','public brand','public title',
+                'public terms','local',true,false,CURRENT_TIMESTAMP+INTERVAL '30 minutes')
+            """, DbValue.Uuid(id), DbValue.Uuid(f.Users[0]), DbValue.Uuid(f.Product), DbValue.Text(status)), Ct);
+        await seed.CommitAsync(Ct);
+        return id;
     }
 
     private static async Task<Guid> Coupon(CheckoutFixture f, decimal percent, long cap)
