@@ -199,6 +199,61 @@ public sealed class PreparedCheckoutTests
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }
 
+    [Fact]
+    public async Task ConcurrentFreeAcceptancesCannotOversubscribeOneSharedCouponUnit()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 6, balance: 0, stock: 2, ct: Ct);
+        var admin = await f.AdminAsync(Ct);
+        await using (var issue = await f.Sessions.BeginAsync(Ct))
+        {
+            Guid id = Guid.NewGuid();
+            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin,
+                new(id, "PUBLIC-RACE", CouponKind.Promotion, 100, f.Product, MaximumUses: 1), Guid.NewGuid(), Ct);
+            await issue.CommitAsync(Ct);
+        }
+        var catalog = Catalog(f);
+        var service = Service(f, catalog);
+        var a = await catalog.PrepareAsync(f.Context(0), CheckoutFixture.Actor(0), new(f.Product, 1, CheckoutPayment.Wallet), Ct);
+        var b = await catalog.PrepareAsync(f.Context(3), CheckoutFixture.Actor(3), new(f.Product, 1, CheckoutPayment.Wallet), Ct);
+        ChannelAccess accessA = await Access(f, 0), accessB = await Access(f, 3);
+        async Task<bool> Buy(int user, PreparedCheckout prepared, ChannelAccess access)
+        {
+            try { return (await service.AcceptAsync(f.Context(user), CheckoutFixture.Actor(user), Request(f), prepared, access, Ct)).Outcome == CheckoutOutcome.Purchased; }
+            catch (DiscountQuantityException error) { Assert.Equal(0, error.Maximum); return false; }
+        }
+        var results = await Task.WhenAll(Buy(0, a, accessA), Buy(3, b, accessB));
+        Assert.Single(results, success => success);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='allocated'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+    }
+
+    [Fact]
+    public async Task ChangedChannelPolicyBetweenProofAndAcceptanceHasZeroEffects()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 1, ct: Ct);
+        var catalog = Catalog(f);
+        var proof = await catalog.PrepareAsync(f.Context(0), CheckoutFixture.Actor(0), new(f.Product, 1, CheckoutPayment.Wallet), Ct);
+        ChannelAccess access = await Access(f, 0);
+        await using (var edit = await f.Sessions.BeginAsync(Ct))
+        {
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.brands SET require_channel_join=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(f.Brands[0])), Ct);
+            await edit.CommitAsync(Ct);
+        }
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service(f, catalog).AcceptAsync(f.Context(0), CheckoutFixture.Actor(0), Request(f), proof, access, Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
+    }
+
+    private static async Task<ChannelAccess> Access(CheckoutFixture f, int user)
+    {
+        BrandPolicySnapshot snapshot;
+        await using (var read = await f.Sessions.BeginAsync(Ct)) snapshot = await BrandPolicyStore.ReadAsync(read, f.Context(user), CheckoutFixture.Actor(user), Ct);
+        return (await BrandPolicy.CheckChannelsAsync(snapshot, CheckoutFixture.Actor(user), Member, Ct))!;
+    }
+
     private static async Task<Guid> Pending(CheckoutFixture f, string status)
     {
         Guid id = OrderIds.New();
