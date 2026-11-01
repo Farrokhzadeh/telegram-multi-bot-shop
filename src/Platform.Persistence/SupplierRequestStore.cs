@@ -113,13 +113,15 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     }
     private async Task<bool> ExistingItemsMatchAsync(DbSession session, BrandContext context, SupplierBinding binding, SupplierOutcome result, CancellationToken ct)
     {
+        int newCustomers = 0;
+        int available = await session.QuerySingleAsync(new DbStatement("SELECT count(*)::integer FROM shop.fulfillments WHERE order_id=$1 AND status='unfilled'", DbValue.Uuid(binding.OrderId)), r => r.GetInt32(0), ct);
         foreach (var item in result.Items)
         {
             var existing = await session.QueryManyAsync(new DbStatement("""
                 SELECT id,supplier_request_id,'customer',delivered_content,delivered_content_key_id,content_kind FROM shop.fulfillments WHERE supplier_item_key=$1
                 UNION ALL SELECT id,supplier_request_id,'bonus',credential_ciphertext,credential_key_id,NULL::text FROM shop.inventory_items WHERE supplier_item_key=$1
                 """, DbValue.Binary(SupplierRules.ItemKey(binding, item.Reference))), r => (Id: r.GetGuid(0), Request: r.GetGuid(1), Kind: r.GetString(2), Bytes: r.GetBinary(3), Key: r.GetString(4), ContentKind: r.IsDBNull(5) ? null : r.GetString(5)), 2, ct);
-            if (existing.Count == 0) continue;
+            if (existing.Count == 0) { if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++; continue; }
             if (existing.Count != 1 || existing[0].Request != binding.RequestId || existing[0].Kind != (item.Disposition == SupplierItemDisposition.Customer ? "customer" : "bonus")) return false;
             var value = existing[0];
             if (value.ContentKind is not null && value.ContentKind != item.ContentKind) return false;
@@ -127,7 +129,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             try { if (!CryptographicOperations.FixedTimeEquals(plain, item.Content.Span)) return false; }
             finally { CryptographicOperations.ZeroMemory(plain); }
         }
-        return true;
+        return newCustomers <= available;
     }
     private async Task CaptureAsync(DbSession session, BrandContext context, SupplierBinding binding, SupplierOutcome result, CancellationToken ct)
     {

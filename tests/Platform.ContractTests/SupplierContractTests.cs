@@ -53,6 +53,21 @@ public sealed class SupplierContractTests
         using var falseFailure = new SupplierOutcome(SupplierOutcomeKind.ConfirmedNoEffect, null, null, null, [new("item", SupplierItemDisposition.Customer, "code", "public content"u8)], "public rejection"u8);
         Assert.Equal("identity_mismatch", SupplierRules.Validate(binding, falseFailure));
     }
+    [Fact]
+    public void QuantityFeesCurrencyAndInvalidBaselineCannotBypassTheOriginalCeiling()
+    {
+        var binding = Bound(2);
+        using var fees = new SupplierOutcome(SupplierOutcomeKind.Completed, "public purchase", "USD", 22.01m, [new("first", SupplierItemDisposition.Customer, "code", "public one"u8), new("second", SupplierItemDisposition.Customer, "code", "public two"u8)], "public wire"u8);
+        Assert.Equal("cost_limit", SupplierRules.Validate(binding, fees));
+        using var currency = new SupplierOutcome(SupplierOutcomeKind.Completed, "public purchase", "UNKNOWN", 20, [], "public wire"u8);
+        Assert.Equal("cost_unverified", SupplierRules.Validate(binding, currency));
+        Assert.Throws<ArgumentException>(() => SupplierRules.UnitCeiling(binding with { UnitBaseline = 0 }));
+        Assert.Throws<ArgumentException>(() => SupplierRules.UnitCeiling(binding with { Quantity = 0 }));
+        Assert.Throws<ArgumentException>(() => new SupplierOutcome((SupplierOutcomeKind)99, null, null, null, [], []));
+        Assert.Equal(11, SupplierRules.UnitCeiling(binding));
+        Assert.Equal(12, SupplierRules.UnitCeiling(binding with { ApprovedUnitCeiling = 12 }));
+        Assert.Equal(10, binding.UnitBaseline);
+    }
     private static SupplierOutcome Outcome(int customers, int bonus) => new(SupplierOutcomeKind.Completed, "public purchase", "USD", 50,
         Enumerable.Range(0, customers + bonus).Select(i => new SupplierItem("public item " + i, i < customers ? SupplierItemDisposition.Customer : SupplierItemDisposition.Bonus, "code", "public credential"u8)).ToArray(), "public wire"u8);
 }

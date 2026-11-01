@@ -29,7 +29,7 @@ public sealed class SupplierOutcome : IDisposable
     private readonly byte[] evidence;
     public SupplierOutcome(SupplierOutcomeKind kind, string? purchaseReference, string? currency, decimal? chargedAmount, SupplierItem[] items, ReadOnlySpan<byte> evidence)
     {
-        if (items.Length > 10000 || evidence.Length > 1048576 || purchaseReference?.Length > 256 || currency?.Length > 32 || chargedAmount < 0) throw new ArgumentException("Invalid supplier result.");
+        if (!Enum.IsDefined(kind) || items.Length > 10000 || evidence.Length > 1048576 || purchaseReference?.Length > 256 || currency?.Length > 32 || chargedAmount < 0) throw new ArgumentException("Invalid supplier result.");
         Kind = kind; PurchaseReference = purchaseReference; Currency = currency; ChargedAmount = chargedAmount; Items = items.ToArray(); this.evidence = evidence.ToArray();
     }
     public SupplierOutcomeKind Kind { get; }
