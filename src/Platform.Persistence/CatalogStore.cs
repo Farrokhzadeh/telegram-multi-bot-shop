@@ -139,7 +139,7 @@ public sealed class CatalogStore
         if (!SameState(before, current) || RemoteNeeded(current, quantity) != remote) Reject(apply);
         if (result is not null && account is not null)
         {
-            Source source = current.Source!;
+            Source observedSource = current.Source!;
             string status = result.Status switch { SupplierCatalogStatus.Available => "available", SupplierCatalogStatus.OutOfStock => "out_of_stock", SupplierCatalogStatus.Ineligible => "ineligible", _ => "error" };
             int changed = await apply.ExecuteAsync(new DbStatement("""
                 UPDATE shop.product_supplier_sources SET observation_revision=observation_revision+1,observed_source_revision=revision,observed_account_ref=$1,
@@ -148,7 +148,7 @@ public sealed class CatalogStore
                 WHERE id=$9 AND revision=$10 AND observation_revision=$11 AND enabled
                 """, DbValue.Text(account), DbValue.Text(status), DbValue.Integer(result.Quantity), Numeric(result.UnitCost), Text(result.Currency), Text(result.QuoteRef),
                 DbValue.Text(result.Status == SupplierCatalogStatus.Available || result.Status == SupplierCatalogStatus.OutOfStock ? "ready_item" : result.Status == SupplierCatalogStatus.Ineligible ? "ineligible" : "error"),
-                result.Status == SupplierCatalogStatus.Error ? DbValue.Text("source_unavailable") : DbValue.Null(NpgsqlDbType.Text), DbValue.Uuid(source.Id), DbValue.Bigint(source.Revision), DbValue.Bigint(source.ObservationRevision)), ct);
+                result.Status == SupplierCatalogStatus.Error ? DbValue.Text("source_unavailable") : DbValue.Null(NpgsqlDbType.Text), DbValue.Uuid(observedSource.Id), DbValue.Bigint(observedSource.Revision), DbValue.Bigint(observedSource.ObservationRevision)), ct);
             if (changed != 1) Reject(apply);
             current = await LoadAsync(apply, context, actor, query.ProductId, ct) ?? throw new PricingRejectedException();
         }
