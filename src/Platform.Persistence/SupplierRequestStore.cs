@@ -62,6 +62,12 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(1), ct);
             bool active = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE id=$1 AND supplier_request_id=$2 AND operation=$3 AND outcome='in_flight' AND parent_submit_attempt_id IS NOT DISTINCT FROM $4)", DbValue.Uuid(attempt.Id), DbValue.Uuid(binding.RequestId), DbValue.Text(attempt.Operation), AdminCommand.Id(attempt.ParentSubmit)), r => r.GetBoolean(0), ct);
             if (!active) throw new InvalidOperationException("Supplier attempt is stale.");
+            string requestStatus = await session.QuerySingleAsync(new DbStatement("SELECT status FROM shop.supplier_requests WHERE id=$1", DbValue.Uuid(binding.RequestId)), r => r.GetString(0), ct);
+            if (requestStatus is "succeeded" or "resolved")
+            {
+                await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome='unknown',error_code='terminal_obligation',evidence_ref=$1,finished_at=clock_timestamp() WHERE id=$2", AdminCommand.Text(evidence), DbValue.Uuid(attempt.Id)), ct);
+                await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return;
+            }
             string? review = SupplierRules.Validate(binding, result);
             bool archived = !string.IsNullOrWhiteSpace(evidence) && result.Evidence.Length > 0;
             bool identity = SupplierRules.Identity(binding, result) is null;

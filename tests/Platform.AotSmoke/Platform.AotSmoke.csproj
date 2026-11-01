@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/SupplierQualification.cs" Link="Shared/SupplierQualification.cs" />
     <Compile Include="../Shared/SupplierFixture.cs" Link="Shared/SupplierFixture.cs" />
     <ProjectReference Include="../../src/Platform.Campaigns/Platform.Campaigns.csproj" />
     <Compile Include="../Shared/AdministrationPhaseQualification.cs" Link="Shared/AdministrationPhaseQualification.cs" />

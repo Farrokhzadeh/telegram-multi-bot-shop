@@ -11,6 +11,8 @@ using Platform.Security;
 using Platform.Testing;
 using Platform.Telegram;
 
+await SupplierQualification.RunAsync();
+Console.WriteLine("PASS: native capped supplier intent, encrypted mixed acquisition, protected bonus and complete manifest.");
 await AdministrationPhaseQualification.RunAsync();
 Console.WriteLine("PASS: native encrypted stock import, audited wallet posting and private campaign recovery.");
 await ApiContractQualification.RunAsync(true);
