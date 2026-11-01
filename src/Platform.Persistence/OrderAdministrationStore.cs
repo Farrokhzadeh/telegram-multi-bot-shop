@@ -23,6 +23,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
     }
     public async Task<Guid> AdjustAsync(AuthenticatedAdmin actor, BrandContext context, WalletAdjustment value, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(value);
         AdminCommand.Reason(value.Reason); AdminCommand.Revision(value.ExpectedVersion);
         Money delta = new(ExactDecimal.Parse(value.AmountUsd), Currency.Usd);
         if (delta.Amount == 0) throw new ArgumentException("A nonzero USD amount is required.");
@@ -39,6 +40,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
     }
     public async Task ResolveAsync(AuthenticatedAdmin actor, BrandContext context, Guid order, OrderResolution value, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(value);
         AdminCommand.Revision(value.ExpectedRevision); AdminCommand.Reason(value.Reason);
         AuditAction action = value.Action switch { "pause_preorder" => AuditAction.HoldPreorder, "resume_preorder" => AuditAction.ResumePreorder, "cancel_local_preorder" => AuditAction.CancelPreorder,
             "retry_supplier" => AuditAction.RetrySupplier, "credit_supplier_failure" => AuditAction.SupplierCredit, _ => throw new ArgumentException("Unsupported resolution.") };

@@ -202,6 +202,13 @@
         "type": "Transitive",
         "resolved": "10.0.0",
         "contentHash": "L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA=="
+      },
+      "platform.payments": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Core": "[1.0.0, )",
+          "Platform.Persistence": "[1.0.0, )"
+        }
       }
     },
     "net10.0/linux-x64": {

@@ -30,7 +30,9 @@
       "platform.campaigns": {
         "type": "Project",
         "dependencies": {
-          "Platform.Core": "[1.0.0, )"
+          "Platform.Core": "[1.0.0, )",
+          "Platform.Persistence": "[1.0.0, )",
+          "Platform.Telegram": "[1.0.0, )"
         }
       },
       "platform.core": {

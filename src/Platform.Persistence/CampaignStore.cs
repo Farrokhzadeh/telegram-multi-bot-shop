@@ -9,6 +9,7 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
 {
     public async Task<Guid> CreateAsync(AuthenticatedAdmin actor, Guid batch, CampaignDraft[] variants, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(variants);
         if (batch == Guid.Empty || variants.Length is < 1 or > 100 || variants.Any(v => v is null || v.Id == Guid.Empty || v.BrandId == Guid.Empty || v.Language is not ("en" or "fa") ||
             v.Audience is not ("all" or "active_since" or "language") || ((v.Audience == "active_since") != v.ActiveSince.HasValue) || ((v.Audience == "language") != (v.AudienceLanguage is not null)) ||
             v.ActiveSince?.Kind is DateTimeKind.Local or DateTimeKind.Unspecified || (v.Text is null && v.Media is null) || v.Text?.Length > 4096 || (v.Text is not null && string.IsNullOrWhiteSpace(v.Text)) ||

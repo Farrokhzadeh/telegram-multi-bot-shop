@@ -4,6 +4,14 @@ namespace Platform.Persistence;
 
 public sealed partial class CampaignStore
 {
+    private const string Audience = """
+        FROM shop.campaigns c JOIN shop.users u ON u.brand_id=c.brand_id JOIN shop.brands b ON b.id=c.brand_id
+        WHERE c.id=$1 AND u.blocked_at IS NULL AND u.banned_at IS NULL AND u.marketing_opt_out_at IS NULL AND u.first_seen_at<=c.approved_at
+            AND CASE WHEN split_part(lower(u.language),'-',1) IN ('en','fa') THEN split_part(lower(u.language),'-',1) ELSE split_part(lower(b.default_language),'-',1) END=c.language
+            AND (c.audience_kind<>'active_since' OR u.last_seen_at>=c.active_since)
+            AND (c.audience_kind<>'language' OR split_part(lower(u.language),'-',1)=c.audience_language)
+            AND NOT EXISTS(SELECT 1 FROM shop.telegram_deliveries d WHERE d.campaign_batch_id=c.batch_id AND d.user_id=u.id)
+        """;
     public async Task<int> MaterializeAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
         if (lease.Intent.Kind != JobKind.CampaignMaterialize || lease.Intent.BrandId != context.BrandId || lease.Intent.OriginId is not Guid campaign) throw new UnauthorizedAccessException();
@@ -19,17 +27,13 @@ public sealed partial class CampaignStore
             var rows = await session.QueryManyAsync(new DbStatement("""
                 INSERT INTO shop.telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,recipient_language,eligibility_checked_at,dedupe_key,campaign_id,campaign_batch_id)
                 SELECT gen_random_uuid(),c.brand_id,'customer_dm',u.id,'campaign','send',c.language,clock_timestamp(),'campaign:'||c.batch_id::text||':'||u.id::text,c.id,c.batch_id
-                FROM shop.campaigns c JOIN shop.users u ON u.brand_id=c.brand_id JOIN shop.brands b ON b.id=c.brand_id
-                WHERE c.id=$1 AND u.blocked_at IS NULL AND u.banned_at IS NULL AND u.marketing_opt_out_at IS NULL AND u.first_seen_at<=c.approved_at
-                    AND CASE WHEN split_part(lower(u.language),'-',1) IN ('en','fa') THEN split_part(lower(u.language),'-',1) ELSE split_part(lower(b.default_language),'-',1) END=c.language
-                    AND (c.audience_kind<>'active_since' OR u.last_seen_at>=c.active_since)
-                    AND (c.audience_kind<>'language' OR split_part(lower(u.language),'-',1)=c.audience_language)
-                    AND NOT EXISTS(SELECT 1 FROM shop.telegram_deliveries d WHERE d.campaign_batch_id=c.batch_id AND d.user_id=u.id)
+                """ + " " + Audience + " " + """
                 ORDER BY u.id LIMIT 1000 ON CONFLICT DO NOTHING RETURNING id
                 """, DbValue.Uuid(campaign)), r => r.GetGuid(0), 1000, ct);
             foreach (Guid delivery in rows) await OutboxStore.EnqueueAsync(session, JobIntent.Telegram(context.BrandId, delivery), delivery, DateTime.UtcNow, ct);
             await session.ExecuteAsync(new DbStatement("UPDATE shop.campaigns SET status='running',started_at=COALESCE(started_at,clock_timestamp()) WHERE id=$1", DbValue.Uuid(campaign)), ct);
-            if (rows.Count == 1000) await OutboxStore.RetryAsync(session, lease, TimeSpan.FromSeconds(1), 1000000, JobError.Transient, ct);
+            bool remaining = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 " + Audience + ")", DbValue.Uuid(campaign)), r => r.GetBoolean(0), ct);
+            if (remaining) await OutboxStore.RetryAsync(session, lease, TimeSpan.FromSeconds(1), 1000000, JobError.Transient, ct);
             else
             {
                 await OutboxStore.CompleteAsync(session, lease, ct);

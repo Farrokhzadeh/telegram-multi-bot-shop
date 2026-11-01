@@ -37,7 +37,7 @@ public sealed partial class CampaignStore
                 if (!await AvailableAsync(session, brand, product, accounts, ct)) { await session.CommitAsync(ct); continue; }
                 var members = await session.QueryManyAsync(new DbStatement("""
                     SELECT s.id,s.user_id FROM shop.product_stock_subscriptions s JOIN shop.users u ON u.id=s.user_id
-                    WHERE s.product_id=$1 AND u.brand_id=$2 AND s.closed_at IS NULL AND s.cancelled_at IS NULL AND s.triggered_at IS NULL ORDER BY s.id LIMIT 1000
+                    WHERE s.product_id=$1 AND u.brand_id=$2 AND s.closed_at IS NULL AND s.cancelled_at IS NULL AND s.triggered_at IS NULL ORDER BY s.user_id,s.id LIMIT 1000
                     """, DbValue.Uuid(product), DbValue.Uuid(brand)), r => (Consent: r.GetGuid(0), Member: r.GetGuid(1)), 1000, ct);
                 foreach (var item in members)
                 {
@@ -68,6 +68,12 @@ public sealed partial class CampaignStore
     {
         if (lease.Intent.Kind != JobKind.SubscriptionCleanup) throw new UnauthorizedAccessException();
         await using var session = await sessions.BeginAsync(ct);
+        int count = await CleanupClosedSubscriptionsAsync(session, lease, ct);
+        await session.CommitAsync(ct); return count;
+    }
+    public async Task<int> CleanupClosedSubscriptionsAsync(DbSession session, JobLease lease, CancellationToken ct)
+    {
+        if (lease.Intent.Kind != JobKind.SubscriptionCleanup) throw new UnauthorizedAccessException();
         try
         {
             await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(5), ct);
@@ -83,7 +89,7 @@ public sealed partial class CampaignStore
                 await session.ExecuteAsync(new DbStatement("DELETE FROM shop.telegram_deliveries WHERE product_stock_subscription_id=$1 AND purpose='restock_notice' AND status IN ('succeeded','failed','cancelled')", DbValue.Uuid(id)), ct);
                 await session.ExecuteAsync(new DbStatement("DELETE FROM shop.product_stock_subscriptions WHERE id=$1", DbValue.Uuid(id)), ct);
             }
-            await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return rows.Count;
+            await OutboxStore.CompleteAsync(session, lease, ct); return rows.Count;
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
