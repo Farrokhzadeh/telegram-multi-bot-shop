@@ -5,7 +5,7 @@ using NpgsqlTypes;
 
 namespace Platform.Persistence;
 
-public enum JobError { Transient, Busy, InvalidOrigin, RemoteOutcomeUnknown, AttemptLimit }
+public enum JobError { Transient, Busy, InvalidOrigin, RemoteOutcomeUnknown, AttemptLimit, CredentialRecovery }
 
 public sealed class JobLease
 {
@@ -139,6 +139,7 @@ public static class OutboxStore
         JobError.InvalidOrigin => "invalid_origin",
         JobError.RemoteOutcomeUnknown => "remote_outcome_unknown",
         JobError.AttemptLimit => "attempt_limit",
+        JobError.CredentialRecovery => "credential_recovery",
         _ => throw new ArgumentOutOfRangeException(nameof(error))
     };
 }

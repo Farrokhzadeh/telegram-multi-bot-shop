@@ -68,11 +68,19 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
             await session.CommitAsync(ct);
             return delivery;
         }
+        catch (ManifestNeedsRecoveryException)
+        {
+            await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='requires_admin',review_code='credential_recovery',revision=revision+1 WHERE id=$1 AND release_authorized_at IS NULL", DbValue.Uuid(order)), ct);
+            await OutboxStore.FailAsync(session, lease, JobError.CredentialRecovery, ct);
+            await session.CommitAsync(ct);
+            return null;
+        }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
     internal static async Task RecordAnchorAsync(DbSession session, BrandContext context, long actor, Guid order, long message, CancellationToken ct)
     {
+        await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(actor)), r => r.GetInt64(0), ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
         bool valid = await session.QuerySingleAsync(new DbStatement("""
             SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.orders o ON o.id=u.flow_order_id WHERE u.id=$1 AND o.id=$2 AND o.user_id=u.id
@@ -253,7 +261,7 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
                     try
                     {
                         writer.Write(part.Number); writer.Write(part.Kind); writer.Write(plain.Length); writer.Write(plain);
-                        if (bytes.Length > 16777216) throw new InvalidOperationException("Manifest requires explicit recovery.");
+                        if (bytes.Length > 16777216) throw new ManifestNeedsRecoveryException();
                         if (part.Kind == "file") file = true;
                         if (!file)
                         {
@@ -279,6 +287,7 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
         public bool IsFile { get; } = file;
         public void Dispose() { CryptographicOperations.ZeroMemory(Bytes); CryptographicOperations.ZeroMemory(Payload); }
     }
+    private sealed class ManifestNeedsRecoveryException : Exception { }
     private sealed record Identity(Guid User, Guid Product);
     private sealed record State(Guid Member, int Quantity, string Kind, string Payment, string Status, Guid? Generation, string? Asset, byte[]? Digest, bool Released, bool Held, bool Review, long Telegram, bool Blocked);
     private sealed record Intent(Guid Order, Guid Generation, long? Target, string Status, long Attempt);
