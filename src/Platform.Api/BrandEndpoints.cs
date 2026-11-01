@@ -23,12 +23,12 @@ public static class BrandEndpoints
         Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken,
         Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
     {
-        endpoints.MapGet("/v1/admin/brands/{brand:guid}", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapGet("/v1/admin/brands/{brand:guid}", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(http, async () =>
         {
             BrandContext? context = resolve(brand);
             return context is null ? Results.NotFound() : Results.Json(await store.ReadAsync(http.GetRequiredAdministrator(), context, http.RequestAborted), BrandAdminJsonContext.Default.BrandConfiguration);
         })).RequireAdministrator();
-        endpoints.MapPut("/v1/admin/brands/{brand:guid}/bot-token", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPut("/v1/admin/brands/{brand:guid}/bot-token", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(http, async () =>
         {
             BrandContext? context = resolve(brand);
             if (context is null) return Results.NotFound();
@@ -37,7 +37,7 @@ public static class BrandEndpoints
             long revision = await store.RotateTokenAsync(http.GetRequiredAdministrator(), context, token, input.ExpectedRevision, input.CommandId, verifyToken, http.RequestAborted);
             return Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
         })).RequireAdministrator();
-        endpoints.MapPut("/v1/admin/brands/{brand:guid}/required-channels", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPut("/v1/admin/brands/{brand:guid}/required-channels", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(http, async () =>
         {
             BrandContext? context = resolve(brand);
             if (context is null) return Results.NotFound();

@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Platform.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Platform.Security;
@@ -37,27 +39,33 @@ public sealed class AdminGuardMiddleware(RequestDelegate next, Func<AdminToken, 
         if (Actor(context) is not null || header.Count != 1 || header[0] is not { Length: 50 } value ||
             !value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            Deny(context);
+            await DenyAsync(context);
             return;
         }
         AdminToken token;
         try { token = AdminToken.Parse(value[7..]); }
-        catch (AdminAuthenticationException) { Deny(context); return; }
+        catch (AdminAuthenticationException) { await DenyAsync(context); return; }
         using (token)
         {
             AuthenticatedAdmin? actor;
             try { actor = await authenticate(token, context.RequestAborted); }
-            catch (AdminAuthenticationException) { Deny(context); return; }
-            if (actor is null) { Deny(context); return; }
+            catch (AdminAuthenticationException) { await DenyAsync(context); return; }
+            if (actor is null) { await DenyAsync(context); return; }
             context.Features.Set(new AdminFeature(actor));
             try { await next(context); }
             finally { context.Features.Set<AdminFeature>(null); }
         }
     }
-    private static void Deny(HttpContext context)
+    private static async Task DenyAsync(HttpContext context)
     {
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         context.Response.Headers.WWWAuthenticate = "Bearer";
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        context.Response.ContentType = "application/json";
+        Guid id = DiagnosticsMiddleware.Correlation(context) ?? Guid.NewGuid();
+        context.Response.Headers["X-Request-Id"] = id.ToString("D");
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(new ApiFailure("unauthenticated", id), DiagnosticsJsonContext.Default.ApiFailure);
+        context.Response.ContentLength = bytes.Length;
+        await context.Response.Body.WriteAsync(bytes, context.RequestAborted);
     }
     private sealed record AdminFeature(AuthenticatedAdmin Actor);
 }

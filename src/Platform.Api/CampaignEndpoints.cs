@@ -12,14 +12,14 @@ public static class CampaignEndpoints
 {
     public static void MapCampaignAdministration(this IEndpointRouteBuilder endpoints, CampaignStore store)
     {
-        endpoints.MapPost("/v1/admin/campaigns", (HttpContext http) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPost("/v1/admin/campaigns", (HttpContext http) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, CampaignJsonContext.Default.CampaignLaunch);
             Guid id = await store.CreateAsync(http.GetRequiredAdministrator(), input.BatchId, input.Variants, http.RequestAborted);
             return Results.Json(new AdminIdentity(id), OrderApiJsonContext.Default.AdminIdentity);
         })).RequireAdministrator();
         foreach (bool cancel in new[] { false, true })
-            endpoints.MapPost("/v1/admin/campaign-batches/{id:guid}/" + (cancel ? "cancel" : "send"), (HttpContext http, Guid id) => AdminHttp.HandleAsync(async () =>
+            endpoints.MapPost("/v1/admin/campaign-batches/{id:guid}/" + (cancel ? "cancel" : "send"), (HttpContext http, Guid id) => AdminHttp.HandleAsync(http, async () =>
             {
                 var input = await AdminHttp.ReadAsync(http, CampaignJsonContext.Default.CampaignTransition);
                 await store.TransitionAsync(http.GetRequiredAdministrator(), id, cancel, input.CommandId, input.Reason, http.RequestAborted); return Results.NoContent();

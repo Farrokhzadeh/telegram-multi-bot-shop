@@ -22,36 +22,36 @@ public static class OrderAndWalletEndpoints
     public static void MapOrderAdministration(this IEndpointRouteBuilder endpoints, OrderAdministrationStore store, PricingStore pricing, ManualDepositService deposits,
         BankDestinationService bank, Func<Guid, BrandContext?> resolve)
     {
-        endpoints.MapGet("/v1/admin/orders", (HttpContext http, Guid? brandId, Guid? memberId, Guid? orderId, Guid? after, int? limit) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapGet("/v1/admin/orders", (HttpContext http, Guid? brandId, Guid? memberId, Guid? orderId, Guid? after, int? limit) => AdminHttp.HandleAsync(http, async () =>
             Results.Json(await store.SearchAsync(http.GetRequiredAdministrator(), brandId, memberId, orderId, after, limit ?? 50, http.RequestAborted), OrderApiJsonContext.Default.AdminPageAdminOrder))).RequireAdministrator();
-        endpoints.MapPost("/v1/admin/wallet-adjustments", (HttpContext http) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPost("/v1/admin/wallet-adjustments", (HttpContext http) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, OrderApiJsonContext.Default.WalletCommand);
             var context = resolve(input.BrandId); if (context is null) return Results.NotFound();
             Guid entry = await store.AdjustAsync(http.GetRequiredAdministrator(), context, input.Value, http.RequestAborted);
             return Results.Json(new AdminIdentity(entry), OrderApiJsonContext.Default.AdminIdentity);
         })).RequireAdministrator();
-        endpoints.MapPost("/v1/admin/orders/{id:guid}/resolution", (HttpContext http, Guid id) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPost("/v1/admin/orders/{id:guid}/resolution", (HttpContext http, Guid id) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, OrderApiJsonContext.Default.ResolutionCommand);
             var context = resolve(input.BrandId); if (context is null) return Results.NotFound();
             await store.ResolveAsync(http.GetRequiredAdministrator(), context, id, input.Value, http.RequestAborted); return Results.NoContent();
         })).RequireAdministrator();
-        endpoints.MapPost("/v1/admin/manual-deposits/{id:guid}/decision", (HttpContext http, Guid id) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPost("/v1/admin/manual-deposits/{id:guid}/decision", (HttpContext http, Guid id) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, OrderApiJsonContext.Default.ReceiptDecision);
             var context = resolve(input.BrandId); if (context is null) return Results.NotFound();
             await deposits.DecideAsync(context, http.GetRequiredAdministrator(), id, input.Approve, input.ExpectedRevision, input.CommandId, input.Reason, http.RequestAborted);
             return Results.NoContent();
         })).RequireAdministrator();
-        endpoints.MapPatch("/v1/admin/coupons/{id:guid}", (HttpContext http, Guid id) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPatch("/v1/admin/coupons/{id:guid}", (HttpContext http, Guid id) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, OrderApiJsonContext.Default.CouponEditCommand);
             var context = resolve(input.BrandId); if (context is null) return Results.NotFound();
             long revision = await pricing.EditAsync(context, http.GetRequiredAdministrator(), id, input.ExpectedRevision, input.Value, input.Reason, input.CommandId, http.RequestAborted);
             return Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
         })).RequireAdministrator();
-        endpoints.MapPut("/v1/admin/brands/{brand:guid}/bank-destination", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(async () =>
+        endpoints.MapPut("/v1/admin/brands/{brand:guid}/bank-destination", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(http, async () =>
         {
             var context = resolve(brand); if (context is null) return Results.NotFound();
             var input = await AdminHttp.ReadAsync(http, OrderApiJsonContext.Default.BankDestinationCommand);

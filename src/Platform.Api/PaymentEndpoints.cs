@@ -9,7 +9,7 @@ namespace Platform.Api;
 public static class PaymentEndpoints
 {
     public static IEndpointConventionBuilder MapPaymentStatus(this IEndpointRouteBuilder endpoints, DbSessionFactory sessions) =>
-        endpoints.MapGet("/v1/admin/payments/{id:guid}", (HttpContext context, Guid id, Guid brandId) => ReadAsync(context, sessions, id, brandId, false)).RequireAdministrator();
+        endpoints.MapGet("/v1/admin/payments/{id:guid}", (HttpContext context, Guid id, Guid brandId) => AdminHttp.HandleAsync(context, () => ReadAsync(context, sessions, id, brandId, false))).RequireAdministrator();
     internal static async Task<IResult> ReadAsync(HttpContext context, DbSessionFactory sessions, Guid id, Guid brand, bool bank)
     {
         await using var session = await sessions.BeginAsync(context.RequestAborted);

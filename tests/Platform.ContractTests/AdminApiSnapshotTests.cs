@@ -21,7 +21,7 @@ public sealed class AdminApiSnapshotTests
         await using var app = WebApplication.CreateSlimBuilder().Build();
         ApiContractQualification.Map(app);
         var document = OpenApiContract.Generate(app);
-        Assert.Equal(26, document.Paths.Sum(p => p.Value.Count));
+        Assert.Equal(29, document.Paths.Sum(p => p.Value.Count));
         Assert.Equal("3.0.3", document.Openapi);
         Assert.True(document.Components.Schemas["BotTokenChange"].Properties!["Token"].WriteOnly);
         Assert.Contains("CommandId", document.Components.Schemas["BotTokenChange"].Required!);

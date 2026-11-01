@@ -33,6 +33,9 @@ public static partial class OpenApiContract
         new("PATCH", "/v1/admin/brands/{brand}", CatalogApiJsonContext.Default.AdminChangeBrandPolicyEdit, BrandAdminJsonContext.Default.ConfigurationSaved, []),
         new("PUT", "/v1/admin/brands/{brand}/channel-enforcement", CatalogApiJsonContext.Default.ChannelEnforcementChange, BrandAdminJsonContext.Default.ConfigurationSaved, []),
         new("PUT", "/v1/admin/brands/{brand}/bank-destination", OrderApiJsonContext.Default.BankDestinationCommand, null, []),
+        new("GET", "/v1/admin/brands", null, CatalogApiJsonContext.Default.AdminPageAdminBrand, ["after", "limit"]),
+        new("GET", "/v1/admin/brands/{brand}/policy", null, CatalogApiJsonContext.Default.BrandPolicyDetail, []),
+        new("GET", "/v1/admin/brands/{brand}/exchange-rate", null, CatalogApiJsonContext.Default.ExchangeRateMetadata, []),
         new("GET", "/v1/admin/products", null, CatalogApiJsonContext.Default.AdminPageAdminProduct, ["after", "limit"]),
         new("PUT", "/v1/admin/products/{id}", CatalogApiJsonContext.Default.AdminChangeMasterProductEdit, BrandAdminJsonContext.Default.ConfigurationSaved, []),
         new("PUT", "/v1/admin/products/{id}/brands/{brand}", CatalogApiJsonContext.Default.AdminChangeListingEdit, BrandAdminJsonContext.Default.ConfigurationSaved, []),
@@ -68,7 +71,7 @@ public static partial class OpenApiContract
                 var parameters = RouteParameter().Matches(path).Select(m => new ApiParameter(m.Groups[1].Value, "path", true, new("string", "uuid"))).Concat(entry.Query.Select(q =>
                     new ApiParameter(q.TrimEnd('!'), "query", q.EndsWith('!'), q.StartsWith("limit", StringComparison.Ordinal) || q.StartsWith("afterRevision", StringComparison.Ordinal) ? new("integer", "int64") : new("string", "uuid")))).ToArray();
                 var responses = new Dictionary<string, ApiResponse>(StringComparer.Ordinal) { [entry.Response is null ? "204" : "200"] = new("Committed or current result", entry.Response is null ? null : Content(Schema(entry.Response, schemas))) };
-                foreach (string status in new[] { "400", "401", "403", "404", "409", "413", "415", "503" }) responses[status] = new("Redacted error", Content(Schema(DiagnosticsJsonContext.Default.ApiFailure, schemas)));
+                foreach (string status in new[] { "400", "401", "403", "404", "409", "413", "415", "408", "500", "503" }) responses[status] = new("Redacted error", Content(Schema(DiagnosticsJsonContext.Default.ApiFailure, schemas)));
                 var operation = new ApiOperation(method.ToLowerInvariant() + "_" + path.Replace('/', '_').Replace("{", "", StringComparison.Ordinal).Replace("}", "", StringComparison.Ordinal),
                     [new() { ["adminBearer"] = [] }], parameters, entry.Request is null ? null : new(true, Content(Schema(entry.Request, schemas))), responses);
                 if (!paths.TryGetValue(path, out var methods)) paths[path] = methods = new(StringComparer.Ordinal);
@@ -97,7 +100,8 @@ public static partial class OpenApiContract
             foreach (var property in info.Properties)
                 properties[property.Name] = Schema(info.Options.GetTypeInfo(property.PropertyType), schemas) with
                 { Nullable = property.IsGetNullable, WriteOnly = property.Name is "Token" or "Number" or "Holder" or "Credential" ? true : null };
-            schemas[name] = new("object", AdditionalProperties: false, Properties: properties, Required: info.Properties.Where(p => p.IsRequired || (info.Options.RespectRequiredConstructorParameters && p.AssociatedParameter is { HasDefaultValue: false })).Select(p => p.Name).ToArray());
+            string[] required = info.Properties.Where(p => p.IsRequired || (info.Options.RespectRequiredConstructorParameters && p.AssociatedParameter is { HasDefaultValue: false })).Select(p => p.Name).ToArray();
+            schemas[name] = new("object", AdditionalProperties: false, Properties: properties, Required: required.Length == 0 ? null : required);
         }
         return new(Reference: "#/components/schemas/" + name);
     }

@@ -40,6 +40,9 @@ public sealed class DiagnosticsMiddleware(RequestDelegate next, Action<string> s
         try
         {
             await next(context);
+            if (context.GetEndpoint()?.Metadata.GetMetadata<AdministratorEndpointMetadata>() is not null && context.Response.StatusCode >= 400 &&
+                !context.Response.HasStarted && context.Response.ContentLength is null or 0)
+                await AdminHttp.Failure(context, context.Response.StatusCode).ExecuteAsync(context);
         }
         catch (Exception exception)
         {
