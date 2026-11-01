@@ -228,6 +228,29 @@ public sealed class LocalDeliveryTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'", Ct));
     }
 
+    [Fact]
+    public async Task OversizePreparationPersistsReviewWithoutReleaseRedemptionOrAnAutomaticRetryLoop()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 17, ct: Ct);
+        await Coupon(f, 17);
+        byte[] plain = new byte[1048576];
+        Array.Fill(plain, (byte)'x');
+        await using (var content = await f.Sessions.BeginAsync(Ct))
+        {
+            var ids = await content.QueryManyAsync(new DbStatement("SELECT id FROM shop.inventory_items"), r => r.GetGuid(0), 1000, Ct);
+            foreach (Guid id in ids)
+                await content.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=$1 WHERE id=$2", DbValue.Binary(new InventoryCipher(f.Secrets).Encrypt(id, plain)), DbValue.Uuid(id)), Ct);
+            await content.CommitAsync(Ct);
+        }
+        Guid order = await Purchase(f, 17);
+        Assert.Null(await Store(f).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='requires_admin' AND review_code='credential_recovery' AND release_authorized_at IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest' AND status='failed' AND last_error_code='credential_recovery'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=17", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
+    }
+
     private static async Task<JobLease> Claim(CheckoutFixture f, JobKind kind)
     {
         await using var session = await f.Sessions.BeginAsync(Ct);
