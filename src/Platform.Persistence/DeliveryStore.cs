@@ -103,6 +103,15 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
         intent = await ReadIntentAsync(session, delivery, ct);
         if (intent.Status == "succeeded")
         { await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return null; }
+        bool alreadySent = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.telegram_deliveries WHERE order_id=$1 AND purpose='order_credentials' AND delivery_generation=$2 AND status='succeeded' AND id<>$3)",
+            DbValue.Uuid(intent.Order), DbValue.Uuid(intent.Generation), DbValue.Uuid(delivery)), r => r.GetBoolean(0), ct);
+        if (alreadySent)
+        {
+            await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='cancelled',last_error_code='known_success' WHERE id=$1 AND status IN ('pending','retry')", DbValue.Uuid(delivery)), ct);
+            await OutboxStore.CompleteAsync(session, lease, ct);
+            await session.CommitAsync(ct);
+            return null;
+        }
         if (intent.Status is not ("pending" or "retry") || intent.Generation != state.Generation || state.Status is not ("ready" or "delivering" or "completed") || !state.Released || state.Held || state.Review || state.Blocked) Reject(session);
         using Manifest manifest = await BuildAsync(session, context, intent.Order, state.Quantity, true, ct);
         Verify(state, intent.Order, manifest);

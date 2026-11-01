@@ -251,6 +251,25 @@ public sealed class LocalDeliveryTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
     }
 
+    [Fact]
+    public async Task LateKnownEditSuccessSuppressesAnAuthorizedRecoveryBeforeANewSend()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        Guid order = await Purchase(f);
+        await Anchor(f, order, 307);
+        await Store(f).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct);
+        JobLease original = await Claim(f, JobKind.SendTelegram);
+        await new LocalDeliveryWorker(Store(f)).RunAsync(f.Context(0), original, (_, _) => Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Uneditable)), Ct);
+        await Store(f).AuthorizeSendRecoveryAsync(f.Context(0), await f.AdminAsync(Ct), order, Guid.NewGuid(), Ct);
+        await Store(f).RecordOutcomeAsync(f.Context(0), original, new(DeliveryOutcomeKind.Succeeded, 307), Ct);
+        int sends = 0;
+        await new LocalDeliveryWorker(Store(f)).RunAsync(f.Context(0), await Claim(f, JobKind.SendTelegram), (_, _) =>
+        { sends++; return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 999)); }, Ct);
+        Assert.Equal(0, sends);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials' AND status='succeeded'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials' AND status='cancelled'", Ct));
+    }
+
     private static async Task<JobLease> Claim(CheckoutFixture f, JobKind kind)
     {
         await using var session = await f.Sessions.BeginAsync(Ct);
