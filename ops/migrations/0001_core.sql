@@ -1646,7 +1646,7 @@ BEGIN
         IS NOT DISTINCT FROM ROW(d.revision,d.percent_off,d.max_total_uses,d.max_uses_per_user,d.usage_adjustment_units,
         d.redeemed_count,d.starts_at,d.ends_at,d.active,d.product_id,d.eligible_user_id),'revision_post_edit_snapshot');
     PERFORM require_true(NEW.held_units_at_revision=held,'revision_held_context');
-    PERFORM require_true(EXISTS(SELECT 1 FROM audit_events WHERE id=NEW.audit_event_id AND actor_kind='admin' AND entity_kind='discount'
+    PERFORM require_true(EXISTS(SELECT 1 FROM audit_events WHERE id=NEW.audit_event_id AND actor_kind='admin' AND (NEW.revision_no>0 OR d.created_by_admin_id IS NOT NULL) AND entity_kind='discount'
         AND entity_id=d.id AND brand_id=d.brand_id AND action IN ('coupon_issue','coupon_edit') AND new_revision=NEW.revision_no)
         OR (NEW.revision_no=0 AND d.revision=0 AND d.created_by_admin_id IS NULL AND d.kind='prepaid_entitlement'
             AND d.percent_off=100 AND d.starts_at IS NULL AND d.ends_at IS NULL AND d.active AND d.redeemed_count=0 AND d.usage_adjustment_units=0
