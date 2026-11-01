@@ -18,6 +18,7 @@ public sealed class CheckoutFixture : IAsyncDisposable
     public Guid[] Users { get; }
     public BrandContext[] Contexts { get; }
     private readonly Guid admin = Guid.NewGuid();
+    private static readonly Lazy<string> Verifier = new(() => AdminAuth.CreatePasswordVerifier(new string('s', 20)));
     private CheckoutFixture(DisposablePostgres database, SyntheticSecretFiles files, SecretSnapshot secrets, int users)
     {
         Database = database; Sessions = new(database.Data); this.files = files; Secrets = secrets;
@@ -47,7 +48,7 @@ public sealed class CheckoutFixture : IAsyncDisposable
             var fixture = new CheckoutFixture(database, files, secrets, users);
             await using (var seed = await fixture.Sessions.BeginAsync(ct))
             {
-                await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,external_subject) VALUES ($1,'public-checkout-admin','external','public-checkout-admin')", DbValue.Uuid(fixture.admin)), ct);
+                await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,password_verifier) VALUES ($1,'public-checkout-admin','password',$2)", DbValue.Uuid(fixture.admin), DbValue.Text(Verifier.Value)), ct);
                 await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','immediate','public shared item')", DbValue.Uuid(fixture.Product)), ct);
                 for (int i = 0; i < 3; i++)
                 {
@@ -81,6 +82,15 @@ public sealed class CheckoutFixture : IAsyncDisposable
             return fixture;
         }
         catch { secrets?.Dispose(); files.Dispose(); await database.DisposeAsync(); throw; }
+    }
+
+    public async Task<AuthenticatedAdmin> AdminAsync(CancellationToken ct = default)
+    {
+        await using var login = await Sessions.BeginAsync(ct);
+        using var ticket = await AdminSessionStore.LoginAsync(login, "public-checkout-admin", new string('s', 20).AsMemory(), TimeSpan.FromHours(1), ct);
+        await login.CommitAsync(ct);
+        await using var resolve = await Sessions.BeginAsync(ct);
+        return await AdminSessionStore.AuthenticateAsync(resolve, ticket.Token, ct);
     }
 
     public async Task AddStockAsync(int count, CancellationToken ct = default)

@@ -126,6 +126,19 @@ await using (var checkout = await CheckoutFixture.CreateAsync())
         await checkout.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='allocated'") != 1 ||
         await checkout.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'") != 1)
         throw new InvalidOperationException("Native atomic wallet checkout/replay failed.");
+    var pricing = new PricingStore(checkout.Sessions, checkout.Secrets);
+    var actor = await checkout.AdminAsync();
+    var coupon = new CouponTerms(Guid.NewGuid(), "PUBLIC-NATIVE-COUPON", CouponKind.Goodwill, 10, checkout.Product, checkout.Users[0], MaximumUses: 3);
+    await using (var issue = await checkout.Sessions.BeginAsync())
+    {
+        await pricing.IssueAsync(issue, checkout.Context(0), actor, coupon, Guid.NewGuid());
+        await issue.CommitAsync();
+    }
+    if ((await pricing.LookupAsync(checkout.Context(0), CheckoutFixture.Actor(0), "public-native-coupon")).DiscountId != coupon.Id ||
+        PricingPolicy.ParseNobitex("{\"status\":\"ok\",\"stats\":{\"usdt-rls\":{\"isClosed\":false,\"latest\":\"1234567\"}}}"u8.ToArray()) != 123456.7m ||
+        PricingPolicy.DiscountTotal(0.05m, 1, 10, Currency.Usdt).Amount != 0.04m)
+        throw new InvalidOperationException("Native coupon/pricing qualification failed.");
+    Console.WriteLine("PASS: native keyed/encrypted coupon issue and scoped lookup with exact legacy FX/cent arithmetic.");
 }
 Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
 
