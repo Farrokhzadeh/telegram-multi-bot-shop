@@ -209,6 +209,12 @@
           "Platform.Core": "[1.0.0, )",
           "Platform.Persistence": "[1.0.0, )"
         }
+      },
+      "platform.payments": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Core": "[1.0.0, )"
+        }
       }
     },
     "net10.0/linux-x64": {

@@ -11,6 +11,8 @@ using Platform.Security;
 using Platform.Testing;
 using Platform.Telegram;
 
+await PaymentSettlementFixture.RunNativeAsync();
+Console.WriteLine("PASS: native authenticated payment lookup, atomic local settlement and replay.");
 NativeHostSmokeTests.VerifyInventoryIsolation();
 CipherQualification.Run();
 Console.WriteLine("PASS: native SC02 golden vector, scope/row/field/key binding, corruption and inventory isolation.");

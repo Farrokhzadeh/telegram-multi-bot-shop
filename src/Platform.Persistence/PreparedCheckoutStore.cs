@@ -126,7 +126,7 @@ public sealed partial class CheckoutStore
         return new(CheckoutOutcome.Purchased, request.OrderId);
     }
 
-    private async Task AcquireAsync(DbSession session, BrandContext context, Guid order, IReadOnlyList<Stock> stock, CancellationToken ct)
+    internal async Task AcquireAsync(DbSession session, BrandContext context, Guid order, IReadOnlyList<Stock> stock, CancellationToken ct)
     {
         var inventory = new InventoryCipher(secrets);
         var cipher = new BrandCipher(secrets);

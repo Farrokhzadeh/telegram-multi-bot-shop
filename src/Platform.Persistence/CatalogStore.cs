@@ -123,6 +123,41 @@ public sealed class CatalogStore
             data.Source is not Source source || source.Id != prepared.Source || source.Revision != prepared.SourceRevision ||
             source.ObservationRevision != prepared.ObservationRevision || Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30)) Reject(session);
         Source selected = data.Source!;
+        await WriteSupplierAsync(session, context, selected, order, prepared.Supply.RemoteUnits, null, ct);
+    }
+
+    internal async Task<string?> BindAcceptedAsync(DbSession session, BrandContext context, Guid product, Guid order, int quantity, CancellationToken ct)
+    {
+        var data = await session.QuerySingleAsync(new DbStatement("""
+            SELECT p.fulfillment_kind,s.id,s.provider_code,s.external_product_id,s.external_variant_id,s.enabled,s.revision,s.observation_revision,
+                s.observed_source_revision,s.observed_account_ref,s.observed_at,s.availability_code,s.available_quantity,s.observed_unit_cost::text,
+                s.observed_currency,s.eligibility_code,s.quote_ref,clock_timestamp()
+            FROM shop.products p LEFT JOIN LATERAL (SELECT * FROM shop.product_supplier_sources WHERE id=p.active_supplier_source_id FOR UPDATE) s ON true WHERE p.id=$1
+            """, DbValue.Uuid(product)), r => (Kind: r.GetString(0), Source: r.IsDBNull(1) ? null : new Source(r.GetGuid(1), r.GetString(2), r.GetString(3), String(r, 4), r.GetBoolean(5), r.GetInt64(6), r.GetInt64(7),
+                r.IsDBNull(8) ? null : r.GetInt64(8), String(r, 9), r.IsDBNull(10) ? null : r.GetUtc(10), r.GetString(11), r.IsDBNull(12) ? null : r.GetInt32(12),
+                r.IsDBNull(13) ? null : ExactDecimal.Parse(r.GetString(13)), String(r, 14), r.GetString(15), String(r, 16)), Now: r.GetUtc(17)), ct);
+        Source? source = data.Source;
+        string? review = data.Kind != "supplier" ? "source_ineligible" : source is null ? "source_missing" : !source.Enabled ? "source_disabled" :
+            !accounts.TryGetValue(source.Provider, out string? account) || source.Account != account ? "account_unverified" :
+            source.ObservedSourceRevision != source.Revision || source.ObservedAt is not DateTime observed || observed > data.Now || data.Now - observed > TimeSpan.FromSeconds(30) ? "cost_unverified" :
+            source.Eligibility != "ready_item" ? "source_ineligible" : source.Availability != "available" || source.Quantity is not int available || available < quantity ? "stock_shortage" : null;
+        if (source is null || source.Cost is not > 0 || source.Currency is null || source.Quote is null || source.ObservedAt is null)
+        {
+            await session.ExecuteAsync(new DbStatement("""
+                INSERT INTO shop.supplier_requests(id,order_id,requested_quantity,product_supplier_source_id,source_revision,provider_code,account_ref,external_product_id,external_variant_id,
+                    local_intent_key,request_sha256,status,review_code)
+                VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'blocked',$11)
+                """, DbValue.Uuid(order), DbValue.Integer(quantity), source is null ? DbValue.Null(NpgsqlDbType.Uuid) : DbValue.Uuid(source.Id),
+                source is null ? DbValue.Null(NpgsqlDbType.Bigint) : DbValue.Bigint(source.Revision), Text(source?.Provider), Text(source?.Account), Text(source?.ProductRef), Text(source?.VariantRef),
+                DbValue.Text("order:" + order.ToString("D")), DbValue.Binary(SHA256.HashData(order.ToByteArray())), DbValue.Text(review ?? "cost_unverified")), ct);
+            return review ?? "cost_unverified";
+        }
+        await WriteSupplierAsync(session, context, source, order, quantity, review, ct);
+        return review;
+    }
+
+    private static async Task WriteSupplierAsync(DbSession session, BrandContext context, Source selected, Guid order, int quantity, string? review, CancellationToken ct)
+    {
         Guid id = Guid.CreateVersion7();
         string intent = "order:" + order.ToString("D");
         byte[] hash;
@@ -133,19 +168,19 @@ public sealed class CatalogStore
                 writer.Write("supplier-binding-v1"); writer.Write(order.ToByteArray()); writer.Write(selected.Id.ToByteArray()); writer.Write(selected.Revision);
                 writer.Write(selected.Provider); writer.Write(selected.Account!); writer.Write(selected.ProductRef); writer.Write(selected.VariantRef is not null);
                 if (selected.VariantRef is string variant) writer.Write(variant);
-                writer.Write(prepared.Supply.RemoteUnits); writer.Write(ExactDecimal.Format(selected.Cost!.Value)); writer.Write(selected.Currency!);
+                writer.Write(quantity); writer.Write(ExactDecimal.Format(selected.Cost!.Value)); writer.Write(selected.Currency!);
                 writer.Write(selected.Quote!); writer.Write(selected.ObservedAt!.Value.Ticks);
             }
             hash = SHA256.HashData(bytes.GetBuffer().AsSpan(0, checked((int)bytes.Length)));
         }
         await session.ExecuteAsync(new DbStatement("""
             INSERT INTO shop.supplier_requests(id,order_id,requested_quantity,product_supplier_source_id,source_revision,provider_code,account_ref,
-                external_product_id,external_variant_id,local_intent_key,request_sha256,status,cost_baseline_amount,cost_currency,cost_quote_ref,cost_observed_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,$13,$14,$15)
-            """, DbValue.Uuid(id), DbValue.Uuid(order), DbValue.Integer(prepared.Supply.RemoteUnits), DbValue.Uuid(selected.Id), DbValue.Bigint(selected.Revision),
+                external_product_id,external_variant_id,local_intent_key,request_sha256,status,cost_baseline_amount,cost_currency,cost_quote_ref,cost_observed_at,review_code)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$16,$12,$13,$14,$15,$17)
+            """, DbValue.Uuid(id), DbValue.Uuid(order), DbValue.Integer(quantity), DbValue.Uuid(selected.Id), DbValue.Bigint(selected.Revision),
             DbValue.Text(selected.Provider), DbValue.Text(selected.Account!), DbValue.Text(selected.ProductRef), Text(selected.VariantRef), DbValue.Text(intent), DbValue.Binary(hash),
-            DbValue.Numeric(selected.Cost!.Value), DbValue.Text(selected.Currency!), DbValue.Text(selected.Quote!), DbValue.Utc(selected.ObservedAt!.Value)), ct);
-        await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, id), order, DateTime.UtcNow, ct);
+            DbValue.Numeric(selected.Cost!.Value), DbValue.Text(selected.Currency!), DbValue.Text(selected.Quote!), DbValue.Utc(selected.ObservedAt!.Value), DbValue.Text(review is null ? "pending" : "blocked"), Text(review)), ct);
+        if (review is null) await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, id), order, DateTime.UtcNow, ct);
     }
 
     private async Task<Data?> RefreshAsync(BrandContext context, long actor, CatalogQuery query, bool display, CancellationToken ct)

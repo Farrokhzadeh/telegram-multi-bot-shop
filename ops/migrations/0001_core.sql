@@ -1195,7 +1195,11 @@ BEGIN
         SELECT balance_after INTO previous_balance FROM wallet_entries WHERE user_id=entry.user_id AND is_posting AND posting_version=entry.posting_version-1;
     END IF;
     PERFORM require_true(previous_balance IS NOT NULL AND entry.balance_after=previous_balance+entry.signed_amount,'posting_exact_chain');
-    IF entry.movement_kind IN ('immediate_crypto_shortage_credit','late_crypto_credit','supplier_wallet_credit') THEN
+    IF entry.movement_kind='late_crypto_credit' THEN
+        PERFORM require_true(EXISTS(SELECT 1 FROM orders o JOIN payments p ON p.order_id=o.id WHERE o.id=entry.order_id AND o.user_id=entry.user_id
+            AND o.payment_status IN ('expired','cancelled') AND p.id=entry.payment_id AND p.status='settled' AND p.compensating_wallet_entry_id=entry.id
+            AND p.payment_method='crypto' AND p.quote_currency='USD' AND p.amount_due=entry.signed_amount AND p.amount_received=p.amount_due),'late_credit_retains_terminal_origin');
+    ELSIF entry.movement_kind IN ('immediate_crypto_shortage_credit','supplier_wallet_credit') THEN
         PERFORM require_true(EXISTS(SELECT 1 FROM orders WHERE id=entry.order_id AND user_id=entry.user_id
             AND resolution_kind=entry.movement_kind AND resolution_wallet_entry_id=entry.id),'compensation_requires_order_resolution');
     END IF;

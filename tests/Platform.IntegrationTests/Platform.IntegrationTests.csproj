@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Platform.Payments/Platform.Payments.csproj" />
+    <Compile Include="../Shared/PaymentSettlementFixture.cs" Link="Shared/PaymentSettlementFixture.cs" />
     <Compile Include="../Shared/PaymentNoticeFixture.cs" Link="Shared/PaymentNoticeFixture.cs" />
     <Compile Include="../Shared/CheckoutFixture.cs" Link="Shared/CheckoutFixture.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />

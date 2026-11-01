@@ -86,6 +86,24 @@ public sealed class NowPaymentsIpnVerifier : IDisposable
         catch (Exception error) when (error is JsonException or FormatException or OverflowException or InvalidOperationException or KeyNotFoundException or ArgumentException)
         { throw new PaymentNoticeRejectedException(); }
     }
+    internal static ProviderPaymentSnapshot ReadLookup(ReadOnlyMemory<byte> body)
+    {
+        if (body.Length is < 2 or > 65536) throw new PaymentNoticeRejectedException();
+        try
+        {
+            using var document = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 16 });
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) throw new PaymentNoticeRejectedException();
+            Canonical(root, new StringBuilder());
+            var invoice = new InvoiceExpectation(Identifier(root.GetProperty("payment_id")), Label(root.GetProperty("order_id"), 160),
+                Amount(root.GetProperty("price_amount")), Label(root.GetProperty("pay_currency"), 32), Amount(root.GetProperty("pay_amount")));
+            decimal received = Amount(root.GetProperty("actually_paid"));
+            if (Label(root.GetProperty("price_currency"), 16) != "usd" || invoice.UsdDue <= 0 || invoice.ExpectedTokens <= 0 || received < 0) throw new PaymentNoticeRejectedException();
+            return new(invoice, Label(root.GetProperty("payment_status"), 64), received);
+        }
+        catch (Exception error) when (error is JsonException or FormatException or OverflowException or InvalidOperationException or KeyNotFoundException or ArgumentException)
+        { throw new PaymentNoticeRejectedException(); }
+    }
     private static string Identifier(JsonElement value)
     {
         if (value.ValueKind == JsonValueKind.String)

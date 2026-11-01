@@ -118,5 +118,5 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
     private sealed record Prior(bool NoOrder, bool NoAudit, Guid? Member, Guid? Brand, byte[]? Hash);
     private sealed record Product(bool Active, string Kind, string Availability, bool LocalFirst, long Revision, string Title, string? Description, string? Icon, string? Guidance);
     private sealed record Listing(bool Visible, bool Wallet, decimal Price, int Min, int Max, long Revision, string Title, string? Description, string? Icon, string? Guidance);
-    private sealed record Stock(Guid Id, byte[] Content, string Key);
+    internal sealed record Stock(Guid Id, byte[] Content, string Key);
 }
