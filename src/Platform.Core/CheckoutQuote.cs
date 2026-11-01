@@ -25,7 +25,7 @@ public sealed class CheckoutQuote
     public Money TotalUsd => new(TotalUsdt.Amount, Currency.Usd);
     public Money? TotalToman => Terms.AutoToman ? Terms.Rate is null ? null : PricingPolicy.TomanTotal(Terms.UnitUsdt, Terms.UnitToman, Terms.Quantity, Terms.DiscountPercent ?? 0, true, Terms.Rate) :
         Terms.UnitToman is null ? null : PricingPolicy.TomanTotal(Terms.UnitUsdt, Terms.UnitToman, Terms.Quantity, Terms.DiscountPercent ?? 0, false, null);
-    public Money Payable => Terms.Currency == Currency.Toman ? TotalToman ?? throw new PricingRejectedException() : TotalUsd;
+    public Money Payable => Terms.Currency == Currency.Toman ? TotalToman ?? throw new PricingRejectedException() : Terms.Payment == CheckoutPayment.Wallet ? TotalUsd : TotalUsdt;
     public override string ToString() => "CheckoutQuote [redacted]";
 
     public static CheckoutQuote Create(QuotePrices prices, ProductPresentation product, int quantity, CheckoutPayment requested, IReadOnlyList<QuoteCoupon> coupons, DateTime now)

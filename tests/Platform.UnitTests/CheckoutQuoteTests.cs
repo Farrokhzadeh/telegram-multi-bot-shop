@@ -44,6 +44,7 @@ public sealed class CheckoutQuoteTests
         var quote = CheckoutQuote.Create(Prices, Product, 2, CheckoutPayment.Crypto, [b, a], DateTime.UtcNow);
         Assert.Equal(a.Id, quote.Terms.DiscountId);
         Assert.Equal(10m, quote.TotalUsd.Amount);
+        Assert.Equal(new Money(10m, Currency.Usdt), quote.Payable);
         Assert.DoesNotContain("AAA", quote.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("AAA", quote.Terms.ToString(), StringComparison.Ordinal);
     }
@@ -76,7 +77,9 @@ public sealed class CheckoutQuoteTests
         var usd = CheckoutQuote.Create(stale, Product, 2, CheckoutPayment.Wallet, [], now);
         Assert.Null(usd.TotalToman);
         Assert.Equal(20m, usd.TotalUsd.Amount);
+        Assert.Equal(new Money(20m, Currency.Usd), usd.Payable);
         var manual = CheckoutQuote.Create(stale with { AutoToman = false, UnitToman = 12345 }, Product, 2, CheckoutPayment.Bank, [Coupon(50, 2)], now);
         Assert.Equal(12345m, manual.TotalToman!.Value.Amount);
+        Assert.Equal(new Money(12345m, Currency.Toman), manual.Payable);
     }
 }
