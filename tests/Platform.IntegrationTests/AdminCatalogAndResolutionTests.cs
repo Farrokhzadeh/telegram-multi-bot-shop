@@ -8,6 +8,7 @@ using Platform.Testing;
 
 namespace Platform.IntegrationTests;
 
+[Collection("PostgreSQL races")]
 public sealed class AdminCatalogAndResolutionTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

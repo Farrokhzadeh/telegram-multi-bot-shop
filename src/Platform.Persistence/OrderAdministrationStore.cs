@@ -132,7 +132,12 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
         Guid? coupon = await session.QuerySingleAsync(new DbStatement("SELECT discount_id FROM (SELECT 1) seed LEFT JOIN shop.discount_uses ON order_id=$1 AND status='held'", DbValue.Uuid(order)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct);
         if (coupon is Guid id) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, id, order, false, ct);
     }
-    private static Task<Guid> MemberAsync(DbSession session, BrandContext context, Guid member, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("SELECT u.id FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=$1 AND b.id=$2 AND b.bot_id=$3 FOR UPDATE OF u", DbValue.Uuid(member), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetGuid(0), ct);
+    private static async Task<Guid> MemberAsync(DbSession session, BrandContext context, Guid member, CancellationToken ct)
+    {
+        long count = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT u.id FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=$1 AND b.id=$2 AND b.bot_id=$3 FOR UPDATE OF u) member", DbValue.Uuid(member), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
+        if (count != 1) throw new SafeOperationException(ErrorKind.NotFound);
+        return member;
+    }
     private static async Task PostAsync(DbSession session, AuthenticatedAdmin actor, Guid member, Money amount, long? expected, Guid entry, string movement, Guid? order, Guid? request, string reason, CancellationToken ct)
     {
         await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1) ON CONFLICT(user_id) DO NOTHING", DbValue.Uuid(member)), ct);
