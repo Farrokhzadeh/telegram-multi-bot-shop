@@ -216,10 +216,11 @@ public sealed class BroadcastRecoveryTests
             byte[] bytes = Encoding.UTF8.GetBytes(protectedValue);
             try
             {
-                await record.ExecuteAsync(new DbStatement("INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind,supplier_request_id,state) VALUES ($1,$2,$3,'current',$4,'supplier_bonus',$5,'admin_held')",
-                    DbValue.Uuid(bonus), DbValue.Uuid(f.Product), DbValue.Binary(new InventoryCipher(f.Secrets).Encrypt(bonus, bytes)), DbValue.Binary(SHA256.HashData(bytes)), DbValue.Uuid(request)), Ct);
+                await record.ExecuteAsync(new DbStatement("INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind,supplier_request_id,state,remote_item_ref,supplier_item_key) VALUES ($1,$2,$3,'current',$4,'supplier_bonus',$5,'admin_held','public bonus item',$6)",
+                    DbValue.Uuid(bonus), DbValue.Uuid(f.Product), DbValue.Binary(new InventoryCipher(f.Secrets).Encrypt(bonus, bytes)), DbValue.Binary(SHA256.HashData(bytes)), DbValue.Uuid(request), DbValue.Binary(SHA256.HashData(request.ToByteArray()))), Ct);
             }
             finally { CryptographicOperations.ZeroMemory(bytes); }
+            await record.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='partial_pending_admin',review_code='partial_acquisition',evidence_ref='protected:synthetic/bonus-evidence',revision=revision+1 WHERE id=$1", DbValue.Uuid(request)), Ct);
             await AdminAuditStore.AppendAsync(record, actor, new(audit, AuditAction.Update, AuditEntity.SupplierRequest, request, f.Brands[0], AuditReason.OperatorReview, audit, SHA256.HashData("public verified bonus metadata"u8)), Ct);
             await record.CommitAsync(Ct);
         }

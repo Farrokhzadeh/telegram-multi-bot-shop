@@ -95,9 +95,9 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
                     SELECT EXISTS(SELECT 1 FROM shop.jobs WHERE supplier_request_id=$1 AND status='leased') OR
                         EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled') OR
                         EXISTS(SELECT 1 FROM shop.supplier_request_attempts a WHERE a.supplier_request_id=$1 AND a.operation='submit' AND
-                            NOT ((a.outcome='failed' AND a.error_code='confirmed_no_effect' AND a.evidence_ref IS NOT NULL) OR
+                            ((a.outcome='failed' AND a.error_code='confirmed_no_effect' AND a.evidence_ref IS NOT NULL) OR
                                 (a.outcome IN ('unknown','timeout') AND EXISTS(SELECT 1 FROM shop.supplier_request_attempts lookup WHERE lookup.parent_submit_attempt_id=a.id
-                                    AND lookup.operation='status_lookup' AND lookup.outcome='failed' AND lookup.error_code='confirmed_no_effect' AND lookup.evidence_ref IS NOT NULL))))
+                                    AND lookup.operation='status_lookup' AND lookup.outcome='failed' AND lookup.error_code='confirmed_no_effect' AND lookup.evidence_ref IS NOT NULL))) IS NOT TRUE)
                     """, DbValue.Uuid(request)), r => r.GetBoolean(0), ct);
                 if (unsafeEffect) throw new InvalidOperationException("Supplier effects remain unresolved.");
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='cancelled',completed_at=clock_timestamp() WHERE supplier_request_id=$1 AND status IN ('pending','retry')", DbValue.Uuid(request)), ct);

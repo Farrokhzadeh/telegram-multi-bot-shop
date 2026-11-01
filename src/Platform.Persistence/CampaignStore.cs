@@ -80,7 +80,8 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
                 SELECT EXISTS(SELECT 1 FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id
                     JOIN shop.audit_events a ON a.id=$2 WHERE r.id=$1 AND u.brand_id=$3 AND a.brand_id=$3 AND a.actor_kind='admin'
                     AND ((a.entity_kind='supplier_request' AND a.entity_id=r.id) OR (a.entity_kind='order' AND a.entity_id=o.id)))
-                    AND (NOT $4 OR EXISTS(SELECT 1 FROM shop.inventory_items WHERE supplier_request_id=$1 AND origin_kind='supplier_bonus' AND state='admin_held'))
+                    AND (NOT $4 OR EXISTS(SELECT 1 FROM shop.inventory_items i JOIN shop.supplier_requests r ON r.id=i.supplier_request_id
+                        WHERE i.supplier_request_id=$1 AND i.origin_kind='supplier_bonus' AND i.state='admin_held' AND i.supplier_item_key IS NOT NULL AND i.remote_item_ref IS NOT NULL AND r.evidence_ref IS NOT NULL))
                 """, DbValue.Uuid(request), DbValue.Uuid(audit), DbValue.Uuid(context.BrandId), DbValue.Boolean(bonus)), r => r.GetBoolean(0), ct);
             if (!valid) throw new UnauthorizedAccessException("Staff notice origin is unavailable.");
             string purpose = bonus ? "staff_supplier_bonus" : "staff_supplier_case";

@@ -23,6 +23,11 @@ public sealed class AdminSupplierResolutionTests
         await fixture.CaptureAsync(order.Payment, order.Origin, order.Due, ct: Ct);
         await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct);
         Guid request = await Fail(f, order.Order);
+        await using (var forbidden = await f.Sessions.BeginAsync(Ct))
+        {
+            var rejected = await Assert.ThrowsAsync<DbOperationException>(() => OutboxStore.EnqueueAsync(forbidden, JobIntent.Supplier(JobKind.SubmitSupplier, f.Brands[0], request), Guid.NewGuid(), DateTime.UtcNow, Ct));
+            Assert.Equal(DbFailureKind.Constraint, rejected.Failure.Kind);
+        }
         var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
         long revision = await AdminCatalogAndResolutionTests.Revision(f, order.Order);
         long requestRevision = await RequestRevision(f, request);
@@ -42,8 +47,10 @@ public sealed class AdminSupplierResolutionTests
         Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='compensated' AND release_authorized_at IS NULL", Ct));
     }
-    [Fact]
-    public async Task UnknownSupplierEffectsPreventBothRetryAndCreditUntilOriginalAttemptIsReconciled()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnknownSupplierEffectsPreventBothRetryAndCreditUntilOriginalAttemptIsReconciled(bool missingProofCode)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 0, ct: Ct);
         var fixture = new PaymentSettlementFixture(f);
@@ -58,7 +65,7 @@ public sealed class AdminSupplierResolutionTests
         {
             Guid attempt = Guid.NewGuid();
             await unknown.ExecuteAsync(new DbStatement("INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,max_charge_amount) VALUES ($1,$2,1,'submit',1.10)", DbValue.Uuid(attempt), DbValue.Uuid(request)), Ct);
-            await unknown.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome='unknown',finished_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(attempt)), Ct);
+            await unknown.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome=$2,evidence_ref=$3,finished_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(attempt), DbValue.Text(missingProofCode ? "failed" : "unknown"), missingProofCode ? DbValue.Text("protected:synthetic/unclear-result") : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Text)), Ct);
             await unknown.CommitAsync(Ct);
         }
         await Fail(f, order.Order);
@@ -69,7 +76,7 @@ public sealed class AdminSupplierResolutionTests
         foreach (string action in new[] { "retry_supplier", "credit_supplier_failure" })
             await Assert.ThrowsAsync<InvalidOperationException>(() => store.ResolveAsync(actor, f.Context(0), order.Order, new(action, revision, "Public unresolved supplier", Guid.NewGuid(), request, requestRevision), Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE outcome='unknown'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE outcome IN ('unknown','failed') AND error_code IS NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND resolution_kind IS NULL", Ct));
     }
     [Fact]

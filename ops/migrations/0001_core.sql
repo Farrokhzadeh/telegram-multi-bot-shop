@@ -1618,7 +1618,7 @@ BEGIN
         WHEN 'submit_supplier','reconcile_supplier','export_supplier' THEN
             expected_brand:=(SELECT order_brand(order_id) FROM supplier_requests WHERE id=NEW.supplier_request_id);
             PERFORM require_true(NEW.supplier_request_id IS NOT NULL,'job_supplier_origin');
-            IF NEW.job_kind='submit_supplier' THEN PERFORM require_true(EXISTS(SELECT 1 FROM supplier_requests WHERE id=NEW.supplier_request_id AND status='pending'),'job_runnable_request'); END IF;
+            IF NEW.job_kind='submit_supplier' AND (TG_OP='INSERT' OR NEW.status IN ('pending','leased','retry')) THEN PERFORM require_true(EXISTS(SELECT 1 FROM supplier_requests WHERE id=NEW.supplier_request_id AND status='pending'),'job_runnable_request'); END IF;
         WHEN 'send_telegram' THEN expected_brand:=(SELECT brand_id FROM telegram_deliveries WHERE id=NEW.telegram_delivery_id);
         WHEN 'campaign_materialize' THEN expected_brand:=(SELECT brand_id FROM campaigns WHERE id=NEW.campaign_id);
         WHEN 'coupon_notice' THEN expected_brand:=(SELECT brand_id FROM discounts WHERE id=NEW.discount_id);
