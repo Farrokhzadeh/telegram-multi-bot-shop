@@ -196,7 +196,7 @@ public static class PaymentEvidencePolicy
 {
     public static PaymentEvidenceDecision Evaluate(InvoiceExpectation expected, VerifiedPaymentNotice notice)
     {
-        if (notice.ProviderPayment != expected.ProviderPayment || notice.Origin != expected.Origin || notice.QuoteCurrency != "usd" || notice.QuoteAmount != expected.UsdDue ||
+        if (expected.Asset is not ("usdttrc20" or "usdtbsc") || expected.UsdDue <= 0 || expected.ExpectedTokens <= 0 || notice.ProviderPayment != expected.ProviderPayment || notice.Origin != expected.Origin || notice.QuoteCurrency != "usd" || notice.QuoteAmount != expected.UsdDue ||
             notice.Asset != expected.Asset || notice.ExpectedTokens != expected.ExpectedTokens || notice.ReceivedTokens > expected.ExpectedTokens ||
             notice.Status is not ("waiting" or "confirming" or "confirmed" or "sending" or "finished" or "partially_paid")) return PaymentEvidenceDecision.Review;
         if (notice.Status == "partially_paid" || (notice.Status == "finished" && notice.ReceivedTokens < expected.ExpectedTokens)) return PaymentEvidenceDecision.Review;

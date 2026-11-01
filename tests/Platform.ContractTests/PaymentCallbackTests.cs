@@ -114,4 +114,11 @@ public sealed class PaymentCallbackTests
         Assert.Equal(ExternalSettlementRoute.LateCredit, ExternalPaymentPolicy.Route(PaymentEvidenceDecision.Ready, false, "cancelled", kind, fulfillment, preorder, false));
         Assert.Equal(ExternalSettlementRoute.Review, ExternalPaymentPolicy.Route(PaymentEvidenceDecision.Pending, false, "awaiting_payment", kind, fulfillment, preorder, false));
     }
+    [Fact]
+    public void UnsupportedExpectedAssetCannotAuthorizeSettlementEvenWithMatchingSignedEvidence()
+    {
+        using var notice = PaymentNoticeFixture.Notice(asset: "trx");
+        Assert.Equal(PaymentEvidenceDecision.Review, PaymentEvidencePolicy.Evaluate(Expected with { Asset = "trx" }, notice));
+    }
+
 }

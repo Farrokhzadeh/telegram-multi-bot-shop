@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
+using Npgsql;
 using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
@@ -90,11 +91,15 @@ public sealed class ExternalPaymentTests
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
         await Enable(f);
         var origin = await Order(f);
+        var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is missing."))
+        { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, MaxPoolSize = 16 };
+        await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        var sessions = new DbSessionFactory(bounded);
         var archive = new Archive();
         var tasks = Enumerable.Range(0, 100).Select(async _ =>
         {
             using var notice = PaymentNoticeFixture.Notice(origin.Origin);
-            return await Store(f).CaptureAsync(f.Context(0), notice, archive.Save, Ct);
+            return await new PaymentEvidenceStore(sessions, f.Secrets).CaptureAsync(f.Context(0), notice, archive.Save, Ct);
         });
         var results = await Task.WhenAll(tasks);
         Assert.Single(results, r => r.Outcome == PaymentCaptureOutcome.Ready);
@@ -246,6 +251,31 @@ public sealed class ExternalPaymentTests
         DateTime first = await inspect.QuerySingleAsync(new DbStatement("SELECT first_payment_observed_at FROM shop.payments WHERE id=$1", DbValue.Uuid(origin.Id)), r => r.GetUtc(0), Ct);
         Assert.True(first <= archiveAt);
         Assert.True(first.Year >= 2026);
+    }
+
+    [Fact]
+    public async Task PostSettlementAnomaliesRetainOriginalHistoryAndQueueOneReviewWithoutPosting()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        await Enable(f);
+        var origin = await Order(f);
+        var archive = new Archive();
+        using (var original = PaymentNoticeFixture.Notice(origin.Origin)) await Store(f).CaptureAsync(f.Context(0), original, archive.Save, Ct);
+        string frozen;
+        await using (var settled = await f.Sessions.BeginAsync(Ct))
+        {
+            frozen = await settled.QuerySingleAsync(new DbStatement("SELECT evidence_asset_ref FROM shop.payments WHERE id=$1", DbValue.Uuid(origin.Id)), r => r.GetString(0), Ct);
+            await settled.ExecuteAsync(new DbStatement("UPDATE shop.payments SET status='settled' WHERE id=$1", DbValue.Uuid(origin.Id)), Ct);
+            await settled.CommitAsync(Ct);
+        }
+        using var anomaly = PaymentNoticeFixture.Notice(origin.Origin, asset: "usdtbsc");
+        Assert.Equal(PaymentCaptureOutcome.Replayed, (await Store(f).CaptureAsync(f.Context(0), anomaly, archive.Save, Ct)).Outcome);
+        Assert.Equal(PaymentCaptureOutcome.Replayed, (await Store(f).CaptureAsync(f.Context(0), anomaly, archive.Save, Ct)).Outcome);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE actor_kind='system' AND reason='post_settlement_notice'", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment'", Ct));
+        await using var read = await f.Sessions.BeginAsync(Ct);
+        Assert.Equal(frozen, await read.QuerySingleAsync(new DbStatement("SELECT evidence_asset_ref FROM shop.payments WHERE id=$1 AND status='settled' AND amount_received=10.25 AND network_amount=10.4", DbValue.Uuid(origin.Id)), r => r.GetString(0), Ct));
+        await NoPosting(f);
     }
 
     private static async Task Enable(CheckoutFixture f, bool zero = true)

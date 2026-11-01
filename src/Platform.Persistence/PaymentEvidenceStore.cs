@@ -98,7 +98,7 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
                 await session.ExecuteAsync(new DbStatement("""
                     INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id)
                     VALUES ($1,'system',$2,'update','payment',$3,'post_settlement_notice',$4,$3) ON CONFLICT(id) DO NOTHING
-                    """, DbValue.Uuid(eventId), DbValue.Uuid(context.BrandId), DbValue.Uuid(data.Id), DbValue.Binary(notice.CanonicalHash)), ct);
+                    """, DbValue.Uuid(eventId), DbValue.Uuid(context.BrandId), DbValue.Uuid(data.Id), DbValue.Binary(notice.RawHash)), ct);
                 await OutboxStore.EnqueueAsync(session, JobIntent.Payment(JobKind.VerifyPayment, context.BrandId, data.Id), eventId, now, ct);
                 await session.CommitAsync(ct);
                 return new(PaymentCaptureOutcome.Replayed, data.Id);
