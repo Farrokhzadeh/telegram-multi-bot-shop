@@ -15,10 +15,40 @@ public sealed record InventoryImportItem(Guid Id, string Credential)
 {
     public override string ToString() => "InventoryImportItem [redacted]";
 }
+public sealed record AdminBrand(Guid Id, string Name, string Market, string Language, bool Active, long Revision);
+public sealed record BrandPolicyDetail(BrandPolicyEdit Value, bool RequireChannels, RequiredChannel[] Channels, long Revision);
+public sealed record ExchangeRateMetadata(string? TomanPerUsd, string? Source, DateTime? ObservedAt, string? Error);
 public sealed record AdminProduct(Guid Id, string Title, string Fulfillment, string Availability, bool LocalFirst, bool Active, long Revision);
 public sealed record InventoryMetadata(Guid Id, Guid ProductId, string State, string Origin, DateTime CreatedAt);
 public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot secrets)
 {
+    public async Task<AdminPage<AdminBrand>> BrandsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default)
+    {
+        AdminCommand.Page(limit);
+        await using var session = await sessions.BeginAsync(ct);
+        await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
+        var rows = await session.QueryManyAsync(new DbStatement("SELECT id,public_name,market,default_language,active,policy_version FROM shop.brands WHERE ($1 IS NULL OR id>$1) ORDER BY id LIMIT $2", AdminCommand.Id(after), DbValue.Integer(limit + 1)),
+            r => new AdminBrand(r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetBoolean(4), r.GetInt64(5)), limit + 1, ct);
+        return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
+    }
+    public async Task<BrandPolicyDetail> PolicyAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default)
+    {
+        await using var session = await sessions.BeginAsync(ct);
+        await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
+        var row = await session.QuerySingleAsync(new DbStatement("""
+            SELECT public_name,default_language,active,allow_wallet,allow_crypto,allow_bank,allow_wallet_topup,zero_balance_topup,support_enabled,customer_support_admin_id,fx_enabled,logo_asset_ref,require_channel_join,policy_version
+            FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR SHARE
+            """, DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Value: new BrandPolicyEdit(r.GetString(0), r.GetString(1), r.GetBoolean(2), r.GetBoolean(3), r.GetBoolean(4), r.GetBoolean(5), r.GetBoolean(6), r.GetBoolean(7), r.GetBoolean(8), r.IsDBNull(9) ? null : r.GetGuid(9), r.GetBoolean(10), r.IsDBNull(11) ? null : r.GetString(11)), Enforce: r.GetBoolean(12), Revision: r.GetInt64(13)), ct);
+        var channels = await session.QueryManyAsync(new DbStatement("SELECT chat_id,title,invite_link FROM shop.brand_channels WHERE brand_id=$1 AND active AND required ORDER BY chat_id", DbValue.Uuid(context.BrandId)), r => new RequiredChannel(r.GetInt64(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2)), 1000, ct);
+        return new(row.Value, row.Enforce, channels.ToArray(), row.Revision);
+    }
+    public async Task<ExchangeRateMetadata> FxAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default)
+    {
+        await using var session = await sessions.BeginAsync(ct);
+        await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
+        return await session.QuerySingleAsync(new DbStatement("SELECT current_fx::text,fx_source,fx_fetched_at,fx_error_code FROM shop.brands WHERE id=$1 AND bot_id=$2", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
+            r => new ExchangeRateMetadata(r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetUtc(2), r.IsDBNull(3) ? null : r.GetString(3)), ct);
+    }
     public async Task<AdminPage<AdminProduct>> ProductsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default)
     {
         AdminCommand.Page(limit);
@@ -39,6 +69,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
     }
     public async Task<long> PolicyAsync(AuthenticatedAdmin actor, BrandContext context, BrandPolicyEdit value, long revision, Guid command, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(value);
         AdminCommand.Revision(revision);
         Label(value.PublicName, 160); Label(value.Language, 160);
         byte[] hash = AdminCommand.Hash("brand-policy-v1", value.PublicName, value.Language, value.Active.ToString(), value.Wallet.ToString(), value.Crypto.ToString(), value.Bank.ToString(), value.Topup.ToString(), value.ZeroBalanceTopup.ToString(), value.Support.ToString(), value.ContactAdminId?.ToString("D"), value.Fx.ToString(), value.Logo);
@@ -65,6 +96,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
     }
     public async Task<long> ProductAsync(AuthenticatedAdmin actor, Guid product, MasterProductEdit value, long revision, Guid command, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(value);
         AdminCommand.Revision(revision); Label(value.Title, 160);
         if (value.Fulfillment is not ("local" or "manual" or "supplier") || value.Availability is not ("immediate" or "local_preorder") || (value.Availability == "local_preorder" && value.Fulfillment != "local")) throw new ArgumentException("Invalid fulfillment policy.");
         byte[] hash = AdminCommand.Hash("master-product-v1", value.Title, value.Description, value.Icon, value.Guidance, value.Fulfillment, value.Availability, value.LocalFirst.ToString(), value.Active.ToString());
@@ -86,6 +118,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
     }
     public async Task<long> ListingAsync(AuthenticatedAdmin actor, BrandContext context, Guid product, ListingEdit value, long revision, Guid command, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(value);
         AdminCommand.Revision(revision);
         Mode(value.TitleMode, value.Title, false); Mode(value.DescriptionMode, value.Description, true); Mode(value.IconMode, value.Icon, true); Mode(value.GuidanceMode, value.Guidance, true);
         Money usd = new(ExactDecimal.Parse(value.PriceUsd), Currency.Usd);
@@ -119,8 +152,9 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
     }
     public async Task ImportAsync(AuthenticatedAdmin actor, Guid product, InventoryImportItem[] items, Guid command, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(items);
         if (items.Length is < 1 or > 1000 || items.Any(i => i is null || i.Id == Guid.Empty || string.IsNullOrWhiteSpace(i.Credential) || Encoding.UTF8.GetByteCount(i.Credential) > 65536) || items.Select(i => i.Id).Distinct().Count() != items.Length) throw new ArgumentException("Invalid inventory import.");
-        byte[] hash = AdminCommand.Hash("inventory-import-v1", items.OrderBy(i => i.Id).SelectMany(i => new[] { i.Id.ToString("D"), Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(i.Credential))) }).ToArray());
+        byte[] hash = AdminCommand.Hash("inventory-import-v1", items.OrderBy(i => i.Id).SelectMany(i => new[] { i.Id.ToString("D"), CredentialCommitment(i.Credential) }).ToArray());
         await using var session = await sessions.BeginAsync(ct);
         try
         {
@@ -154,6 +188,12 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
             await session.CommitAsync(ct);
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
+    }
+    private static string CredentialCommitment(string credential)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(credential);
+        try { return Convert.ToHexString(SHA256.HashData(bytes)); }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
     }
     private static void Label(string value, int maximum) { if (string.IsNullOrWhiteSpace(value) || value.Length > maximum || value.Any(char.IsControl)) throw new ArgumentException("Invalid display value."); }
     private static void Mode(string mode, string? value, bool clear) { if (mode is not ("inherit" or "override") && !(clear && mode == "clear") || ((mode == "override") != (value is not null))) throw new ArgumentException("Invalid field override."); }
