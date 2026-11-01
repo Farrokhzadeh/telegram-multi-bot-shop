@@ -52,6 +52,7 @@ public static class BrandEndpoints
         try { return await action(); }
         catch (Exception error) when (error is JsonException or ArgumentException) { throw new SafeOperationException(ErrorKind.InvalidRequest); }
         catch (Exception error) when (error is FormatException or InvalidOperationException) { throw new SafeOperationException(ErrorKind.Conflict); }
+        catch (DbOperationException error) when (error.Failure.Kind is DbFailureKind.InvalidData or DbFailureKind.Constraint) { throw new SafeOperationException(ErrorKind.Conflict); }
         catch (BadHttpRequestException error) { return Results.StatusCode(error.StatusCode); }
     }
     private static async Task<T> ReadAsync<T>(HttpContext http, JsonTypeInfo<T> type)

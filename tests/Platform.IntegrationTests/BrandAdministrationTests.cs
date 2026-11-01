@@ -23,7 +23,8 @@ public sealed class BrandAdministrationTests
         await using (var stale = await f.Sessions.BeginAsync(Ct))
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => BrandPolicyStore.RequireCurrentAsync(stale, f.Context(0), CheckoutFixture.Actor(0), original, true, Ct));
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetChannelsAsync(admin, f.Context(0), [], 0, Guid.NewGuid(), Eligible, Ct));
-        await Assert.ThrowsAsync<FormatException>(() => store.SetChannelsAsync(admin, f.Context(0), [], 0, command, Eligible, Ct));
+        var conflict = await Assert.ThrowsAsync<DbOperationException>(() => store.SetChannelsAsync(admin, f.Context(0), [], 0, command, Eligible, Ct));
+        Assert.Equal(DbFailureKind.InvalidData, conflict.Failure.Kind);
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetChannelsAsync(admin, f.Context(0), [], 1, Guid.NewGuid(), (_, _, _) => Task.FromResult(false), Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.brand_channels WHERE active", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE entity_kind='brand'", Ct));

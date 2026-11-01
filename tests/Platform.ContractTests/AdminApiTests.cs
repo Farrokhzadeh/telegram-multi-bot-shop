@@ -41,7 +41,8 @@ public sealed class AdminApiTests
         Guid command = Guid.NewGuid();
         Assert.Equal(1, await pricing.EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, Ct));
         for (int i = 0; i < 25; i++) Assert.Equal(1, await pricing.EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, Ct));
-        await Assert.ThrowsAsync<FormatException>(() => pricing.EditAsync(f.Context(0), actor, coupon, 0, edit with { Percent = 20 }, AuditReason.OperatorReview, command, Ct));
+        var conflict = await Assert.ThrowsAsync<DbOperationException>(() => pricing.EditAsync(f.Context(0), actor, coupon, 0, edit with { Percent = 20 }, AuditReason.OperatorReview, command, Ct));
+        Assert.Equal(DbFailureKind.InvalidData, conflict.Failure.Kind);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=1", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=1", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts WHERE redeemed_count=1 AND usage_adjustment_units=-1 AND max_total_uses=0 AND NOT active", Ct));
