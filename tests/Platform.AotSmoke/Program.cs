@@ -134,8 +134,8 @@ await using (var database = await DisposablePostgres.CreateAsync())
     Console.WriteLine("PASS: native typed outbox enqueue, deduplication, lease renewal and stale-generation fences.");
 
     var userSessions = new DbSessionFactory(database.Data);
-    Guid customerBrand = Guid.NewGuid(), customerDeployment = Guid.NewGuid();
-    var customerRegistry = new BotBrandRegistry([new("native-customer", "public-customer", customerBrand, 91001, customerDeployment, 1, true)]);
+    Guid customerBrand = Guid.NewGuid(), customerDeployment = SyntheticSecretFiles.Deployment;
+    var customerRegistry = new BotBrandRegistry([new("native-customer", "public-customer", customerBrand, 91001, customerDeployment, 7, true)]);
     var customerPrincipal = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
         [new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "public-customer")], "native-customer"));
     if (!customerRegistry.TryResolveAuthenticated("native-customer", customerPrincipal, out var customerContext))
@@ -195,6 +195,26 @@ await using (var database = await DisposablePostgres.CreateAsync())
             throw new InvalidOperationException("Native verified Telegram routing failed.");
     }
     Console.WriteLine("PASS: native verified private update routing and replay suppression with no transport.");
+    using (var supportFiles = new SyntheticSecretFiles())
+    {
+        supportFiles.WriteManifest(SecretService.BotHost, false, brands: [customerBrand]);
+        using var supportSecrets = SecretFiles.Load(supportFiles.Root, "service-config.json", supportFiles.Grant(SecretService.BotHost, false, brands: [customerBrand]));
+        using var verifier = new TelegramWebhookVerifier(customerContext!, webhookSecret);
+        var support = new HumanSupportRouter(userSessions, supportSecrets);
+        var opened = await support.RouteAsync(verifier.Verify([TelegramFixture.Header(webhookSecret)], TelegramFixture.Body("/support", updateId: 930002, actorId: 97001, chatId: 97001, messageId: 930002)));
+        var text = verifier.Verify([TelegramFixture.Header(webhookSecret)], TelegramFixture.Body("public native support text", updateId: 930003, actorId: 97001, chatId: 97001, messageId: 930003));
+        await support.RouteAsync(text);
+        await new HumanSupportRouter(userSessions, supportSecrets).RouteAsync(text);
+        await using var read = await userSessions.BeginAsync();
+        var message = await read.QuerySingleAsync(new DbStatement("SELECT id,body_ciphertext,body_key_id FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=930003", DbValue.Uuid(opened.TicketId)),
+            row => (Id: row.GetGuid(0), Bytes: row.GetBinary(1), Key: row.GetString(2)));
+        byte[] plain = new BrandCipher(supportSecrets).Decrypt(customerContext!, "support_messages", message.Id, "body_ciphertext", message.Key, message.Bytes);
+        try { if (!plain.AsSpan().SequenceEqual("public native support text"u8)) throw new InvalidOperationException("Native support cipher failed."); }
+        finally { CryptographicOperations.ZeroMemory(plain); }
+        long work = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='support_notice' AND brand_id=$1", DbValue.Uuid(customerBrand)), row => row.GetInt64(0));
+        if (work != 2) throw new InvalidOperationException("Native support replay duplicated staff work.");
+    }
+    Console.WriteLine("PASS: native encrypted human support and durable staff work survive router restart without AI or transport.");
 
     string? operatorPath = Environment.GetEnvironmentVariable("SHOP_SCHEMA_RUNNER_PATH");
     if (operatorPath is not null)

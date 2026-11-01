@@ -18,15 +18,16 @@ internal sealed class BrandFixture : IAsyncDisposable
     internal BrandContext[] Contexts { get; private set; } = [];
     private BrandFixture(DisposablePostgres database) { Database = database; Sessions = new(database.Data); }
 
-    internal static async Task<BrandFixture> CreateAsync(CancellationToken ct)
+    internal static async Task<BrandFixture> CreateAsync(CancellationToken ct, Guid[]? brands = null, Guid? deploymentId = null, long revision = 1)
     {
         var database = await DisposablePostgres.CreateAsync(ct);
         try
         {
             await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
             var fixture = new BrandFixture(database);
-            var deployment = Guid.NewGuid();
-            var registry = new BotBrandRegistry(fixture.Brands.Select((brand, i) => new BotBrandBinding("test-bot", "bot" + i, brand, 1001 + i, deployment, 1, true)));
+            if (brands is not null) Array.Copy(brands, fixture.Brands, 3);
+            var deployment = deploymentId ?? Guid.NewGuid();
+            var registry = new BotBrandRegistry(fixture.Brands.Select((brand, i) => new BotBrandBinding("test-bot", "bot" + i, brand, 1001 + i, deployment, revision, true)));
             fixture.Contexts = Enumerable.Range(0, 3).Select(i =>
             {
                 var identity = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "bot" + i)], "test-bot"));

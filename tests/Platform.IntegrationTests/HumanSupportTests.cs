@@ -15,8 +15,10 @@ public sealed class HumanSupportTests
     [Fact]
     public async Task HumanSupportOperatesWithoutAiAndMovesNoMoney()
     {
-        await using var fixture = await BrandFixture.CreateAsync(Ct);
-        var router = new HumanSupportRouter(fixture.Sessions);
+        await using var fixture = await BrandFixture.CreateAsync(Ct, [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.NewGuid()], SyntheticSecretFiles.Deployment, 7);
+        using var files = new SyntheticSecretFiles();
+        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        var router = new HumanSupportRouter(fixture.Sessions, secrets);
         var first = await router.RouteAsync(Support(fixture, 31), Ct);
         Assert.True(first.Created);
         var replay = await router.RouteAsync(Support(fixture, 32), Ct);
@@ -64,6 +66,7 @@ public sealed class HumanSupportTests
                 """, DbValue.Uuid(discount), DbValue.Uuid(order), DbValue.Uuid(revision)), Ct);
             await seed.CommitAsync(Ct);
         }
+        string before = await FinancialSnapshot(fixture);
         Guid ticketId;
         bool created;
         await using (var session = await fixture.Sessions.BeginAsync(Ct))
@@ -79,6 +82,14 @@ public sealed class HumanSupportTests
             await SupportStore.RecordStaffReplyAsync(session, actor, ticketId, "support-reply-2", ct: Ct);
             await session.CommitAsync(Ct);
         }
+        await using (var lifecycle = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await SupportStore.AssignTicketAsync(lifecycle, actor, ticketId, AuditReason.OperatorReview, Ct);
+            await SupportStore.CloseTicketAsync(lifecycle, actor, ticketId, Ct);
+            await SupportStore.ReopenTicketAsync(lifecycle, actor, ticketId, Ct);
+            await lifecycle.CommitAsync(Ct);
+        }
+        Assert.Equal(before, await FinancialSnapshot(fixture));
         Assert.Equal("paid", await OrderStatus(fixture, order));
         Assert.Equal(1L, await CountAll(fixture, "SELECT count(*) FROM shop.discount_uses WHERE status='held'"));
         Assert.Equal("waiting_stock", await Scalar(fixture, "SELECT fulfillment_status FROM shop.orders WHERE id=$1", order));
@@ -140,6 +151,149 @@ public sealed class HumanSupportTests
         }
         Assert.Equal(("waiting_customer", actor.AdminId), await Ticket(fixture, ticketId));
         Assert.True(await Count(fixture, "SELECT count(*) FROM shop.telegram_deliveries WHERE support_message_id=$1 AND status='pending'", messageId) >= 1);
+    }
+
+    [Fact]
+    public async Task VerifiedTextIsEncryptedAndCustomerMessagesNotifyStaffDurably()
+    {
+        await using var fixture = await SecretFixture();
+        using var files = new SyntheticSecretFiles();
+        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        var support = new HumanSupportRouter(fixture.Sessions, secrets);
+        var router = new UpdateRouter(fixture.Sessions, (_, _, _) => throw new InvalidOperationException(), support);
+        Guid order = await SeedPaidPreorder(fixture);
+        string before = await FinancialSnapshot(fixture);
+        var opened = await router.RouteAsync(Message(fixture, "/support " + order.ToString("D"), 101), Ct);
+        const string text = "public synthetic cancellation discussion / متن آزمایشی";
+        var reply = await router.RouteAsync(Message(fixture, text, 102), Ct);
+        Assert.Equal(opened.EntityId, reply.EntityId);
+        await using var read = await fixture.Sessions.BeginAsync(Ct);
+        var message = await read.QuerySingleAsync(new DbStatement("SELECT id,body_ciphertext,body_key_id,asset_ref FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=102", DbValue.Uuid(opened.EntityId!.Value)),
+            row => (Id: row.GetGuid(0), Bytes: row.GetBinary(1), Key: row.GetString(2), Asset: row.IsDBNull(3)), Ct);
+        Assert.True(message.Asset);
+        byte[] decoded = new BrandCipher(secrets).Decrypt(fixture.Contexts[0], "support_messages", message.Id, "body_ciphertext", message.Key, message.Bytes);
+        try { Assert.Equal(text, System.Text.Encoding.UTF8.GetString(decoded)); }
+        finally { CryptographicOperations.ZeroMemory(decoded); }
+        Assert.Throws<CipherRejectedException>(() => new BrandCipher(secrets).Decrypt(fixture.Contexts[1], "support_messages", message.Id, "body_ciphertext", message.Key, message.Bytes));
+        Assert.Equal(2L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='support_notice' AND brand_id=$1", DbValue.Uuid(fixture.Brands[0])), row => row.GetInt64(0), Ct));
+        Assert.Equal(before, await FinancialSnapshot(fixture));
+    }
+
+    [Fact]
+    public async Task RestartAndReplayAfterClosureDoNotCreateTicketMessageOrNotification()
+    {
+        await using var fixture = await SecretFixture();
+        using var files = new SyntheticSecretFiles();
+        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        var update = Message(fixture, "/support", 201);
+        var first = await new HumanSupportRouter(fixture.Sessions, secrets).RouteAsync(update, Ct);
+        var actor = await Actor(fixture);
+        await using (var close = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await SupportStore.CloseTicketAsync(close, actor, first.TicketId, Ct);
+            await close.CommitAsync(Ct);
+        }
+        var replay = await new HumanSupportRouter(fixture.Sessions, secrets).RouteAsync(update, Ct);
+        Assert.Equal(first.TicketId, replay.TicketId);
+        Assert.False(replay.Created);
+        Assert.Equal("closed", (await Ticket(fixture, first.TicketId)).Status);
+        Assert.Equal(1L, await CountAll(fixture, "SELECT count(*) FROM shop.support_messages"));
+        Assert.Equal(1L, await CountAll(fixture, "SELECT count(*) FROM shop.jobs WHERE job_kind='support_notice'"));
+        await using var worker = await fixture.Sessions.BeginAsync(Ct);
+        var lease = await OutboxStore.ClaimAsync(worker, JobKind.SupportNotice, Guid.NewGuid(), TimeSpan.FromSeconds(30), Ct);
+        Assert.NotNull(lease);
+        Assert.Equal(fixture.Brands[0], lease.Intent.BrandId);
+        await worker.CommitAsync(Ct);
+    }
+
+    [Fact]
+    public async Task UnrelatedCommandsWrongFlowForeignOrdersAndBlockedCustomersCannotWriteSupport()
+    {
+        await using var fixture = await SecretFixture();
+        using var files = new SyntheticSecretFiles();
+        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        var router = new HumanSupportRouter(fixture.Sessions, secrets);
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Message(fixture, "/menu", 301), Ct));
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Message(fixture, "public text outside support", 302), Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => router.RouteAsync(Message(fixture, "/support " + fixture.Orders[1].ToString("D"), 303), Ct));
+        await using (var block = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await block.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(fixture.Users[0])), Ct);
+            await block.CommitAsync(Ct);
+        }
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Message(fixture, "/support", 304), Ct));
+        Assert.Equal(0L, await CountAll(fixture, "SELECT count(*) FROM shop.support_tickets"));
+        Assert.Equal(0L, await CountAll(fixture, "SELECT count(*) FROM shop.jobs"));
+    }
+
+    [Fact]
+    public async Task StaffReplyRequestIdentitySuppressesRepeatedDeliveryAndRevokedNoOpsFail()
+    {
+        await using var fixture = await BrandFixture.CreateAsync(Ct);
+        var actor = await Actor(fixture);
+        Guid ticket, request = Guid.NewGuid();
+        await using (var open = await fixture.Sessions.BeginAsync(Ct))
+        {
+            (ticket, _) = await SupportStore.OpenTicketAsync(open, fixture.Contexts[0], 7001, null, Ct);
+            await open.CommitAsync(Ct);
+        }
+        for (int i = 0; i < 2; i++)
+        {
+            await using var reply = await fixture.Sessions.BeginAsync(Ct);
+            Assert.Equal(request, await SupportStore.RecordStaffReplyAsync(reply, actor, ticket, "public-reply", ct: Ct, requestId: request));
+            await reply.CommitAsync(Ct);
+        }
+        Assert.Equal(1L, await CountAll(fixture, "SELECT count(*) FROM shop.telegram_deliveries"));
+        await using (var close = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await SupportStore.CloseTicketAsync(close, actor, ticket, Ct);
+            await AdminSessionStore.LogoutAsync(close, actor, Ct);
+            await close.CommitAsync(Ct);
+        }
+        await using var revoked = await fixture.Sessions.BeginAsync(Ct);
+        await Assert.ThrowsAsync<AdminAuthenticationException>(() => SupportStore.CloseTicketAsync(revoked, actor, ticket, Ct));
+    }
+
+    [Fact]
+    public async Task CustomerReplyCannotWriteClosedOrForeignTicketAndRollbackLeavesNoStaffWork()
+    {
+        await using var fixture = await BrandFixture.CreateAsync(Ct);
+        var actor = await Actor(fixture);
+        Guid ticket;
+        await using (var open = await fixture.Sessions.BeginAsync(Ct))
+        {
+            (ticket, _) = await SupportStore.OpenTicketAsync(open, fixture.Contexts[0], 7001, null, Ct);
+            await open.CommitAsync(Ct);
+        }
+        await using (var wrong = await fixture.Sessions.BeginAsync(Ct))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => SupportStore.RecordCustomerMessageAsync(wrong, fixture.Contexts[1], 7001, ticket, "public-foreign", ct: Ct));
+        await using (var rollback = await fixture.Sessions.BeginAsync(Ct))
+            await SupportStore.RecordCustomerMessageAsync(rollback, fixture.Contexts[0], 7001, ticket, "public-uncommitted", ct: Ct);
+        Assert.Equal(0L, await CountAll(fixture, "SELECT count(*) FROM shop.support_messages"));
+        Assert.Equal(0L, await CountAll(fixture, "SELECT count(*) FROM shop.jobs"));
+        await using (var close = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await SupportStore.CloseTicketAsync(close, actor, ticket, Ct);
+            await close.CommitAsync(Ct);
+        }
+        await using var closed = await fixture.Sessions.BeginAsync(Ct);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => SupportStore.RecordCustomerMessageAsync(closed, fixture.Contexts[0], 7001, ticket, "public-closed", ct: Ct));
+    }
+
+    private static async Task<string> FinancialSnapshot(BrandFixture fixture)
+    {
+        await using var read = await fixture.Sessions.BeginAsync(Ct);
+        var hashes = new List<string>();
+        foreach (string table in new[] { "orders", "wallets", "wallet_entries", "inventory_items", "fulfillments", "discounts", "discount_uses", "discount_revisions", "supplier_requests" })
+            hashes.Add(await read.QuerySingleAsync(new DbStatement("SELECT md5(COALESCE(string_agg(t::text,'' ORDER BY t::text),'')) FROM shop." + table + " t"), row => row.GetString(0), Ct));
+        return string.Join(":", hashes);
+    }
+
+    private static Task<BrandFixture> SecretFixture() => BrandFixture.CreateAsync(Ct, [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.NewGuid()], SyntheticSecretFiles.Deployment, 7);
+    private static VerifiedTelegramUpdate Message(BrandFixture fixture, string text, long id)
+    {
+        using var verifier = new TelegramWebhookVerifier(fixture.Contexts[0], Secret);
+        return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body(text, updateId: id, messageId: id));
     }
 
     private static async Task<AuthenticatedAdmin> Actor(BrandFixture fixture)
@@ -271,6 +425,6 @@ public sealed class HumanSupportTests
     private static VerifiedTelegramUpdate Support(BrandFixture fixture, long updateId)
     {
         using var verifier = new TelegramWebhookVerifier(fixture.Contexts[0], Secret);
-        return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body("/support", updateId: updateId, actorId: 7001, chatId: 7001));
+        return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body("/support", updateId: updateId, actorId: 7001, chatId: 7001, messageId: updateId));
     }
 }
