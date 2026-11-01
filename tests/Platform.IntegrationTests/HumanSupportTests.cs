@@ -22,7 +22,7 @@ public sealed class HumanSupportTests
         var replay = await router.RouteAsync(Support(fixture, 32), Ct);
         Assert.False(replay.Created);
         Assert.Equal(first.TicketId, replay.TicketId);
-        using var actor = await Actor(fixture);
+        var actor = await Actor(fixture);
         Guid messageId;
         await using (var session = await fixture.Sessions.BeginAsync(Ct))
         {
@@ -68,14 +68,14 @@ public sealed class HumanSupportTests
         }
         Assert.True(created);
         Assert.Equal("preorder_cancellation", await Category(fixture, ticketId));
-        using var actor = await Actor(fixture);
+        var actor = await Actor(fixture);
         await using (var session = await fixture.Sessions.BeginAsync(Ct))
         {
             await SupportStore.RecordStaffReplyAsync(session, actor, ticketId, "support-reply-2", ct: Ct);
             await session.CommitAsync(Ct);
         }
         Assert.Equal("paid", await OrderStatus(fixture, order));
-        Assert.Equal(1L, await Count(fixture, "SELECT count(*) FROM shop.discount_uses WHERE status='held'"));
+        Assert.Equal(1L, await CountAll(fixture, "SELECT count(*) FROM shop.discount_uses WHERE status='held'"));
         Assert.Equal("waiting_stock", await Scalar(fixture, "SELECT fulfillment_status FROM shop.orders WHERE id=$1", order));
         await Unchanged(fixture);
     }
@@ -115,7 +115,7 @@ public sealed class HumanSupportTests
             (ticketId, _) = await SupportStore.OpenTicketAsync(session, fixture.Contexts[0], 7001, null, Ct);
             await session.CommitAsync(Ct);
         }
-        using var actor = await Actor(fixture);
+        var actor = await Actor(fixture);
         await using (var session = await fixture.Sessions.BeginAsync(Ct))
         {
             Assert.Equal(ticketId, await SupportStore.AssignTicketAsync(session, actor, ticketId, AuditReason.OperatorReview, Ct));
@@ -185,7 +185,7 @@ public sealed class HumanSupportTests
     private static async Task<(string Status, Guid? AssignedAdminId)> Ticket(BrandFixture fixture, Guid ticketId)
     {
         await using var read = await fixture.Sessions.BeginAsync(Ct);
-        var row = await read.QuerySingleAsync(new DbStatement("SELECT status,assigned_admin_id FROM shop.support_tickets WHERE id=$1", DbValue.Uuid(ticketId)),
+        var row = await read.QuerySingleAsync<(string Status, Guid? AssignedAdminId)>(new DbStatement("SELECT status,assigned_admin_id FROM shop.support_tickets WHERE id=$1", DbValue.Uuid(ticketId)),
             r => (r.GetString(0), r.IsDBNull(1) ? null : r.GetGuid(1)), Ct);
         await read.CommitAsync(Ct);
         return row;
@@ -223,13 +223,21 @@ public sealed class HumanSupportTests
         return count;
     }
 
+    private static async Task<long> CountAll(BrandFixture fixture, string sql)
+    {
+        await using var read = await fixture.Sessions.BeginAsync(Ct);
+        long count = await read.QuerySingleAsync(new DbStatement(sql), r => r.GetInt64(0), Ct);
+        await read.CommitAsync(Ct);
+        return count;
+    }
+
     private static async Task<(string Purpose, string RecipientKind, Guid UserId, string Status, string JobKind, string JobStatus)> Delivery(BrandFixture fixture, Guid messageId)
     {
         await using var read = await fixture.Sessions.BeginAsync(Ct);
         var row = await read.QuerySingleAsync(new DbStatement("""
             SELECT d.purpose,d.recipient_kind,d.user_id,d.status,j.job_kind,j.status FROM shop.telegram_deliveries d
             LEFT JOIN shop.jobs j ON j.telegram_delivery_id=d.id WHERE d.support_message_id=$1
-            """, DbValue.Uuid(messageId)), r => (r.GetString(0), r.GetString(1), r.GetGuid(2), r.GetString(3), r.IsDBNull(4) ? null : r.GetString(4), r.IsDBNull(5) ? null : r.GetString(5)), Ct);
+            """, DbValue.Uuid(messageId)), r => (r.GetString(0), r.GetString(1), r.GetGuid(2), r.GetString(3), r.IsDBNull(4) ? "" : r.GetString(4), r.IsDBNull(5) ? "" : r.GetString(5)), Ct);
         await read.CommitAsync(Ct);
         return row;
     }
