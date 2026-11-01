@@ -116,6 +116,19 @@ using (var files = new SyntheticSecretFiles())
 }
 Console.WriteLine("PASS: native versioned secret files, historical key lookup, independent inventory authorization and no-follow paths.");
 
+await using (var checkout = await CheckoutFixture.CreateAsync())
+{
+    var request = checkout.Request();
+    var result = await checkout.Store.PurchaseLocalAsync(checkout.Context(0), CheckoutFixture.Actor(0), request);
+    var replay = await checkout.Store.PurchaseLocalAsync(checkout.Context(0), CheckoutFixture.Actor(0), request);
+    if (result.Outcome != CheckoutOutcome.Purchased || replay.Outcome != CheckoutOutcome.Replayed ||
+        await checkout.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'") != 1 ||
+        await checkout.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='allocated'") != 1 ||
+        await checkout.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'") != 1)
+        throw new InvalidOperationException("Native atomic wallet checkout/replay failed.");
+}
+Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
+
 await using (var database = await DisposablePostgres.CreateAsync())
 {
     var manifest = SchemaManifest.ForQualification(database.Data.ConnectionString);

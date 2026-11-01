@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/CheckoutFixture.cs" Link="Shared/CheckoutFixture.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
     <Compile Include="../Shared/TelegramFixture.cs" Link="Shared/TelegramFixture.cs" />
     <Compile Include="../Shared/FoundationQualification.cs" Link="Shared/FoundationQualification.cs" />

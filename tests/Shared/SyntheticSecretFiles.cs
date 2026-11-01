@@ -16,7 +16,7 @@ public sealed class SyntheticSecretFiles : IDisposable
     {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Linux qualification required.");
         Directory.CreateDirectory(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        foreach (var name in new[] { "a-current", "a-old", "b-current", "inventory-current" })
+        foreach (var name in new[] { "a-current", "a-old", "b-current", "c-current", "inventory-current" })
         {
             var bytes = RandomNumberGenerator.GetBytes(32);
             try { Write(name, bytes); }
@@ -48,7 +48,7 @@ public sealed class SyntheticSecretFiles : IDisposable
                 writer.WriteString("brandId", brand);
                 writer.WriteString("currentKeyId", brand == BrandA ? activeKey : "current");
                 writer.WriteStartArray("keys");
-                WriteReference(writer, "current", brand == BrandA ? aFile : "b-current");
+                WriteReference(writer, "current", brand == BrandA ? aFile : brand == BrandB ? "b-current" : "c-current");
                 if (brand == BrandA) WriteReference(writer, "old", "a-old");
                 writer.WriteEndArray();
                 writer.WriteEndObject();
