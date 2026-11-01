@@ -183,6 +183,8 @@ Only the listed typed references may be present for each kind; platform maintena
 
 A product-origin job may affect all memberships through the shared product; it carries no guessed brand_id. Customer send jobs derive their brand and recipient from their checked delivery.
 
+Supplier submit work requires a pending original request on every insertion and every update into pending, leased or retry. Terminal retirement of existing work may follow a confirmed failed request under the unchanged immutable origin, brand and authorization guards. Cancelling historical work authorizes neither a new runnable submit nor procurement or financial effects.
+
 ## Financial and release state distinctions
 
 - A paid cancellation changes fulfillment/resolution, not historical payment_status=paid. Unpaid expiry/replacement may retain payment_status=expired/cancelled even when independently reconciled late money later creates the approved wallet credit.
