@@ -75,18 +75,16 @@ public sealed class PaymentStateMachineTests
         await using (var fail = await f.Sessions.BeginAsync(Ct))
         {
             await fail.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET state='retired'"), Ct);
-            await fail.ExecuteAsync(new DbStatement("CREATE FUNCTION shop.public_test_fail_settlement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'public synthetic commit failure' USING ERRCODE='23514'; END $$"), Ct);
-            await fail.ExecuteAsync(new DbStatement("CREATE CONSTRAINT TRIGGER public_test_fail_settlement AFTER UPDATE ON shop.payments DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.status='settled') EXECUTE FUNCTION shop.public_test_fail_settlement()"), Ct);
             await fail.CommitAsync(Ct);
         }
+        await using (var ddl = f.Database.Data.CreateCommand("CREATE FUNCTION shop.public_test_fail_settlement() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'public synthetic commit failure' USING ERRCODE='23514'; END $$; CREATE CONSTRAINT TRIGGER public_test_fail_settlement AFTER UPDATE ON shop.payments DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.status='settled') EXECUTE FUNCTION shop.public_test_fail_settlement()")) await ddl.ExecuteNonQueryAsync(Ct);
         var error = await Assert.ThrowsAsync<DbOperationException>(() => fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct));
         Assert.Equal(DbFailureKind.Constraint, error.Failure.Kind);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE status='confirming' AND compensating_wallet_entry_id IS NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", Ct));
-        await using (var recover = await f.Sessions.BeginAsync(Ct))
-        { await recover.ExecuteAsync(new DbStatement("DROP TRIGGER public_test_fail_settlement ON shop.payments"), Ct); await recover.CommitAsync(Ct); }
+        await using (var recover = f.Database.Data.CreateCommand("DROP TRIGGER public_test_fail_settlement ON shop.payments")) await recover.ExecuteNonQueryAsync(Ct);
         Assert.Equal(ExternalSettlementRoute.LocalShortageCredit, (await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct)).Route);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='released'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE signed_amount=5", Ct));
@@ -138,6 +136,25 @@ public sealed class PaymentStateMachineTests
         await using var verify = await f.Sessions.BeginAsync(Ct);
         Assert.Equal(ends, await verify.QuerySingleAsync(new DbStatement("SELECT ends_at FROM shop.discounts WHERE id=$1", DbValue.Uuid(coupon)), r => r.GetUtc(0), Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts", Ct));
+    }
+    [Fact]
+    public async Task VerifiedStandaloneFundingCreatesOnlyItsOriginalMissingWallet()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 0, ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableAsync(Ct);
+        await using (var observe = await f.Sessions.BeginAsync(Ct))
+        { await BrandUserStore.ObservePrivateAsync(observe, f.Context(0), 9999, Ct); await observe.CommitAsync(Ct); }
+        Guid payment = Guid.NewGuid();
+        var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        await evidence.CreateTopupAsync(f.Context(0), 9999, payment, new(20, Currency.Usd), CryptoAsset.UsdtTrc20, Ct);
+        await using (var bind = await f.Sessions.BeginAsync(Ct))
+        { await evidence.BindInvoiceAsync(bind, f.Context(0), 9999, payment, PaymentSettlementFixture.Provider(payment), 10.4m, Ct); await bind.CommitAsync(Ct); }
+        await fixture.CaptureAsync(payment, "topup:" + payment.ToString("D"), 20, ct: Ct);
+        await fixture.Store.SettleAsync(f.Context(0), payment, PaymentSettlementFixture.Lookup, Ct);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallets w JOIN shop.users u ON u.id=w.user_id WHERE u.telegram_id=9999 AND w.balance=20 AND w.version=1", Ct));
+        Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.wallets WHERE balance=0", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
     }
     private static async Task<Guid> Coupon(CheckoutFixture f, DateTime ends)
     {

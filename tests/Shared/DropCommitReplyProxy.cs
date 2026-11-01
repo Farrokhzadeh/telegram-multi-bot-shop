@@ -43,26 +43,30 @@ public sealed class DropCommitReplyProxy : IAsyncDisposable
     {
         try
         {
-            using var client = await listener.AcceptTcpClientAsync(stop.Token);
-            using var backend = new TcpClient();
-            await backend.ConnectAsync(target.Host == "localhost" ? "127.0.0.1" : target.Host!, target.Port, stop.Token);
-            NetworkStream input = client.GetStream(), server = backend.GetStream();
-            byte[] size = new byte[4];
-            await input.ReadExactlyAsync(size, stop.Token);
-            int length = BinaryPrimitives.ReadInt32BigEndian(size);
-            if (length is < 8 or > 131072) throw new IOException("Invalid synthetic startup frame.");
-            byte[] startup = new byte[length - 4];
-            await input.ReadExactlyAsync(startup, stop.Token);
-            await server.WriteAsync(size, stop.Token);
-            await server.WriteAsync(startup, stop.Token);
+            while (!stop.IsCancellationRequested && !observed.Task.IsCompleted)
+            {
+                using var client = await listener.AcceptTcpClientAsync(stop.Token);
+                using var backend = new TcpClient();
+                await backend.ConnectAsync(target.Host == "localhost" ? "127.0.0.1" : target.Host!, target.Port, stop.Token);
+                NetworkStream input = client.GetStream(), server = backend.GetStream();
+                byte[] size = new byte[4];
+                await input.ReadExactlyAsync(size, stop.Token);
+                int length = BinaryPrimitives.ReadInt32BigEndian(size);
+                if (length is < 8 or > 131072) throw new IOException("Invalid synthetic startup frame.");
+                byte[] startup = new byte[length - 4];
+                await input.ReadExactlyAsync(startup, stop.Token);
+                await server.WriteAsync(size, stop.Token);
+                await server.WriteAsync(startup, stop.Token);
 
-            Task upstream = ForwardAsync(input, server, false);
-            Task downstream = ForwardAsync(server, input, true);
-            await Task.WhenAny(upstream, downstream);
-            stop.Cancel();
-            client.Close(); backend.Close();
-            try { await Task.WhenAll(upstream, downstream); }
-            catch (Exception error) when (error is IOException or OperationCanceledException or SocketException or ObjectDisposedException) { }
+                using var ending = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                Task upstream = ForwardAsync(input, server, false, ending.Token);
+                Task downstream = ForwardAsync(server, input, true, ending.Token);
+                await Task.WhenAny(upstream, downstream);
+                ending.Cancel();
+                client.Close(); backend.Close();
+                try { await Task.WhenAll(upstream, downstream); }
+                catch (Exception error) when (error is IOException or OperationCanceledException or SocketException or ObjectDisposedException) { }
+            }
         }
         catch (Exception error) when (error is IOException or OperationCanceledException or SocketException or ObjectDisposedException)
         {
@@ -74,24 +78,24 @@ public sealed class DropCommitReplyProxy : IAsyncDisposable
         }
     }
 
-    private async Task ForwardAsync(NetworkStream source, NetworkStream destination, bool fromServer)
+    private async Task ForwardAsync(NetworkStream source, NetworkStream destination, bool fromServer, CancellationToken ct)
     {
         byte[] header = new byte[5];
-        while (!stop.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
-            if (await source.ReadAsync(header.AsMemory(0, 1), stop.Token) == 0) return;
-            await source.ReadExactlyAsync(header.AsMemory(1, 4), stop.Token);
+            if (await source.ReadAsync(header.AsMemory(0, 1), ct) == 0) return;
+            await source.ReadExactlyAsync(header.AsMemory(1, 4), ct);
             int length = BinaryPrimitives.ReadInt32BigEndian(header.AsSpan(1));
             if (length is < 4 or > 1048576) throw new IOException("Invalid synthetic protocol frame.");
             byte[] body = new byte[length - 4];
-            await source.ReadExactlyAsync(body, stop.Token);
+            await source.ReadExactlyAsync(body, ct);
             if (fromServer && header[0] == (byte)'C' && body.AsSpan().SequenceEqual("COMMIT\0"u8))
             {
                 observed.TrySetResult(true);
                 throw new IOException("Synthetic commit acknowledgement dropped.");
             }
-            await destination.WriteAsync(header, stop.Token);
-            await destination.WriteAsync(body, stop.Token);
+            await destination.WriteAsync(header, ct);
+            await destination.WriteAsync(body, ct);
         }
     }
 
