@@ -172,6 +172,31 @@ await using (var checkout = await CheckoutFixture.CreateAsync())
         throw new InvalidOperationException("Native prepared mixed checkout failed.");
     Console.WriteLine("PASS: native prepared wallet acceptance, whole coupon hold, mixed split binding and original-result replay without live transport.");
 }
+await using (var sourceSale = await CheckoutFixture.CreateAsync(balance: 1000, stock: 0))
+{
+    var sourceCatalog = new CatalogStore(sourceSale.Sessions, sourceSale.Secrets, [], (_, _) => throw new InvalidOperationException("Native prepaid must not fetch supplier stock."));
+    var service = new WalletCheckoutService(sourceSale.Sessions, sourceSale.Store, sourceCatalog);
+    var source = new CheckoutRequest(OrderIds.New(), sourceSale.Product, 100, CheckoutPayment.Wallet, CheckoutKind.PrepaidUnits);
+    var result = await service.PurchaseAsync(sourceSale.Context(0), CheckoutFixture.Actor(0), source,
+        (_, _, _) => throw new InvalidOperationException("Unexpected native channel call."));
+    if (result.Outcome != CheckoutOutcome.Purchased ||
+        await sourceSale.CountAsync("SELECT count(*) FROM shop.discounts WHERE kind='prepaid_entitlement' AND max_total_uses=100 AND created_by_admin_id IS NULL") != 1 ||
+        await sourceSale.CountAsync("SELECT count(*) FROM shop.fulfillments") != 0)
+        throw new InvalidOperationException("Native automatic paid-source issuance failed.");
+    await using (var enable = await sourceSale.Sessions.BeginAsync())
+    {
+        await enable.ExecuteAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(sourceSale.Brands[1])));
+        await enable.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET allow_crypto=true,revision=revision+1 WHERE brand_id=$1", DbValue.Uuid(sourceSale.Brands[1])));
+        await enable.CommitAsync();
+    }
+    var unpaid = new CheckoutRequest(OrderIds.New(), sourceSale.Product, 2, CheckoutPayment.Crypto, CheckoutKind.PrepaidUnits, CryptoAsset.UsdtBsc);
+    if ((await service.PurchaseAsync(sourceSale.Context(1), CheckoutFixture.Actor(1), unpaid,
+        (_, _, _) => throw new InvalidOperationException("Unexpected native channel call."))).Outcome != CheckoutOutcome.AwaitingPayment ||
+        await sourceSale.CountAsync("SELECT count(*) FROM shop.payments WHERE network_asset='USDTBSC' AND amount_due=20 AND status='created'") != 1 ||
+        await sourceSale.CountAsync("SELECT count(*) FROM shop.discounts") != 1)
+        throw new InvalidOperationException("Native unpaid source creation failed.");
+    Console.WriteLine("PASS: native paid-source single-code issuance and unpaid crypto intent without goods, live invoices or fabricated administrator.");
+}
 Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
 
 await using (var database = await DisposablePostgres.CreateAsync())

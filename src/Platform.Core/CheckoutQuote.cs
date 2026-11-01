@@ -2,6 +2,8 @@ using System.Numerics;
 
 namespace Platform.Core;
 
+public enum CheckoutKind { ProductPurchase, PrepaidUnits }
+public enum CryptoAsset { UsdtTrc20, UsdtBsc }
 public enum CheckoutPayment { Wallet, Crypto, Bank, NoPaymentRequired }
 public sealed class DiscountQuantityException(int maximum) : Exception("quantity_exceeds_discount_limit")
 {

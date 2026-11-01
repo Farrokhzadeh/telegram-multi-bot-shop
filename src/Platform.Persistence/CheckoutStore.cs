@@ -6,7 +6,7 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public enum CheckoutOutcome { Purchased, Replayed, Unavailable, QuoteChanged, InsufficientBalance, OutOfStock }
+public enum CheckoutOutcome { Purchased, Replayed, Unavailable, QuoteChanged, InsufficientBalance, OutOfStock, AwaitingPayment }
 public sealed record LocalCheckoutRequest(Guid OrderId, Guid ProductId, int Quantity, decimal UnitPrice, long ListingRevision = 0, long ProductRevision = 0, long PolicyRevision = 0);
 public sealed record CheckoutResult(CheckoutOutcome Outcome, Guid? OrderId = null);
 

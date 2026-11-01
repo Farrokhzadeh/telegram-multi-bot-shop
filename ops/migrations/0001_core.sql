@@ -653,12 +653,13 @@ id uuid PRIMARY KEY,
     ends_at timestamptz,
     active boolean NOT NULL DEFAULT true,
     revision bigint NOT NULL DEFAULT 0 CHECK (revision >= 0),
-    created_by_admin_id uuid NOT NULL,
+    created_by_admin_id uuid,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (brand_id,code_digest),
     CHECK (ends_at IS NULL OR starts_at IS NULL OR ends_at > starts_at),
     CHECK ((kind='prepaid_entitlement' AND product_id IS NOT NULL AND eligible_user_id IS NOT NULL AND source_order_id IS NOT NULL) OR
            (kind <> 'prepaid_entitlement' AND source_order_id IS NULL)),
+    CHECK (created_by_admin_id IS NOT NULL OR kind='prepaid_entitlement'),
     CHECK (isfinite(starts_at)),
     CHECK (isfinite(ends_at)),
     CHECK (isfinite(created_at))
@@ -1330,6 +1331,7 @@ BEGIN
     SELECT count(*) INTO local_count FROM inventory_items i JOIN fulfillments f ON f.id=i.assigned_fulfillment_id WHERE f.order_id=oid;
     SELECT coalesce(sum(requested_quantity),0) INTO remote_count FROM supplier_requests WHERE order_id=oid AND status NOT IN ('failed','resolved');
     PERFORM require_true(local_count+remote_count<=o.quantity,'bound_split_quantity');
+    IF o.order_kind='prepaid_units' THEN PERFORM require_true(local_count=0 AND remote_count=0 AND NOT EXISTS(SELECT 1 FROM fulfillments WHERE order_id=oid),'prepaid_no_goods'); END IF;
     IF o.is_preorder THEN PERFORM require_true(local_count IN (0,o.quantity),'preorder_whole_allocation'); END IF;
     IF o.is_preorder AND o.payment_status IN ('paid','not_required') AND local_count=0 AND o.resolution_kind IS NULL THEN
         PERFORM require_true(o.fulfillment_status IN ('waiting_stock','requires_admin'),'unallocated_preorder_stays_in_fifo');
@@ -1442,8 +1444,8 @@ BEGIN
         END IF;
     END IF;
     IF TG_OP='UPDATE' THEN
-        PERFORM require_true(ROW(NEW.id,NEW.brand_id,NEW.kind,NEW.source_order_id,NEW.issuance_batch_id,NEW.created_at)
-            IS NOT DISTINCT FROM ROW(OLD.id,OLD.brand_id,OLD.kind,OLD.source_order_id,OLD.issuance_batch_id,OLD.created_at),'coupon_provenance_immutable');
+        PERFORM require_true(ROW(NEW.id,NEW.brand_id,NEW.kind,NEW.source_order_id,NEW.issuance_batch_id,NEW.created_by_admin_id,NEW.created_at)
+            IS NOT DISTINCT FROM ROW(OLD.id,OLD.brand_id,OLD.kind,OLD.source_order_id,OLD.issuance_batch_id,OLD.created_by_admin_id,OLD.created_at),'coupon_provenance_immutable');
         PERFORM require_true(NEW.revision>=OLD.revision AND NEW.redeemed_count>=OLD.redeemed_count,'coupon_revision_redemption_history');
     END IF;
     RETURN NEW;
@@ -1645,7 +1647,15 @@ BEGIN
         d.redeemed_count,d.starts_at,d.ends_at,d.active,d.product_id,d.eligible_user_id),'revision_post_edit_snapshot');
     PERFORM require_true(NEW.held_units_at_revision=held,'revision_held_context');
     PERFORM require_true(EXISTS(SELECT 1 FROM audit_events WHERE id=NEW.audit_event_id AND actor_kind='admin' AND entity_kind='discount'
-        AND entity_id=d.id AND brand_id=d.brand_id AND action IN ('coupon_issue','coupon_edit') AND new_revision=NEW.revision_no),'revision_audit');
+        AND entity_id=d.id AND brand_id=d.brand_id AND action IN ('coupon_issue','coupon_edit') AND new_revision=NEW.revision_no)
+        OR (NEW.revision_no=0 AND d.revision=0 AND d.created_by_admin_id IS NULL AND d.kind='prepaid_entitlement'
+            AND d.percent_off=100 AND d.starts_at IS NULL AND d.ends_at IS NULL AND d.active AND d.redeemed_count=0 AND d.usage_adjustment_units=0
+            AND EXISTS(SELECT 1 FROM audit_events a JOIN orders o ON o.id=d.source_order_id WHERE a.id=NEW.audit_event_id AND a.actor_kind='system'
+                AND a.action='coupon_issue' AND a.entity_kind='discount' AND a.entity_id=d.id AND a.brand_id=d.brand_id AND a.new_revision=0
+                AND a.correlation_id=o.id AND a.reason='paid_source_entitlement' AND o.order_kind='prepaid_units' AND o.payment_status='paid'
+                AND o.user_id=d.eligible_user_id AND o.product_id=d.product_id AND d.max_total_uses=o.quantity
+                AND (EXISTS(SELECT 1 FROM wallet_entries w WHERE w.order_id=o.id AND w.user_id=o.user_id AND w.movement_kind='purchase_debit' AND w.is_posting AND w.signed_amount<0)
+                    OR EXISTS(SELECT 1 FROM payments p WHERE p.order_id=o.id AND p.status='settled' AND p.confirmed_at IS NOT NULL AND p.amount_received>=p.amount_due)))),'revision_audit');
     RETURN NEW;
 END $$;
 CREATE TRIGGER coupon_revision_guard BEFORE INSERT ON discount_revisions FOR EACH ROW EXECUTE FUNCTION guard_coupon_revision();

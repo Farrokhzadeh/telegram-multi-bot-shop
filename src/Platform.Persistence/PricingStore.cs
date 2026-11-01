@@ -18,7 +18,7 @@ public sealed record CouponTerms(Guid Id, string Code, CouponKind Kind, decimal 
 }
 public sealed record CouponClaim(Guid DiscountId, Guid OrderId, Guid RevisionId, int Units, Money Saved, string Status);
 
-public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapshot secrets)
 {
     public async Task<Guid> IssueAsync(DbSession session, BrandContext context, AuthenticatedAdmin actor, CouponTerms terms, Guid commandId, CancellationToken ct = default)
     {

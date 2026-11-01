@@ -17,7 +17,7 @@ public sealed class WalletCheckoutService(DbSessionFactory sessions, CheckoutSto
         if (access is null) return new(CheckoutOutcome.Unavailable);
         try
         {
-            PreparedCheckout prepared = await catalog.PrepareAsync(context, verifiedActorId, new(request.ProductId, request.Quantity, request.Payment), ct);
+            PreparedCheckout prepared = await catalog.PrepareAsync(context, verifiedActorId, new(request.ProductId, request.Quantity, request.Payment, request.Kind), ct);
             return await AcceptAsync(context, verifiedActorId, request, prepared, access, ct);
         }
         catch (Exception error) when (error is PricingRejectedException or DiscountQuantityException or UnauthorizedAccessException)

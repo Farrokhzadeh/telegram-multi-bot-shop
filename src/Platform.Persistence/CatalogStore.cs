@@ -20,7 +20,7 @@ public sealed record SupplierCatalogResult(SupplierCatalogStatus Status, int Qua
 {
     public override string ToString() => "SupplierCatalogResult [redacted]";
 }
-public sealed record CatalogQuery(Guid ProductId, int Quantity, CheckoutPayment Payment);
+public sealed record CatalogQuery(Guid ProductId, int Quantity, CheckoutPayment Payment, CheckoutKind Kind = CheckoutKind.ProductPurchase);
 public sealed record CatalogItem(Guid ProductId, ProductPresentation Presentation, decimal UnitUsdt, decimal? UnitToman, bool AutoToman, CatalogAvailability Availability, int Minimum, int Maximum, bool Wallet, bool Crypto, bool Bank)
 {
     public bool CanPurchase => Availability == CatalogAvailability.Available && (Wallet || Crypto || Bank);
@@ -82,10 +82,10 @@ public sealed class CatalogStore
     {
         ValidateQuery(query);
         var state = await RefreshAsync(context, verifiedActorId, query, false, ct);
-        if (state is null || Supply(state, query.Quantity) is not CheckoutSupply supply) throw new PricingRejectedException();
+        if (state is null || Supply(state, query.Quantity, query.Kind) is not CheckoutSupply supply) throw new PricingRejectedException();
         await using var session = await sessions.BeginAsync(ct);
         Data? current = await LoadAsync(session, context, verifiedActorId, query.ProductId, ct);
-        if (current is null || !SameState(state, current) || Supply(current, query.Quantity) != supply) Reject(session);
+        if (current is null || !SameState(state, current) || Supply(current, query.Quantity, query.Kind) != supply) Reject(session);
         CheckoutQuote quote = await BuildQuoteAsync(session, context, current, query, ct);
         var prepared = new PreparedCheckout(this, context, verifiedActorId, current.Member, query, quote, supply, current.PolicyRevision, current.ProductRevision,
             current.ListingRevision, supply.RemoteUnits > 0 ? current.Source?.Id : null, supply.RemoteUnits > 0 ? current.Source?.Revision : null, supply.RemoteUnits > 0 ? current.Source?.ObservationRevision : null);
@@ -101,7 +101,7 @@ public sealed class CatalogStore
                 Interlocked.Exchange(ref prepared.Used, 1) != 0 || Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30)) Reject(session);
             Data? current = await LoadAsync(session, context, verifiedActorId, prepared.Query.ProductId, ct);
             if (current is null || current.Member != prepared.Member || current.PolicyRevision != prepared.PolicyRevision || current.ProductRevision != prepared.ProductRevision || current.ListingRevision != prepared.ListingRevision ||
-                Supply(current, prepared.Query.Quantity) != prepared.Supply || (prepared.Supply.RemoteUnits > 0 &&
+                Supply(current, prepared.Query.Quantity, prepared.Query.Kind) != prepared.Supply || (prepared.Supply.RemoteUnits > 0 &&
                 (current.Source?.Id != prepared.Source || current.Source?.Revision != prepared.SourceRevision || current.Source?.ObservationRevision != prepared.ObservationRevision))) Reject(session);
             CheckoutQuote quote = await BuildQuoteAsync(session, context, current, prepared.Query, ct);
             if (quote.Terms != prepared.Quote.Terms || quote.RequestedPayment != prepared.Quote.RequestedPayment || Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30)) Reject(session);
@@ -155,7 +155,7 @@ public sealed class CatalogStore
         if (before is null) return null;
         int quantity = display ? before.Minimum : query.Quantity;
         if (!display && (quantity < before.Minimum || quantity > before.Maximum || !PaymentAllowed(before, query.Payment))) throw new PricingRejectedException();
-        int remote = RemoteNeeded(before, quantity);
+        int remote = query.Kind == CheckoutKind.PrepaidUnits ? 0 : RemoteNeeded(before, quantity);
         SupplierCatalogResult? result = null;
         string? account = null;
         if (remote > 0 && before.Source is { Enabled: true } source && accounts.TryGetValue(source.Provider, out account))
@@ -168,7 +168,7 @@ public sealed class CatalogStore
         await using var apply = await sessions.BeginAsync(ct);
         Data? current = await LoadAsync(apply, context, actor, query.ProductId, ct);
         if (current is null) return null;
-        if (!SameState(before, current) || RemoteNeeded(current, quantity) != remote) Reject(apply);
+        if (!SameState(before, current) || (query.Kind == CheckoutKind.PrepaidUnits ? 0 : RemoteNeeded(current, quantity)) != remote) Reject(apply);
         if (result is not null && account is not null)
         {
             Source observedSource = current.Source!;
@@ -195,22 +195,25 @@ public sealed class CatalogStore
         var rows = await session.QueryManyAsync(new DbStatement("""
             SELECT d.id,r.id,d.code_ciphertext,d.code_key_id,d.percent_off::text,d.max_total_uses,d.redeemed_count,d.usage_adjustment_units,d.max_uses_per_user,
                 (SELECT COALESCE(sum(c.units_covered),0)::text FROM shop.discount_uses c WHERE c.discount_id=d.id AND c.status='held'),
-                (SELECT COALESCE(sum(c.units_covered),0)::text FROM shop.discount_uses c JOIN shop.orders o ON o.id=c.order_id WHERE c.discount_id=d.id AND o.user_id=$3 AND c.status IN ('held','redeemed'))
+                (SELECT COALESCE(sum(c.units_covered),0)::text FROM shop.discount_uses c JOIN shop.orders o ON o.id=c.order_id WHERE c.discount_id=d.id AND o.user_id=$3 AND c.status IN ('held','redeemed')),
+                (SELECT COALESCE(sum(c.units_covered),0)::text FROM shop.discount_uses c JOIN shop.orders o ON o.id=c.order_id WHERE c.discount_id=d.id AND o.user_id=$3 AND c.status='held'
+                    AND o.payment_status='awaiting_payment' AND NOT EXISTS(SELECT 1 FROM shop.payments p WHERE p.order_id=o.id AND
+                        (p.first_payment_observed_at IS NOT NULL OR p.receipt_asset_ref IS NOT NULL OR p.status IN ('observed','confirming','settled','review'))))
             FROM shop.discounts d JOIN shop.discount_revisions r ON r.discount_id=d.id AND r.revision_no=d.revision
             WHERE d.brand_id=$1 AND d.active AND (d.product_id IS NULL OR d.product_id=$2) AND (d.eligible_user_id IS NULL OR d.eligible_user_id=$3)
                 AND (d.starts_at IS NULL OR d.starts_at<=clock_timestamp()) AND (d.ends_at IS NULL OR d.ends_at>clock_timestamp())
                 AND (d.kind<>'prepaid_entitlement' OR EXISTS(SELECT 1 FROM shop.orders s WHERE s.id=d.source_order_id AND s.user_id=$3 AND s.product_id=$2 AND s.order_kind='prepaid_units' AND s.payment_status='paid'))
             ORDER BY d.id FOR UPDATE OF d
             """, DbValue.Uuid(context.BrandId), DbValue.Uuid(data.ProductId), DbValue.Uuid(data.Member)), row => new Candidate(row.GetGuid(0), row.GetGuid(1), row.GetBinary(2), row.GetString(3), ExactDecimal.Parse(row.GetString(4)),
-                row.IsDBNull(5) ? null : row.GetInt64(5), row.GetInt64(6), row.GetInt64(7), row.IsDBNull(8) ? null : row.GetInt64(8), BigInteger.Parse(row.GetString(9), CultureInfo.InvariantCulture), BigInteger.Parse(row.GetString(10), CultureInfo.InvariantCulture)), 1000, ct);
+                row.IsDBNull(5) ? null : row.GetInt64(5), row.GetInt64(6), row.GetInt64(7), row.IsDBNull(8) ? null : row.GetInt64(8), BigInteger.Parse(row.GetString(9), CultureInfo.InvariantCulture), BigInteger.Parse(row.GetString(10), CultureInfo.InvariantCulture), BigInteger.Parse(row.GetString(11), CultureInfo.InvariantCulture)), 1000, ct);
         var coupons = new List<QuoteCoupon>(rows.Count);
         var cipher = new BrandCipher(secrets);
         foreach (Candidate candidate in rows)
         {
-            BigInteger? capacity = PricingPolicy.Remaining(candidate.Limit, candidate.Redeemed, candidate.Adjustment, candidate.Held);
+            BigInteger? capacity = PricingPolicy.Remaining(candidate.Limit, candidate.Redeemed, candidate.Adjustment, candidate.Held - candidate.Reusable);
             if (candidate.MemberLimit is long memberLimit)
             {
-                BigInteger own = BigInteger.Max(0, (BigInteger)memberLimit - candidate.MemberUsed);
+                BigInteger own = BigInteger.Max(0, (BigInteger)memberLimit - candidate.MemberUsed + candidate.Reusable);
                 capacity = capacity is BigInteger global ? BigInteger.Min(global, own) : own;
             }
             byte[] plain = cipher.Decrypt(context, "discounts", candidate.Id, "code_ciphertext", candidate.Key, candidate.Code);
@@ -218,7 +221,7 @@ public sealed class CatalogStore
             finally { CryptographicOperations.ZeroMemory(plain); }
         }
         DateTime now = await session.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), row => row.GetUtc(0), ct);
-        if (Supply(data with { Now = now }, query.Quantity) is null) throw new PricingRejectedException();
+        if (Supply(data with { Now = now }, query.Quantity, query.Kind) is null) throw new PricingRejectedException();
         return CheckoutQuote.Create(new(data.UnitUsdt, data.UnitToman, data.AutoToman, data.FxEnabled, data.Fx, data.MaximumFxAge), data.Presentation, query.Quantity, query.Payment, coupons, now);
     }
 
@@ -263,8 +266,9 @@ public sealed class CatalogStore
             brand.Market, brand.Wallet && listing.Wallet, brand.Crypto && listing.Crypto, brand.Bank && listing.Bank, listing.Minimum, listing.Maximum, source, now);
     }
 
-    private CheckoutSupply? Supply(Data data, int quantity)
+    private CheckoutSupply? Supply(Data data, int quantity, CheckoutKind kind = CheckoutKind.ProductPurchase)
     {
+        if (kind == CheckoutKind.PrepaidUnits) return new(0, 0, false, "prepaid");
         if (data.Policy == "local_preorder") return new(data.Local >= quantity ? quantity : 0, 0, data.Local < quantity, "local");
         if (data.Kind == "manual") return new(0, 0, false, "manual");
         int local = data.Kind == "local" || data.LocalFirst ? (int)Math.Min(data.Local, quantity) : 0;
@@ -305,7 +309,7 @@ public sealed class CatalogStore
     }
     private static void ValidateQuery(CatalogQuery query)
     {
-        if (query.ProductId == Guid.Empty || query.Quantity <= 0 || query.Payment is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank)) throw new PricingRejectedException();
+        if (query.ProductId == Guid.Empty || query.Quantity <= 0 || !Enum.IsDefined(query.Kind) || query.Payment is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank)) throw new PricingRejectedException();
     }
     private static bool Label(string? value) => !string.IsNullOrWhiteSpace(value) && value.Length <= 200 && !value.Any(char.IsControl);
     private static DbValue Text(string? value) => value is null ? DbValue.Null(NpgsqlDbType.Text) : DbValue.Text(value);
@@ -320,5 +324,5 @@ public sealed class CatalogStore
         string? Account, DateTime? ObservedAt, string Availability, int? Quantity, decimal? Cost, string? Currency, string Eligibility, string? Quote);
     private sealed record Data(Guid ProductId, Guid Member, long PolicyRevision, long ProductRevision, long ListingRevision, ProductPresentation Presentation, string Kind, string Policy, bool LocalFirst, long Local,
         decimal UnitUsdt, decimal? UnitToman, bool AutoToman, bool FxEnabled, FxRate? Fx, TimeSpan MaximumFxAge, string Market, bool Wallet, bool Crypto, bool Bank, int Minimum, int Maximum, Source? Source, DateTime Now);
-    private sealed record Candidate(Guid Id, Guid Revision, byte[] Code, string Key, decimal Percent, long? Limit, long Redeemed, long Adjustment, long? MemberLimit, BigInteger Held, BigInteger MemberUsed);
+    private sealed record Candidate(Guid Id, Guid Revision, byte[] Code, string Key, decimal Percent, long? Limit, long Redeemed, long Adjustment, long? MemberLimit, BigInteger Held, BigInteger MemberUsed, BigInteger Reusable);
 }
