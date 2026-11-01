@@ -160,7 +160,7 @@ public sealed class HumanSupportTests
         Guid admin = Guid.NewGuid();
         await using (var seed = await fixture.Sessions.BeginAsync(Ct))
         {
-            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,password_verifier) VALUES ($1,'public-support-admin','password',$2)",
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,password_verifier) VALUES ($1,'public-support-admin','password',$2) ON CONFLICT (login) DO NOTHING",
                 DbValue.Uuid(admin), DbValue.Text(Verifier.Value)), Ct);
             await seed.CommitAsync(Ct);
         }
