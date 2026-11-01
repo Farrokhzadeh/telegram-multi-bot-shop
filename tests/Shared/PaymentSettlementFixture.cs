@@ -33,6 +33,30 @@ public sealed class PaymentSettlementFixture(CheckoutFixture fixture)
         await bind.CommitAsync(ct);
         return (payment.Id, request.OrderId, payment.Origin, payment.Due);
     }
+    public ManualDepositService Manual => new(Shop.Sessions, Store);
+    public async Task EnableBankAsync(CancellationToken ct)
+    {
+        await using (var edit = await Shop.Sessions.BeginAsync(ct))
+        {
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.brands SET market='iran',policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(Shop.Brands[0])), ct);
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET allow_bank=true,price_toman=1000000,auto_price_toman=false,revision=revision+1 WHERE brand_id=$1", DbValue.Uuid(Shop.Brands[0])), ct);
+            await edit.CommitAsync(ct);
+        }
+        long revision;
+        await using (var read = await Shop.Sessions.BeginAsync(ct)) revision = await read.QuerySingleAsync(new DbStatement("SELECT policy_version FROM shop.brands WHERE id=$1", DbValue.Uuid(Shop.Brands[0])), r => r.GetInt64(0), ct);
+        using var bank = new BankDestinationService(Shop.Sessions, Shop.Secrets, new byte[32]);
+        await bank.SaveAsync(Shop.Context(0), await Shop.AdminAsync(ct), "1111222233334444", "Public synthetic holder", revision, Guid.NewGuid(), ct);
+    }
+    public async Task<(Guid Payment, Guid Order)> BankOrderAsync(CancellationToken ct)
+    {
+        var request = new CheckoutRequest(OrderIds.New(), Shop.Product, 1, CheckoutPayment.Bank);
+        var result = await new WalletCheckoutService(Shop.Sessions, Shop.Store, Catalog).PurchaseAsync(Shop.Context(0), CheckoutFixture.Actor(0), request,
+            (_, _, _) => Task.FromResult(ChannelMembership.Member), ct);
+        if (result.Outcome != CheckoutOutcome.AwaitingPayment) throw new InvalidOperationException("Synthetic bank checkout failed.");
+        await using var read = await Shop.Sessions.BeginAsync(ct);
+        Guid payment = await read.QuerySingleAsync(new DbStatement("SELECT id FROM shop.payments WHERE order_id=$1", DbValue.Uuid(request.OrderId)), r => r.GetGuid(0), ct);
+        return (payment, request.OrderId);
+    }
     public static string Provider(Guid id) => (10000000000UL + BitConverter.ToUInt32(id.ToByteArray(), 12)).ToString(System.Globalization.CultureInfo.InvariantCulture);
     public async Task CaptureAsync(Guid payment, string origin, decimal due, int user = 0, CancellationToken ct = default)
     {
@@ -67,7 +91,11 @@ public sealed class PaymentSettlementFixture(CheckoutFixture fixture)
         await fixture.EnableAsync(ct);
         var order = await fixture.OrderAsync(ct: ct);
         await fixture.CaptureAsync(order.Payment, order.Origin, order.Due, ct: ct);
-        var settled = await fixture.Store.SettleAsync(f.Context(0), order.Payment, Lookup, ct);
+        JobLease lease;
+        await using (var claim = await f.Sessions.BeginAsync(ct))
+        { lease = await OutboxStore.ClaimAsync(claim, JobKind.VerifyPayment, Guid.NewGuid(), TimeSpan.FromSeconds(60), ct) ?? throw new InvalidOperationException(); await claim.CommitAsync(ct); }
+        using var provider = Client(_ => PaymentNoticeFixture.Body(order.Origin, quote: order.Due, provider: Provider(order.Payment)));
+        var settled = await new PaymentVerificationWorker(f.Sessions, fixture.Store, provider).RunAsync(f.Context(0), lease, ct) ?? throw new InvalidOperationException();
         var replay = await fixture.Store.SettleAsync(f.Context(0), order.Payment, (_, _) => throw new InvalidOperationException(), ct);
         if (settled.Route != ExternalSettlementRoute.LocalGoods || replay.Outcome != PaymentSettlementOutcome.Replayed ||
             await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) != 0)

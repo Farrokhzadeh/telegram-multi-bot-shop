@@ -1113,6 +1113,9 @@ BEGIN
         IF OLD.confirmed_at IS NOT NULL THEN
             PERFORM require_true(NEW.confirmed_at IS NOT DISTINCT FROM OLD.confirmed_at,'payment_confirmation_immutable');
         END IF;
+        IF OLD.receipt_asset_ref IS NOT NULL THEN
+            PERFORM require_true(NEW.receipt_asset_ref IS NOT DISTINCT FROM OLD.receipt_asset_ref,'receipt_origin_immutable');
+        END IF;
         IF OLD.status='settled' THEN PERFORM require_true(NEW.status='settled','settlement_history'); END IF;
         IF OLD.compensating_wallet_entry_id IS NOT NULL THEN
             PERFORM require_true(NEW.compensating_wallet_entry_id IS NOT DISTINCT FROM OLD.compensating_wallet_entry_id,'payment_credit_immutable');
