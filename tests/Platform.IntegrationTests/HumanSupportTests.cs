@@ -51,7 +51,7 @@ public sealed class HumanSupportTests
                 VALUES ($1,$2,decode(repeat('55',32),'hex'),decode('01','hex'),'public-key','PUB',gen_random_uuid(),'promotion',10,$3)
                 """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(fixture.Brands[0]), DbValue.Uuid(adminId)), Ct);
             await seed.ExecuteAsync(new DbStatement("""
-                UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,is_preorder=true,fulfillment_status='waiting_stock' WHERE id=$1
+                UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,is_preorder=true,fulfillment_kind_snapshot='local',fulfillment_status='waiting_stock' WHERE id=$1
                 """, DbValue.Uuid(order)), Ct);
             Guid discount = await seed.QuerySingleAsync(new DbStatement("SELECT id FROM shop.discounts"), row => row.GetGuid(0), Ct);
             await seed.ExecuteAsync(new DbStatement("""
@@ -88,7 +88,7 @@ public sealed class HumanSupportTests
         await using (var seed = await fixture.Sessions.BeginAsync(Ct))
         {
             await seed.ExecuteAsync(new DbStatement("""
-                UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,is_preorder=true,fulfillment_status='waiting_stock' WHERE id=$1
+                UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,is_preorder=true,fulfillment_kind_snapshot='local',fulfillment_status='waiting_stock' WHERE id=$1
                 """, DbValue.Uuid(ownOrder)), Ct);
             await seed.CommitAsync(Ct);
         }
