@@ -43,6 +43,34 @@ public sealed class SupplierFailureTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE admin_authorization_audit_id IS NOT NULL AND max_charge_amount=1.10", Ct));
     }
     [Fact]
+    public async Task RetryCostIncreaseRequiresSeparateApprovalAndAnotherExplicitSafeRetryWithoutBaselineReset()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        Guid order = await SupplierFixture.AcceptAsync(f, 1, Ct);
+        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.NoEffect() };
+        var worker = new SupplierFulfillmentWorker(store, port, port);
+        var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
+        var binding = await store.ReadAsync(f.Context(0), lease, Ct);
+        await worker.RunAsync(f.Context(0), lease, Ct);
+        var actor = await f.AdminAsync(Ct);
+        var admin = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        await admin.ResolveAsync(actor, f.Context(0), order, new("retry_supplier", await AdminCatalogAndResolutionTests.Revision(f, order), "Public first safe retry", Guid.NewGuid(), binding.RequestId, 0), Ct);
+        port.UnitCost = 2;
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        Assert.Equal(1, port.Submits);
+        await store.ApproveCostAsync(actor, f.Context(0), binding.RequestId, 1, 2, "USD", Guid.NewGuid(), Ct);
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='submit_supplier' AND status IN ('pending','retry','leased')", Ct));
+        await admin.ResolveAsync(actor, f.Context(0), order, new("retry_supplier", await AdminCatalogAndResolutionTests.Revision(f, order), "Public approved safe retry", Guid.NewGuid(), binding.RequestId, 2), Ct);
+        port.Submit = b => SyntheticSupplier.Complete(b);
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        Assert.Equal(2, port.Submits);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='succeeded' AND revision=3 AND cost_baseline_amount=1 AND approved_cost_ceiling=2", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE max_charge_amount=2 AND admin_authorization_audit_id IS NOT NULL", Ct));
+        Assert.All(port.Intents, value => Assert.Equal(binding.Intent, value));
+    }
+    [Fact]
     public async Task RetryAndTerminalCreditSerializeToOneAuditedOutcomeAndReturnTheWholeHeldClaimOnlyOnCredit()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);

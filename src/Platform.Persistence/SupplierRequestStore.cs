@@ -206,11 +206,25 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.ApproveCost, AuditEntity.SupplierRequest, request, context.BrandId, AuditReason.OperatorReview, command,
                 AdminCommand.Hash("supplier-cost-approval-v1", request.ToString("D"), expectedRevision.ToString(System.Globalization.CultureInfo.InvariantCulture), ExactDecimal.Format(maximumUnitCost), currency), expectedRevision, expectedRevision + 1), ct)) return;
             var binding = await LockAsync(session, context, request, ct);
-            bool safe = await session.QuerySingleAsync(new DbStatement("SELECT status='blocked' AND review_code='cost_limit' AND revision=$2 AND NOT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE supplier_request_id=$1 AND operation='submit') AND NOT EXISTS(SELECT 1 FROM shop.jobs WHERE supplier_request_id=$1 AND status='leased') FROM shop.supplier_requests WHERE id=$1", DbValue.Uuid(request), DbValue.Bigint(expectedRevision)), r => r.GetBoolean(0), ct);
+            bool priorSubmit = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE supplier_request_id=$1 AND operation='submit')", DbValue.Uuid(request)), r => r.GetBoolean(0), ct);
+            bool safe = await session.QuerySingleAsync(new DbStatement("""
+                SELECT status='blocked' AND review_code='cost_limit' AND revision=$2
+                    AND NOT EXISTS(SELECT 1 FROM shop.jobs WHERE supplier_request_id=$1 AND status='leased')
+                    AND NOT EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled')
+                    AND NOT EXISTS(SELECT 1 FROM shop.inventory_items WHERE supplier_request_id=$1)
+                    AND NOT EXISTS(SELECT 1 FROM shop.supplier_request_attempts a WHERE a.supplier_request_id=$1 AND a.operation='submit' AND
+                        ((a.outcome='failed' AND a.error_code='confirmed_no_effect' AND a.evidence_ref IS NOT NULL) OR
+                         (a.outcome IN ('unknown','timeout') AND EXISTS(SELECT 1 FROM shop.supplier_request_attempts l WHERE l.parent_submit_attempt_id=a.id
+                            AND l.operation='status_lookup' AND l.outcome='failed' AND l.error_code='confirmed_no_effect' AND l.evidence_ref IS NOT NULL))) IS NOT TRUE)
+                FROM shop.supplier_requests WHERE id=$1
+                """, DbValue.Uuid(request), DbValue.Bigint(expectedRevision)), r => r.GetBoolean(0), ct);
             if (!safe || currency != binding.Currency || maximumUnitCost <= binding.UnitBaseline) throw new InvalidOperationException("Original cost review is unavailable.");
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='pending',review_code=NULL,approved_cost_ceiling=$1,approval_audit_id=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3", DbValue.Numeric(maximumUnitCost), DbValue.Uuid(command), DbValue.Uuid(request)), ct);
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET review_code=NULL,fulfillment_status='acquiring',revision=revision+1 WHERE id=$1 AND review_code='cost_limit'", DbValue.Uuid(binding.OrderId)), ct);
-            await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, request), command, DateTime.UtcNow, ct);
+            await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status=$4,review_code=NULL,approved_cost_ceiling=$1,approval_audit_id=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3", DbValue.Numeric(maximumUnitCost), DbValue.Uuid(command), DbValue.Uuid(request), DbValue.Text(priorSubmit ? "failed" : "pending")), ct);
+            if (!priorSubmit)
+            {
+                await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET review_code=NULL,fulfillment_status='acquiring',revision=revision+1 WHERE id=$1 AND review_code='cost_limit'", DbValue.Uuid(binding.OrderId)), ct);
+                await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, request), command, DateTime.UtcNow, ct);
+            }
             await session.CommitAsync(ct);
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
