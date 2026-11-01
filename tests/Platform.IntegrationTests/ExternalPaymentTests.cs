@@ -193,6 +193,61 @@ public sealed class ExternalPaymentTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
     }
 
+    [Theory]
+    [InlineData("confirmation_pending", true)]
+    [InlineData("expired", false)]
+    public async Task DelayedFinalEvidencePreservesTimelyHistoryAndNeverRevivesExpiredOrders(string state, bool timely)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        Guid order = Guid.NewGuid(), payment = Guid.NewGuid();
+        string origin = "order:" + order.ToString("D");
+        await using (var seed = await f.Sessions.BeginAsync(Ct))
+        {
+            await seed.ExecuteAsync(new DbStatement("""
+                INSERT INTO shop.orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,unit_price_usdt,auto_price_toman_snapshot,
+                    pricing_rounding_step_snapshot,price_calculation_version,brand_public_name_snapshot,product_title_snapshot,payment_terms_snapshot,
+                    fulfillment_kind_snapshot,local_first_snapshot,is_preorder,created_at,payment_due_at)
+                VALUES ($1,$2,$3,1,'product_purchase',$4,'USDT','crypto',10.25,false,5000,$5,'public brand','public item','public terms','local',true,false,
+                    CURRENT_TIMESTAMP-INTERVAL '31 minutes',CURRENT_TIMESTAMP-INTERVAL '1 minute')
+                """, DbValue.Uuid(order), DbValue.Uuid(f.Users[0]), DbValue.Uuid(f.Product), DbValue.Text(state), DbValue.Text(PricingPolicy.Version)), Ct);
+            await seed.ExecuteAsync(new DbStatement("""
+                INSERT INTO shop.payments(id,order_id,payment_method,quote_currency,amount_due,provider_code,provider_payment_ref,idempotency_ref,network_asset,
+                    expected_network_amount,first_payment_observed_at,status)
+                VALUES ($1,$2,'crypto','USD',10.25,'nowpayments','123456789',$3,'USDTTRC20',10.4,CASE WHEN $4 THEN CURRENT_TIMESTAMP-INTERVAL '2 minutes' ELSE NULL END,'confirming')
+                """, DbValue.Uuid(payment), DbValue.Uuid(order), DbValue.Text(origin), DbValue.Boolean(timely)), Ct);
+            await seed.CommitAsync(Ct);
+        }
+        using var notice = PaymentNoticeFixture.Notice(origin);
+        Assert.Equal(PaymentCaptureOutcome.Ready, (await Store(f).CaptureAsync(f.Context(0), notice, new Archive().Save, Ct)).Outcome);
+        await using var read = await f.Sessions.BeginAsync(Ct);
+        var clocks = await read.QuerySingleAsync(new DbStatement("SELECT p.first_payment_observed_at<=o.payment_due_at,p.confirmed_at>o.payment_due_at,o.payment_status FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id WHERE p.id=$1", DbValue.Uuid(payment)), r => (r.GetBoolean(0), r.GetBoolean(1), r.GetString(2)), Ct);
+        Assert.Equal((timely, true, state), clocks);
+        await NoPosting(f);
+    }
+
+    [Fact]
+    public async Task QualifyingClockIsCapturedBeforeArchiveWorkAndIgnoresProviderTimeClaims()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        await Enable(f);
+        var origin = await Order(f);
+        string body = PaymentNoticeFixture.Body(origin.Origin).Replace("\"order_id\"", "\"created_at\":\"2000-01-01T00:00:00Z\",\"order_id\"", StringComparison.Ordinal);
+        using var verifier = PaymentNoticeFixture.Verifier();
+        using var notice = verifier.Verify([PaymentNoticeFixture.Sign(body)], Encoding.UTF8.GetBytes(body));
+        DateTime archiveAt = DateTime.MinValue;
+        var archive = new Archive();
+        await Store(f).CaptureAsync(f.Context(0), notice, async (item, ct) =>
+        {
+            await using var read = await f.Sessions.BeginAsync(ct);
+            archiveAt = await read.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
+            return await archive.Save(item, ct);
+        }, Ct);
+        await using var inspect = await f.Sessions.BeginAsync(Ct);
+        DateTime first = await inspect.QuerySingleAsync(new DbStatement("SELECT first_payment_observed_at FROM shop.payments WHERE id=$1", DbValue.Uuid(origin.Id)), r => r.GetUtc(0), Ct);
+        Assert.True(first <= archiveAt);
+        Assert.True(first.Year >= 2026);
+    }
+
     private static async Task Enable(CheckoutFixture f, bool zero = true)
     {
         await using var edit = await f.Sessions.BeginAsync(Ct);

@@ -215,8 +215,13 @@ public static class ExternalPaymentPolicy
         if (orderState is not ("awaiting_payment" or "confirmation_pending" or "under_review")) return ExternalSettlementRoute.Review;
         if (kind == CheckoutKind.PrepaidUnits) return ExternalSettlementRoute.Prepaid;
         if (preorder) return fulfillment == "local" ? ExternalSettlementRoute.LocalPreorder : ExternalSettlementRoute.Review;
-        return fulfillment switch { "supplier" => ExternalSettlementRoute.Supplier, "manual" => ExternalSettlementRoute.LocalGoods,
-            "local" => completeLocalStock ? ExternalSettlementRoute.LocalGoods : ExternalSettlementRoute.LocalShortageCredit, _ => ExternalSettlementRoute.Review };
+        return fulfillment switch
+        {
+            "supplier" => ExternalSettlementRoute.Supplier,
+            "manual" => ExternalSettlementRoute.LocalGoods,
+            "local" => completeLocalStock ? ExternalSettlementRoute.LocalGoods : ExternalSettlementRoute.LocalShortageCredit,
+            _ => ExternalSettlementRoute.Review
+        };
     }
     public static Money FrozenCredit(decimal netQuote) => netQuote > 0 ? new(netQuote, Currency.Usd) : throw new PaymentNoticeRejectedException();
 }

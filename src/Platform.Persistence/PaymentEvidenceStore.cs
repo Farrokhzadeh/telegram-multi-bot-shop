@@ -71,7 +71,12 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
         Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default)
     {
         Payment before;
-        await using (var preflight = await sessions.BeginAsync(ct)) before = await LoadAsync(preflight, context, null, notice.Origin, false, ct);
+        DateTime observedAt;
+        await using (var preflight = await sessions.BeginAsync(ct))
+        {
+            before = await LoadAsync(preflight, context, null, notice.Origin, false, ct);
+            observedAt = await preflight.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
+        }
         if (before.Method != "crypto" || before.Currency != "USD" || before.ProviderCode != "nowpayments" || before.Provider != notice.ProviderPayment || before.Expected is null) throw new PaymentNoticeRejectedException();
         byte[] encrypted = new BrandCipher(secrets).Encrypt(context, "payments", before.Id, "ipn_evidence", notice.Body.Span);
         string asset = await archive(new(before.Id, context.BrandId, Convert.ToHexStringLower(notice.RawHash), secrets.CurrentBrandKeyId(context), encrypted), ct);
@@ -100,7 +105,7 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
             }
             if (data.Status == "review") decision = PaymentEvidenceDecision.Review;
             bool identity = notice.QuoteCurrency == "usd" && notice.QuoteAmount == data.Due && notice.Asset == expectedAsset && notice.ExpectedTokens == data.Expected;
-            DateTime? first = data.First ?? (identity && notice.ReceivedTokens > 0 ? now : null);
+            DateTime? first = data.First ?? (identity && notice.ReceivedTokens > 0 ? observedAt : null);
             if (data.Confirmed is not null && decision == PaymentEvidenceDecision.Pending) return new(PaymentCaptureOutcome.Replayed, data.Id);
             await session.ExecuteAsync(new DbStatement("""
                 UPDATE shop.payments SET status=$1,provider_status_code=$2,network_amount=CASE WHEN $15 THEN GREATEST(COALESCE(network_amount,0),$3) ELSE network_amount END,
@@ -109,8 +114,8 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
                     ipn_key_id=$8,ipn_signature=$9,ipn_payload_sha256=$10,ipn_verified_at=$11,evidence_asset_ref=$12,evidence_digest=$13
                 WHERE id=$14
                 """, DbValue.Text(decision == PaymentEvidenceDecision.Review ? "review" : first is null ? "awaiting" : "confirming"), DbValue.Text(notice.Status), DbValue.Numeric(notice.ReceivedTokens),
-                notice.Confirmations is long n ? DbValue.Bigint(n) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint), Time(first), decision == PaymentEvidenceDecision.Ready ? DbValue.Utc(now) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.TimestampTz),
-                DbValue.Boolean(decision == PaymentEvidenceDecision.Ready), DbValue.Text(notice.KeyId), DbValue.Binary(notice.Signature), DbValue.Binary(notice.CanonicalHash), DbValue.Utc(now), DbValue.Text(asset), DbValue.Binary(notice.RawHash), DbValue.Uuid(data.Id), DbValue.Boolean(identity)), ct);
+                notice.Confirmations is long n ? DbValue.Bigint(n) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint), Time(first), decision == PaymentEvidenceDecision.Ready ? DbValue.Utc(observedAt) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.TimestampTz),
+                DbValue.Boolean(decision == PaymentEvidenceDecision.Ready), DbValue.Text(notice.KeyId), DbValue.Binary(notice.Signature), DbValue.Binary(notice.CanonicalHash), DbValue.Utc(observedAt), DbValue.Text(asset), DbValue.Binary(notice.RawHash), DbValue.Uuid(data.Id), DbValue.Boolean(identity)), ct);
             if (data.Order is Guid live && first is DateTime observed && data.Deadline is DateTime deadline && observed <= deadline && data.OrderStatus == "awaiting_payment")
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='confirmation_pending',revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 AND payment_status='awaiting_payment'", DbValue.Uuid(live)), ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Payment(JobKind.VerifyPayment, context.BrandId, data.Id), eventId, now, ct);
