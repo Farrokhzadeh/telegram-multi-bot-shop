@@ -55,9 +55,11 @@ jobs:
       - name: Test synthetic and disposable contracts
         shell: bash
         run: |
+          result=0
           for suite in UnitTests IntegrationTests ContractTests; do
-            dotnet test "tests/Platform.${suite}/Platform.${suite}.csproj" -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory "artifacts/test-results/${suite}"
+            dotnet test "tests/Platform.${suite}/Platform.${suite}.csproj" -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory "artifacts/test-results/${suite}" || result=1
           done
+          exit "$result"
       - name: Publish and run Linux Native AOT
         run: bash ops/ci/native-smoke.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
