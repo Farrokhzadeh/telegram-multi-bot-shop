@@ -82,6 +82,27 @@ public sealed class PricingStoreTests
     }
 
     [Fact]
+    public async Task OneOrderCannotConsumeTwoDifferentCouponCodes()
+    {
+        await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
+        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var first = new CouponTerms(Guid.NewGuid(), "PUBLIC-FIRST", CouponKind.Promotion, 10, fixture.Product, MaximumUses: 5);
+        var second = first with { Id = Guid.NewGuid(), Code = "PUBLIC-SECOND" };
+        await Issue(fixture, store, first);
+        await Issue(fixture, store, second);
+        Guid order;
+        await using (var hold = await fixture.Sessions.BeginAsync(Ct))
+        {
+            order = await Order(hold, fixture, 0, 1, 10);
+            await store.HoldAsync(hold, fixture.Context(0), CheckoutFixture.Actor(0), first.Id, order, Ct);
+            await hold.CommitAsync(Ct);
+        }
+        await using (var duplicate = await fixture.Sessions.BeginAsync(Ct))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.HoldAsync(duplicate, fixture.Context(0), CheckoutFixture.Actor(0), second.Id, order, Ct));
+        Assert.Equal(1L, await fixture.CountAsync("SELECT count(*) FROM shop.discount_uses", Ct));
+    }
+
+    [Fact]
     public async Task ExistingHoldKeepsItsGrantAndCancellationReleaseIsExactlyOnce()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);

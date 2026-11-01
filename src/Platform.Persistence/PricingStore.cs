@@ -129,6 +129,8 @@ public sealed class PricingStore(DbSessionFactory sessions, SecretSnapshot secre
             if (existing.Status == "released") Reject(session);
             return existing;
         }
+        bool otherClaim = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.discount_uses WHERE order_id=$1 AND discount_id<>$2)", DbValue.Uuid(orderId), DbValue.Uuid(discountId)), row => row.GetBoolean(0), ct);
+        if (otherClaim) Reject(session);
         var grant = await session.QuerySingleAsync(new DbStatement("""
             SELECT r.id,d.percent_off::text FROM (SELECT 1) seed LEFT JOIN shop.discounts d ON d.id=$1 AND d.brand_id=$2 AND d.active AND (d.starts_at IS NULL OR d.starts_at<=clock_timestamp()) AND (d.ends_at IS NULL OR d.ends_at>clock_timestamp())
             LEFT JOIN shop.discount_revisions r ON r.discount_id=d.id AND r.revision_no=d.revision
