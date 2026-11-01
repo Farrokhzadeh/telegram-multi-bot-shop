@@ -45,14 +45,14 @@ public sealed class CheckoutStore(DbSessionFactory sessions, SecretSnapshot secr
             if (prior.NoOrder || prior.NoAudit || prior.Member != member.Id || prior.Brand != context.BrandId || prior.Hash is null || !CryptographicOperations.FixedTimeEquals(prior.Hash, fingerprint)) Reject(session);
             return new(CheckoutOutcome.Replayed, request.OrderId);
         }
-        var brand = await session.QuerySingleAsync(new DbStatement("SELECT public_name,policy_version,allow_wallet,require_channel_join FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
-            row => (Name: row.GetString(0), Revision: row.GetInt64(1), Wallet: row.GetBoolean(2), Channels: row.GetBoolean(3)), ct);
-        if (!brand.Wallet || brand.Channels) return new(CheckoutOutcome.Unavailable);
         var product = await session.QuerySingleAsync<Product?>(new DbStatement("""
             SELECT p.id,p.active,p.fulfillment_kind,p.availability_policy,p.local_first,p.revision,p.title,p.description,p.icon_ref,p.guidance
             FROM (SELECT 1) seed LEFT JOIN (SELECT * FROM shop.products WHERE id=$1 FOR UPDATE) p ON true
             """, DbValue.Uuid(request.ProductId)), row => row.IsDBNull(0) ? null : new Product(row.GetBoolean(1), row.GetString(2), row.GetString(3), row.GetBoolean(4), row.GetInt64(5), row.GetString(6), Text(row, 7), Text(row, 8), Text(row, 9)), ct);
         if (product is null || !product.Active || product.Kind != "local" || product.Availability != "immediate") return new(CheckoutOutcome.Unavailable);
+        var brand = await session.QuerySingleAsync(new DbStatement("SELECT public_name,policy_version,allow_wallet,require_channel_join FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
+            row => (Name: row.GetString(0), Revision: row.GetInt64(1), Wallet: row.GetBoolean(2), Channels: row.GetBoolean(3)), ct);
+        if (!brand.Wallet || brand.Channels) return new(CheckoutOutcome.Unavailable);
         var listing = await session.QuerySingleAsync<Listing?>(new DbStatement("""
             SELECT b.product_id,b.visible,b.allow_wallet,b.price_usdt::text,b.min_quantity,b.max_quantity,b.revision,
                 CASE WHEN b.title_mode='override' THEN b.title_override ELSE $3 END,

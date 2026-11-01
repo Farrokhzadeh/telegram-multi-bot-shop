@@ -18,10 +18,12 @@ public static class StockSubscriptionStore
             """, DbValue.Uuid(observation.ProductId), DbValue.Uuid(context.BrandId), DbValue.Bigint(observation.ProductRevision),
             DbValue.Bigint(observation.ListingRevision), DbValue.Utc(observation.ObservedAt)), row => row.GetBoolean(0), ct);
         if (!eligible) Deny(session);
-        return await session.QuerySingleAsync(new DbStatement("""
+        Guid consent = await session.QuerySingleAsync(new DbStatement("""
             INSERT INTO shop.product_stock_subscriptions(id,user_id,product_id) VALUES ($1,$2,$3)
             ON CONFLICT (user_id,product_id) WHERE closed_at IS NULL DO UPDATE SET product_id=EXCLUDED.product_id RETURNING id
             """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(member.Id), DbValue.Uuid(observation.ProductId)), row => row.GetGuid(0), ct);
+        await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.EvaluateRestock, observation.ProductId), consent, DateTime.UtcNow, ct);
+        return consent;
     }
 
     public static async Task<Guid?> UnsubscribeAsync(DbSession session, BrandContext context, long verifiedActorId, Guid membershipId,

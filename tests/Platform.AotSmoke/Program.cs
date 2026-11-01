@@ -139,6 +139,26 @@ await using (var checkout = await CheckoutFixture.CreateAsync())
         PricingPolicy.DiscountTotal(0.05m, 1, 10, Currency.Usdt).Amount != 0.04m)
         throw new InvalidOperationException("Native coupon/pricing qualification failed.");
     Console.WriteLine("PASS: native keyed/encrypted coupon issue and scoped lookup with exact legacy FX/cent arithmetic.");
+    await checkout.AddStockAsync(1);
+    var catalog = new CatalogStore(checkout.Sessions, checkout.Secrets, [new SupplierAccount("synthetic", "public-native-account")],
+        (request, _) => Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, request.Quantity, 2, "USD", "public native quote")));
+    var localQuote = await catalog.PrepareAsync(checkout.Context(0), CheckoutFixture.Actor(0), new(checkout.Product, 1, CheckoutPayment.Wallet));
+    if (localQuote.Quote.TotalUsd.Amount != 9 || localQuote.Quote.Terms.DiscountId != coupon.Id) throw new InvalidOperationException("Native automatic quote failed.");
+    await using (var configure = await checkout.Sessions.BeginAsync())
+    {
+        Guid source = Guid.NewGuid();
+        await configure.ExecuteAsync(new DbStatement("INSERT INTO shop.product_supplier_sources(id,product_id,provider_code,external_product_id,enabled) VALUES ($1,$2,'synthetic','public native product',true)", DbValue.Uuid(source), DbValue.Uuid(checkout.Product)));
+        await configure.ExecuteAsync(new DbStatement("UPDATE shop.products SET fulfillment_kind='supplier',active_supplier_source_id=$1,revision=revision+1 WHERE id=$2", DbValue.Uuid(source), DbValue.Uuid(checkout.Product)));
+        await configure.CommitAsync();
+    }
+    var mixed = await catalog.PrepareAsync(checkout.Context(0), CheckoutFixture.Actor(0), new(checkout.Product, 3, CheckoutPayment.Wallet));
+    if (mixed.Supply.LocalUnits != 1 || mixed.Supply.RemoteUnits != 2 || mixed.Quote.TotalUsd.Amount != 27) throw new InvalidOperationException("Native local-first catalog failed.");
+    await using (var validate = await checkout.Sessions.BeginAsync())
+    {
+        await catalog.RequireCurrentAsync(validate, checkout.Context(0), CheckoutFixture.Actor(0), mixed);
+        await validate.CommitAsync();
+    }
+    Console.WriteLine("PASS: native immutable automatic quote, local-first supplier refresh and single-use acceptance proof without live transport.");
 }
 Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
 
