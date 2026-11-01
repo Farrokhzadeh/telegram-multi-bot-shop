@@ -8,7 +8,11 @@ public static class Localization
     public static string Text(BrandPolicySnapshot policy, CustomerText key)
     {
         ArgumentNullException.ThrowIfNull(policy);
-        bool persian = policy.Language.Equals("fa", StringComparison.OrdinalIgnoreCase) || policy.Language.StartsWith("fa-", StringComparison.OrdinalIgnoreCase);
+        return Text(policy.Language, key);
+    }
+    public static string Text(string language, CustomerText key)
+    {
+        bool persian = language.Equals("fa", StringComparison.OrdinalIgnoreCase) || language.StartsWith("fa-", StringComparison.OrdinalIgnoreCase);
         return (persian, key) switch
         {
             (true, CustomerText.OutOfStock) => "ناموجود",

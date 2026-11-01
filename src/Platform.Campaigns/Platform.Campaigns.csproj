@@ -4,6 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Platform.Core/Platform.Core.csproj" />
+    <ProjectReference Include="../Platform.Telegram/Platform.Telegram.csproj" />
     <ProjectReference Include="../Platform.Persistence/Platform.Persistence.csproj" />
   </ItemGroup>
 </Project>
