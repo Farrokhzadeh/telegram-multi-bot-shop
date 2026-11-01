@@ -125,7 +125,7 @@ public sealed class SupplierRecoveryTests
         using (var opened = await store.OpenBonusAsync(admin, f.Context(0), binding.RequestId, bonus, Guid.NewGuid(), Ct))
         { Assert.Equal("public supplier credential"u8.ToArray(), opened.Content.ToArray()); Assert.DoesNotContain("public supplier credential", opened.ToString()); }
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE actor_kind='admin' AND action='maintenance' AND entity_kind='supplier_request'", Ct));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => store.OpenBonusAsync(admin, f.Context(1), binding.RequestId, bonus, Guid.NewGuid(), Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.OpenBonusAsync(admin, f.Context(1), binding.RequestId, bonus, Guid.NewGuid(), Ct));
         Assert.Equal(5L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE kind='supplier'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE origin_kind='supplier_bonus' AND state<>'admin_held'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE recipient_kind='staff_chat' AND staff_chat_id=-100777 AND purpose='staff_supplier_bonus'", Ct));

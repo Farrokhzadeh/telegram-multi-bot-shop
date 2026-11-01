@@ -233,7 +233,9 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     {
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var data = await session.QuerySingleAsync(new DbStatement("SELECT i.remote_item_ref,i.credential_ciphertext,i.credential_key_id FROM shop.inventory_items i JOIN shop.supplier_requests r ON r.id=i.supplier_request_id JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE i.id=$1 AND r.id=$2 AND i.state='admin_held' AND i.origin_kind='supplier_bonus' AND b.id=$3 AND b.bot_id=$4", DbValue.Uuid(item), DbValue.Uuid(request), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Reference: r.GetString(0), Cipher: r.GetBinary(1), Key: r.GetString(2)), ct);
+        var rows = await session.QueryManyAsync(new DbStatement("SELECT i.remote_item_ref,i.credential_ciphertext,i.credential_key_id FROM shop.inventory_items i JOIN shop.supplier_requests r ON r.id=i.supplier_request_id JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE i.id=$1 AND r.id=$2 AND i.state='admin_held' AND i.origin_kind='supplier_bonus' AND b.id=$3 AND b.bot_id=$4", DbValue.Uuid(item), DbValue.Uuid(request), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Reference: r.GetString(0), Cipher: r.GetBinary(1), Key: r.GetString(2)), 1, ct);
+        if (rows.Count != 1) throw new UnauthorizedAccessException("Protected supplier bonus is unavailable.");
+        var data = rows[0];
         await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Maintenance, AuditEntity.SupplierRequest, request, context.BrandId, AuditReason.OperatorReview, command, AdminCommand.Hash("supplier-bonus-access-v1", request.ToString("D"), item.ToString("D"))), ct);
         byte[] plain = new InventoryCipher(secrets).Decrypt(item, data.Key, data.Cipher);
         try { await session.CommitAsync(ct); return new(data.Reference, SupplierItemDisposition.Bonus, "code", plain); }
