@@ -1,6 +1,7 @@
 using Platform.Core;
 using Platform.Fulfillment;
 using Platform.Persistence;
+using Platform.Security;
 using Platform.Testing;
 
 namespace Platform.IntegrationTests;
@@ -131,7 +132,8 @@ public sealed class SupplierRecoveryTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE recipient_kind='staff_chat' AND staff_chat_id=-100777 AND purpose='staff_supplier_bonus'", Ct));
         await using (var revoke = await f.Sessions.BeginAsync(Ct))
         { await revoke.ExecuteAsync(new DbStatement("UPDATE shop.admin_sessions SET revoked_at=clock_timestamp()"), Ct); await revoke.CommitAsync(Ct); }
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.OpenBonusAsync(admin, f.Context(0), binding.RequestId, bonus, Guid.NewGuid(), Ct));
+        await Assert.ThrowsAsync<AdminAuthenticationException>(() => store.OpenBonusAsync(admin, f.Context(0), binding.RequestId, bonus, Guid.NewGuid(), Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE actor_kind='admin' AND action='maintenance' AND entity_kind='supplier_request'", Ct));
     }
     [Fact]
     public async Task ReorderedRecoveryDeduplicatesPartialUnitsAndBonusesWithoutClearingProtectedPartialReview()
