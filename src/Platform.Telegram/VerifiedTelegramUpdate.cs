@@ -11,14 +11,15 @@ public sealed class TelegramIngressRejectedException : Exception
 }
 public sealed class VerifiedTelegramUpdate
 {
-    internal VerifiedTelegramUpdate(BrandContext context, long updateId, long actorId, long messageId, string value, bool callback)
-    { Context = context; UpdateId = updateId; ActorId = actorId; MessageId = messageId; Value = value; IsCallback = callback; }
+    internal VerifiedTelegramUpdate(BrandContext context, long updateId, long actorId, long messageId, string value, bool callback, string? assetRef = null)
+    { Context = context; UpdateId = updateId; ActorId = actorId; MessageId = messageId; Value = value; IsCallback = callback; AssetRef = assetRef; }
     public BrandContext Context { get; }
     public long UpdateId { get; }
     public long ActorId { get; }
     public long MessageId { get; }
     public bool IsCallback { get; }
     internal string Value { get; }
+    internal string? AssetRef { get; }
     public override string ToString() => "VerifiedTelegramUpdate [redacted]";
 }
 
@@ -58,6 +59,7 @@ public sealed class TelegramWebhookVerifier : IDisposable
             if (callback == root.TryGetProperty("message", out JsonElement message)) throw new TelegramIngressRejectedException();
             JsonElement sender;
             string value;
+            string? assetRef = null;
             if (callback)
             {
                 sender = envelope.GetProperty("from");
@@ -70,8 +72,19 @@ public sealed class TelegramWebhookVerifier : IDisposable
             else
             {
                 sender = message.GetProperty("from");
-                value = message.GetProperty("text").GetString() ?? throw new TelegramIngressRejectedException();
-                if (value.Length is < 1 or > 4096 || string.IsNullOrWhiteSpace(value)) throw new TelegramIngressRejectedException();
+                bool photo = message.TryGetProperty("photo", out JsonElement photos);
+                bool documentMedia = message.TryGetProperty("document", out JsonElement documentMediaValue);
+                if (photo && documentMedia) throw new TelegramIngressRejectedException();
+                if (photo)
+                {
+                    if (photos.ValueKind != JsonValueKind.Array || photos.GetArrayLength() is < 1 or > 10) throw new TelegramIngressRejectedException();
+                    assetRef = photos[photos.GetArrayLength() - 1].GetProperty("file_id").GetString();
+                }
+                else if (documentMedia) assetRef = documentMediaValue.GetProperty("file_id").GetString();
+                if ((photo || documentMedia) && (string.IsNullOrEmpty(assetRef) || assetRef.Length > 1024 || assetRef.Any(c => c < 33 || c > 126))) throw new TelegramIngressRejectedException();
+                value = message.TryGetProperty("text", out JsonElement text) ? text.GetString() ?? throw new TelegramIngressRejectedException() :
+                    message.TryGetProperty("caption", out JsonElement caption) ? caption.GetString() ?? throw new TelegramIngressRejectedException() : "";
+                if (value.Length > 4096 || (string.IsNullOrWhiteSpace(value) && assetRef is null) || (assetRef is not null && value.StartsWith('/'))) throw new TelegramIngressRejectedException();
                 if (value.StartsWith('/') && value is not ("/start" or "/menu" or "/support" or "/discounts") &&
                     !(value.Length == 82 && value.StartsWith("/bind ", StringComparison.Ordinal)) && !IsSupportCommand(value)) throw new TelegramIngressRejectedException();
             }
@@ -79,7 +92,7 @@ public sealed class TelegramWebhookVerifier : IDisposable
             if (sender.GetProperty("is_bot").GetBoolean()) throw new TelegramIngressRejectedException();
             JsonElement chat = message.GetProperty("chat");
             if (chat.GetProperty("type").GetString() != "private" || Number(chat, "id", true) != actorId) throw new TelegramIngressRejectedException();
-            return new(context, updateId, actorId, Number(message, "message_id", true), value, callback);
+            return new(context, updateId, actorId, Number(message, "message_id", true), value, callback, assetRef);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
         { throw new TelegramIngressRejectedException(); }

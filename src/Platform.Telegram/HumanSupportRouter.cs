@@ -42,7 +42,7 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
         {
             string keyId = secrets.CurrentBrandKeyId(update.Context);
             byte[] encrypted = new BrandCipher(secrets).Encrypt(update.Context, "support_messages", messageId, "body_ciphertext", plain);
-            await SupportStore.RecordCustomerMessageAsync(session, update.Context, update.ActorId, ticketId, null, encrypted, keyId, ct, messageId, update.MessageId);
+            await SupportStore.RecordCustomerMessageAsync(session, update.Context, update.ActorId, ticketId, update.AssetRef, encrypted, keyId, ct, messageId, update.MessageId);
         }
         finally { CryptographicOperations.ZeroMemory(plain); }
         await session.CommitAsync(ct);

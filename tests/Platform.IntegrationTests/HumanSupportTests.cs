@@ -227,6 +227,23 @@ public sealed class HumanSupportTests
     }
 
     [Fact]
+    public async Task VerifiedMediaReferencesStayInTheSameSupportTicketWithoutDownloading()
+    {
+        await using var fixture = await SecretFixture();
+        using var files = new SyntheticSecretFiles();
+        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        var router = new HumanSupportRouter(fixture.Sessions, secrets);
+        var ticket = await router.RouteAsync(Message(fixture, "/support", 351), Ct);
+        using var verifier = new TelegramWebhookVerifier(fixture.Contexts[0], Secret);
+        byte[] body = TelegramFixture.Replace(TelegramFixture.Body("public media caption", updateId: 352, messageId: 352), "\"text\":", "\"document\":{\"file_id\":\"public-synthetic-media\"},\"text\":");
+        var media = verifier.Verify([TelegramFixture.Header(Secret)], body);
+        await router.RouteAsync(media, Ct);
+        await router.RouteAsync(media, Ct);
+        Assert.Equal(1L, await Count(fixture, "SELECT count(*) FROM shop.support_messages WHERE ticket_id=$1 AND asset_ref='public-synthetic-media'", ticket.TicketId));
+        await Unchanged(fixture);
+    }
+
+    [Fact]
     public async Task DisabledBrandSupportCannotOpenTickets()
     {
         await using var fixture = await SecretFixture();
