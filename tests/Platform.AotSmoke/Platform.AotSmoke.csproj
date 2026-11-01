@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/PaymentNoticeFixture.cs" Link="Shared/PaymentNoticeFixture.cs" />
     <Compile Include="../Shared/CheckoutFixture.cs" Link="Shared/CheckoutFixture.cs" />
     <Compile Include="../Shared/FoundationQualification.cs" Link="Shared/FoundationQualification.cs" />
     <Compile Include="../Shared/AdminQualification.cs" Link="Shared/AdminQualification.cs" />

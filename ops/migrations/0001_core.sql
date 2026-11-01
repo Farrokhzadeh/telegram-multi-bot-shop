@@ -352,6 +352,11 @@ id uuid PRIMARY KEY,
     provider_payment_ref short_text,
     idempotency_ref short_text NOT NULL UNIQUE,
     network_asset text CHECK (network_asset IN ('USDTTRC20','USDTBSC')),
+    expected_network_amount finite_numeric CHECK (expected_network_amount > 0),
+    ipn_key_id short_text,
+    ipn_signature bytea CHECK (octet_length(ipn_signature)=64),
+    ipn_payload_sha256 bytea CHECK (octet_length(ipn_payload_sha256)=32),
+    ipn_verified_at timestamptz,
     network_amount finite_numeric CHECK (network_amount >= 0),
     provider_confirmations bigint CHECK (provider_confirmations >= 0),
     first_payment_observed_at timestamptz,
@@ -378,6 +383,10 @@ id uuid PRIMARY KEY,
            (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND bank_destination_ciphertext IS NOT NULL AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)),
     CHECK (topup_user_id IS NULL OR payment_method='crypto'),
     CHECK (status <> 'settled' OR confirmed_at IS NOT NULL),
+    CHECK (num_nonnulls(ipn_key_id,ipn_signature,ipn_payload_sha256,ipn_verified_at) IN (0,4)),
+    CHECK (ipn_key_id IS NULL OR (payment_method='crypto' AND provider_payment_ref IS NOT NULL AND expected_network_amount IS NOT NULL AND evidence_asset_ref IS NOT NULL)),
+    CHECK (expected_network_amount IS NULL OR payment_method='crypto'),
+    CHECK (isfinite(ipn_verified_at)),
     CHECK (isfinite(first_payment_observed_at)),
     CHECK (isfinite(confirmed_at)),
     CHECK (isfinite(reviewed_at)),
@@ -1096,7 +1105,7 @@ BEGIN
             IS NOT DISTINCT FROM ROW(OLD.id,OLD.order_id,OLD.topup_user_id,OLD.payment_method,OLD.quote_currency,OLD.amount_due,OLD.idempotency_ref,
             OLD.network_asset,OLD.bank_destination_ciphertext,OLD.bank_destination_key_id,OLD.legacy_kind,OLD.created_at),'payment_quote_origin_immutable');
         IF OLD.provider_payment_ref IS NOT NULL THEN
-            PERFORM require_true(ROW(NEW.provider_code,NEW.provider_payment_ref) IS NOT DISTINCT FROM ROW(OLD.provider_code,OLD.provider_payment_ref),'provider_identity_immutable');
+            PERFORM require_true(ROW(NEW.provider_code,NEW.provider_payment_ref,NEW.expected_network_amount) IS NOT DISTINCT FROM ROW(OLD.provider_code,OLD.provider_payment_ref,OLD.expected_network_amount),'provider_identity_immutable');
         END IF;
         IF OLD.first_payment_observed_at IS NOT NULL THEN
             PERFORM require_true(NEW.first_payment_observed_at IS NOT DISTINCT FROM OLD.first_payment_observed_at,'first_payment_clock_immutable');

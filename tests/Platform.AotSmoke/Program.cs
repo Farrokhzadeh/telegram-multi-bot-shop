@@ -228,6 +228,37 @@ await using (var deliveryFixture = await CheckoutFixture.CreateAsync())
         throw new InvalidOperationException("Native complete-manifest delivery failed.");
     Console.WriteLine("PASS: native protected complete manifest, explicit recovery send and saved outcome with synthetic transport.");
 }
+await using (var paymentFixture = await CheckoutFixture.CreateAsync(balance: 0, stock: 0))
+{
+    await using (var enable = await paymentFixture.Sessions.BeginAsync())
+    {
+        await enable.ExecuteAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,allow_wallet_topup=true,zero_balance_topup=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(paymentFixture.Brands[0])));
+        await enable.CommitAsync();
+    }
+    var evidenceStore = new PaymentEvidenceStore(paymentFixture.Sessions, paymentFixture.Secrets);
+    Guid payment = Guid.NewGuid();
+    await evidenceStore.CreateTopupAsync(paymentFixture.Context(0), CheckoutFixture.Actor(0), payment, new Money(10.25m, Currency.Usd), CryptoAsset.UsdtTrc20);
+    await using (var bind = await paymentFixture.Sessions.BeginAsync())
+    {
+        await evidenceStore.BindInvoiceAsync(bind, paymentFixture.Context(0), CheckoutFixture.Actor(0), payment, "123456789", 10.4m);
+        await bind.CommitAsync();
+    }
+    using var notice = PaymentNoticeFixture.Notice("topup:" + payment.ToString("D"));
+    var encryptedEvidence = new Dictionary<string, byte[]>();
+    Task<string> Archive(ProtectedPaymentEvidence item, CancellationToken ct)
+    {
+        string asset = "protected:native/" + item.PaymentId.ToString("N") + "/" + item.Digest;
+        encryptedEvidence.TryAdd(asset, item.Ciphertext.ToArray());
+        return Task.FromResult(asset);
+    }
+    if ((await evidenceStore.CaptureAsync(paymentFixture.Context(0), notice, Archive)).Outcome != PaymentCaptureOutcome.Ready ||
+        (await evidenceStore.CaptureAsync(paymentFixture.Context(0), notice, Archive)).Outcome != PaymentCaptureOutcome.Replayed ||
+        await paymentFixture.CountAsync("SELECT count(*) FROM shop.payments WHERE amount_due=10.25 AND amount_received=10.25 AND network_amount=10.4 AND expected_network_amount=10.4 AND ipn_signature IS NOT NULL") != 1 ||
+        await paymentFixture.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment'") != 1 ||
+        await paymentFixture.CountAsync("SELECT count(*) FROM shop.wallet_entries") != 0 || encryptedEvidence.Count != 1)
+        throw new InvalidOperationException("Native signed payment evidence failed.");
+    Console.WriteLine("PASS: native signed IPN verification, invoice-bound scalar evidence and replay without financial settlement.");
+}
 Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
 
 await using (var database = await DisposablePostgres.CreateAsync())
