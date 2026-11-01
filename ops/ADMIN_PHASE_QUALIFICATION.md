@@ -38,6 +38,8 @@ The phase suite includes 100 concurrent logical wallet-adjustment replays; stale
 
 Current canonical typed no-JSON 28-table fresh-disposable SQL SHA-256 is `4e46e2eeed7657ef7e77788aa36bc05da0e07c3e8d877c4fadfde33f5e91847d`; earlier hashes remain historical evidence. No existing staging/production schema was migrated. Normal hosts remain fail closed. Live Telegram/payment/supplier/FX adapters, archive durability, runtime/sender routing and scheduling, credential reload, invoice/callback activation, actual supplier acquisition/cost override/FIFO workers and operational release gates remain unqualified. Local .NET/PostgreSQL/Docker are unavailable; GitHub Actions supplies executable evidence. Local Spec Kit tooling passed 15 tests and git diff --check passed. No real credentials/source rows, live services, staging/production mutation or deployment.
 
+The later documentation-only run [41349274010](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41349274010) stopped at secret scanning: two references to the public generated contract hash used wording that matched the pinned generic API-key assignment rule. Those references now identify an administration contract digest explicitly. Hash values, executable source, scanner rules and allowlists are unchanged. The prior executable qualification remains bound to its source/run above; the corrective documentation commit is rechecked by the full workflow.
+
 ## Qualified artifacts
 
 | Artifact | SHA-256 |
