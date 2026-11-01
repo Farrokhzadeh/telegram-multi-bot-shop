@@ -40,23 +40,28 @@ public sealed class HumanSupportTests
     public async Task PreorderCancellationTicketIsMembershipScopedAndLeavesFinancialState()
     {
         await using var fixture = await BrandFixture.CreateAsync(Ct);
-        Guid order = fixture.Orders[0];
+        Guid order = await SeedPaidPreorder(fixture);
         Guid adminId = Guid.NewGuid();
         await using (var seed = await fixture.Sessions.BeginAsync(Ct))
         {
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,password_verifier) VALUES ($1,'public-support-admin','password',$2)",
                 DbValue.Uuid(adminId), DbValue.Text(Verifier.Value)), Ct);
+            Guid discount = Guid.NewGuid(), audit = Guid.NewGuid(), revision = Guid.NewGuid();
             await seed.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,display_prefix,issuance_batch_id,kind,percent_off,created_by_admin_id)
                 VALUES ($1,$2,decode(repeat('55',32),'hex'),decode('01','hex'),'public-key','PUB',gen_random_uuid(),'promotion',10,$3)
-                """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(fixture.Brands[0]), DbValue.Uuid(adminId)), Ct);
+                """, DbValue.Uuid(discount), DbValue.Uuid(fixture.Brands[0]), DbValue.Uuid(adminId)), Ct);
             await seed.ExecuteAsync(new DbStatement("""
-                UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,is_preorder=true,fulfillment_kind_snapshot='local',fulfillment_status='waiting_stock' WHERE id=$1
-                """, DbValue.Uuid(order)), Ct);
-            Guid discount = await seed.QuerySingleAsync(new DbStatement("SELECT id FROM shop.discounts"), row => row.GetGuid(0), Ct);
+                INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,new_revision,correlation_id)
+                VALUES ($1,'admin',$2,$3,'coupon_issue','discount',$4,'public coupon issue',0,gen_random_uuid())
+                """, DbValue.Uuid(audit), DbValue.Uuid(adminId), DbValue.Uuid(fixture.Brands[0]), DbValue.Uuid(discount)), Ct);
             await seed.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.discount_uses(discount_id,order_id,units_covered,saved_amount,saved_currency,status) VALUES ($1,$2,1,1,'USD','held')
-                """, DbValue.Uuid(discount), DbValue.Uuid(order)), Ct);
+                INSERT INTO shop.discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,usage_adjustment_units,redeemed_count_at_revision,held_units_at_revision,active)
+                VALUES ($1,$2,0,$3,10,0,0,0,true)
+                """, DbValue.Uuid(revision), DbValue.Uuid(discount), DbValue.Uuid(audit)), Ct);
+            await seed.ExecuteAsync(new DbStatement("""
+                INSERT INTO shop.discount_uses(discount_id,order_id,discount_revision_id,units_covered,saved_amount,saved_currency,status) VALUES ($1,$2,$3,1,1,'USD','held')
+                """, DbValue.Uuid(discount), DbValue.Uuid(order), DbValue.Uuid(revision)), Ct);
             await seed.CommitAsync(Ct);
         }
         Guid ticketId;
@@ -84,14 +89,7 @@ public sealed class HumanSupportTests
     public async Task OrderLinkedTicketRejectsForeignOrdersWithoutDisclosure()
     {
         await using var fixture = await BrandFixture.CreateAsync(Ct);
-        Guid ownOrder = fixture.Orders[0];
-        await using (var seed = await fixture.Sessions.BeginAsync(Ct))
-        {
-            await seed.ExecuteAsync(new DbStatement("""
-                UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,is_preorder=true,fulfillment_kind_snapshot='local',fulfillment_status='waiting_stock' WHERE id=$1
-                """, DbValue.Uuid(ownOrder)), Ct);
-            await seed.CommitAsync(Ct);
-        }
+        Guid ownOrder = await SeedPaidPreorder(fixture);
         Guid ticketId;
         bool created;
         await using (var session = await fixture.Sessions.BeginAsync(Ct))
@@ -249,6 +247,25 @@ public sealed class HumanSupportTests
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.inventory_items"), r => r.GetInt64(0), Ct));
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.fulfillments"), r => r.GetInt64(0), Ct));
         await read.CommitAsync(Ct);
+    }
+
+    private static async Task<Guid> SeedPaidPreorder(BrandFixture fixture)
+    {
+        Guid product = Guid.NewGuid(), orderId = Guid.NewGuid();
+        await using var seed = await fixture.Sessions.BeginAsync(Ct);
+        await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','local_preorder','public preorder')",
+            DbValue.Uuid(product)), Ct);
+        await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_products(brand_id,product_id,price_usdt) VALUES ($1,$2,10)",
+            DbValue.Uuid(fixture.Contexts[0].BrandId), DbValue.Uuid(product)), Ct);
+        await seed.ExecuteAsync(new DbStatement("""
+            INSERT INTO shop.orders(id,user_id,product_id,quantity,order_kind,payment_status,payment_confirmed_at,currency,payment_method,
+                unit_price_usdt,auto_price_toman_snapshot,pricing_rounding_step_snapshot,price_calculation_version,brand_public_name_snapshot,
+                product_title_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,fulfillment_status)
+            VALUES ($1,$2,$3,1,'product_purchase','paid',CURRENT_TIMESTAMP,'USDT','crypto',10,false,5000,'public-v1',
+                'public brand','public product','public terms','local',true,true,'waiting_stock')
+            """, DbValue.Uuid(orderId), DbValue.Uuid(fixture.Users[0]), DbValue.Uuid(product)), Ct);
+        await seed.CommitAsync(Ct);
+        return orderId;
     }
 
     private static VerifiedTelegramUpdate Support(BrandFixture fixture, long updateId)
