@@ -42,8 +42,15 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
     {
         ArgumentNullException.ThrowIfNull(value);
         AdminCommand.Revision(value.ExpectedRevision); AdminCommand.Reason(value.Reason);
-        AuditAction action = value.Action switch { "pause_preorder" => AuditAction.HoldPreorder, "resume_preorder" => AuditAction.ResumePreorder, "cancel_local_preorder" => AuditAction.CancelPreorder,
-            "retry_supplier" => AuditAction.RetrySupplier, "credit_supplier_failure" => AuditAction.SupplierCredit, _ => throw new ArgumentException("Unsupported resolution.") };
+        AuditAction action = value.Action switch
+        {
+            "pause_preorder" => AuditAction.HoldPreorder,
+            "resume_preorder" => AuditAction.ResumePreorder,
+            "cancel_local_preorder" => AuditAction.CancelPreorder,
+            "retry_supplier" => AuditAction.RetrySupplier,
+            "credit_supplier_failure" => AuditAction.SupplierCredit,
+            _ => throw new ArgumentException("Unsupported resolution.")
+        };
         bool retry = action == AuditAction.RetrySupplier;
         if (value.SupplierRequestId == Guid.Empty || (action is AuditAction.RetrySupplier or AuditAction.SupplierCredit && (value.SupplierRequestId is null || value.ExpectedRequestRevision is null))) throw new ArgumentException("Supplier resolution requires the original request and revision.");
         if (value.ExpectedRequestRevision is long requestRevision) AdminCommand.Revision(requestRevision);

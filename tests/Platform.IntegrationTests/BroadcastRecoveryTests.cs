@@ -112,8 +112,10 @@ public sealed class BroadcastRecoveryTests
         }
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='succeeded'", Ct));
     }
-    [Fact]
-    public async Task CancellationAndBlockChangesNeverCreateExtraOrRetargetedNotifications()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationAndBlockChangesNeverCreateExtraOrRetargetedNotifications(bool dispatched)
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
         var store = await Launch(f);
@@ -121,13 +123,15 @@ public sealed class BroadcastRecoveryTests
         Guid batch;
         await using (var read = await f.Sessions.BeginAsync(Ct)) batch = await read.QuerySingleAsync(new DbStatement("SELECT batch_id FROM shop.campaigns"), r => r.GetGuid(0), Ct);
         var lease = (await store.ClaimNoticeAsync(Guid.NewGuid(), Ct))!;
-        Assert.NotNull(await store.BeginNoticeAsync(f.Context(0), lease, TimeSpan.FromMilliseconds(100), null, Accounts, Ct));
+        if (dispatched) Assert.NotNull(await store.BeginNoticeAsync(f.Context(0), lease, TimeSpan.FromMilliseconds(100), null, Accounts, Ct));
         Guid cancel = Guid.NewGuid();
         await store.TransitionAsync(actor, batch, true, cancel, "Public cancellation", Ct);
         await store.TransitionAsync(actor, batch, true, cancel, "Public cancellation", Ct);
-        await store.RecordNoticeAsync(f.Context(0), lease, new(NoticeOutcomeKind.Sent, 555), Ct);
+        if (dispatched) await store.RecordNoticeAsync(f.Context(0), lease, new(NoticeOutcomeKind.Sent, 555), Ct);
+        else Assert.Null(await store.BeginNoticeAsync(f.Context(0), lease, TimeSpan.FromMilliseconds(100), null, Accounts, Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.campaigns WHERE status='cancelled'", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='succeeded'", Ct));
+        Assert.Equal(dispatched ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='succeeded'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE status='leased'", Ct));
         Assert.Null(await store.ClaimNoticeAsync(Guid.NewGuid(), Ct));
     }
     [Fact]

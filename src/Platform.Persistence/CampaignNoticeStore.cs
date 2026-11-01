@@ -57,7 +57,7 @@ public sealed partial class CampaignStore
                     LEFT JOIN shop.products p ON p.id=sub.product_id LEFT JOIN shop.brand_products bp ON bp.product_id=p.id AND bp.brand_id=d.brand_id
                 WHERE d.id=$1 FOR UPDATE OF d
                 """, DbValue.Uuid(delivery)), r => new NoticeState(r.GetString(0), r.GetString(1), Long(r, 2), r.GetString(3), Long(r, 4), !r.IsDBNull(5) && r.GetBoolean(5), !r.IsDBNull(6) && r.GetBoolean(6), r.GetString(7), r.GetBoolean(8), r.GetInt64(9), Text(r, 10), Text(r, 11), Text(r, 12), !r.IsDBNull(13) && r.GetBoolean(13), Text(r, 14), Text(r, 15), Text(r, 16), Time(r, 17), Time(r, 18)), ct);
-            if (data.Status == "succeeded") { await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return null; }
+            if (data.Status is "succeeded" or "cancelled" or "failed") { await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return null; }
             if (data.Status is not ("pending" or "retry")) throw new InvalidOperationException("Notice requires explicit recovery.");
             if (data.Bot != context.BotId) throw new UnauthorizedAccessException();
             bool cancelled = data.Blocked || (data.Purpose == "campaign" && (data.OptedOut || data.CampaignStatus is not ("approved" or "running") ||
@@ -137,8 +137,9 @@ public sealed partial class CampaignStore
             string status = await session.QuerySingleAsync(new DbStatement("SELECT status FROM shop.telegram_deliveries WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Delivery)), r => r.GetString(0), ct);
             bool uncertain = status is "leased" or "uncertain";
             if (uncertain) await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='uncertain',last_error_code='remote_outcome_unknown' WHERE id=$1", DbValue.Uuid(id.Delivery)), ct);
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status=$1,locked_by=NULL,lease_until=NULL,available_at=clock_timestamp(),completed_at=CASE WHEN $1='failed' THEN clock_timestamp() ELSE NULL END,last_error_code=$2 WHERE id=$3",
-                DbValue.Text(uncertain ? "failed" : "retry"), DbValue.Text(uncertain ? "remote_outcome_unknown" : "pre_dispatch_recovery"), DbValue.Uuid(id.Job)), ct);
+            string recoveredStatus = uncertain ? "failed" : status is "succeeded" or "failed" or "cancelled" ? status : "retry";
+            await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status=$1,locked_by=NULL,lease_until=NULL,available_at=clock_timestamp(),completed_at=CASE WHEN $1='retry' THEN NULL ELSE clock_timestamp() END,last_error_code=$2 WHERE id=$3",
+                DbValue.Text(recoveredStatus), DbValue.Text(uncertain ? "remote_outcome_unknown" : "pre_dispatch_recovery"), DbValue.Uuid(id.Job)), ct);
         }
         await session.CommitAsync(ct); return recovered;
     }
