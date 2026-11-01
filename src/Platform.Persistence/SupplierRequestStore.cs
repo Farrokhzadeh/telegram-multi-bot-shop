@@ -5,7 +5,7 @@ using Platform.Security;
 namespace Platform.Persistence;
 
 public sealed record SupplierAttempt(SupplierBinding Binding, Guid Id, Guid? ParentSubmit, string Operation, string? PurchaseReference);
-public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapshot secrets, long? trustedStaffChat = null)
+public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapshot secrets, long? trustedStaffChat = null, TimeSpan? remoteLeaseDuration = null)
 {
     private const string BindingColumns = "r.id,r.order_id,o.product_id,r.product_supplier_source_id,r.source_revision,r.provider_code,r.account_ref,r.external_product_id,r.external_variant_id,r.local_intent_key,r.requested_quantity,r.cost_baseline_amount::text,r.cost_currency,r.approved_cost_ceiling::text";
     public async Task<SupplierBinding> ReadAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
@@ -22,7 +22,9 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         try
         {
             var binding = await LockAsync(session, context, lease.Intent.OriginId!.Value, ct);
-            await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(2), ct);
+            TimeSpan duration = remoteLeaseDuration ?? TimeSpan.FromMinutes(2);
+            if (duration < TimeSpan.FromSeconds(1) || duration > TimeSpan.FromMinutes(2)) throw new ArgumentOutOfRangeException(nameof(remoteLeaseDuration));
+            await OutboxStore.RenewAsync(session, lease, duration, ct);
             var state = await session.QuerySingleAsync(new DbStatement("SELECT r.status,o.review_code,r.remote_ref,s.enabled AND s.revision=r.source_revision,clock_timestamp() FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.product_supplier_sources s ON s.id=r.product_supplier_source_id WHERE r.id=$1", DbValue.Uuid(binding.RequestId)), r => (Status: r.GetString(0), Review: r.IsDBNull(1) ? null : r.GetString(1), Remote: r.IsDBNull(2) ? null : r.GetString(2), Source: r.GetBoolean(3), Now: r.GetUtc(4)), ct);
             bool submit = lease.Intent.Kind == JobKind.SubmitSupplier;
             if (state.Status is "resolved" or "succeeded") { await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return null; }
@@ -59,14 +61,14 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         {
             var binding = await LockAsync(session, context, attempt.Binding.RequestId, ct);
             if (binding != attempt.Binding) throw new InvalidOperationException("Supplier binding changed.");
-            await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(1), ct);
+            await OutboxStore.CompleteAsync(session, lease, ct);
             bool active = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE id=$1 AND supplier_request_id=$2 AND operation=$3 AND outcome='in_flight' AND parent_submit_attempt_id IS NOT DISTINCT FROM $4)", DbValue.Uuid(attempt.Id), DbValue.Uuid(binding.RequestId), DbValue.Text(attempt.Operation), AdminCommand.Id(attempt.ParentSubmit)), r => r.GetBoolean(0), ct);
             if (!active) throw new InvalidOperationException("Supplier attempt is stale.");
             string requestStatus = await session.QuerySingleAsync(new DbStatement("SELECT status FROM shop.supplier_requests WHERE id=$1", DbValue.Uuid(binding.RequestId)), r => r.GetString(0), ct);
             if (requestStatus is "succeeded" or "resolved")
             {
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome='unknown',error_code='terminal_obligation',evidence_ref=$1,finished_at=clock_timestamp() WHERE id=$2", AdminCommand.Text(evidence), DbValue.Uuid(attempt.Id)), ct);
-                await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return;
+                await session.CommitAsync(ct); return;
             }
             string? review = SupplierRules.Validate(binding, result);
             bool archived = !string.IsNullOrWhiteSpace(evidence) && result.Evidence.Length > 0;
@@ -79,14 +81,13 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
                 if (await ExistingItemsMatchAsync(session, context, binding, result, ct)) await CaptureAsync(session, context, binding, result, ct);
                 else { identity = false; review = "identity_mismatch"; }
             }
-            bool acquired = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled')", DbValue.Uuid(binding.RequestId)), r => r.GetBoolean(0), ct);
+            bool acquired = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled') OR EXISTS(SELECT 1 FROM shop.inventory_items WHERE supplier_request_id=$1 AND origin_kind='supplier_bonus')", DbValue.Uuid(binding.RequestId)), r => r.GetBoolean(0), ct);
             if (acquired && result.Kind == SupplierOutcomeKind.ConfirmedNoEffect) { identity = false; review = "identity_mismatch"; }
             bool noEffect = archived && identity && result.Kind == SupplierOutcomeKind.ConfirmedNoEffect;
             bool complete = archived && identity && review is null;
             string outcome = noEffect ? "failed" : complete ? "succeeded" : "unknown";
             await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome=$1,error_code=$2,remote_ref=$3,evidence_ref=$4,finished_at=clock_timestamp() WHERE id=$5",
                 DbValue.Text(outcome), AdminCommand.Text(noEffect ? "confirmed_no_effect" : review), AdminCommand.Text(identity ? result.PurchaseReference : null), AdminCommand.Text(archived ? evidence : null), DbValue.Uuid(attempt.Id)), ct);
-            await OutboxStore.CompleteAsync(session, lease, ct);
             if (complete)
             {
                 var reviews = await session.QuerySingleAsync(new DbStatement("SELECT o.review_code,r.review_code FROM shop.orders o JOIN shop.supplier_requests r ON r.order_id=o.id WHERE r.id=$1", DbValue.Uuid(binding.RequestId)), r => (Order: r.IsDBNull(0) ? null : r.GetString(0), Request: r.IsDBNull(1) ? null : r.GetString(1)), ct);

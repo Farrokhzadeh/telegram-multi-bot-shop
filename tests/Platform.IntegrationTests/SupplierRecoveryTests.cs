@@ -18,7 +18,7 @@ public sealed class SupplierRecoveryTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets, -100777);
+        var store = new SupplierRequestStore(f.Sessions, f.Secrets, -100777, crash ? TimeSpan.FromSeconds(1) : null);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
         var worker = new SupplierFulfillmentWorker(store, port, port);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
@@ -26,7 +26,7 @@ public sealed class SupplierRecoveryTests
         if (crash)
         {
             await store.BeginAsync(f.Context(0), lease, await port.InspectAsync(binding, Ct), Ct);
-            await Expire(f, lease);
+            await Task.Delay(TimeSpan.FromMilliseconds(1100), Ct);
             Assert.Null(await ClaimOptional(f, JobKind.SubmitSupplier));
             Assert.True(await store.RecoverExpiredAsync(f.Context(0), Ct));
             Assert.False(await store.RecoverExpiredAsync(f.Context(0), Ct));
@@ -34,7 +34,7 @@ public sealed class SupplierRecoveryTests
         else await worker.RunAsync(f.Context(0), lease, Ct);
         await Due(f);
         var lookup = await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct);
-        await worker.RunAsync(f.Context(0), lookup, Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), lookup, Ct);
         Assert.Equal(crash ? 0 : 1, port.Submits);
         Assert.Equal(1, port.Lookups);
         Assert.All(port.Intents, value => Assert.Equal(binding.Intent, value));
