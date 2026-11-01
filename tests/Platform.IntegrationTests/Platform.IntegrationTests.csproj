@@ -13,6 +13,8 @@
     <Compile Include="../Shared/TelegramFixture.cs" Link="Shared/TelegramFixture.cs" />
     <Compile Include="../Shared/FoundationQualification.cs" Link="Shared/FoundationQualification.cs" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <Compile Include="../../src/Platform.Api/PaymentEndpoints.cs" Link="Api/PaymentEndpoints.cs" />
+    <Compile Include="../../src/Platform.Api/ManualDepositEndpoints.cs" Link="Api/ManualDepositEndpoints.cs" />
     <Compile Include="../../src/Platform.Api/AdminGuardMiddleware.cs" Link="Api/AdminGuardMiddleware.cs" />
     <Compile Include="../Shared/AdminQualification.cs" Link="Shared/AdminQualification.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
