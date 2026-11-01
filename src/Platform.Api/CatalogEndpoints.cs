@@ -58,12 +58,12 @@ public static class CatalogEndpoints
             var input = await AdminHttp.ReadAsync(http, CatalogApiJsonContext.Default.AdminChangeListingEdit);
             return Saved(await store.ListingAsync(http.GetRequiredAdministrator(), context, id, input.Value, input.ExpectedRevision, input.CommandId, http.RequestAborted));
         })).RequireAdministrator();
-        endpoints.MapPost("/v1/admin/inventory/import", (HttpContext http) => AdminHttp.HandleAsync(http, async () =>
+        endpoints.MapPost("/v1/admin/inventory/import", (Func<HttpContext, Task<IResult>>)((HttpContext http) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, CatalogApiJsonContext.Default.StockImport);
             await store.ImportAsync(http.GetRequiredAdministrator(), input.ProductId, input.Items, input.CommandId, http.RequestAborted);
             return Results.NoContent();
-        })).RequireAdministrator();
+        }))).RequireAdministrator();
     }
     private static IResult Saved(long revision) => Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
 }

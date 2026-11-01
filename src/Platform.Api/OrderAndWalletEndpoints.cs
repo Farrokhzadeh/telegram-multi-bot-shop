@@ -24,13 +24,13 @@ public static class OrderAndWalletEndpoints
     {
         endpoints.MapGet("/v1/admin/orders", (HttpContext http, Guid? brandId, Guid? memberId, Guid? orderId, Guid? after, int? limit) => AdminHttp.HandleAsync(http, async () =>
             Results.Json(await store.SearchAsync(http.GetRequiredAdministrator(), brandId, memberId, orderId, after, limit ?? 50, http.RequestAborted), OrderApiJsonContext.Default.AdminPageAdminOrder))).RequireAdministrator();
-        endpoints.MapPost("/v1/admin/wallet-adjustments", (HttpContext http) => AdminHttp.HandleAsync(http, async () =>
+        endpoints.MapPost("/v1/admin/wallet-adjustments", (Func<HttpContext, Task<IResult>>)((HttpContext http) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, OrderApiJsonContext.Default.WalletCommand);
             var context = resolve(input.BrandId); if (context is null) return Results.NotFound();
             Guid entry = await store.AdjustAsync(http.GetRequiredAdministrator(), context, input.Value, http.RequestAborted);
             return Results.Json(new AdminIdentity(entry), OrderApiJsonContext.Default.AdminIdentity);
-        })).RequireAdministrator();
+        }))).RequireAdministrator();
         endpoints.MapPost("/v1/admin/orders/{id:guid}/resolution", (HttpContext http, Guid id) => AdminHttp.HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, OrderApiJsonContext.Default.ResolutionCommand);
