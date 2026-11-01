@@ -15,7 +15,7 @@ public sealed class HumanSupportTests
     [Fact]
     public async Task HumanSupportOperatesWithoutAiAndMovesNoMoney()
     {
-        await using var fixture = await BrandFixture.CreateAsync(Ct, [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.NewGuid()], SyntheticSecretFiles.Deployment, 7);
+        await using var fixture = await SecretFixture();
         using var files = new SyntheticSecretFiles();
         using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var router = new HumanSupportRouter(fixture.Sessions, secrets);
@@ -227,6 +227,21 @@ public sealed class HumanSupportTests
     }
 
     [Fact]
+    public async Task DisabledBrandSupportCannotOpenTickets()
+    {
+        await using var fixture = await SecretFixture();
+        using var files = new SyntheticSecretFiles();
+        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        await using (var disable = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await disable.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=false,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(fixture.Brands[0])), Ct);
+            await disable.CommitAsync(Ct);
+        }
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => new HumanSupportRouter(fixture.Sessions, secrets).RouteAsync(Message(fixture, "/support", 401), Ct));
+        Assert.Equal(0L, await CountAll(fixture, "SELECT count(*) FROM shop.support_tickets"));
+    }
+
+    [Fact]
     public async Task StaffReplyRequestIdentitySuppressesRepeatedDeliveryAndRevokedNoOpsFail()
     {
         await using var fixture = await BrandFixture.CreateAsync(Ct);
@@ -289,7 +304,35 @@ public sealed class HumanSupportTests
         return string.Join(":", hashes);
     }
 
-    private static Task<BrandFixture> SecretFixture() => BrandFixture.CreateAsync(Ct, [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.NewGuid()], SyntheticSecretFiles.Deployment, 7);
+    private static async Task<BrandFixture> SecretFixture()
+    {
+        var fixture = await BrandFixture.CreateAsync(Ct, [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.NewGuid()], SyntheticSecretFiles.Deployment, 7);
+        try
+        {
+            var actor = await Actor(fixture);
+            AdminToken nonce;
+            await using (var begin = await fixture.Sessions.BeginAsync(Ct))
+            {
+                nonce = (await AdminBindingStore.BeginAsync(begin, actor, 7999, TimeSpan.FromMinutes(5), Guid.NewGuid(), Guid.NewGuid(), Ct))!;
+                await begin.CommitAsync(Ct);
+            }
+            using (nonce)
+            {
+                await using (var proof = await fixture.Sessions.BeginAsync(Ct))
+                {
+                    Assert.True(await AdminBindingStore.ObservePrivateProofAsync(proof, actor.AdminId, nonce, PrivateTelegramProof.FromVerifiedIngress(fixture.Contexts[0], 7999, 7999, false, nonce), Ct));
+                    await proof.CommitAsync(Ct);
+                }
+                await using var complete = await fixture.Sessions.BeginAsync(Ct);
+                Assert.True(await AdminBindingStore.CompleteAsync(complete, actor, 7999, actor.AuthVersion, nonce, Guid.NewGuid(), Guid.NewGuid(), Ct));
+                await complete.ExecuteAsync(new DbStatement("UPDATE shop.admins SET public_contact_handle='public_support' WHERE id=$1", DbValue.Uuid(actor.AdminId)), Ct);
+                await complete.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=true,customer_support_admin_id=$1,policy_version=policy_version+1 WHERE id=$2", DbValue.Uuid(actor.AdminId), DbValue.Uuid(fixture.Brands[0])), Ct);
+                await complete.CommitAsync(Ct);
+            }
+            return fixture;
+        }
+        catch { await fixture.DisposeAsync(); throw; }
+    }
     private static VerifiedTelegramUpdate Message(BrandFixture fixture, string text, long id)
     {
         using var verifier = new TelegramWebhookVerifier(fixture.Contexts[0], Secret);

@@ -21,6 +21,12 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
         if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(Guid.Empty, false, true);
         BrandUser member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct);
         if (member.Banned || member.Blocked) throw new TelegramIngressRejectedException();
+        bool enabled = await session.QuerySingleAsync(new DbStatement("""
+            SELECT b.support_enabled AND EXISTS(SELECT 1 FROM shop.admins a WHERE a.id=b.customer_support_admin_id
+                AND a.disabled_at IS NULL AND a.telegram_user_id IS NOT NULL AND a.public_contact_handle IS NOT NULL)
+            FROM shop.brands b WHERE b.id=$1 AND b.bot_id=$2 AND b.active FOR SHARE OF b
+            """, DbValue.Uuid(update.Context.BrandId), DbValue.Bigint(update.Context.BotId)), row => row.GetBoolean(0), ct);
+        if (!enabled) throw new TelegramIngressRejectedException();
         Guid? replay = await session.QuerySingleAsync(new DbStatement("""
             SELECT t.id FROM (SELECT 1) seed LEFT JOIN (SELECT t.id FROM shop.support_messages m JOIN shop.support_tickets t ON t.id=m.ticket_id
                 WHERE t.user_id=$1 AND m.sender_kind='customer' AND m.telegram_message_id=$2) t ON true

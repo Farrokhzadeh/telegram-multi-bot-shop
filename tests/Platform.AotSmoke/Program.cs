@@ -195,6 +195,18 @@ await using (var database = await DisposablePostgres.CreateAsync())
             throw new InvalidOperationException("Native verified Telegram routing failed.");
     }
     Console.WriteLine("PASS: native verified private update routing and replay suppression with no transport.");
+    await using (var enableSupport = await userSessions.BeginAsync())
+    {
+        Guid contact = Guid.NewGuid(), audit = Guid.NewGuid();
+        await enableSupport.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,external_subject) VALUES ($1,'public-native-support','external','public-native-support')", DbValue.Uuid(contact)));
+        await enableSupport.ExecuteAsync(new DbStatement("""
+            INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,action,entity_kind,entity_id,reason,correlation_id)
+            VALUES ($1,'admin',$2,'bind_telegram','admin',$2,'public synthetic fixture',gen_random_uuid())
+            """, DbValue.Uuid(audit), DbValue.Uuid(contact)));
+        await enableSupport.ExecuteAsync(new DbStatement("UPDATE shop.admins SET telegram_user_id=98001,telegram_verified_by_admin_id=$1,telegram_verified_at=CURRENT_TIMESTAMP,telegram_verification_audit_id=$2,public_contact_handle='public_support' WHERE id=$1", DbValue.Uuid(contact), DbValue.Uuid(audit)));
+        await enableSupport.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=true,customer_support_admin_id=$1,policy_version=policy_version+1 WHERE id=$2", DbValue.Uuid(contact), DbValue.Uuid(customerBrand)));
+        await enableSupport.CommitAsync();
+    }
     using (var supportFiles = new SyntheticSecretFiles())
     {
         supportFiles.WriteManifest(SecretService.BotHost, false, brands: [customerBrand]);
