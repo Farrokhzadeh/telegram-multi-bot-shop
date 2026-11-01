@@ -224,3 +224,11 @@ Extend existing audited order-resolution contracts with blocking pause/resume, s
 - Subscribe/unsubscribe changes explicit consent only. Terminal restock evidence and closed consent use the independent 180-day closed_at maintenance contract; active consent remains.
 - Direct supplier preflight has no purchase side effect and does not create an order-level remote-attempt row before an order exists. Its typed evidence is version-checked against the current selected mapping; accepted snapshots are immutable.
 - No endpoint creates external refund records or grants privileges based on staff-group membership/text.
+
+## T039–T042 offline implementation checkpoint
+
+The opt-in authenticated status routes are `GET /v1/admin/payments/{id}?brandId=...` and `GET /v1/admin/manual-deposits/{id}?brandId=...`. Explicit brand selection is administrator-only. Responses expose original payment/fulfillment state, exact quote strings, actual internal USD posting and coupon return/expiry facts; they exclude protected evidence, provider identity, cards, holder, ciphertext and signatures. Normal hosts do not mount these routes.
+
+Receipt denial is unverified and preserves the protected review/claim until a subsequent authorized decision. Timely approval reuses the frozen-order dispatcher; bank local shortages remain paid/unfulfilled. Paid-unfulfilled reconciliation records an administrator review audit only, with no outside-shop payout record, inferred repayment, cancellation or coupon release. Receiving-card writes use independent active admin authorization, content-checked command identity, shared keyed duplicate detection and policy-revision CAS; existing payment destinations stay immutable.
+
+Signed evidence capture alone remains confirming. Settlement additionally requires fresh matching authenticated finished provider lookup. Late verified crypto posting links to its original terminal invoice and wallet without rewriting the original order resolution. See `ops/PAYMENT_SETTLEMENT_QUALIFICATION.md` for source/run evidence, exact offline scope and remaining activation gates.
