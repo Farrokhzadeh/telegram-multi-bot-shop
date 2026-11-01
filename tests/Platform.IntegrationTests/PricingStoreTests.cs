@@ -82,6 +82,21 @@ public sealed class PricingStoreTests
     }
 
     [Fact]
+    public async Task CheckoutRechecksCouponEligibilityAfterItsTransactionStart()
+    {
+        await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
+        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        await using var purchase = await fixture.Sessions.BeginAsync(Ct);
+        DateTime started = await purchase.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), row => row.GetUtc(0), Ct);
+        var terms = new CouponTerms(Guid.NewGuid(), "PUBLIC-NEWLY-ACTIVE", CouponKind.Promotion, 50, fixture.Product, MaximumUses: 5, StartsAt: started);
+        await Issue(fixture, store, terms);
+        Assert.Equal(CheckoutOutcome.Unavailable, (await fixture.Store.AcceptLocalAsync(purchase, fixture.Context(0), CheckoutFixture.Actor(0), fixture.Request(), Ct)).Outcome);
+        await purchase.CommitAsync(Ct);
+        Assert.Equal(0L, await fixture.CountAsync("SELECT count(*) FROM shop.orders", Ct));
+        Assert.Equal(0L, await fixture.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+    }
+
+    [Fact]
     public async Task OneOrderCannotConsumeTwoDifferentCouponCodes()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);

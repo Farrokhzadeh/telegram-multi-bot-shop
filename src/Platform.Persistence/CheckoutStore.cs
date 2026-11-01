@@ -68,7 +68,7 @@ public sealed class CheckoutStore(DbSessionFactory sessions, SecretSnapshot secr
             SELECT EXISTS(SELECT 1 FROM shop.orders WHERE user_id=$1 AND payment_status IN ('awaiting_payment','under_review','confirmation_pending'))
                 OR EXISTS(SELECT 1 FROM shop.orders WHERE product_id=$2 AND is_preorder AND payment_status IN ('paid','not_required') AND fulfillment_status IN ('waiting_stock','requires_admin'))
                 OR EXISTS(SELECT 1 FROM shop.discounts WHERE brand_id=$3 AND active AND (product_id IS NULL OR product_id=$2) AND (eligible_user_id IS NULL OR eligible_user_id=$1)
-                    AND (starts_at IS NULL OR starts_at<=CURRENT_TIMESTAMP) AND (ends_at IS NULL OR ends_at>CURRENT_TIMESTAMP))
+                    AND (starts_at IS NULL OR starts_at<=clock_timestamp()) AND (ends_at IS NULL OR ends_at>clock_timestamp()))
             """, DbValue.Uuid(member.Id), DbValue.Uuid(request.ProductId), DbValue.Uuid(context.BrandId)), row => row.GetBoolean(0), ct);
         if (guarded) return new(CheckoutOutcome.Unavailable);
         Money total = new Money(listing.Price, Currency.Usd).MultiplyQuantity(request.Quantity);
