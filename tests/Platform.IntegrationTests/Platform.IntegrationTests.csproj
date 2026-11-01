@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/SupplierFixture.cs" Link="Shared/SupplierFixture.cs" />
     <Compile Include="../../src/Platform.Api/DiagnosticsEndpoints.cs" Link="Api/DiagnosticsEndpoints.cs" />
     <ProjectReference Include="../../src/Platform.Campaigns/Platform.Campaigns.csproj" />
     <Compile Include="../Shared/AdministrationPhaseQualification.cs" Link="Shared/AdministrationPhaseQualification.cs" />
