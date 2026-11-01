@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Persistence;
@@ -5,7 +6,7 @@ using Platform.Security;
 
 namespace Platform.Telegram;
 
-public sealed record HumanSupportRouteResult(Guid TicketId, bool Created, bool Busy)
+public sealed record HumanSupportRouteResult(Guid TicketId, bool Created, bool Busy, long FlowRevision = 0)
 {
     public override string ToString() => "HumanSupportRouteResult [redacted]";
 }
@@ -31,11 +32,11 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
             SELECT t.id FROM (SELECT 1) seed LEFT JOIN (SELECT t.id FROM shop.support_messages m JOIN shop.support_tickets t ON t.id=m.ticket_id
                 WHERE t.user_id=$1 AND m.sender_kind='customer' AND m.telegram_message_id=$2) t ON true
             """, DbValue.Uuid(member.Id), DbValue.Bigint(update.MessageId)), row => row.IsDBNull(0) ? (Guid?)null : row.GetGuid(0), ct);
-        if (replay is Guid prior) return new(prior, false, false);
+        if (replay is Guid prior) return new(prior, false, false, member.Flow.Revision);
         if (!command && member.Flow.State != CustomerFlowState.Support) throw new TelegramIngressRejectedException();
         Guid? order = command ? (update.Value == "/support" ? null : Guid.ParseExact(update.Value[9..], "D")) : member.Flow.OrderId;
         var (ticketId, created) = await SupportStore.OpenTicketAsync(session, update.Context, update.ActorId, order, ct);
-        if (command) await BrandUserStore.TransitionAsync(session, update.Context, update.ActorId, member.Id, member.Flow.Revision, CustomerFlowState.Support, orderId: order, ct: ct);
+        if (command) member = await BrandUserStore.TransitionAsync(session, update.Context, update.ActorId, member.Id, member.Flow.Revision, CustomerFlowState.Support, orderId: order, ct: ct);
         Guid messageId = Guid.NewGuid();
         byte[] plain = Encoding.UTF8.GetBytes(update.Value);
         try
@@ -45,7 +46,12 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
             await SupportStore.RecordCustomerMessageAsync(session, update.Context, update.ActorId, ticketId, update.AssetRef, encrypted, keyId, ct, messageId, update.MessageId);
         }
         finally { CryptographicOperations.ZeroMemory(plain); }
+        await session.ExecuteAsync(new DbStatement("""
+            INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,support_ticket_id,flow_revision,telegram_update_id,outcome_code,idempotency_key)
+            VALUES (gen_random_uuid(),$1,'support',$2,$3,$4,$5,$6,'accepted',$7) ON CONFLICT (user_id,idempotency_key) DO NOTHING
+            """, DbValue.Uuid(member.Id), DbValue.Text(command ? "command" : "flow"), DbValue.Text(command ? "support_open" : "support_reply"),
+            DbValue.Uuid(ticketId), DbValue.Bigint(member.Flow.Revision), DbValue.Bigint(update.UpdateId), DbValue.Text("telegram:" + update.UpdateId.ToString(CultureInfo.InvariantCulture))), ct);
         await session.CommitAsync(ct);
-        return new(ticketId, created, false);
+        return new(ticketId, created, false, member.Flow.Revision);
     }
 }

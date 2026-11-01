@@ -21,7 +21,7 @@ public sealed class UpdateRouter
         if (support is not null && !update.IsCallback && (TelegramWebhookVerifier.IsSupportCommand(update.Value) || !update.Value.StartsWith('/')))
         {
             HumanSupportRouteResult result = await support.RouteAsync(update, ct);
-            return new(result.Busy ? UpdateRouteCode.Busy : UpdateRouteCode.Support, 0, result.TicketId);
+            return new(result.Busy ? UpdateRouteCode.Busy : UpdateRouteCode.Support, result.FlowRevision, result.TicketId);
         }
         Callback? callback = update.IsCallback ? ParseCallback(update.Value) : null;
         RestockObservation? observation = null;

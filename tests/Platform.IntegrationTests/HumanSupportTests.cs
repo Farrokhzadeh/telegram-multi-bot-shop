@@ -167,6 +167,8 @@ public sealed class HumanSupportTests
         const string text = "public synthetic cancellation discussion / متن آزمایشی";
         var reply = await router.RouteAsync(Message(fixture, text, 102), Ct);
         Assert.Equal(opened.EntityId, reply.EntityId);
+        Assert.True(opened.FlowRevision > 0);
+        Assert.Equal(opened.FlowRevision, reply.FlowRevision);
         await using var read = await fixture.Sessions.BeginAsync(Ct);
         var message = await read.QuerySingleAsync(new DbStatement("SELECT id,body_ciphertext,body_key_id,asset_ref FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=102", DbValue.Uuid(opened.EntityId!.Value)),
             row => (Id: row.GetGuid(0), Bytes: row.GetBinary(1), Key: row.GetString(2), Asset: row.IsDBNull(3)), Ct);
