@@ -23,51 +23,31 @@ public static class BrandEndpoints
         Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken,
         Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
     {
-        endpoints.MapGet("/v1/admin/brands/{brand:guid}", (HttpContext http, Guid brand) => HandleAsync(async () =>
+        endpoints.MapGet("/v1/admin/brands/{brand:guid}", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(async () =>
         {
             BrandContext? context = resolve(brand);
             return context is null ? Results.NotFound() : Results.Json(await store.ReadAsync(http.GetRequiredAdministrator(), context, http.RequestAborted), BrandAdminJsonContext.Default.BrandConfiguration);
         })).RequireAdministrator();
-        endpoints.MapPut("/v1/admin/brands/{brand:guid}/bot-token", (HttpContext http, Guid brand) => HandleAsync(async () =>
+        endpoints.MapPut("/v1/admin/brands/{brand:guid}/bot-token", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(async () =>
         {
             BrandContext? context = resolve(brand);
             if (context is null) return Results.NotFound();
-            var input = await ReadAsync(http, BrandAdminJsonContext.Default.BotTokenChange);
+            var input = await AdminHttp.ReadAsync(http, BrandAdminJsonContext.Default.BotTokenChange);
             using var token = BotToken.Parse(input.Token);
             long revision = await store.RotateTokenAsync(http.GetRequiredAdministrator(), context, token, input.ExpectedRevision, input.CommandId, verifyToken, http.RequestAborted);
             return Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
         })).RequireAdministrator();
-        endpoints.MapPut("/v1/admin/brands/{brand:guid}/required-channels", (HttpContext http, Guid brand) => HandleAsync(async () =>
+        endpoints.MapPut("/v1/admin/brands/{brand:guid}/required-channels", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(async () =>
         {
             BrandContext? context = resolve(brand);
             if (context is null) return Results.NotFound();
-            var input = await ReadAsync(http, BrandAdminJsonContext.Default.RequiredChannelsChange);
+            var input = await AdminHttp.ReadAsync(http, BrandAdminJsonContext.Default.RequiredChannelsChange);
             if (input.Channels is null) throw new ArgumentException("Required channels are missing.");
             long revision = await store.SetChannelsAsync(http.GetRequiredAdministrator(), context, input.Channels, input.ExpectedRevision, input.CommandId, verifyChannels, http.RequestAborted);
             return Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
         })).RequireAdministrator();
     }
-    private static async Task<IResult> HandleAsync(Func<Task<IResult>> action)
-    {
-        try { return await action(); }
-        catch (Exception error) when (error is JsonException or ArgumentException) { throw new SafeOperationException(ErrorKind.InvalidRequest); }
-        catch (Exception error) when (error is FormatException or InvalidOperationException) { throw new SafeOperationException(ErrorKind.Conflict); }
-        catch (DbOperationException error) when (error.Failure.Kind is DbFailureKind.InvalidData or DbFailureKind.Constraint) { throw new SafeOperationException(ErrorKind.Conflict); }
-        catch (BadHttpRequestException error) { return Results.StatusCode(error.StatusCode); }
-    }
-    private static async Task<T> ReadAsync<T>(HttpContext http, JsonTypeInfo<T> type)
-    {
-        if (!http.Request.HasJsonContentType()) throw new BadHttpRequestException("JSON content is required.", StatusCodes.Status415UnsupportedMediaType);
-        byte[] bytes = new byte[1048577];
-        try
-        {
-            int length = 0, count;
-            while (length < bytes.Length && (count = await http.Request.Body.ReadAsync(bytes.AsMemory(length), http.RequestAborted)) != 0) length += count;
-            if (length == bytes.Length) throw new BadHttpRequestException("Request is too large.", StatusCodes.Status413PayloadTooLarge);
-            return JsonSerializer.Deserialize(bytes.AsSpan(0, length), type) ?? throw new ArgumentException("Request is required.");
-        }
-        finally { CryptographicOperations.ZeroMemory(bytes); }
-    }
+
 }
 
 [JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]

@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platform.Api/AdminHttp.cs" Link="Api/AdminHttp.cs" />
+    <Compile Include="../../src/Platform.Api/CatalogEndpoints.cs" Link="Api/CatalogEndpoints.cs" />
     <Compile Include="../Shared/BrandAdministrationQualification.cs" Link="Shared/BrandAdministrationQualification.cs" />
     <Compile Include="../../src/Platform.Api/BrandEndpoints.cs" Link="Api/BrandEndpoints.cs" />
     <ProjectReference Include="../../src/Platform.Payments/Platform.Payments.csproj" />

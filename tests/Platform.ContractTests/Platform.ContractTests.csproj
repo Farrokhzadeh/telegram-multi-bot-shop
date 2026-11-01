@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platform.Api/AdminHttp.cs" Link="Api/AdminHttp.cs" />
+    <Compile Include="../../src/Platform.Api/CatalogEndpoints.cs" Link="Api/CatalogEndpoints.cs" />
     <Compile Include="../Shared/CheckoutFixture.cs" Link="Shared/CheckoutFixture.cs" />
     <Compile Include="../Shared/DisposablePostgres.cs" Link="Shared/DisposablePostgres.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
