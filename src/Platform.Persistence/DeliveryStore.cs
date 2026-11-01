@@ -46,11 +46,11 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
                     return null;
                 }
                 Guid generation = Guid.CreateVersion7();
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.fulfillments SET status='ready',manifest_generation=$1 WHERE order_id=$2 AND status='acquired'", DbValue.Uuid(generation), DbValue.Uuid(order)), ct);
                 await session.ExecuteAsync(new DbStatement("""
                     UPDATE shop.orders SET delivery_generation=$1,manifest_asset_ref=$2,manifest_digest=$3,manifest_prepared_at=clock_timestamp(),
                         release_authorized_at=clock_timestamp(),fulfillment_status='ready',revision=revision+1,updated_at=clock_timestamp() WHERE id=$4
                     """, DbValue.Uuid(generation), DbValue.Text(Asset(order, generation)), DbValue.Binary(SHA256.HashData(manifest.Bytes)), DbValue.Uuid(order)), ct);
+                await session.ExecuteAsync(new DbStatement("UPDATE shop.fulfillments SET status='ready',manifest_generation=$1 WHERE order_id=$2 AND status='acquired'", DbValue.Uuid(generation), DbValue.Uuid(order)), ct);
                 Guid? coupon = await session.QuerySingleAsync(new DbStatement("SELECT discount_id FROM (SELECT 1) seed LEFT JOIN shop.discount_uses ON order_id=$1 AND status='held'", DbValue.Uuid(order)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct);
                 if (coupon is Guid id) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, id, order, true, ct);
                 state = await LockAsync(session, context, order, ct);
