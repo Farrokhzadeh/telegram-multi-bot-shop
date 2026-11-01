@@ -10,7 +10,7 @@ public enum CheckoutOutcome { Purchased, Replayed, Unavailable, QuoteChanged, In
 public sealed record LocalCheckoutRequest(Guid OrderId, Guid ProductId, int Quantity, decimal UnitPrice, long ListingRevision = 0, long ProductRevision = 0, long PolicyRevision = 0);
 public sealed record CheckoutResult(CheckoutOutcome Outcome, Guid? OrderId = null);
 
-public sealed class CheckoutStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnapshot secrets)
 {
     public async Task<CheckoutResult> PurchaseLocalAsync(BrandContext context, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct = default)
     {
@@ -96,20 +96,7 @@ public sealed class CheckoutStore(DbSessionFactory sessions, SecretSnapshot secr
             INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,order_id,reason)
             VALUES (gen_random_uuid(),$1,$2,$3,$4,'purchase_debit',true,$5,$6,'customer_request')
             """, DbValue.Uuid(member.Id), DbValue.Numeric(-total.Amount), DbValue.Money(balance, Currency.Usd), DbValue.Bigint(checked(wallet.Version + 1)), DbValue.Text("checkout:" + request.OrderId.ToString("D")), DbValue.Uuid(request.OrderId)), ct);
-        var inventory = new InventoryCipher(secrets);
-        var cipher = new BrandCipher(secrets);
-        int unit = 0;
-        foreach (Stock item in stock)
-        {
-            Guid fulfillment = Guid.CreateVersion7();
-            byte[] plain = inventory.Decrypt(item.Id, item.Key, item.Content);
-            byte[] encrypted;
-            try { encrypted = cipher.Encrypt(context, "fulfillments", fulfillment, "delivered_content", plain); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
-            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.fulfillments(id,order_id,unit_no,kind) VALUES ($1,$2,$3,'local')", DbValue.Uuid(fulfillment), DbValue.Uuid(request.OrderId), DbValue.Integer(++unit)), ct);
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET state='allocated',assigned_fulfillment_id=$1,allocated_at=CURRENT_TIMESTAMP WHERE id=$2", DbValue.Uuid(fulfillment), DbValue.Uuid(item.Id)), ct);
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.fulfillments SET status='acquired',delivered_content=$1,delivered_content_key_id=$2,content_kind='text' WHERE id=$3", DbValue.Binary(encrypted), DbValue.Text(secrets.CurrentBrandKeyId(context)), DbValue.Uuid(fulfillment)), ct);
-        }
+        await AcquireAsync(session, context, request.OrderId, stock, ct);
         await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, request.OrderId), request.OrderId, DateTime.UtcNow, ct);
         return new(CheckoutOutcome.Purchased, request.OrderId);
     }

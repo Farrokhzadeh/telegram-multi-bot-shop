@@ -116,6 +116,38 @@ public sealed class CatalogStore
         return new(productId, state.ProductRevision, state.ListingRevision, state.Now, Supply(state, state.Minimum) is null);
     }
 
+    internal async Task BindSupplierAsync(DbSession session, BrandContext context, PreparedCheckout prepared, Guid order, CancellationToken ct)
+    {
+        Data? data = await LoadAsync(session, context, prepared.Actor, prepared.Query.ProductId, ct);
+        if (data is null || Supply(data, prepared.Query.Quantity) != prepared.Supply || prepared.Supply.RemoteUnits <= 0 ||
+            data.Source is not Source source || source.Id != prepared.Source || source.Revision != prepared.SourceRevision ||
+            source.ObservationRevision != prepared.ObservationRevision || Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30)) Reject(session);
+        Source selected = data.Source!;
+        Guid id = Guid.CreateVersion7();
+        string intent = "order:" + order.ToString("D");
+        byte[] hash;
+        using (var bytes = new MemoryStream())
+        {
+            using (var writer = new BinaryWriter(bytes, Encoding.UTF8, leaveOpen: true))
+            {
+                writer.Write("supplier-binding-v1"); writer.Write(order.ToByteArray()); writer.Write(selected.Id.ToByteArray()); writer.Write(selected.Revision);
+                writer.Write(selected.Provider); writer.Write(selected.Account!); writer.Write(selected.ProductRef); writer.Write(selected.VariantRef is not null);
+                if (selected.VariantRef is string variant) writer.Write(variant);
+                writer.Write(prepared.Supply.RemoteUnits); writer.Write(ExactDecimal.Format(selected.Cost!.Value)); writer.Write(selected.Currency!);
+                writer.Write(selected.Quote!); writer.Write(selected.ObservedAt!.Value.Ticks);
+            }
+            hash = SHA256.HashData(bytes.GetBuffer().AsSpan(0, checked((int)bytes.Length)));
+        }
+        await session.ExecuteAsync(new DbStatement("""
+            INSERT INTO shop.supplier_requests(id,order_id,requested_quantity,product_supplier_source_id,source_revision,provider_code,account_ref,
+                external_product_id,external_variant_id,local_intent_key,request_sha256,status,cost_baseline_amount,cost_currency,cost_quote_ref,cost_observed_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending',$12,$13,$14,$15)
+            """, DbValue.Uuid(id), DbValue.Uuid(order), DbValue.Integer(prepared.Supply.RemoteUnits), DbValue.Uuid(selected.Id), DbValue.Bigint(selected.Revision),
+            DbValue.Text(selected.Provider), DbValue.Text(selected.Account!), DbValue.Text(selected.ProductRef), Text(selected.VariantRef), DbValue.Text(intent), DbValue.Binary(hash),
+            DbValue.Numeric(selected.Cost!.Value), DbValue.Text(selected.Currency!), DbValue.Text(selected.Quote!), DbValue.Utc(selected.ObservedAt!.Value)), ct);
+        await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, id), order, DateTime.UtcNow, ct);
+    }
+
     private async Task<Data?> RefreshAsync(BrandContext context, long actor, CatalogQuery query, bool display, CancellationToken ct)
     {
         Data? before;

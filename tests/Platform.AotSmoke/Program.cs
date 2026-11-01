@@ -159,6 +159,18 @@ await using (var checkout = await CheckoutFixture.CreateAsync())
         await validate.CommitAsync();
     }
     Console.WriteLine("PASS: native immutable automatic quote, local-first supplier refresh and single-use acceptance proof without live transport.");
+    var dispatcher = new WalletCheckoutService(checkout.Sessions, checkout.Store, catalog);
+    var accepted = new CheckoutRequest(OrderIds.New(), checkout.Product, 3);
+    var purchase = await dispatcher.PurchaseAsync(checkout.Context(0), CheckoutFixture.Actor(0), accepted,
+        (_, _, _) => throw new InvalidOperationException("Unexpected native channel transport."));
+    var duplicate = await dispatcher.PurchaseAsync(checkout.Context(0), CheckoutFixture.Actor(0), accepted,
+        (_, _, _) => throw new InvalidOperationException("Unexpected native replay transport."));
+    if (purchase.Outcome != CheckoutOutcome.Purchased || duplicate.Outcome != CheckoutOutcome.Replayed ||
+        await checkout.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=2 AND status='pending'") != 1 ||
+        await checkout.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE units_covered=3 AND status='held'") != 1 ||
+        await checkout.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-27") != 1)
+        throw new InvalidOperationException("Native prepared mixed checkout failed.");
+    Console.WriteLine("PASS: native prepared wallet acceptance, whole coupon hold, mixed split binding and original-result replay without live transport.");
 }
 Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
 
