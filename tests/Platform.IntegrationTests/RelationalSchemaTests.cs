@@ -319,6 +319,10 @@ public sealed class RelationalSchemaTests
             INSERT INTO shop.discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,max_total_uses,usage_adjustment_units,redeemed_count_at_revision,held_units_at_revision,active)
             VALUES ('00000000-0000-0000-0000-000000000625','00000000-0000-0000-0000-000000000621',1,'00000000-0000-0000-0000-000000000624',10,0,50,0,2,false)
             """);
+        await RejectAsync(database, """
+            INSERT INTO shop.discount_uses(discount_id,order_id,discount_revision_id,units_covered,saved_amount,saved_currency,status)
+            VALUES ('00000000-0000-0000-0000-000000000621','00000000-0000-0000-0000-000000000402','00000000-0000-0000-0000-000000000623',2,2,'USD','held')
+            """);
         Assert.Equal(2L, await ScalarAsync<long>(database, "SELECT sum(units_covered)::bigint FROM shop.discount_uses WHERE status='held'"));
         await ExecuteAsync(database, "UPDATE shop.discount_uses SET status='released',transitioned_at=CURRENT_TIMESTAMP");
         Assert.Equal(0L, await ScalarAsync<long>(database, "SELECT max_total_uses FROM shop.discounts"));
