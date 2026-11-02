@@ -1,6 +1,6 @@
 # Activity runtime prerequisite checkpoint
 
-Pending full CI qualification. T088 and T089 remain unchecked, with task count unchanged at 76/96. This checkpoint implements the independent bounded per-bot replay prerequisite, an optional independent-administrator history extension and a restricted bounded cleanup primitive. It does not claim complete action/quantity/checkout/abandonment/error instrumentation, non-Telegram replay, full expiry/restore/import, legacy user_activity reconciliation or SC-040 completion.
+T088 prerequisite checkpoint qualified at `16c090af7b013625c15490be5f97e6fb2952785d`, [CI 41470748518](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41470748518): **596 .NET tests (136 unit, 349 integration, 111 contract)**, **20 Python checks** and all five Linux Native AOT executables. Zero failed/skipped tests, zero build warnings/errors; formatting, secret scan, locked restore, evidence guards and Compose checks passed. T088 and T089 remain unchecked, with task count unchanged at 76/96. This checkpoint implements the independent bounded per-bot replay prerequisite, an optional independent-administrator history extension and a restricted bounded cleanup primitive. It does not claim complete action/quantity/checkout/abandonment/error instrumentation, non-Telegram replay, full expiry/restore/import, legacy user_activity reconciliation or SC-040 completion.
 
 The canonical schema review represents the already-required processed-update checkpoint on the existing brands row as a monotonic BIGINT and fixed 128-byte seen-ID window. There are still 28 typed tables and no JSON column. The SQL guard rejects checkpoint rewind or removal of retained seen bits. Both navigation and human support claim an update under the existing membership-before-brand financial lock order, before domain transitions and commit together; failures roll back the claim. Unseen out-of-order updates within the 1024-ID window remain eligible; older IDs and unqualified provider sequence resets fail closed. No automatic reset, epoch guessing or credential/recovery endpoint exists. Actual transport/reset/reordering limits and safe operational epoch recovery remain gates before normal-host activation.
 
@@ -11,3 +11,17 @@ The explicitly invoked maintenance primitive deletes at most 500 strictly expire
 Synthetic managed/native probes cover 100 replays, out-of-order updates, rollback, stale/reset rejection, brand isolation, schema rewind/bit-clear guards, replay after analytics deletion, exact UTC cutoff equality, deferred cleanup failure and resumable concurrent bounded cleanup with all other 27 tables unchanged. The actual HTTP probe covers anonymous rejection, safe typed pagination, foreign scope, tampered/rebound cursors and session revocation. Full source/backup/restore/financial-after-expiry scenarios remain with T088/T089; SC-040 and SC-008 remain planned/unexecuted.
 
 No real keys/source records, live Telegram/payment/supplier/FX/AI calls, staging/production mutation, deployment or migration. Local .NET/PostgreSQL/Docker are unavailable. Reviewer checklist remains read-only at 92/126, constitution 3.0.0 and approved decisions are preserved. Existing business, replay, ownership, complete-manifest and financial guards are retained.
+
+The first source run (41469139410) was superseded/cancelled by the reviewed membership-before-brand lock-order correction. Run 41469592926 passed 594 of 596 tests but found two fixture defects: synthetic trigger DDL was incorrectly sent through the one-data-statement wrapper, and the cursor tamper probe replaced its first character with the same value. Setup now uses the owned disposable database's explicit DDL connection and the probe changes a signature character deterministically. Full rerun 41470748518 passed all suites and native probes. No production/business/replay guard was weakened.
+
+Fresh SQL digest: `9daf7ac6e5307887f24b02b64d1af86ddee3ad6c8b337b04d9ab03a737877428`.
+
+| Executable | SHA-256 |
+| --- | --- |
+| Api | 18fae9f7e8c5d3bdd78ddd64ea591b9c050557dd38aebac29c6e840c40ead6e4 |
+| BotHost | ccdda271e55fb0a4aeaab2d38bda054989e870ab32d0021b140ff34ff132d0a8 |
+| JobHost | c32b1596d34c068c2cd59c359de8f57fcaef7f61ed6cf9739d1c820bfcab136b |
+| SchemaRunner | d47ab8f23a96aab001959f3c3a80e2e7cbe3f7ed493919365d693c8c4cd70c02 |
+| AotSmoke | 0be3724e920d4c1643dfbfc18acaf65a0202ed3999b6b7ce1a64c0b7ec91cc5c |
+
+The generated administration core contract remains 29 methods, digest `7677e2439a9ead3a27b443f25891ce4f11ed70f20297aa6ead66cff3ea6fff46`. The separate timeline extension does not silently change that artifact. Scenario witness digest is `368136b0dee81a065227461918e32c21c26b59d7c51c393db62189466732fd3f`; all entries retain their full-criterion gaps and releaseReady=false. Reviewer checklist digest remains `165ad6199cf2f924d2868ef34659de82422a59aead17ec98e310932d416d10dc`. SC-008 and SC-040 remain planned/unexecuted. Task count is 76/96; T088 is in progress.
