@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/CouponRevisionQualification.cs" Link="Shared/CouponRevisionQualification.cs" />
     <Compile Include="../Shared/PaymentMessageQualification.cs" Link="Shared/PaymentMessageQualification.cs" />
     <Compile Include="../Shared/PaymentDeadlineQualification.cs" Link="Shared/PaymentDeadlineQualification.cs" />
     <Compile Include="../Shared/AcceptanceQualification.cs" Link="Shared/AcceptanceQualification.cs" />

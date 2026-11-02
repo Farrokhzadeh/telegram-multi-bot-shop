@@ -492,3 +492,8 @@ Console.WriteLine("PASS: native credential message ownership prevents late metad
 
 await PaymentMessageQualification.CredentialOwnershipAsync(uncertain: true);
 Console.WriteLine("PASS: native unknown metadata edit fences the original credential target until explicit new-message recovery.");
+
+await CouponRevisionQualification.OverrideAsync();
+await CouponRevisionQualification.RaceAsync();
+await CouponRevisionQualification.RollbackAsync();
+Console.WriteLine("PASS: native typed coupon revision history, serialized override/redemption context and atomic rollback.");
