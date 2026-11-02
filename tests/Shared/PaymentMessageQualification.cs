@@ -92,6 +92,44 @@ public static class PaymentMessageQualification
         while (await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='succeeded' AND telegram_message_id=701", deadline.Token) != 1) await Task.Delay(10, deadline.Token);
         Require(calls == 1, "late known receipt retained without another send");
     }
+    public static async Task LeaseRecoveryAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: ct);
+        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct); await payments.OrderAsync(ct: ct);
+        var store = new PaymentInstructionStore(f.Sessions); var send = await Claim(store, ct);
+        Require(await store.BeginAsync(f.Context(0), send, TimeSpan.FromMilliseconds(100), ct) && await store.ReadForSendAsync(f.Context(0), send, ct) is not null, "started new send");
+        await ExpireAsync(f, send, ct); await new PaymentInstructionStore(new(f.Database.Data)).RecoverExpiredAsync(f.Context(0), send.Intent.OriginId!.Value, ct);
+        Require(await store.ClaimAsync(Guid.NewGuid(), ct) is null && await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='uncertain'", ct) == 1, "crashed new send cannot automatically replay");
+        await store.RecordAsync(f.Context(0), send, new(PaymentMessageOutcomeKind.Sent, 801), ct);
+        await payments.OrderAsync(ct: ct); await DueAsync(f, ct); var edit = await Claim(store, ct);
+        Require(await store.BeginAsync(f.Context(0), edit, TimeSpan.FromMilliseconds(100), ct), "started saved edit");
+        Require((await store.ReadForSendAsync(f.Context(0), edit, ct))?.TargetMessageId == 801, "persisted original target");
+        await ExpireAsync(f, edit, ct); await new PaymentInstructionStore(new(f.Database.Data)).RecoverExpiredAsync(f.Context(0), edit.Intent.OriginId!.Value, ct);
+        bool oldOwner = false;
+        try { await store.BeginAsync(f.Context(0), edit, TimeSpan.FromMilliseconds(100), ct); } catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.LeaseLost) { oldOwner = true; }
+        Require(oldOwner, "expired edit owner fenced"); await DueAsync(f, ct);
+        bool recovered = false;
+        for (int i = 0; i < 2; i++)
+        {
+            var current = await Claim(store, ct);
+            Require(await store.BeginAsync(f.Context(0), current, TimeSpan.FromMilliseconds(100), ct), "reconstructed metadata worker");
+            var dispatch = await store.ReadForSendAsync(f.Context(0), current, ct) ?? throw new InvalidOperationException();
+            if (current.Id == edit.Id)
+            {
+                Require(current.Attempt == edit.Attempt + 1 && dispatch.TargetMessageId == 801 && dispatch.Text.Contains("Cancelled — replaced", StringComparison.Ordinal), "same edit fresh state and attempt");
+                bool wrongTarget = false;
+                try { await store.RecordAsync(f.Context(0), current, new(PaymentMessageOutcomeKind.Sent, 999), ct); } catch (InvalidOperationException) { wrongTarget = true; }
+                Require(wrongTarget, "wrong remote target cannot complete work");
+                bool stale = false;
+                try { await store.RecordAsync(f.Context(0), edit, new(PaymentMessageOutcomeKind.Sent, 801), ct); } catch (InvalidOperationException) { stale = true; }
+                Require(stale, "old edit receipt cannot complete new attempt"); recovered = true;
+            }
+            await store.RecordAsync(f.Context(0), current, new(PaymentMessageOutcomeKind.Sent, dispatch.TargetMessageId ?? 802), ct); await DueAsync(f, ct);
+        }
+        Require(recovered && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0, "restart preserves metadata and money");
+    }
+    private static async Task ExpireAsync(CheckoutFixture f, JobLease lease, CancellationToken ct)
+    { await using var session = await f.Sessions.BeginAsync(ct); await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET lease_until=clock_timestamp()-INTERVAL '1 second' WHERE id=$1", DbValue.Uuid(lease.Id)), ct); await session.CommitAsync(ct); }
     private static async Task<JobLease> Claim(PaymentInstructionStore store, CancellationToken ct) => await store.ClaimAsync(Guid.NewGuid(), ct) ?? throw new InvalidOperationException("Payment message fixture work missing.");
     private static async Task DueAsync(CheckoutFixture f, CancellationToken ct)
     {

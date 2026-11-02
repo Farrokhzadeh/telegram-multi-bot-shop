@@ -483,3 +483,6 @@ await PaymentMessageQualification.ProjectionAsync();
 await PaymentMessageQualification.RecoveryAsync();
 await PaymentMessageQualification.TimeoutAsync();
 Console.WriteLine("PASS: native current-state payment instructions, saved edits, backoff, audited fallback and late-known receipt recovery.");
+
+await PaymentMessageQualification.LeaseRecoveryAsync();
+Console.WriteLine("PASS: native payment metadata lease recovery and stale-owner/wrong-target fences.");
