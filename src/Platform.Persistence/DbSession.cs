@@ -119,6 +119,12 @@ public sealed class DbSession : IAsyncDisposable
         finally { Exit(); }
     }
 
+    public bool MatchesEndpoint(string host, int port, string database, string username)
+    {
+        var endpoint = new NpgsqlConnectionStringBuilder(connection.ConnectionString);
+        return endpoint.Host == host && endpoint.Port == port && endpoint.Database == database && endpoint.Username == username;
+    }
+
     public async Task<T> QuerySingleAsync<T>(DbStatement statement, Func<DbRow, T> project,
         CancellationToken cancellationToken = default)
     {

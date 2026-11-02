@@ -224,6 +224,14 @@
           "Platform.Persistence": "[1.0.0, )",
           "Platform.Telegram": "[1.0.0, )"
         }
+      },
+      "platform.migration": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Core": "[1.0.0, )",
+          "Platform.Persistence": "[1.0.0, )",
+          "Platform.Security": "[1.0.0, )"
+        }
       }
     },
     "net10.0/linux-x64": {

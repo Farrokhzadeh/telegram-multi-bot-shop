@@ -8,6 +8,8 @@ public static class LegacyMapStore
     public static async Task RequireDestinationAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct = default)
     {
         manifest.Destination.Validate();
+        var destination = manifest.Destination;
+        if (!session.MatchesEndpoint(destination.Host, destination.Port, destination.Database, destination.Username)) throw new MigrationRejectedException();
         bool valid = await session.QuerySingleAsync(new DbStatement("SELECT current_database()=$1 AND current_user=$2 AND current_setting('server_version_num')::integer=$3 AND EXISTS(SELECT 1 FROM pg_roles WHERE rolname='shop_legacy_import' AND pg_has_role(current_user,oid,'MEMBER'))",
             DbValue.Text(manifest.Destination.Database), DbValue.Text(manifest.Destination.Username), DbValue.Integer(manifest.Destination.ServerVersion)), r => r.GetBoolean(0), ct);
         if (!valid) throw new MigrationRejectedException();

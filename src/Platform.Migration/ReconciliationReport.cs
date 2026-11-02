@@ -1,0 +1,48 @@
+using System.Text.Json.Serialization;
+using Platform.Core;
+using Platform.Persistence;
+
+namespace Platform.Migration;
+
+public sealed record MigrationReconciliation(Guid Batch, long ExpectedMappings, long CommittedMappings, long MissingMappings, long MismatchedMappings,
+    decimal OpeningUsd, decimal ExpectedOpeningUsd, decimal TargetWalletUsd, decimal WalletDifferenceUsd, long OpeningPostings, long NonPostingHistory, long PaidUnfulfilledOrders, long HeldCouponUnits, long TargetCiphertexts, long SaleableInventory, bool Complete)
+{
+    public string Scope => "qualified_wallet_projection_only";
+    public bool ReleaseReady => false;
+}
+public sealed class ReconciliationReport(DbSessionFactory sessions)
+{
+    public async Task<MigrationReconciliation> ReadAsync(VerifiedImportManifest manifest, CancellationToken ct = default)
+    {
+        await using var session = await sessions.BeginAsync(ct);
+        await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
+        long committed = 0, missing = 0, mismatch = 0;
+        foreach (var proof in manifest.Proofs)
+        {
+            var rows = await session.QueryManyAsync(new DbStatement("SELECT target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind=$3 AND legacy_id=$4",
+                DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId)), r => (Kind: r.GetString(0), Id: r.GetGuid(1), Brand: r.IsDBNull(2) ? Guid.Empty : r.GetGuid(2), Digest: r.GetBinary(3), Batch: r.GetGuid(4), Reference: r.GetString(5)), 1, ct);
+            if (rows.Count == 0) { missing++; continue; }
+            committed++;
+            var value = rows[0];
+            if (value.Kind != proof.TargetKind || value.Id != proof.Target || value.Brand != proof.Brand || value.Batch != manifest.Batch || value.Reference != manifest.Reference || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(value.Digest, proof.Fingerprint.Span)) mismatch++;
+        }
+        var money = await session.QuerySingleAsync(new DbStatement("SELECT COALESCE(sum(signed_amount) FILTER(WHERE movement_kind='opening_balance' AND is_posting),0)::text,count(*) FILTER(WHERE movement_kind='opening_balance' AND is_posting),count(*) FILTER(WHERE movement_kind='legacy_history' AND NOT is_posting) FROM shop.wallet_entries WHERE legacy_import_batch=$1", DbValue.Uuid(manifest.Batch)), r => (Opening: ExactDecimal.Parse(r.GetString(0)), Postings: r.GetInt64(1), History: r.GetInt64(2)), ct);
+        var liabilities = await session.QuerySingleAsync(new DbStatement("""
+            SELECT (SELECT count(*) FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND o.payment_status IN ('paid','not_required') AND o.fulfillment_status NOT IN ('completed','cancelled','compensated')),
+                (SELECT COALESCE(sum(d.units_covered),0)::bigint FROM shop.discount_uses d JOIN shop.orders o ON o.id=d.order_id JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND d.status='held'),
+                (SELECT count(*) FROM shop.fulfillments f JOIN shop.orders o ON o.id=f.order_id JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND f.delivered_content IS NOT NULL)
+                    +(SELECT count(*) FROM shop.discounts WHERE brand_id=$1 AND code_ciphertext IS NOT NULL)
+                    +(SELECT count(*) FROM shop.support_messages m JOIN shop.support_tickets t ON t.id=m.ticket_id JOIN shop.users u ON u.id=t.user_id WHERE u.brand_id=$1 AND m.body_ciphertext IS NOT NULL)
+                    +(SELECT count(*) FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND p.bank_destination_ciphertext IS NOT NULL),
+                (SELECT count(*) FROM shop.inventory_items WHERE state='available')
+            """, DbValue.Uuid(manifest.TargetBrand)), r => (Paid: r.GetInt64(0), Held: r.GetInt64(1), Ciphers: r.GetInt64(2), Stock: r.GetInt64(3)), ct);
+        long mapped = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        var balances = await session.QuerySingleAsync(new DbStatement("SELECT COALESCE(sum(w.balance),0)::text,count(*) FROM shop.wallets w JOIN shop.legacy_id_map m ON m.target_kind='wallet' AND m.target_id=w.user_id WHERE m.import_batch=$1 AND m.import_manifest_ref=$2", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => (Total: ExactDecimal.Parse(r.GetString(0)), Count: r.GetInt64(1)), ct);
+        bool complete = money.Opening == manifest.ExpectedOpeningUsd && balances.Total == manifest.ExpectedOpeningUsd && balances.Count == manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletSnapshot) && missing == 0 && mismatch == 0 && mapped == manifest.Proofs.Count &&
+            money.Postings == manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) && money.History == manifest.Proofs.Count(p => p.Projection == LegacyProjection.Transaction);
+        return new(manifest.Batch, manifest.Proofs.Count, committed, missing, mismatch, money.Opening, manifest.ExpectedOpeningUsd, balances.Total, balances.Total - manifest.ExpectedOpeningUsd, money.Postings, money.History, liabilities.Paid, liabilities.Held, liabilities.Ciphers, liabilities.Stock, complete);
+    }
+}
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(MigrationReconciliation))]
+public sealed partial class MigrationReportJsonContext : JsonSerializerContext;

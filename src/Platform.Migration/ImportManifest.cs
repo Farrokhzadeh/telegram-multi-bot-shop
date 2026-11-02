@@ -34,10 +34,10 @@ public sealed class VerifiedImportManifest
     private readonly byte[] digest;
     private readonly byte[] body;
     private readonly Dictionary<string, LegacyMapProof> entries;
-    private VerifiedImportManifest(string reference, byte[] body, SchemaManifest destination, string source, Guid brand, string revision, byte[] schemaDigest, string snapshot, byte[] snapshotDigest, Guid batch, LegacyMapProof[] proofs)
+    private VerifiedImportManifest(string reference, byte[] body, SchemaManifest destination, string source, Guid brand, string revision, byte[] schemaDigest, string snapshot, byte[] snapshotDigest, Guid batch, decimal expectedOpeningUsd, LegacyMapProof[] proofs)
     {
         Reference = reference; this.body = body; digest = SHA256.HashData(body); Destination = destination; SourceBrand = source; TargetBrand = brand;
-        SourceRevision = revision; SourceSchemaDigest = Convert.ToHexStringLower(schemaDigest); SnapshotReference = snapshot; SnapshotDigest = Convert.ToHexStringLower(snapshotDigest); Batch = batch;
+        SourceRevision = revision; SourceSchemaDigest = Convert.ToHexStringLower(schemaDigest); SnapshotReference = snapshot; SnapshotDigest = Convert.ToHexStringLower(snapshotDigest); Batch = batch; ExpectedOpeningUsd = expectedOpeningUsd;
         entries = proofs.ToDictionary(p => p.Key, StringComparer.Ordinal); Proofs = Array.AsReadOnly(proofs);
     }
     public string Reference { get; }
@@ -50,18 +50,19 @@ public sealed class VerifiedImportManifest
     public string SnapshotReference { get; }
     public string SnapshotDigest { get; }
     public Guid Batch { get; }
+    public decimal ExpectedOpeningUsd { get; }
     public IReadOnlyList<LegacyMapProof> Proofs { get; }
     public byte[] Encode() => body.ToArray();
     public void Require(LegacyMapProof proof)
     { if (!entries.TryGetValue(proof.Key, out var expected) || !expected.Same(proof)) throw new MigrationRejectedException(); }
-    public static byte[] EncodePlan(SchemaManifest destination, string source, Guid brand, string revision, ReadOnlySpan<byte> schemaDigest, string snapshot, ReadOnlySpan<byte> snapshotDigest, Guid batch, IEnumerable<LegacyMapProof> proofs)
+    public static byte[] EncodePlan(SchemaManifest destination, string source, Guid brand, string revision, ReadOnlySpan<byte> schemaDigest, string snapshot, ReadOnlySpan<byte> snapshotDigest, Guid batch, IEnumerable<LegacyMapProof> proofs, decimal expectedOpeningUsd = 0)
     {
         destination.Validate();
         var rows = proofs.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray();
-        if (string.IsNullOrWhiteSpace(source) || source.Length > 64 || source.Any(char.IsControl) || brand == Guid.Empty || revision.Length != 40 || !revision.All(char.IsAsciiHexDigit) || schemaDigest.Length != 32 || snapshotDigest.Length != 32 || batch == Guid.Empty || rows.Length is < 1 or > 100000 || rows.Any(p => p.Brand != brand) || rows.Select(p => p.Key).Distinct(StringComparer.Ordinal).Count() != rows.Length || rows.GroupBy(p => (p.TargetKind, p.Target)).Any(g => g.Count() > 1 && (g.Key.TargetKind != "order" || g.Count(p => p.Projection == LegacyProjection.Order) > 1))) throw new MigrationRejectedException();
+        if (string.IsNullOrWhiteSpace(source) || source.Length > 64 || source.Any(char.IsControl) || brand == Guid.Empty || revision.Length != 40 || !revision.All(char.IsAsciiHexDigit) || schemaDigest.Length != 32 || snapshotDigest.Length != 32 || batch == Guid.Empty || expectedOpeningUsd < 0 || rows.Length is < 1 or > 100000 || rows.Any(p => p.Brand != brand) || rows.Select(p => p.Key).Distinct(StringComparer.Ordinal).Count() != rows.Length || rows.GroupBy(p => (p.TargetKind, p.Target)).Any(g => g.Count() > 1 && (g.Key.TargetKind != "order" || g.Count(p => p.Projection == LegacyProjection.Order) > 1))) throw new MigrationRejectedException();
         Protected(snapshot);
         using var stream = new MemoryStream(); using var w = new BinaryWriter(stream, Encoding.UTF8, true);
-        w.Write("SHOP-IMPORT-1"u8); Text(w, destination.ToFileText()); Text(w, source); w.Write(brand.ToByteArray()); Text(w, revision); w.Write(schemaDigest); Text(w, snapshot); w.Write(snapshotDigest); w.Write(batch.ToByteArray()); w.Write(rows.Length);
+        w.Write("SHOP-IMPORT-1"u8); Text(w, destination.ToFileText()); Text(w, source); w.Write(brand.ToByteArray()); Text(w, revision); w.Write(schemaDigest); Text(w, snapshot); w.Write(snapshotDigest); w.Write(batch.ToByteArray()); Text(w, Platform.Core.ExactDecimal.Format(expectedOpeningUsd)); w.Write(rows.Length);
         foreach (var p in rows) { w.Write((byte)p.Projection); Text(w, p.LegacyId); w.Write(p.Target.ToByteArray()); w.Write(p.Brand.ToByteArray()); w.Write(p.Fingerprint.Span); }
         w.Flush(); if (stream.Length > 16777216) throw new MigrationRejectedException(); return stream.ToArray();
     }
@@ -73,14 +74,14 @@ public sealed class VerifiedImportManifest
         {
             using var stream = new MemoryStream(canonicalBody.ToArray(), false); using var r = new BinaryReader(stream, Encoding.UTF8, true);
             if (!r.ReadBytes(13).AsSpan().SequenceEqual("SHOP-IMPORT-1"u8)) throw new MigrationRejectedException();
-            var destination = SchemaManifest.Parse(Text(r)); string source = Text(r); Guid brand = GuidOf(r); string revision = Text(r); byte[] schema = Exact(r, 32); string snapshot = Text(r); byte[] snapshotDigest = Exact(r, 32); Guid batch = GuidOf(r);
+            var destination = SchemaManifest.Parse(Text(r)); string source = Text(r); Guid brand = GuidOf(r); string revision = Text(r); byte[] schema = Exact(r, 32); string snapshot = Text(r); byte[] snapshotDigest = Exact(r, 32); Guid batch = GuidOf(r); decimal expectedOpeningUsd = Platform.Core.ExactDecimal.Parse(Text(r));
             int count = r.ReadInt32(); if (count is < 1 or > 100000) throw new MigrationRejectedException();
             var proofs = new LegacyMapProof[count];
             for (int i = 0; i < count; i++) proofs[i] = new((LegacyProjection)r.ReadByte(), Text(r), GuidOf(r), GuidOf(r), Exact(r, 32));
             if (stream.Position != stream.Length) throw new MigrationRejectedException();
-            byte[] rebuilt = EncodePlan(destination, source, brand, revision, schema, snapshot, snapshotDigest, batch, proofs);
+            byte[] rebuilt = EncodePlan(destination, source, brand, revision, schema, snapshot, snapshotDigest, batch, proofs, expectedOpeningUsd);
             if (!rebuilt.AsSpan().SequenceEqual(canonicalBody)) throw new MigrationRejectedException();
-            return new(reference, rebuilt, destination, source, brand, revision, schema, snapshot, snapshotDigest, batch, proofs);
+            return new(reference, rebuilt, destination, source, brand, revision, schema, snapshot, snapshotDigest, batch, expectedOpeningUsd, proofs);
         }
         catch (Exception e) when (e is EndOfStreamException or ArgumentException or InvalidOperationException or DecoderFallbackException or OverflowException) { throw new MigrationRejectedException(); }
     }

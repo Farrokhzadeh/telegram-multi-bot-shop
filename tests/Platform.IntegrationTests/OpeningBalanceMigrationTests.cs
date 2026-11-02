@@ -33,10 +33,52 @@ public sealed class OpeningBalanceMigrationTests
     public async Task NonUsdWalletOrOtherLiabilityStopsWithoutCurrencyCoercion(string currency, string otherBalance)
     {
         await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
-        var row = MigrationQualification.Wallet() with { Currency = currency, OtherBalance = Platform.Core.ExactDecimal.Parse(otherBalance) };
-        var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [row]);
+        var valid = MigrationQualification.Wallet();
+        var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [valid]);
+        var row = valid with { Currency = currency, OtherBalance = Platform.Core.ExactDecimal.Parse(otherBalance) };
         await Assert.ThrowsAsync<MigrationRejectedException>(() => new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, row, Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallets", Ct));
+    }
+    [Fact]
+    public async Task ResumeFillsMissingNonPostingHistoryWithoutResettingAnAlreadyFrozenOpening()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
+        await MigrationQualification.EnableRoleAsync(f, Ct);
+        var row = MigrationQualification.Wallet();
+        var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [row]);
+        var writer = new OpeningBalanceImportWorkflow(f.Sessions);
+        await writer.ImportAsync(f.Context(0), manifest, row with { History = row.History.Take(1).ToArray() }, Ct);
+        var incomplete = await new ReconciliationReport(f.Sessions).ReadAsync(manifest, Ct);
+        Assert.False(incomplete.Complete);
+        Assert.Equal(1, incomplete.MissingMappings);
+        await writer.ImportAsync(f.Context(0), manifest, row, Ct);
+        Assert.True((await new ReconciliationReport(f.Sessions).ReadAsync(manifest, Ct)).Complete);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE NOT is_posting", Ct));
+    }
+    [Fact]
+    public async Task TargetAndMappingRollbackTogetherAndUnprivilegedRoleCannotImport()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
+        await MigrationQualification.EnableRoleAsync(f, Ct);
+        var row = MigrationQualification.Wallet();
+        var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [row]);
+        await using (var denied = await f.Sessions.BeginAsync(Ct))
+        {
+            await denied.ExecuteAsync(new Platform.Persistence.DbStatement("SET LOCAL ROLE pg_read_all_data"), Ct);
+            await Assert.ThrowsAsync<MigrationRejectedException>(() => LegacyMapStore.EnsureAsync(denied, manifest, manifest.Proofs[0], Ct));
+        }
+        await using (var rollback = await f.Sessions.BeginAsync(Ct))
+        {
+            await LegacyMapStore.EnsureAsync(rollback, manifest, manifest.Proofs[0], Ct);
+        }
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.users", Ct));
+        var bad = row with { TargetUser = Guid.NewGuid() };
+        var collision = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [bad]);
+        await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, row, Ct);
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), collision, bad, Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.users", Ct));
     }
     [Fact]
     public async Task SameLegacyIdAcrossBrandsIsDistinctAndChangedSnapshotCannotReopenTheBalance()

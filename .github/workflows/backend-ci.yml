@@ -67,6 +67,7 @@ jobs:
         with:
           name: offline-qualification-${{ github.sha }}
           path: |
+            artifacts/migration/
             artifacts/contracts/
             artifacts/test-results/
             **/packages.lock.json

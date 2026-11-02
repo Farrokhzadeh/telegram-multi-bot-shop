@@ -5,6 +5,9 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
+    <None Include="../fixtures/legacy-fernet-synthetic.json" Link="fixtures/legacy-fernet-synthetic.json" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="../Shared/MigrationQualification.cs" Link="Shared/MigrationQualification.cs" />
     <Compile Include="../Shared/SupplierQualification.cs" Link="Shared/SupplierQualification.cs" />
     <Compile Include="../Shared/SupplierFixture.cs" Link="Shared/SupplierFixture.cs" />
     <Compile Include="../../src/Platform.Api/DiagnosticsEndpoints.cs" Link="Api/DiagnosticsEndpoints.cs" />
