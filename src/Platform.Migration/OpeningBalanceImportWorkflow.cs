@@ -43,6 +43,7 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
 {
     public async Task ImportAsync(BrandContext context, VerifiedImportManifest manifest, LegacyWalletSnapshot row, CancellationToken ct = default)
     {
+        row = row with { History = Array.AsReadOnly(row.History.ToArray()) };
         row.Validate();
         if (manifest.TargetBrand != context.BrandId) throw new MigrationRejectedException();
         var proofs = row.Proofs(context.BrandId); foreach (var proof in proofs) manifest.Require(proof);

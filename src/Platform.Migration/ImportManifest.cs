@@ -69,10 +69,12 @@ public sealed class VerifiedImportManifest
     public static VerifiedImportManifest Open(string reference, ReadOnlySpan<byte> expectedDigest, ReadOnlySpan<byte> canonicalBody)
     {
         Protected(reference);
-        if (expectedDigest.Length != 32 || canonicalBody.Length is < 128 or > 16777216 || !CryptographicOperations.FixedTimeEquals(expectedDigest, SHA256.HashData(canonicalBody))) throw new MigrationRejectedException();
+        if (expectedDigest.Length != 32 || canonicalBody.Length is < 128 or > 16777216) throw new MigrationRejectedException();
+        byte[] frozen = canonicalBody.ToArray();
+        if (!CryptographicOperations.FixedTimeEquals(expectedDigest, SHA256.HashData(frozen))) throw new MigrationRejectedException();
         try
         {
-            using var stream = new MemoryStream(canonicalBody.ToArray(), false); using var r = new BinaryReader(stream, Encoding.UTF8, true);
+            using var stream = new MemoryStream(frozen, false); using var r = new BinaryReader(stream, Encoding.UTF8, true);
             if (!r.ReadBytes(13).AsSpan().SequenceEqual("SHOP-IMPORT-1"u8)) throw new MigrationRejectedException();
             var destination = SchemaManifest.Parse(Text(r)); string source = Text(r); Guid brand = GuidOf(r); string revision = Text(r); byte[] schema = Exact(r, 32); string snapshot = Text(r); byte[] snapshotDigest = Exact(r, 32); Guid batch = GuidOf(r); decimal expectedOpeningUsd = Platform.Core.ExactDecimal.Parse(Text(r));
             int count = r.ReadInt32(); if (count is < 1 or > 100000) throw new MigrationRejectedException();
@@ -80,7 +82,7 @@ public sealed class VerifiedImportManifest
             for (int i = 0; i < count; i++) proofs[i] = new((LegacyProjection)r.ReadByte(), Text(r), GuidOf(r), GuidOf(r), Exact(r, 32));
             if (stream.Position != stream.Length) throw new MigrationRejectedException();
             byte[] rebuilt = EncodePlan(destination, source, brand, revision, schema, snapshot, snapshotDigest, batch, proofs, expectedOpeningUsd);
-            if (!rebuilt.AsSpan().SequenceEqual(canonicalBody)) throw new MigrationRejectedException();
+            if (!rebuilt.AsSpan().SequenceEqual(frozen)) throw new MigrationRejectedException();
             return new(reference, rebuilt, destination, source, brand, revision, schema, snapshot, snapshotDigest, batch, expectedOpeningUsd, proofs);
         }
         catch (Exception e) when (e is IOException or ArgumentException or InvalidOperationException or OverflowException or FormatException) { throw new MigrationRejectedException(); }

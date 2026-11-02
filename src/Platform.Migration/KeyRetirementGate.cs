@@ -22,10 +22,12 @@ public static class KeyRetirementGate
     public static KeyDependencyPlan Open(string protectedReference, ReadOnlySpan<byte> pinnedDigest, ReadOnlySpan<byte> bytes)
     {
         Reference(protectedReference);
-        if (pinnedDigest.Length != 32 || bytes.Length is < 2 or > 1048576 || !CryptographicOperations.FixedTimeEquals(pinnedDigest, SHA256.HashData(bytes))) throw new MigrationRejectedException();
+        if (pinnedDigest.Length != 32 || bytes.Length is < 2 or > 1048576) throw new MigrationRejectedException();
+        byte[] frozen = bytes.ToArray();
+        if (!CryptographicOperations.FixedTimeEquals(pinnedDigest, SHA256.HashData(frozen))) throw new MigrationRejectedException();
         try
         {
-            var plan = JsonSerializer.Deserialize(bytes, KeyDependencyJsonContext.Default.KeyDependencyPlan) ?? throw new MigrationRejectedException();
+            var plan = JsonSerializer.Deserialize(frozen, KeyDependencyJsonContext.Default.KeyDependencyPlan) ?? throw new MigrationRejectedException();
             Validate(plan); return plan;
         }
         catch (JsonException) { throw new MigrationRejectedException(); }
