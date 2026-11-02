@@ -24,7 +24,7 @@ internal static class BotActivityWriter
         if (originalAt > clock.Now) throw new ArgumentException("Activity occurrence is in the future.");
         if (originalAt < clock.AsOf.AddHours(-4320)) return false;
         var definition = BotActivityRegistry.Get(action);
-        string key = "workflow:" + definition.Code + ":" + identity.ToString("N");
+        string key = links.TelegramUpdate is long telegram ? BotActivityRegistry.TelegramIdentity(telegram) : "workflow:" + definition.Code + ":" + identity.ToString("N");
         var values = new[] { DbValue.Uuid(member), DbValue.Text(definition.EventType), DbValue.Text(BotActivityRegistry.Source(source)), DbValue.Text(definition.Code), Id(links.Product), Id(links.Order), Id(links.Ticket),
             links.Quantity is int quantity ? DbValue.Integer(quantity) : DbValue.Null(NpgsqlDbType.Integer), links.FlowRevision is long revision ? DbValue.Bigint(revision) : DbValue.Null(NpgsqlDbType.Bigint),
             links.TelegramUpdate is long update ? DbValue.Bigint(update) : DbValue.Null(NpgsqlDbType.Bigint), DbValue.Text(BotActivityRegistry.Outcome(outcome)), DbValue.Text(key), DbValue.Utc(originalAt) };

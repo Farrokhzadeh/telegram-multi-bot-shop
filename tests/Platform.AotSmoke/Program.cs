@@ -507,6 +507,9 @@ await BotActivityRuntimeQualification.TimelineAsync();
 Console.WriteLine("PASS: native independent Telegram replay checkpoint, bounded safe activity cleanup and authenticated scoped cursor timeline.");
 
 await WorkflowActivityQualification.CheckoutAsync();
+await WorkflowActivityQualification.QuantityAsync();
+await WorkflowActivityQualification.QuantityErrorsAsync();
+await WorkflowActivityQualification.QuantityRollbackAsync();
 await WorkflowActivityQualification.AtomicAsync();
 await WorkflowActivityQualification.FlowAsync();
 await WorkflowActivityQualification.RetentionAsync();

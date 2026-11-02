@@ -6,8 +6,8 @@ using Platform.Security;
 
 namespace Platform.Telegram;
 
-public enum UpdateRouteCode { Started, Menu, Support, Discounts, Product, Order, Subscribed, Unsubscribed, Duplicate, Busy, StaffProofObserved }
-public sealed record UpdateRouteResult(UpdateRouteCode Code, long FlowRevision, Guid? EntityId = null);
+public enum UpdateRouteCode { Started, Menu, Support, Discounts, Product, Order, Subscribed, Unsubscribed, Duplicate, Busy, StaffProofObserved, Quantity, QuantityRejected }
+public sealed record UpdateRouteResult(UpdateRouteCode Code, long FlowRevision, Guid? EntityId = null, int? Quantity = null);
 public sealed class UpdateRouter
 {
     private readonly DbSessionFactory sessions;
@@ -19,6 +19,13 @@ public sealed class UpdateRouter
     public async Task<UpdateRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(update);
+        if (!update.IsCallback && !update.Value.StartsWith('/') && update.AssetRef is null)
+        {
+            BrandUser current;
+            await using (var read = await sessions.BeginAsync(ct)) current = await BrandUserStore.RequireAsync(read, update.Context, update.ActorId, null, ct);
+            if (current.Flow.State == CustomerFlowState.Quantity || (current.Flow.State != CustomerFlowState.Support && ParseQuantity(update.Value) is not null))
+                return await QuantityAsync(update, current, ct);
+        }
         if (support is not null && !update.IsCallback && (TelegramWebhookVerifier.IsSupportCommand(update.Value) || !update.Value.StartsWith('/')))
         {
             HumanSupportRouteResult result = await support.RouteAsync(update, ct);
@@ -116,6 +123,49 @@ public sealed class UpdateRouter
         return new(action.Code, member.Flow.Revision, entity);
     }
 
+    private async Task<UpdateRouteResult> QuantityAsync(VerifiedTelegramUpdate update, BrandUser expected, CancellationToken ct)
+    {
+        await using var session = await sessions.BeginAsync(ct);
+        if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(UpdateRouteCode.Busy, expected.Flow.Revision);
+        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(expected.Id)), r => r.GetGuid(0), ct);
+        BrandUser member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, expected.Id, ct);
+        if (member.Blocked || member.Banned) throw new TelegramIngressRejectedException();
+        if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct)) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
+        long highwater = await session.QuerySingleAsync(new DbStatement("SELECT telegram_update_highwater FROM shop.brands WHERE id=$1", DbValue.Uuid(update.Context.BrandId)), r => r.GetInt64(0), ct);
+        if (update.UpdateId != highwater) throw new TelegramIngressRejectedException();
+        if (member.Flow.Revision != expected.Flow.Revision || member.Flow.State != CustomerFlowState.Quantity || member.Flow.ProductId is not Guid product ||
+            member.Flow.AnchorMessageId is not long anchor || update.MessageId <= anchor) throw new TelegramIngressRejectedException();
+        var listing = await session.QuerySingleAsync(new DbStatement("""
+            SELECT l.min_quantity,l.max_quantity,clock_timestamp() FROM (SELECT 1) seed LEFT JOIN
+                (SELECT l.min_quantity,l.max_quantity FROM shop.brand_products l JOIN shop.products p ON p.id=l.product_id
+                WHERE l.brand_id=$1 AND l.product_id=$2 AND l.visible AND p.active FOR SHARE OF l,p) l ON true
+            """, DbValue.Uuid(update.Context.BrandId), DbValue.Uuid(product)), r => (Min: r.IsDBNull(0) ? 0 : r.GetInt32(0), Max: r.IsDBNull(1) ? 0 : r.GetInt32(1), Now: r.GetUtc(2)), ct);
+        if (listing.Min == 0) throw new TelegramIngressRejectedException();
+        if (member.Flow.ExpiresAt is DateTime expiry && expiry <= listing.Now) throw new TelegramIngressRejectedException();
+        int? quantity = ParseQuantity(update.Value);
+        bool accepted = quantity >= listing.Min && quantity <= Math.Min(10000, listing.Max);
+        await BotActivityWriter.RecordAsync(session, update.Context, update.ActorId, member.Id,
+            accepted ? BotActivityAction.QuantityEnter : BotActivityAction.QuantityRejected, BotActivitySource.Flow,
+            accepted ? BotActivityOutcome.Accepted : BotActivityOutcome.Rejected,
+            new(product, Quantity: accepted ? quantity : null, FlowRevision: member.Flow.Revision, TelegramUpdate: update.UpdateId),
+            Guid.NewGuid(), listing.Now, ct);
+        if (accepted) member = await BrandUserStore.TransitionAsync(session, update.Context, update.ActorId, member.Id, member.Flow.Revision,
+            CustomerFlowState.Payment, productId: product, anchorMessageId: anchor, expiresAt: member.Flow.ExpiresAt, ct: ct);
+        await session.CommitAsync(ct);
+        return new(accepted ? UpdateRouteCode.Quantity : UpdateRouteCode.QuantityRejected, member.Flow.Revision, product, accepted ? quantity : null);
+    }
+    private static int? ParseQuantity(string value)
+    {
+        if (value.Length is < 1 or > 5) return null;
+        Span<char> digits = stackalloc char[value.Length];
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            digits[i] = c is >= '۰' and <= '۹' ? (char)('0' + c - '۰') : c is >= '٠' and <= '٩' ? (char)('0' + c - '٠') : c;
+            if (!char.IsAsciiDigit(digits[i])) return null;
+        }
+        return int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out int quantity) && quantity is > 0 and <= 10000 ? quantity : null;
+    }
     private static Callback ParseCallback(string value)
     {
         string[] parts = value.Split('|');

@@ -5,6 +5,12 @@ namespace Platform.IntegrationTests;
 [Collection("PostgreSQL races")]
 public sealed class WorkflowActivityTests
 {
+    [Fact]
+    public async Task VerifiedNumericIngressPreservesBrandScopeReplayAndSupportBoundary() => await WorkflowActivityQualification.QuantityAsync(Ct);
+    [Fact]
+    public async Task InvalidQuantityRecordsOnlyFiniteTypedRejection() => await WorkflowActivityQualification.QuantityErrorsAsync(Ct);
+    [Fact]
+    public async Task QuantityEventCommitFailureRollsBackFlowAndReplayCheckpoint() => await WorkflowActivityQualification.QuantityRollbackAsync(Ct);
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
     public async Task ActualCheckoutAndQuantityEventsPreserveOriginalClocksAndFinancialReplay() => await WorkflowActivityQualification.CheckoutAsync(Ct);

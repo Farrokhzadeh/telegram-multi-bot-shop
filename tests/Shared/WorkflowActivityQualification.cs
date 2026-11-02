@@ -1,11 +1,102 @@
 using Platform.Core;
 using Platform.Persistence;
+using Platform.Security;
 using Platform.Telegram;
 
 namespace Platform.Testing;
 
 public static class WorkflowActivityQualification
 {
+    public static async Task QuantityAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 6, ct: ct);
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        {
+            for (int i = 0; i < 4; i++) await BrandUserStore.TransitionAsync(seed, f.Context(i), CheckoutFixture.Actor(i), f.Users[i], 0,
+                CustomerFlowState.Quantity, productId: f.Product, anchorMessageId: 77, expiresAt: DateTime.UtcNow.AddHours(1), ct: ct);
+            await seed.CommitAsync(ct);
+        }
+        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(f.Sessions, f.Secrets));
+        string[] digits = ["2", "۲", "٢"];
+        for (int i = 0; i < digits.Length; i++)
+        {
+            var result = await router.RouteAsync(QuantityUpdate(f, i, digits[i], 100), ct);
+            Require(result.Code == UpdateRouteCode.Quantity && result.Quantity == 2 && result.FlowRevision == 2 && result.EntityId == f.Product, "verified three-brand numeric ingress and localized digits");
+            for (int j = 0; j < 100; j++) Require((await router.RouteAsync(QuantityUpdate(f, i, "9", 100), ct)).Code == UpdateRouteCode.Duplicate, "changed-text replay preserves original observation");
+        }
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='quantity_enter' AND quantity_selected=2 AND flow_revision=1 AND telegram_update_id=100 AND idempotency_key='telegram:100'", ct) == 3, "one typed observation per membership with original revision");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.support_messages", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.orders", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct) == 0, "quantity is UI progress without support content or financial effects");
+        bool reordered = false;
+        try { await router.RouteAsync(QuantityUpdate(f, 3, "2", 99), ct); } catch (TelegramIngressRejectedException) { reordered = true; }
+        Require(reordered && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 3, "unseen reordered quantity cannot attach to a newer flow");
+    }
+    public static async Task QuantityErrorsAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: ct);
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        {
+            await BrandUserStore.TransitionAsync(seed, f.Context(0), CheckoutFixture.Actor(0), f.Users[0], 0, CustomerFlowState.Quantity,
+                productId: f.Product, anchorMessageId: 77, expiresAt: DateTime.UtcNow.AddHours(1), ct: ct);
+            await seed.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET min_quantity=2,max_quantity=5 WHERE brand_id=$1", DbValue.Uuid(f.Brands[0])), ct);
+            await seed.CommitAsync(ct);
+        }
+        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(f.Sessions, f.Secrets));
+        string[] invalid = ["0", "-1", "1", "6", "10001", "2147483648", "1.5", "1e1", "+2", " 2", "public private message"];
+        for (int i = 0; i < invalid.Length; i++)
+        {
+            var result = await router.RouteAsync(QuantityUpdate(f, 0, invalid[i], 100 + i), ct);
+            Require(result.Code == UpdateRouteCode.QuantityRejected && result.Quantity is null && result.FlowRevision == 1, "bounded invalid quantity has a finite private-data-free outcome");
+        }
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='quantity_rejected' AND outcome_code='rejected' AND quantity_selected IS NULL AND flow_revision=1", ct) == invalid.Length, "one rejection per authenticated input without raw content");
+        async Task Reject(VerifiedTelegramUpdate update)
+        {
+            bool rejected = false;
+            try { await router.RouteAsync(update, ct); } catch (Exception e) when (e is TelegramIngressRejectedException or UnauthorizedAccessException) { rejected = true; }
+            Require(rejected, "stale expired unpublished blocked and unknown quantity origins fail closed");
+        }
+        await Reject(QuantityUpdate(f, 0, "2", 120, 77));
+        await Reject(QuantityUpdate(f, 9, "2", 120));
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        { await seed.ExecuteAsync(new DbStatement("UPDATE shop.users SET flow_expires_at=CURRENT_TIMESTAMP-INTERVAL '1 second',flow_revision=flow_revision+1 WHERE id=$1", DbValue.Uuid(f.Users[0])), ct); await seed.CommitAsync(ct); }
+        await Reject(QuantityUpdate(f, 0, "2", 120));
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        {
+            await seed.ExecuteAsync(new DbStatement("UPDATE shop.users SET flow_expires_at=CURRENT_TIMESTAMP+INTERVAL '1 hour',flow_revision=flow_revision+1,blocked_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(f.Users[0])), ct);
+            await seed.CommitAsync(ct);
+        }
+        await Reject(QuantityUpdate(f, 0, "2", 120));
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        {
+            await seed.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=NULL WHERE id=$1", DbValue.Uuid(f.Users[0])), ct);
+            await seed.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET visible=false WHERE brand_id=$1", DbValue.Uuid(f.Brands[0])), ct);
+            await seed.CommitAsync(ct);
+        }
+        await Reject(QuantityUpdate(f, 0, "2", 120));
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == invalid.Length && await f.CountAsync("SELECT telegram_update_highwater FROM shop.brands WHERE bot_id=1001", ct) == 110, "unauthorized inputs cannot consume replay claims or append observations");
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        { await seed.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET visible=true WHERE brand_id=$1", DbValue.Uuid(f.Brands[0])), ct); await seed.CommitAsync(ct); }
+        Require((await router.RouteAsync(QuantityUpdate(f, 0, "5", 120), ct)).Code == UpdateRouteCode.Quantity, "inclusive maximum quantity accepts without purchase");
+    }
+    public static async Task QuantityRollbackAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: ct);
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        { await BrandUserStore.TransitionAsync(seed, f.Context(0), CheckoutFixture.Actor(0), f.Users[0], 0, CustomerFlowState.Quantity, productId: f.Product, anchorMessageId: 77, ct: ct); await seed.CommitAsync(ct); }
+        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException());
+        await using (var fail = f.Database.Data.CreateCommand("CREATE FUNCTION shop.synthetic_quantity_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='synthetic quantity failure'; END $$; CREATE CONSTRAINT TRIGGER synthetic_quantity_failure AFTER INSERT ON shop.bot_activity_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION shop.synthetic_quantity_failure()")) await fail.ExecuteNonQueryAsync(ct);
+        bool failed = false;
+        try { await router.RouteAsync(QuantityUpdate(f, 0, "2", 100), ct); } catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { failed = true; }
+        Require(failed && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 0 && await f.CountAsync("SELECT flow_revision FROM shop.users WHERE flow_state='quantity'", ct) == 1 && await f.CountAsync("SELECT telegram_update_highwater FROM shop.brands WHERE bot_id=1001", ct) == -1, "deferred event failure rolls back flow and independent replay claim");
+        await using (var repair = f.Database.Data.CreateCommand("DROP TRIGGER synthetic_quantity_failure ON shop.bot_activity_events; DROP FUNCTION shop.synthetic_quantity_failure()")) await repair.ExecuteNonQueryAsync(ct);
+        Require((await router.RouteAsync(QuantityUpdate(f, 0, "2", 100), ct)).Code == UpdateRouteCode.Quantity, "rolled-back update retries successfully");
+        Require((await router.RouteAsync(QuantityUpdate(f, 0, "2", 100), ct)).Code == UpdateRouteCode.Duplicate && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 1, "committed numeric update cannot repeat");
+    }
+    private static VerifiedTelegramUpdate QuantityUpdate(CheckoutFixture f, int user, string value, long update, long message = 100)
+    {
+        byte[] secret = System.Security.Cryptography.SHA256.HashData("public numeric ingress qualification"u8);
+        using var verifier = new TelegramWebhookVerifier(f.Context(user), secret);
+        return verifier.Verify([TelegramFixture.Header(secret)], TelegramFixture.Body(value, updateId: update, actorId: CheckoutFixture.Actor(user), chatId: CheckoutFixture.Actor(user), botId: f.Context(user).BotId, messageId: message));
+    }
     public static async Task CheckoutAsync(CancellationToken ct = default)
     {
         await using var f = await CheckoutFixture.CreateAsync(users: 6, stock: 8, ct: ct);
