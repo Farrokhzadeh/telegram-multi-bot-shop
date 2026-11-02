@@ -49,6 +49,8 @@ public static class TargetRestoreQualification
             byte[] digest = SHA256.HashData(await File.ReadAllBytesAsync(backup, ct));
             await TransferAsync(target, backup, true, ct);
             var sessions = new DbSessionFactory(target.Data);
+            await using (var permissions = await sessions.BeginAsync(ct))
+                Require(await permissions.QuerySingleAsync(new DbStatement("SELECT count(*) FROM pg_proc p CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a WHERE p.pronamespace='shop'::regnamespace AND a.grantee=0 AND a.privilege_type='EXECUTE'"), r => r.GetInt64(0), ct) == 0, "target restore preserves PUBLIC execute revocations");
             Require(await WorkflowActivityQualification.DomainAsync(source.Sessions, true, ct) == await WorkflowActivityQualification.DomainAsync(sessions, true, ct), "full target backup restores all 27 domain relations including checkpoints and committed jobs");
             using var timeline = new BotActivityStore(sessions, SHA256.HashData("public target restore cursor key"u8));
             var page = await timeline.ReadAsync(actor, new(Member: source.Users[0]), ct: ct);
@@ -87,7 +89,7 @@ public static class TargetRestoreQualification
         var start = new ProcessStartInfo("docker") { UseShellExecute = false, RedirectStandardError = true, RedirectStandardInput = restore, RedirectStandardOutput = !restore };
         foreach (string argument in new[] { "exec", restore ? "-i" : container, restore ? container : "pg_dump" }) start.ArgumentList.Add(argument);
         if (restore) start.ArgumentList.Add("pg_restore");
-        foreach (string argument in new[] { "--username=shop_test_runner", "--no-owner", "--no-privileges", "--dbname=" + name }) start.ArgumentList.Add(argument);
+        foreach (string argument in new[] { "--username=shop_test_runner", "--no-owner", "--dbname=" + name }) start.ArgumentList.Add(argument);
         if (restore) { start.ArgumentList.Add("--single-transaction"); start.ArgumentList.Add("--exit-on-error"); }
         else start.ArgumentList.Add("--format=custom");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(60));

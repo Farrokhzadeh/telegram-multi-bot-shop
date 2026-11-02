@@ -24,7 +24,7 @@ public static class ActivityMaintenanceQualification
         await using (var grant = f.Database.Data.CreateCommand($"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT; GRANT {role} TO shop_test_runner; GRANT USAGE ON SCHEMA shop TO {role}; GRANT SELECT(id,occurred_at),DELETE ON shop.bot_activity_events TO {role}; GRANT EXECUTE ON FUNCTION shop.activity_retention_covered(uuid),shop.activity_cleanup_candidates(integer),shop.require_true(boolean,text) TO {role}")) await grant.ExecuteNonQueryAsync(ct);
         try
         {
-            var options = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString) { Options = "-c role=" + role, IncludeErrorDetail = false };
+            var options = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString) { Options = "-c role=" + role, IncludeErrorDetail = false, Pooling = false };
             await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
             await using (var identity = data.CreateCommand("SELECT current_user::text")) Require((string)(await identity.ExecuteScalarAsync(ct))! == role, "actual restricted database identity");
             var cleanup = await new BotActivityRetentionStore(new(data)).CleanAsync(1, ct);
