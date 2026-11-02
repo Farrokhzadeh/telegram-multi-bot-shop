@@ -80,11 +80,11 @@ Replace SC-001 with any row below. This only prints commands; it does not run th
 | SC-023 | Synthetic witness subset; render its command | Synthetic trusted-time/expired grant semantics only; deployed message wording and live payment timing remain unexecuted. |
 | SC-024 | Synthetic witness subset; render its command | Synthetic paid ownership only; imported legacy paid-code provenance must be validated, never guessed T063/T064/T066. |
 | SC-025 | Synthetic witness subset; render its command | Synthetic prepaid issuance/redemption only; historical paid liabilities and deployed customer journey remain unqualified. |
-| SC-026 | Synthetic witness subset; render its command | Synthetic quote/owner override assertions only; full follow-up coupon revision task T086 and participant journey remain pending. |
+| SC-026 | Synthetic witness subset; render its command | Synthetic quote/owner override and protected accepted claims observed; actual participant-facing quantity journey and protected historical compatibility remain unqualified. |
 | SC-027 | Synthetic witness subset; render its command | Synthetic late-money recovery only; live funds/provider evidence and final Telegram edit behavior remain unqualified. |
 | SC-028 | Synthetic witness subset; render its command | Synthetic staff decisions only; actual off-bot settlements, complete historical reconciliation and production review remain unexecuted. |
-| SC-029 | Synthetic witness subset; render its command | Existing immutable revision/override probes only; complete T086 revision-edit concurrency/provenance qualification remains pending. |
-| SC-030 | Synthetic witness subset; render its command | Selected flow/support event probes only; exhaustive T087/T088 meaningful event and 100-replay/retention coverage remains pending. |
+| SC-029 | Synthetic witness subset; render its command | Synthetic typed owner edits, actual redeemed/held snapshots, concurrent redemption, immutable original orders and deferred rollback observed. Protected historical/source reconciliation and deployed authorization remain unqualified. |
+| SC-030 | Synthetic witness subset; render its command | Version-1 finite registry, selected verified router and scoped replay/context probes only. Complete T088/T089 instrumentation, independent ingress replay safety, retention and historical import remain pending. |
 | SC-031 | Synthetic witness subset; render its command | Synthetic partial outcomes only; actual provider typed recovery/export capabilities and complete T090-T092 follow-up remain gated. |
 | SC-032 | Synthetic witness subset; render its command | Synthetic original-intent lookup only; real provider lookup/export/max-charge guarantees remain gated T057/T091. |
 | SC-033 | Synthetic witness subset; render its command | Synthetic selected-source snapshots only; authoritative real provider mappings, all-source rotations and T093/T094 qualification remain pending. |

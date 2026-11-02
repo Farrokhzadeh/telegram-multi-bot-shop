@@ -12,10 +12,11 @@ public static class BotActivityQualification
         await using var f = await CheckoutFixture.CreateAsync(users: 6, balance: 0, ct: ct);
         var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct);
         var own = await payments.OrderAsync(ct: ct); var foreign = await payments.OrderAsync(user: 1, ct: ct);
-        Guid ticket;
+        Guid ticket, foreignTicket;
         await using (var setup = await f.Sessions.BeginAsync(ct))
         {
             ticket = (await SupportStore.OpenTicketAsync(setup, f.Context(0), CheckoutFixture.Actor(0), null, ct)).Id;
+            foreignTicket = (await SupportStore.OpenTicketAsync(setup, f.Context(1), CheckoutFixture.Actor(1), null, ct)).Id;
             await BrandUserStore.TransitionAsync(setup, f.Context(0), CheckoutFixture.Actor(0), f.Users[0], 0, CustomerFlowState.Payment, orderId: own.Order, anchorMessageId: 777, expiresAt: DateTime.UtcNow.AddHours(1), ct: ct);
             await setup.CommitAsync(ct);
         }
@@ -46,6 +47,10 @@ public static class BotActivityQualification
         try { await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.CheckoutOpen), BotActivitySource.Callback, new(f.Product, foreign.Order, TelegramUpdate: 9999), ct); }
         catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { ownership = true; }
         Require(ownership, "foreign order cannot enter activity context");
+        bool ticketOwnership = false;
+        try { await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.SupportReply), BotActivitySource.Flow, new(Ticket: foreignTicket, TelegramUpdate: 10000), ct); }
+        catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { ticketOwnership = true; }
+        Require(ticketOwnership, "foreign support ticket cannot enter activity context");
         bool immutable = false;
         await using (var write = await f.Sessions.BeginAsync(ct))
         { try { await write.ExecuteAsync(new DbStatement("UPDATE shop.bot_activity_events SET outcome_code='duplicate'"), ct); } catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { immutable = true; } }
