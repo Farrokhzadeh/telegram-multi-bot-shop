@@ -68,7 +68,7 @@ public static class AiBoundaryQualification
         await using var read = await f.Sessions.BeginAsync(ct);
         var parts = new List<string>();
         foreach (string table in new[] { "brands", "brand_channels", "users", "admins", "admin_sessions", "products", "brand_products", "inventory_items", "wallets", "wallet_entries", "orders", "payments", "fulfillments", "supplier_requests", "jobs", "campaigns", "telegram_deliveries", "support_tickets", "support_messages", "legacy_id_map", "audit_events", "discounts", "discount_uses", "discount_revisions", "bot_activity_events", "supplier_request_attempts", "product_supplier_sources", "product_stock_subscriptions" })
-            parts.Add(await read.QuerySingleAsync(new DbStatement($"SELECT md5(COALESCE(string_agg(row_text,E'\\n' ORDER BY row_text),'')) FROM (SELECT t::text row_text FROM shop.{table} t) rows"), r => r.GetString(0), ct));
+            parts.Add(await read.QuerySingleAsync(new DbStatement($"SELECT md5(COALESCE(string_agg(row_text,$1 ORDER BY row_text),'')) FROM (SELECT t::text row_text FROM shop.{table} t) rows", DbValue.Text("\n")), r => r.GetString(0), ct));
         return string.Join(':', parts);
     }
     public static void Require(bool condition) { if (!condition) throw new InvalidOperationException("AI boundary qualification failed."); }
