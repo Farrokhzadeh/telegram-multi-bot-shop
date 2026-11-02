@@ -486,3 +486,6 @@ Console.WriteLine("PASS: native current-state payment instructions, saved edits,
 
 await PaymentMessageQualification.LeaseRecoveryAsync();
 Console.WriteLine("PASS: native payment metadata lease recovery and stale-owner/wrong-target fences.");
+
+await PaymentMessageQualification.CredentialOwnershipAsync();
+Console.WriteLine("PASS: native credential message ownership prevents late metadata overwrite and orders concurrent transport.");

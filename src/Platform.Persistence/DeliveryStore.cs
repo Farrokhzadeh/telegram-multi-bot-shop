@@ -113,6 +113,20 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
             return null;
         }
         if (intent.Status is not ("pending" or "retry") || intent.Generation != state.Generation || state.Status is not ("ready" or "delivering" or "completed") || !state.Released || state.Held || state.Review || state.Blocked) Reject(session);
+        if (intent.Target is long statusTarget)
+        {
+            var metadata = await session.QuerySingleAsync(new DbStatement("SELECT COALESCE(bool_or(d.status='leased'),false),COALESCE(bool_or(d.last_error_code='remote_outcome_unknown' OR d.status='uncertain' OR (d.status='leased' AND EXISTS(SELECT 1 FROM shop.jobs j WHERE j.telegram_delivery_id=d.id AND j.status='leased' AND j.lease_until<=clock_timestamp()))),false) FROM shop.telegram_deliveries d WHERE d.order_id=$1 AND d.purpose='order_status' AND d.target_message_id=$2", DbValue.Uuid(intent.Order), DbValue.Bigint(statusTarget)), r => (Active: r.GetBoolean(0), Unknown: r.GetBoolean(1)), ct);
+            if (metadata.Unknown)
+            {
+                await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='failed',last_error_code='credential_recovery' WHERE id=$1", DbValue.Uuid(delivery)), ct);
+                await OutboxStore.FailAsync(session, lease, JobError.CredentialRecovery, ct); await session.CommitAsync(ct); return null;
+            }
+            if (metadata.Active)
+            {
+                await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='retry',locked_by=NULL,lease_until=NULL,available_at=clock_timestamp()+INTERVAL '1 second',last_error_code='metadata_in_flight' WHERE id=$1", DbValue.Uuid(lease.Id)), ct);
+                await session.CommitAsync(ct); return null;
+            }
+        }
         using Manifest manifest = await BuildAsync(session, context, intent.Order, state.Quantity, true, ct);
         Verify(state, intent.Order, manifest);
         if (intent.Target is not null && manifest.IsFile) Reject(session);

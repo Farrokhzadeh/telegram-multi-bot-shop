@@ -49,6 +49,12 @@ public sealed partial class PaymentInstructionStore
         await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(1), ct);
         if (data.Status != "leased" || data.Attempt != lease.Attempt) throw new InvalidOperationException("Stale payment message dispatch.");
         if (!data.Reachable) { await FinishAsync(session, lease, id, "cancelled", "recipient_blocked", ct); await session.CommitAsync(ct); return null; }
+        bool manifestOwnsMessage = await session.QuerySingleAsync(new DbStatement("SELECT release_authorized_at IS NOT NULL FROM shop.orders WHERE id=$1", DbValue.Uuid(data.Order)), r => r.GetBoolean(0), ct);
+        if (manifestOwnsMessage)
+        {
+            bool unknown = await session.QuerySingleAsync(new DbStatement("SELECT last_error_code='remote_outcome_unknown' FROM shop.telegram_deliveries WHERE id=$1", DbValue.Uuid(id)), r => !r.IsDBNull(0) && r.GetBoolean(0), ct);
+            await FinishAsync(session, lease, id, unknown ? "uncertain" : "cancelled", unknown ? "remote_outcome_unknown" : "credential_delivery_active", ct); await session.CommitAsync(ct); return null;
+        }
         bool recovered = data.Audit is Guid audit && await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.telegram_deliveries d JOIN shop.audit_events a ON a.id=$1 WHERE d.order_id=$2 AND d.id<>$3 AND d.purpose='order_status' AND d.status='succeeded' AND d.sent_at>=a.created_at)", DbValue.Uuid(audit), DbValue.Uuid(data.Order), DbValue.Uuid(id)), r => r.GetBoolean(0), ct);
         if (recovered) { await FinishAsync(session, lease, id, "cancelled", "known_success", ct); await session.CommitAsync(ct); return null; }
         if (data.Target is null && data.Audit is null)
@@ -132,7 +138,7 @@ public sealed partial class PaymentInstructionStore
     private static async Task FinishAsync(DbSession session, JobLease lease, Guid delivery, string state, string reason, CancellationToken ct)
     {
         await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status=$1,last_error_code=$2 WHERE id=$3", DbValue.Text(state), DbValue.Text(reason), DbValue.Uuid(delivery)), ct);
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status=$1,locked_by=NULL,lease_until=NULL,completed_at=clock_timestamp(),last_error_code=$2 WHERE id=$3", DbValue.Text(state), DbValue.Text(reason), DbValue.Uuid(lease.Id)), ct);
+        await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status=$1,locked_by=NULL,lease_until=NULL,completed_at=clock_timestamp(),last_error_code=$2 WHERE id=$3", DbValue.Text(state == "uncertain" ? "failed" : state), DbValue.Text(reason), DbValue.Uuid(lease.Id)), ct);
     }
     private sealed record State(Guid Order, Guid Member, long Chat, long? Target, long? Message, string Status, long Attempt, string Language, bool Reachable, Guid? Audit);
 }

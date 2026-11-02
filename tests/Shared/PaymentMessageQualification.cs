@@ -1,5 +1,6 @@
 using Platform.Core;
 using Platform.Payments;
+using Platform.Fulfillment;
 using Platform.Persistence;
 using Platform.Telegram;
 
@@ -128,6 +129,38 @@ public static class PaymentMessageQualification
         }
         Require(recovered && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0, "restart preserves metadata and money");
     }
+    public static async Task CredentialOwnershipAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: ct);
+        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct); var order = await payments.OrderAsync(ct: ct);
+        var messages = new PaymentInstructionStore(f.Sessions); var initial = await Claim(messages, ct);
+        await new PaymentMessageWorker(messages, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100)).RunAsync(f.Context(0), initial, (_, _) => Task.FromResult(new PaymentMessageOutcome(PaymentMessageOutcomeKind.Sent, 901)), ct);
+        await payments.CaptureAsync(order.Payment, order.Origin, order.Due, ct: ct); await payments.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, ct);
+        await DueAsync(f, ct); var metadata = await Claim(messages, ct);
+        Require(await messages.BeginAsync(f.Context(0), metadata, TimeSpan.FromMilliseconds(100), ct), "metadata started before manifest");
+        Require((await messages.ReadForSendAsync(f.Context(0), metadata, ct))?.TargetMessageId == 901, "metadata owns original saved target");
+        var deliveryStore = new DeliveryStore(f.Sessions, f.Secrets);
+        Require(await deliveryStore.PrepareAsync(f.Context(0), await CredentialClaim(f, JobKind.PrepareManifest, ct), ct) is not null, "complete manifest prepared");
+        var credential = await CredentialClaim(f, JobKind.SendTelegram, ct); int calls = 0;
+        await new LocalDeliveryWorker(deliveryStore).RunAsync(f.Context(0), credential, (_, _) => { calls++; return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 901)); }, ct);
+        Require(calls == 0, "credential edit waits for active metadata transport");
+        await messages.RecordAsync(f.Context(0), metadata, new(PaymentMessageOutcomeKind.Sent, 901), ct); await DueAsync(f, ct);
+        var current = await CredentialClaim(f, JobKind.SendTelegram, ct);
+        await new LocalDeliveryWorker(deliveryStore).RunAsync(f.Context(0), current, (dispatch, _) => { Require(dispatch.TargetMessageId == 901 && dispatch.Content.Length > 0, "same protected complete manifest target"); calls++; return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 901)); }, ct);
+        Require(calls == 1 && await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'", ct) == 1, "credential result completed after metadata");
+        await using (var enqueue = await f.Sessions.BeginAsync(ct))
+        {
+            Guid id = Guid.NewGuid();
+            await enqueue.ExecuteAsync(new DbStatement("INSERT INTO shop.telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,target_message_id,dedupe_key,order_id) VALUES ($1,$2,'customer_dm',$3,'order_status','edit',901,$4,$5)", DbValue.Uuid(id), DbValue.Uuid(f.Brands[0]), DbValue.Uuid(f.Users[0]), DbValue.Text("public-stale-status:" + order.Order.ToString("D")), DbValue.Uuid(order.Order)), ct);
+            await OutboxStore.EnqueueAsync(enqueue, JobIntent.Telegram(f.Brands[0], id), id, DateTime.UtcNow, ct); await enqueue.CommitAsync(ct);
+        }
+        await DueAsync(f, ct); var stale = await Claim(messages, ct); int staleCalls = 0;
+        await new PaymentMessageWorker(messages, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100)).RunAsync(f.Context(0), stale, (_, _) => { staleCalls++; return Task.FromResult(new PaymentMessageOutcome(PaymentMessageOutcomeKind.Sent, 901)); }, ct);
+        Require(staleCalls == 0 && await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='cancelled' AND last_error_code='credential_delivery_active'", ct) == 1, "late status cannot erase credential result");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='released'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0, "credential ownership fence never repeats money or allocation");
+    }
+    private static async Task<JobLease> CredentialClaim(CheckoutFixture f, JobKind kind, CancellationToken ct)
+    { await using var session = await f.Sessions.BeginAsync(ct); var lease = await OutboxStore.ClaimAsync(session, kind, Guid.NewGuid(), TimeSpan.FromMinutes(1), ct); await session.CommitAsync(ct); return lease ?? throw new InvalidOperationException("Credential ownership fixture work missing."); }
     private static async Task ExpireAsync(CheckoutFixture f, JobLease lease, CancellationToken ct)
     { await using var session = await f.Sessions.BeginAsync(ct); await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET lease_until=clock_timestamp()-INTERVAL '1 second' WHERE id=$1", DbValue.Uuid(lease.Id)), ct); await session.CommitAsync(ct); }
     private static async Task<JobLease> Claim(PaymentInstructionStore store, CancellationToken ct) => await store.ClaimAsync(Guid.NewGuid(), ct) ?? throw new InvalidOperationException("Payment message fixture work missing.");

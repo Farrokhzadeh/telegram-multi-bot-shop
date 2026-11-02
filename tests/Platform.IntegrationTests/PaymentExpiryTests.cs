@@ -23,6 +23,8 @@ public sealed class PaymentExpiryTests
     [Fact]
     public async Task ExpiredMessageLeasesRetainUnknownSendsAndRecoverOnlyTheOriginalEdit() => await PaymentMessageQualification.LeaseRecoveryAsync(Ct);
     [Fact]
+    public async Task PaymentStatusCannotOvertakeOrEraseTheAuthorizedCompleteCredentialManifest() => await PaymentMessageQualification.CredentialOwnershipAsync(Ct);
+    [Fact]
     public async Task ReviewObligationCanCoexistWithOneIndependentPendingOrder()
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
