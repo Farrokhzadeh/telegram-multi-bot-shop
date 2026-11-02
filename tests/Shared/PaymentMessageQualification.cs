@@ -1,0 +1,104 @@
+using Platform.Core;
+using Platform.Payments;
+using Platform.Persistence;
+using Platform.Telegram;
+
+namespace Platform.Testing;
+
+public static class PaymentMessageQualification
+{
+    public static async Task ProjectionAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 3, ct: ct);
+        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct);
+        var old = await payments.OrderAsync(ct: ct); var store = new PaymentInstructionStore(f.Sessions);
+        var first = await Claim(store, ct); int calls = 0;
+        var worker = new PaymentMessageWorker(store, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100));
+        await worker.RunAsync(f.Context(0), first, (message, _) =>
+        { Require(message.TargetMessageId is null && message.ChatId == CheckoutFixture.Actor(0) && message.BotId == f.Context(0).BotId && message.Text.Contains("Payment valid for 30 minutes", StringComparison.Ordinal), "private original instruction"); calls++; return Task.FromResult(new PaymentMessageOutcome(PaymentMessageOutcomeKind.Sent, 501)); }, ct);
+        await worker.RunAsync(f.Context(0), first, (_, _) => throw new InvalidOperationException("Known success resent."), ct);
+        Require(calls == 1, "known original success");
+        var next = await payments.OrderAsync(ct: ct); await DueAsync(f, ct);
+        var replacement = await Claim(store, ct);
+        Require(await store.BeginAsync(f.Context(0), replacement, TimeSpan.FromMilliseconds(100), ct), "replacement work");
+        var cancelled = await store.ReadForSendAsync(f.Context(0), replacement, ct);
+        Require(cancelled is not null && cancelled.Order == old.Order && cancelled.TargetMessageId == 501 && cancelled.Text.Contains("Cancelled — replaced", StringComparison.Ordinal), "cancelled is a separate original-order edit");
+        await store.RecordAsync(f.Context(0), replacement, new(PaymentMessageOutcomeKind.Sent, 501), ct);
+        await DueAsync(f, ct); var pending = await Claim(store, ct);
+        Require(await store.BeginAsync(f.Context(0), pending, TimeSpan.FromMilliseconds(100), ct), "new original instruction");
+        await using (var early = await f.Sessions.BeginAsync(ct))
+        { await early.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET available_at=clock_timestamp() WHERE job_kind='expire_order_payment' AND order_id=$1", DbValue.Uuid(next.Order)), ct); await early.CommitAsync(ct); }
+        JobLease expiry;
+        await using (var claim = await f.Sessions.BeginAsync(ct))
+        { expiry = await OutboxStore.ClaimAsync(claim, JobKind.ExpireOrderPayment, Guid.NewGuid(), TimeSpan.FromMinutes(1), ct) ?? throw new InvalidOperationException(); await claim.CommitAsync(ct); }
+        await payments.CaptureAsync(next.Payment, next.Origin, next.Due, ct: ct);
+        await payments.Store.SettleAsync(f.Context(0), next.Payment, PaymentSettlementFixture.Lookup, ct);
+        Require(await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(0), expiry, ct) == PaymentExpiryOutcome.Terminal, "stale expiry cannot expire paid money");
+        var fresh = await store.ReadForSendAsync(f.Context(0), pending, ct);
+        Require(fresh is not null && fresh.Order == next.Order && fresh.Text.Contains("Payment accepted", StringComparison.Ordinal) && !fresh.Text.Contains("Expired", StringComparison.Ordinal), "authoritative reread before dispatch");
+        await store.RecordAsync(f.Context(0), pending, new(PaymentMessageOutcomeKind.Sent, 502), ct);
+        Require(await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='cancelled' AND resolution_kind='replaced'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='expired'", ct) == 0, "no stale edit financial transition");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE last_error_code='latest_projection' AND status='cancelled'", ct) == 1, "superseded unsent status coalesced");
+        bool foreign = false;
+        try { await store.ReadForSendAsync(f.Context(1), pending, ct); } catch (UnauthorizedAccessException) { foreign = true; }
+        Require(foreign, "foreign status work rejected");
+    }
+    public static async Task RecoveryAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: ct);
+        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct);
+        await payments.OrderAsync(ct: ct); var store = new PaymentInstructionStore(f.Sessions);
+        var first = await Claim(store, ct);
+        Require(await store.BeginAsync(f.Context(0), first, TimeSpan.FromMilliseconds(100), ct), "first metadata attempt");
+        Require(await store.ReadForSendAsync(f.Context(0), first, ct) is not null, "current instruction");
+        await store.RecordAsync(f.Context(0), first, new(PaymentMessageOutcomeKind.RateLimited, RetryAfterSeconds: 7), ct);
+        Require(await store.ClaimAsync(Guid.NewGuid(), ct) is null, "rate limit retained");
+        await DueAsync(f, ct); var retry = await Claim(store, ct);
+        Require(retry.Id == first.Id && retry.Attempt == first.Attempt + 1, "same rate-limited intent");
+        Require(await store.BeginAsync(f.Context(0), retry, TimeSpan.FromMilliseconds(100), ct), "retry attempt");
+        bool stale = false;
+        try { await store.RecordAsync(f.Context(0), first, new(PaymentMessageOutcomeKind.Sent, 601), ct); } catch (InvalidOperationException) { stale = true; }
+        Require(stale, "stale receipt fenced");
+        await store.RecordAsync(f.Context(0), retry, new(PaymentMessageOutcomeKind.Sent, 601), ct);
+        await payments.OrderAsync(ct: ct); await DueAsync(f, ct); var edit = await Claim(store, ct);
+        Require(await store.BeginAsync(f.Context(0), edit, TimeSpan.FromMilliseconds(100), ct), "saved edit attempt");
+        Require((await store.ReadForSendAsync(f.Context(0), edit, ct))?.TargetMessageId == 601, "saved edit target");
+        await store.RecordAsync(f.Context(0), edit, new(PaymentMessageOutcomeKind.Uneditable), ct);
+        Guid command = Guid.NewGuid(); var admin = await f.AdminAsync(ct);
+        Guid fallback = await store.AuthorizeFallbackAsync(f.Context(0), admin, edit.Intent.OriginId!.Value, command, ct);
+        Require(fallback == await store.AuthorizeFallbackAsync(f.Context(0), admin, edit.Intent.OriginId!.Value, command, ct), "audited fallback replay");
+        await store.RecordAsync(f.Context(0), edit, new(PaymentMessageOutcomeKind.Sent, 601), ct);
+        await DueAsync(f, ct);
+        var worker = new PaymentMessageWorker(new(f.Sessions), TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100)); int recoveryCalls = 0;
+        for (int i = 0; i < 2; i++)
+        {
+            var work = await store.ClaimAsync(Guid.NewGuid(), ct); if (work is null) break;
+            await worker.RunAsync(f.Context(0), work, (_, _) => { recoveryCalls++; return Task.FromResult(new PaymentMessageOutcome(PaymentMessageOutcomeKind.Sent, 602)); }, ct);
+            await DueAsync(f, ct);
+        }
+        Require(await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE dedupe_key LIKE 'instruction-recovery:%' AND status='cancelled' AND last_error_code='known_success'", ct) == 1, "late known edit suppresses fallback");
+        Require(recoveryCalls == 1 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0, "only new order metadata sent without money effects");
+    }
+    public static async Task TimeoutAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: ct);
+        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct); await payments.OrderAsync(ct: ct);
+        var store = new PaymentInstructionStore(f.Sessions); var lease = await Claim(store, ct);
+        var late = new TaskCompletionSource<PaymentMessageOutcome>(TaskCreationOptions.RunContinuationsAsynchronously); int calls = 0;
+        await new PaymentMessageWorker(store, TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(100)).RunAsync(f.Context(0), lease, (_, _) => { Interlocked.Increment(ref calls); return late.Task; }, ct);
+        Require(await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='uncertain'", ct) == 1 && await store.ClaimAsync(Guid.NewGuid(), ct) is null, "unknown new send pauses automatic retry");
+        late.SetResult(new(PaymentMessageOutcomeKind.Sent, 701));
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        while (await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE status='succeeded' AND telegram_message_id=701", deadline.Token) != 1) await Task.Delay(10, deadline.Token);
+        Require(calls == 1, "late known receipt retained without another send");
+    }
+    private static async Task<JobLease> Claim(PaymentInstructionStore store, CancellationToken ct) => await store.ClaimAsync(Guid.NewGuid(), ct) ?? throw new InvalidOperationException("Payment message fixture work missing.");
+    private static async Task DueAsync(CheckoutFixture f, CancellationToken ct)
+    {
+        await using var session = await f.Sessions.BeginAsync(ct);
+        await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET last_attempt_at=clock_timestamp()-INTERVAL '10 seconds',next_attempt_at=clock_timestamp()"), ct);
+        await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET available_at=clock_timestamp() WHERE job_kind='send_telegram' AND status='retry'"), ct);
+        await session.CommitAsync(ct);
+    }
+    private static void Require(bool condition, string stage) { if (!condition) throw new InvalidOperationException("Payment message qualification failed: " + stage + "."); }
+}

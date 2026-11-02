@@ -478,3 +478,8 @@ await PaymentDeadlineQualification.SchemaAsync();
 await PaymentDeadlineQualification.ExpiryAsync();
 await PaymentDeadlineQualification.ProtectionAsync();
 Console.WriteLine("PASS: native canonical deadline guards, exactly-once expiry, protected evidence and late original-money recovery.");
+
+await PaymentMessageQualification.ProjectionAsync();
+await PaymentMessageQualification.RecoveryAsync();
+await PaymentMessageQualification.TimeoutAsync();
+Console.WriteLine("PASS: native current-state payment instructions, saved edits, backoff, audited fallback and late-known receipt recovery.");

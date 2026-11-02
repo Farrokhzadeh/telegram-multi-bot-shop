@@ -15,6 +15,12 @@ public sealed class PaymentExpiryTests
     [Fact]
     public async Task ExistingEvidenceAndReviewObligationsCannotExpireOrDonateTheirClaims() => await PaymentDeadlineQualification.ProtectionAsync(Ct);
     [Fact]
+    public async Task StatusEditsRecheckCurrentPaymentAndNeverExpireOrOverwritePaidOrders() => await PaymentMessageQualification.ProjectionAsync(Ct);
+    [Fact]
+    public async Task RateLimitsAndAuditedFallbackRetainSavedTargetsAndKnownLateReceipts() => await PaymentMessageQualification.RecoveryAsync(Ct);
+    [Fact]
+    public async Task UnknownNewMessagePausesUntilLateKnownSuccessWithoutAnAutomaticResend() => await PaymentMessageQualification.TimeoutAsync(Ct);
+    [Fact]
     public async Task ReviewObligationCanCoexistWithOneIndependentPendingOrder()
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
