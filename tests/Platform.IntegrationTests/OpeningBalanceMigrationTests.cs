@@ -3,6 +3,7 @@ using Platform.Testing;
 
 namespace Platform.IntegrationTests;
 
+[Collection("PostgreSQL races")]
 public sealed class OpeningBalanceMigrationTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;

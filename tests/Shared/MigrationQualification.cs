@@ -21,6 +21,8 @@ public static class MigrationQualification
         SchemaManifest.ForQualification(f.Database.Data.ConnectionString).Validate();
         await using var command = f.Database.Data.CreateCommand("DO $$ BEGIN CREATE ROLE shop_legacy_import NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$");
         await command.ExecuteNonQueryAsync(ct);
+        await using var membership = f.Database.Data.CreateCommand("GRANT shop_legacy_import TO shop_test_runner");
+        await membership.ExecuteNonQueryAsync(ct);
     }
     public static async Task RunAsync(CancellationToken ct = default)
     {
