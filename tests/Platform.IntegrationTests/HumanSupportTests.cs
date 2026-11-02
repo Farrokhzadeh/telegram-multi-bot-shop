@@ -13,6 +13,23 @@ public sealed class HumanSupportTests
     private static readonly Lazy<string> Verifier = new(() => AdminAuth.CreatePasswordVerifier(new string('s', 20)));
 
     [Fact]
+    public async Task NumericTextInSupportRemainsAnEncryptedSupportReply()
+    {
+        await using var fixture = await SecretFixture();
+        using var files = new SyntheticSecretFiles();
+        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        var router = new UpdateRouter(fixture.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(fixture.Sessions, secrets));
+        var first = await router.RouteAsync(Support(fixture, 501), Ct);
+        var reply = await router.RouteAsync(Message(fixture, "2", 502), Ct);
+        Assert.Equal(UpdateRouteCode.Support, reply.Code);
+        Assert.Equal(first.EntityId, reply.EntityId);
+        Assert.Equal(1L, await CountAll(fixture, "SELECT count(*) FROM shop.bot_activity_events WHERE action_code='support_reply'"));
+        Assert.Equal(0L, await CountAll(fixture, "SELECT count(*) FROM shop.bot_activity_events WHERE event_type='quantity'"));
+        Assert.Equal(2L, await CountAll(fixture, "SELECT count(*) FROM shop.support_messages"));
+        await Unchanged(fixture);
+    }
+
+    [Fact]
     public async Task HumanSupportOperatesWithoutAiAndMovesNoMoney()
     {
         await using var fixture = await SecretFixture();

@@ -37,7 +37,7 @@ public static class BotActivityQualification
             var definition = BotActivityRegistry.Get(action);
             var context = new BotActivityContext(definition.ProductRequired ? f.Product : null, action == BotActivityAction.CheckoutOpen || definition.OrderRequired ? own.Order : null,
                 definition.TicketRequired ? ticket : null, definition.QuantityRequired ? 2 : null, 2, 1000 + (int)action);
-            var source = action is BotActivityAction.QuantityEnter or BotActivityAction.SupportReply ? BotActivitySource.Flow : action == BotActivityAction.PolicyCheck ? BotActivitySource.System : action is BotActivityAction.Start or BotActivityAction.CatalogOpen or BotActivityAction.SupportOpen or BotActivityAction.DiscountsOpen ? BotActivitySource.Command : BotActivitySource.Callback;
+            var source = action is BotActivityAction.QuantityEnter or BotActivityAction.QuantityRejected or BotActivityAction.SupportReply ? BotActivitySource.Flow : action == BotActivityAction.PolicyCheck ? BotActivitySource.System : action is BotActivityAction.Start or BotActivityAction.CatalogOpen or BotActivityAction.SupportOpen or BotActivityAction.DiscountsOpen ? BotActivitySource.Command : BotActivitySource.Callback;
             await Insert(f, 0, definition, source, context, ct);
         }
         for (int i = 0; i < 100; i++) await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.Start), BotActivitySource.Command, new(TelegramUpdate: 1000), ct);
@@ -61,14 +61,15 @@ public static class BotActivityQualification
     }
     private static async Task Insert(CheckoutFixture f, int user, BotActivityDefinition definition, BotActivitySource source, BotActivityContext context, CancellationToken ct)
     {
-        BotActivityRegistry.Validate(definition.Action, source, BotActivityOutcome.Accepted, context);
+        var outcome = definition.Action == BotActivityAction.QuantityRejected ? BotActivityOutcome.Rejected : BotActivityOutcome.Accepted;
+        BotActivityRegistry.Validate(definition.Action, source, outcome, context);
         await using var session = await f.Sessions.BeginAsync(ct);
         await session.ExecuteAsync(new DbStatement("""
             INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,order_id,support_ticket_id,quantity_selected,flow_revision,telegram_update_id,outcome_code,idempotency_key)
             VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(user_id,idempotency_key) DO NOTHING
             """, DbValue.Uuid(f.Users[user]), DbValue.Text(definition.EventType), DbValue.Text(BotActivityRegistry.Source(source)), DbValue.Text(definition.Code), Id(context.Product), Id(context.Order), Id(context.Ticket),
             context.Quantity is int quantity ? DbValue.Integer(quantity) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Integer), context.FlowRevision is long revision ? DbValue.Bigint(revision) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint),
-            context.TelegramUpdate is long update ? DbValue.Bigint(update) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint), DbValue.Text(BotActivityRegistry.Outcome(BotActivityOutcome.Accepted)), DbValue.Text(BotActivityRegistry.TelegramIdentity(context.TelegramUpdate!.Value))), ct);
+            context.TelegramUpdate is long update ? DbValue.Bigint(update) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint), DbValue.Text(BotActivityRegistry.Outcome(outcome)), DbValue.Text(BotActivityRegistry.TelegramIdentity(context.TelegramUpdate!.Value))), ct);
         await session.CommitAsync(ct);
     }
     private static DbValue Id(Guid? value) => value is Guid id ? DbValue.Uuid(id) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid);
