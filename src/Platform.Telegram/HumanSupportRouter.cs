@@ -41,7 +41,9 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
         if (!command && member.Flow.State != CustomerFlowState.Support) throw new TelegramIngressRejectedException();
         Guid? order = command ? (update.Value == "/support" ? null : Guid.ParseExact(update.Value[9..], "D")) : member.Flow.OrderId;
         var (ticketId, created) = await SupportStore.OpenTicketAsync(session, update.Context, update.ActorId, order, ct);
+        BrandUser previous = member;
         if (command) member = await BrandUserStore.TransitionAsync(session, update.Context, update.ActorId, member.Id, member.Flow.Revision, CustomerFlowState.Support, orderId: order, ct: ct);
+        if (command) await BotActivityWriter.FlowLeftAsync(session, update.Context, update.ActorId, previous, member, ct);
         Guid messageId = Guid.NewGuid();
         byte[] plain = Encoding.UTF8.GetBytes(update.Value);
         try

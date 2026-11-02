@@ -6,6 +6,14 @@ namespace Platform.IntegrationTests;
 public sealed class WorkflowActivityTests
 {
     [Fact]
+    public async Task ActualUiAbandonmentPreservesFinancialStateAndReplay() => await WorkflowActivityQualification.AbandonmentAsync(Ct);
+    [Fact]
+    public async Task TargetImportPreservesOriginalIdentityClockCutoffAndConflictingReplay() => await TargetActivityImportQualification.RunAsync(Ct);
+    [Fact]
+    public async Task TargetImportFailureRestartsAtomicallyWithoutPartialHistory() => await TargetActivityImportQualification.AtomicAsync(Ct);
+    [Fact]
+    public async Task TargetImportRejectsUnboundedUnprovenFutureAndWrongDestinationRows() => await TargetActivityImportQualification.BoundsAsync(Ct);
+    [Fact]
     public async Task PaymentHistoryExpiryPreservesIndependentReplayAndEveryDomainTable() => await PaymentActivityQualification.RetentionAsync(Ct);
     [Fact]
     public async Task PaymentAndTopupEventsFollowRealThreeBrandTransitionsAndReplay() => await PaymentActivityQualification.TopupAsync(Ct);

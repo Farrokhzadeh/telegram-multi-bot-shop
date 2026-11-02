@@ -24,11 +24,15 @@ public sealed class CustomerFlowExpiryStore(DbSessionFactory sessions)
             WHERE id=$1 AND flow_revision=$2 AND flow_expires_at=$3
             """, DbValue.Uuid(memberId), DbValue.Bigint(expectedRevision), DbValue.Utc(original.At)), ct);
         if (changed != 1) { session.RejectApplication(); throw new InvalidOperationException("Flow expiry changed concurrently."); }
-        byte[] identity = new byte[24]; memberId.TryWriteBytes(identity.AsSpan(0, 16)); BinaryPrimitives.WriteInt64BigEndian(identity.AsSpan(16), expectedRevision);
         await BotActivityWriter.RecordAsync(session, context, original.Actor, memberId, BotActivityAction.FlowExpired, BotActivitySource.System, BotActivityOutcome.Cancelled,
-            new(original.Product, original.Order, FlowRevision: original.Revision), new Guid(SHA256.HashData(identity).AsSpan(0, 16)), original.At, ct);
+            new(original.Product, original.Order, FlowRevision: original.Revision), Identity(memberId, expectedRevision), original.At, ct);
         await session.CommitAsync(ct);
         return true;
+    }
+    internal static Guid Identity(Guid member, long revision)
+    {
+        byte[] identity = new byte[24]; member.TryWriteBytes(identity.AsSpan(0, 16)); BinaryPrimitives.WriteInt64BigEndian(identity.AsSpan(16), revision);
+        return new Guid(SHA256.HashData(identity).AsSpan(0, 16));
     }
     private sealed record Original(long Actor, long Revision, DateTime At, Guid? Product, Guid? Order);
 }

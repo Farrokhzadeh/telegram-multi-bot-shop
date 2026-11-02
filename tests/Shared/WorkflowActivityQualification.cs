@@ -7,6 +7,20 @@ namespace Platform.Testing;
 
 public static class WorkflowActivityQualification
 {
+    public static async Task AbandonmentAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: ct);
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        { await BrandUserStore.TransitionAsync(seed, f.Context(0), CheckoutFixture.Actor(0), f.Users[0], 0, CustomerFlowState.Quantity, productId: f.Product, anchorMessageId: 77, expiresAt: DateTime.UtcNow.AddHours(1), ct: ct); await seed.CommitAsync(ct); }
+        byte[] secret = System.Security.Cryptography.SHA256.HashData("public abandonment qualification"u8);
+        using var verifier = new TelegramWebhookVerifier(f.Context(0), secret);
+        var update = verifier.Verify([TelegramFixture.Header(secret)], TelegramFixture.Body("/menu", updateId: 100));
+        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException());
+        Require((await router.RouteAsync(update, ct)).Code == UpdateRouteCode.Menu, "actual navigation abandons previous quantity UI");
+        for (int i = 0; i < 100; i++) Require((await router.RouteAsync(update, ct)).Code == UpdateRouteCode.Duplicate, "abandonment replay cannot transition twice");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='flow_abandoned' AND flow_revision=1 AND outcome_code='cancelled'", ct) == 1, "one original-revision UI abandonment without domain cancellation");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.orders", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.support_tickets", ct) == 0, "leaving UI does not cancel or mutate domain obligations");
+    }
     public static async Task CheckoutErrorsAsync(CancellationToken ct = default)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: ct);
@@ -16,6 +30,7 @@ public static class WorkflowActivityQualification
         bool shortage = false;
         try { await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(OrderIds.New(), f.Product, 3), Member, ct); } catch (PricingRejectedException) { shortage = true; }
         Require(shortage && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_rejected' AND outcome_code='rejected' AND source_kind='flow' AND order_id IS NULL AND quantity_selected IN (1,3)", ct) == 2, "significant checkout failures record only a finite scoped observation without a fictional order or raw error");
+        Require((await f.Store.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request(), ct)).Outcome == CheckoutOutcome.InsufficientBalance && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_rejected'", ct) == 3, "direct local-core rejection uses the same typed writer");
         Require(await f.CountAsync("SELECT count(*) FROM shop.orders", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.payments", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", ct) == 2, "rejection activity creates no financial or stock effects");
     }
     public static async Task FundingRollbackAsync(CancellationToken ct = default)

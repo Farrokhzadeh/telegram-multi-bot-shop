@@ -15,7 +15,7 @@ public sealed class BotActivityRetentionStore(DbSessionFactory sessions)
                     WHEN 'checkout_funded' THEN o.payment_status IN ('paid','not_required') AND o.payment_confirmed_at=e.occurred_at
                     WHEN 'checkout_expired' THEN o.resolution_kind='unpaid_expiry' AND o.resolution_at=e.occurred_at
                     WHEN 'checkout_replaced' THEN o.resolution_kind='replaced' AND o.resolution_at=e.occurred_at ELSE false END))
-        OR COALESCE(e.action_code='flow_expired' AND e.flow_revision IS NOT NULL AND u.flow_revision>e.flow_revision,false)
+        OR COALESCE(e.action_code IN ('flow_expired','flow_abandoned') AND e.flow_revision IS NOT NULL AND u.flow_revision>e.flow_revision,false)
         OR (e.action_code IN ('quantity_enter','checkout_rejected') AND e.source_kind='flow'
             AND e.outcome_code=CASE WHEN e.action_code='quantity_enter' THEN 'accepted' ELSE 'rejected' END AND e.product_id IS NOT NULL
             AND e.quantity_selected IS NOT NULL AND e.order_id IS NULL AND e.support_ticket_id IS NULL AND e.flow_revision IS NULL

@@ -90,6 +90,7 @@ public sealed class UpdateRouter
             callback?.Action == 'o' ? DbValue.Uuid(callback.Target) : DbValue.Null(NpgsqlDbType.Uuid), DbValue.Bigint(member.Flow.Revision), DbValue.Bigint(update.UpdateId), DbValue.Text(key)), ct);
         if (recorded == 0)
         { await session.CommitAsync(ct); return new(UpdateRouteCode.Duplicate, member.Flow.Revision); }
+        BrandUser previous = member;
         Guid? entity = null;
         if (callback is null)
         {
@@ -119,6 +120,7 @@ public sealed class UpdateRouter
                 _ => callback.Target
             };
         }
+        await BotActivityWriter.FlowLeftAsync(session, update.Context, update.ActorId, previous, member, ct);
         await session.CommitAsync(ct);
         return new(action.Code, member.Flow.Revision, entity);
     }

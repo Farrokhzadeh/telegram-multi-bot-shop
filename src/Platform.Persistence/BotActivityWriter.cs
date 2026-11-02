@@ -43,5 +43,26 @@ internal static class BotActivityWriter
         }
         return inserted != 0;
     }
+    internal static async Task FlowLeftAsync(DbSession session, BrandContext context, long actor, BrandUser before, BrandUser after, CancellationToken ct)
+    {
+        if (before.Flow.State is CustomerFlowState.Idle or CustomerFlowState.Catalog ||
+            (before.Flow.State == after.Flow.State && before.Flow.ProductId == after.Flow.ProductId && before.Flow.OrderId == after.Flow.OrderId)) return;
+        DateTime now = await session.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
+        bool expired = before.Flow.ExpiresAt is DateTime at && at < now;
+        await RecordAsync(session, context, actor, before.Id, expired ? BotActivityAction.FlowExpired : BotActivityAction.FlowAbandoned, BotActivitySource.System, BotActivityOutcome.Cancelled,
+            new(before.Flow.ProductId, before.Flow.OrderId, FlowRevision: before.Flow.Revision), CustomerFlowExpiryStore.Identity(before.Id, before.Flow.Revision), expired ? before.Flow.ExpiresAt!.Value : now, ct);
+    }
+    internal static async Task CheckoutRejectedAsync(DbSession session, BrandContext context, long actor, Guid product, int quantity, CancellationToken ct)
+    {
+        await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(actor)), r => r.GetInt64(0), ct);
+        BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
+        if (member.Blocked || member.Banned) return;
+        var origin = await session.QuerySingleAsync(new DbStatement("""
+            SELECT EXISTS(SELECT 1 FROM shop.brand_products l JOIN shop.products p ON p.id=l.product_id
+                WHERE l.brand_id=$1 AND l.product_id=$2 AND l.visible AND p.active),clock_timestamp()
+            """, DbValue.Uuid(context.BrandId), DbValue.Uuid(product)), r => (Allowed: r.GetBoolean(0), Now: r.GetUtc(1)), ct);
+        if (origin.Allowed) await BotActivityWriter.RecordAsync(session, context, actor, member.Id, BotActivityAction.CheckoutRejected, BotActivitySource.Flow, BotActivityOutcome.Rejected,
+            new(product, Quantity: quantity), Guid.NewGuid(), origin.Now, ct);
+    }
     private static DbValue Id(Guid? value) => value is Guid id ? DbValue.Uuid(id) : DbValue.Null(NpgsqlDbType.Uuid);
 }

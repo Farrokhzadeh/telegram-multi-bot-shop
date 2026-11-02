@@ -718,7 +718,7 @@ id uuid PRIMARY KEY,
     user_id uuid NOT NULL,
     event_type text NOT NULL CHECK (event_type IN ('navigation','quantity','checkout','support','subscription','discount','policy','flow','payment')),
     source_kind text NOT NULL CHECK (source_kind IN ('command','callback','flow','system')),
-    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check','checkout_created','flow_expired','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected','topup_created','payment_awaiting','payment_observed','payment_review','payment_denied','payment_evidence_ready','payment_settled')),
+    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check','checkout_created','flow_expired','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected','topup_created','payment_awaiting','payment_observed','payment_review','payment_denied','payment_evidence_ready','payment_settled','flow_abandoned')),
     product_id uuid,
     order_id uuid,
     support_ticket_id uuid,
@@ -736,13 +736,13 @@ id uuid PRIMARY KEY,
            (event_type='subscription' AND action_code IN ('subscribe','unsubscribe')) OR
            (event_type='discount' AND action_code='discounts_open') OR
            (event_type='policy' AND action_code='policy_check') OR
-           (event_type='flow' AND action_code='flow_expired') OR
+           (event_type='flow' AND action_code IN ('flow_expired','flow_abandoned')) OR
            (event_type='payment' AND action_code IN ('topup_created','payment_awaiting','payment_observed','payment_review','payment_denied','payment_evidence_ready','payment_settled'))),
     CHECK (action_code NOT IN ('product_open','quantity_enter','checkout_open','checkout_created','subscribe','unsubscribe','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected') OR product_id IS NOT NULL),
     CHECK (action_code NOT IN ('quantity_enter','checkout_created','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected') OR quantity_selected IS NOT NULL),
     CHECK (action_code <> 'support_reply' OR support_ticket_id IS NOT NULL),
     CHECK (action_code NOT IN ('checkout_created','checkout_funded','checkout_expired','checkout_replaced') OR order_id IS NOT NULL),
-    CHECK (action_code NOT IN ('flow_expired','quantity_rejected') OR flow_revision IS NOT NULL),
+    CHECK (action_code NOT IN ('flow_expired','flow_abandoned','quantity_rejected') OR flow_revision IS NOT NULL),
     CHECK (action_code <> 'quantity_rejected' OR (source_kind='flow' AND outcome_code='rejected' AND quantity_selected IS NULL)),
     CHECK (action_code <> 'checkout_rejected' OR (source_kind='flow' AND outcome_code='rejected' AND order_id IS NULL AND support_ticket_id IS NULL AND flow_revision IS NULL AND telegram_update_id IS NULL)),
     CHECK (action_code NOT IN ('checkout_funded','checkout_expired','checkout_replaced') OR (source_kind='system' AND

@@ -22,7 +22,13 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
 
     public async Task<CheckoutResult> AcceptLocalAsync(DbSession session, BrandContext context, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct = default)
     {
-        try { return await AcceptCoreAsync(session, context, verifiedActorId, request, ct); }
+        try
+        {
+            CheckoutResult result = await AcceptCoreAsync(session, context, verifiedActorId, request, ct);
+            if (result.Outcome is not (CheckoutOutcome.Purchased or CheckoutOutcome.Replayed))
+                await BotActivityWriter.CheckoutRejectedAsync(session, context, verifiedActorId, request.ProductId, request.Quantity, ct);
+            return result;
+        }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
