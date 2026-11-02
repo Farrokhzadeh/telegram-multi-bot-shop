@@ -11,6 +11,7 @@ namespace Platform.Testing;
 
 public sealed record AcceptanceReport(int Version, string Scope, bool ReleaseReady, int Tables, int LastUnitBuyers, int SuccessfulLastUnitPurchases,
     int SettlementAttempts, int TopupPostings, int CompletedOrders, int ReleasedUnits, int SupplierSubmits, int SupplierLookups, bool RestartFencesVerified);
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(AcceptanceReport))]
 public sealed partial class AcceptanceJson : JsonSerializerContext;
 public static class AcceptanceQualification
