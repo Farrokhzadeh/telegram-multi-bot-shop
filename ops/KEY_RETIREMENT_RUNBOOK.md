@@ -1,0 +1,17 @@
+# Old-key dependency and retirement runbook
+
+Scope: implemented protected-manifest validation and a synthetic eligibility assessment, without key disclosure or deletion. Current authorization excludes real key/source reads, protected backup inventory, production/staging mutation and deployment. Real dependency closure and retirement require a separate owner decision; no key may be deleted by a task or test result.
+
+## Protected inventory
+
+Produce one immutable, content-pinned KeyDependencyPlan per original key handle. OldKeyReference and CompleteInventoryEvidence are protected handles, never key bytes or passwords. The latter points to the independently attested complete inventory of encrypted source databases, row fields, snapshots, exports, media/provider-response archives, replicas and retained backups across every source/brand that may depend on this key. An empty dependency list is acceptable only after explicit complete-inventory attestation that nothing still depends on that handle. Unknown scope is incomplete, not zero dependencies.
+
+Each BackupKeyDependency records a protected artifact reference, immutable SHA-256, UTC retention horizon or an explicitly unbounded horizon, restore verification, rollback/history dependence and record-wise re-encryption verification. Include live/frozen source data as artifacts where relevant, not just backup files. A retained old snapshot that needs the old key remains a dependency even if all current target rows use new keys. Store this manifest in protected immutable storage outside the business DB and Git; pin its digest through a trusted operator/evidence channel before parsing. Source-generated strict JSON rejects unknown/duplicate fields, null required values, missing constructor fields and digest mismatch. Never publish actual key material, secret paths, customer rows or private encrypted archives in ordinary CI/reporting.
+
+## Assessment and separate decision
+
+KeyRetirementGate accepts only bounded protected references, exact artifact digests and UTC instants. It blocks incomplete inventory, rollback or historical dependence, missing re-encryption/restore proof, unbounded retention and every dependency whose retain-until time has not passed. Cutoff equality is retained. A candidate becomes eligible for separate review only after all listed retention horizons have strictly elapsed and all other evidence checks pass.
+
+An eligible assessment is not deletion authority: mayDelete is always false, and no deletion API is implemented. Independently verify the inventory's authenticity/completeness, immutable artifact bytes, scope, protected restore evidence, backups/rollback owners and all still-running source writers before requesting the explicit owner decision. The retired-key plan must preserve any still-required source snapshot/image/key combination. If an unexpected dependency appears, block retirement and retain the original key; do not replace missing evidence with an assumed date or silently coerce a dependency to new ciphertext.
+
+After a separately authorized retirement operation, retain protected evidence of the decision and the actual approved scope without recording key values. This repository neither performs nor qualifies that operation. The implemented tests use generated keys and public synthetic manifests; actual backup durability, real restore, source/key coverage and owner signoff remain operational gates.

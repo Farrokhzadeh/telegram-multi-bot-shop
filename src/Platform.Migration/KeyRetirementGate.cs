@@ -45,7 +45,7 @@ public static class KeyRetirementGate
     }
     private static void Validate(KeyDependencyPlan plan)
     {
-        if (plan.Id == Guid.Empty || plan.Dependencies.Length > 100000 || plan.Dependencies.Select(d => d.ArtifactReference).Distinct(StringComparer.Ordinal).Count() != plan.Dependencies.Length) throw new MigrationRejectedException();
+        if (plan.Id == Guid.Empty || plan.Dependencies is null || plan.Dependencies.Any(d => d is null) || plan.Dependencies.Length > 100000 || plan.Dependencies.Select(d => d.ArtifactReference).Distinct(StringComparer.Ordinal).Count() != plan.Dependencies.Length) throw new MigrationRejectedException();
         Reference(plan.OldKeyReference); Reference(plan.CompleteInventoryEvidence);
         foreach (var d in plan.Dependencies)
         { Reference(d.ArtifactReference); if (d.Sha256.Length != 64 || !d.Sha256.All(char.IsAsciiHexDigit) || d.RetainUntilUtc is DateTime date && (date.Kind != DateTimeKind.Utc || date == DateTime.MinValue || date == DateTime.MaxValue)) throw new MigrationRejectedException(); }

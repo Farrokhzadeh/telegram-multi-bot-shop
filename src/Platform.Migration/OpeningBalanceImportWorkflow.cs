@@ -31,9 +31,9 @@ public sealed record LegacyWalletSnapshot(string LegacyUser, Guid TargetUser, Gu
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(LegacyUser) || LegacyUser.Length > 256 || TargetUser == Guid.Empty || TargetOpening == Guid.Empty || TelegramId <= 0 || Language is not ("en" or "fa") ||
-            FirstSeen.Kind != DateTimeKind.Utc || LastSeen.Kind != DateTimeKind.Utc || FirstSeen == DateTime.MinValue || LastSeen == DateTime.MaxValue || LastSeen < FirstSeen || BalanceUsd < 0 || OtherBalance != 0 || Currency != "USD" || History.Count > 10000 ||
+            FirstSeen.Kind != DateTimeKind.Utc || LastSeen.Kind != DateTimeKind.Utc || FirstSeen == DateTime.MinValue || LastSeen == DateTime.MaxValue || LastSeen < FirstSeen || FirstSeen.Ticks % 10 != 0 || LastSeen.Ticks % 10 != 0 || BalanceUsd < 0 || OtherBalance != 0 || Currency != "USD" || History.Count > 10000 ||
             History.Select(h => h.LegacyId).Distinct(StringComparer.Ordinal).Count() != History.Count || History.Select(h => h.TargetEntry).Distinct().Count() != History.Count ||
-            History.Any(h => string.IsNullOrWhiteSpace(h.LegacyId) || h.TargetEntry == Guid.Empty || h.TargetEntry == TargetOpening || h.SignedAmount == 0 || h.Currency != "USD" || h.OccurredAt.Kind != DateTimeKind.Utc || h.OccurredAt == DateTime.MinValue || h.OccurredAt == DateTime.MaxValue || h.BalanceAfter < 0)) throw new MigrationRejectedException();
+            History.Any(h => string.IsNullOrWhiteSpace(h.LegacyId) || h.TargetEntry == Guid.Empty || h.TargetEntry == TargetOpening || h.SignedAmount == 0 || h.Currency != "USD" || h.OccurredAt.Kind != DateTimeKind.Utc || h.OccurredAt == DateTime.MinValue || h.OccurredAt == DateTime.MaxValue || h.OccurredAt.Ticks % 10 != 0 || h.BalanceAfter < 0)) throw new MigrationRejectedException();
     }
     private static byte[] Hash(Action<BinaryWriter> write)
     { using var stream = new MemoryStream(); using (var writer = new BinaryWriter(stream, Encoding.UTF8, true)) { writer.Write("legacy-wallet-projection-v1"); write(writer); } return SHA256.HashData(stream.ToArray()); }
