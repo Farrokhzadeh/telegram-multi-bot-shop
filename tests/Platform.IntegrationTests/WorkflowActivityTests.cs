@@ -6,6 +6,8 @@ namespace Platform.IntegrationTests;
 public sealed class WorkflowActivityTests
 {
     [Fact]
+    public async Task ActualTargetBackupRestorePreservesReplayMoneyAndOriginalRetentionClock() => await TargetRestoreQualification.RunAsync(Ct);
+    [Fact]
     public async Task VerifiedNumericIngressPreservesBrandScopeReplayAndSupportBoundary() => await WorkflowActivityQualification.QuantityAsync(Ct);
     [Fact]
     public async Task InvalidQuantityRecordsOnlyFiniteTypedRejection() => await WorkflowActivityQualification.QuantityErrorsAsync(Ct);

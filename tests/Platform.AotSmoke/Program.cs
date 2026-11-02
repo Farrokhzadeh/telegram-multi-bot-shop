@@ -510,6 +510,7 @@ await WorkflowActivityQualification.CheckoutAsync();
 await WorkflowActivityQualification.QuantityAsync();
 await WorkflowActivityQualification.QuantityErrorsAsync();
 await WorkflowActivityQualification.QuantityRollbackAsync();
+await TargetRestoreQualification.RunAsync();
 await WorkflowActivityQualification.AtomicAsync();
 await WorkflowActivityQualification.FlowAsync();
 await WorkflowActivityQualification.RetentionAsync();

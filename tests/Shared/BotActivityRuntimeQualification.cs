@@ -65,12 +65,14 @@ public static class BotActivityRuntimeQualification
         string before = await Domain(f, ct);
         await using (var setup = f.Database.Data.CreateCommand("CREATE FUNCTION shop.synthetic_cleanup_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='synthetic commit failure'; END $$; CREATE CONSTRAINT TRIGGER synthetic_cleanup_failure AFTER DELETE ON shop.bot_activity_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION shop.synthetic_cleanup_failure()")) await setup.ExecuteNonQueryAsync(ct);
         bool failed = false;
-        try { await new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct); }
+        var maintenance = new BotActivityRetentionStore(f.Sessions);
+        try { await maintenance.CleanAsync(1, ct); }
         catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { failed = true; }
-        Require(failed && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 6, "failed cleanup rolls back");
+        Require(failed && maintenance.Metrics == new BotActivityMaintenanceMetrics(0, 1, 0) && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 6, "failed cleanup rolls back and reports only aggregate error counts");
         await using (var setup = f.Database.Data.CreateCommand("DROP TRIGGER synthetic_cleanup_failure ON shop.bot_activity_events; DROP FUNCTION shop.synthetic_cleanup_failure()")) await setup.ExecuteNonQueryAsync(ct);
-        var first = await new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct);
+        var first = await maintenance.CleanAsync(1, ct);
         Require(first.Deleted == 1 && first.Backlog.Expired == 4 && first.Backlog.Blocked == 2, "bounded restart and blocked backlog");
+        Require(maintenance.Metrics == new BotActivityMaintenanceMetrics(1, 1, 1), "retry exposes aggregate success failure and deleted counts without event bodies");
         var remaining = await Task.WhenAll(new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct), new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct));
         Require(remaining.Sum(r => r.Deleted) == 2, "concurrent cleaners partition rows");
         var final = await new BotActivityRetentionStore(f.Sessions).CleanAsync(500, ct);

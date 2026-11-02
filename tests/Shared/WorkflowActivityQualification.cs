@@ -150,7 +150,7 @@ public static class WorkflowActivityQualification
             original = await seed.QuerySingleAsync(new DbStatement("SELECT flow_expires_at FROM shop.users WHERE id=$1", DbValue.Uuid(f.Users[0])), r => r.GetUtc(0), ct);
             await seed.CommitAsync(ct);
         }
-        string before = await Domain(f, false, ct);
+        string before = await DomainAsync(f.Sessions, false, ct);
         var store = new CustomerFlowExpiryStore(f.Sessions);
         Require(!await store.ExpireAsync(f.Context(1), f.Users[3], 1, ct) && !await store.ExpireAsync(f.Context(0), f.Users[0], 0, ct) && !await store.ExpireAsync(f.Context(1), f.Users[1], 1, ct), "wrong scope stale revision and future flow stay unchanged");
         var results = await Task.WhenAll(store.ExpireAsync(f.Context(0), f.Users[0], 1, ct), new CustomerFlowExpiryStore(f.Sessions).ExpireAsync(f.Context(0), f.Users[0], 1, ct));
@@ -162,7 +162,7 @@ public static class WorkflowActivityQualification
             var member = await BrandUserStore.RequireAsync(read, f.Context(0), CheckoutFixture.Actor(0), f.Users[0], ct);
             Require(member.Flow.State == CustomerFlowState.Idle && member.Flow.Revision == 2 && member.Flow.ProductId is null && member.Flow.ExpiresAt is null, "clear only expired UI context");
         }
-        Require(before == await Domain(f, false, ct), "no money order stock coupon support or other domain changes");
+        Require(before == await DomainAsync(f.Sessions, false, ct), "no money order stock coupon support or other domain changes");
         await using (var seed = await f.Sessions.BeginAsync(ct))
         { await seed.ExecuteAsync(new DbStatement("UPDATE shop.users SET flow_state='quantity',flow_product_id=$1,flow_revision=3,flow_expires_at=CURRENT_TIMESTAMP-INTERVAL '181 days' WHERE id=$2", DbValue.Uuid(f.Product), DbValue.Uuid(f.Users[0])), ct); await seed.CommitAsync(ct); }
         Require(await store.ExpireAsync(f.Context(0), f.Users[0], 3, ct) && !await store.ExpireAsync(f.Context(0), f.Users[0], 3, ct), "already-old UI flow can expire without replay");
@@ -188,18 +188,25 @@ public static class WorkflowActivityQualification
                 INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,flow_revision,outcome_code,idempotency_key,occurred_at)
                 VALUES(gen_random_uuid(),$1,'flow','system','flow_expired',4,'cancelled','public-original-flow-event',CURRENT_TIMESTAMP-INTERVAL '181 days'),
                     (gen_random_uuid(),$1,'flow','system','flow_expired',5,'cancelled','public-unproven-flow-event',CURRENT_TIMESTAMP-INTERVAL '181 days')
-                """, DbValue.Uuid(f.Users[0])), ct); await seed.CommitAsync(ct);
+                """, DbValue.Uuid(f.Users[0])), ct);
+            await seed.ExecuteAsync(new DbStatement("""
+                INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,quantity_selected,outcome_code,idempotency_key,occurred_at,flow_revision)
+                VALUES(gen_random_uuid(),$1,'quantity','flow','quantity_enter',$2,1,'accepted','workflow:quantity_enter:11111111111111111111111111111111',CURRENT_TIMESTAMP-INTERVAL '181 days',NULL),
+                    (gen_random_uuid(),$1,'quantity','flow','quantity_enter',$2,1,'accepted','workflow:quantity_enter:22222222222222222222222222222222',CURRENT_TIMESTAMP-INTERVAL '181 days',5),
+                    (gen_random_uuid(),$1,'quantity','flow','quantity_enter',$2,1,'accepted','workflow:quantity_enter:public-malformed-key',CURRENT_TIMESTAMP-INTERVAL '181 days',NULL)
+                """, DbValue.Uuid(f.Users[0]), DbValue.Uuid(f.Product)), ct);
+            await seed.CommitAsync(ct);
         }
-        string before = await Domain(f, true, ct);
+        string before = await DomainAsync(f.Sessions, true, ct);
         var result = await new BotActivityRetentionStore(f.Sessions).CleanAsync(10, ct);
-        Require(result.Deleted == 2 && result.Backlog.Expired == 1 && result.Backlog.Blocked == 1, "only independently covered domain-origin activity is eligible");
-        Require(before == await Domain(f, true, ct) && !await new CustomerFlowExpiryStore(f.Sessions).ExpireAsync(f.Context(0), f.Users[0], 4, ct), "purge and late timeout cannot change domain facts or revive old event");
+        Require(result.Deleted == 3 && result.Backlog.Expired == 3 && result.Backlog.Blocked == 3, "only independently covered domain activity and retired ephemeral observations are eligible; malformed or unproven contexts stay blocked");
+        Require(before == await DomainAsync(f.Sessions, true, ct) && !await new CustomerFlowExpiryStore(f.Sessions).ExpireAsync(f.Context(0), f.Users[0], 4, ct), "purge and late timeout cannot change domain facts or revive old event");
         Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE idempotency_key IN ('public-original-order-event','public-original-flow-event')", ct) == 0, "domain-origin rows remain deleted");
     }
     private static Task<ChannelMembership> Member(long channel, long actor, CancellationToken ct) => Task.FromResult(ChannelMembership.Member);
-    private static async Task<string> Domain(CheckoutFixture f, bool includeUsers, CancellationToken ct)
+    internal static async Task<string> DomainAsync(DbSessionFactory sessions, bool includeUsers, CancellationToken ct)
     {
-        await using var read = await f.Sessions.BeginAsync(ct);
+        await using var read = await sessions.BeginAsync(ct);
         var tables = await read.QueryManyAsync(new DbStatement("SELECT tablename::text FROM pg_tables WHERE schemaname='shop' AND tablename<>'bot_activity_events' AND ($1 OR tablename<>'users') ORDER BY tablename", DbValue.Boolean(includeUsers)), r => r.GetString(0), 28, ct);
         var hashes = new List<string>();
         foreach (string table in tables) hashes.Add(await read.QuerySingleAsync(new DbStatement($"SELECT md5(COALESCE(string_agg(t::text,'|' ORDER BY t::text),'')) FROM shop.{table} t"), r => r.GetString(0), ct));
