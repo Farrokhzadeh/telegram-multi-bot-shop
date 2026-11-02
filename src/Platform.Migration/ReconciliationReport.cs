@@ -9,6 +9,7 @@ public sealed record MigrationReconciliation(Guid Batch, long ExpectedMappings, 
 {
     public string Scope => "qualified_wallet_projection_only";
     public bool ReleaseReady => false;
+    public override string ToString() => "MigrationReconciliation [redacted]";
 }
 public sealed class ReconciliationReport(DbSessionFactory sessions)
 {

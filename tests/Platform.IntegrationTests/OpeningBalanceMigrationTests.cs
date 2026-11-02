@@ -70,7 +70,8 @@ public sealed class OpeningBalanceMigrationTests
         }
         await using (var rollback = await f.Sessions.BeginAsync(Ct))
         {
-            await LegacyMapStore.EnsureAsync(rollback, manifest, manifest.Proofs[0], Ct);
+            await LegacyMapStore.EnsureAsync(rollback, manifest, manifest.Proofs.Single(p => p.Projection == LegacyProjection.User), Ct);
+            await rollback.ExecuteAsync(new Platform.Persistence.DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES ($1,$2,$3,'en')", Platform.Persistence.DbValue.Uuid(row.TargetUser), Platform.Persistence.DbValue.Uuid(f.Brands[0]), Platform.Persistence.DbValue.Bigint(row.TelegramId)), Ct);
         }
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.users", Ct));

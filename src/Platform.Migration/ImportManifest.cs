@@ -83,7 +83,7 @@ public sealed class VerifiedImportManifest
             if (!rebuilt.AsSpan().SequenceEqual(canonicalBody)) throw new MigrationRejectedException();
             return new(reference, rebuilt, destination, source, brand, revision, schema, snapshot, snapshotDigest, batch, expectedOpeningUsd, proofs);
         }
-        catch (Exception e) when (e is EndOfStreamException or ArgumentException or InvalidOperationException or DecoderFallbackException or OverflowException) { throw new MigrationRejectedException(); }
+        catch (Exception e) when (e is IOException or ArgumentException or InvalidOperationException or OverflowException or FormatException) { throw new MigrationRejectedException(); }
     }
     private static void Protected(string value) { if (!value.StartsWith("protected:", StringComparison.Ordinal) || value.Length is < 11 or > 512 || value.Any(char.IsControl)) throw new MigrationRejectedException(); }
     private static void Text(BinaryWriter w, string value) { byte[] bytes = Encoding.UTF8.GetBytes(value); if (bytes.Length > 2048) throw new MigrationRejectedException(); w.Write(bytes.Length); w.Write(bytes); }
