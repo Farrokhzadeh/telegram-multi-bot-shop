@@ -25,6 +25,8 @@ public sealed class PaymentExpiryTests
     [Fact]
     public async Task PaymentStatusCannotOvertakeOrEraseTheAuthorizedCompleteCredentialManifest() => await PaymentMessageQualification.CredentialOwnershipAsync(Ct);
     [Fact]
+    public async Task UncertainOldStatusEditRequiresExplicitCredentialRecoveryToANewSafeMessage() => await PaymentMessageQualification.CredentialOwnershipAsync(Ct, uncertain: true);
+    [Fact]
     public async Task ReviewObligationCanCoexistWithOneIndependentPendingOrder()
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);

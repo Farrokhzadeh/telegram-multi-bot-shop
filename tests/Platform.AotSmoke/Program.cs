@@ -489,3 +489,6 @@ Console.WriteLine("PASS: native payment metadata lease recovery and stale-owner/
 
 await PaymentMessageQualification.CredentialOwnershipAsync();
 Console.WriteLine("PASS: native credential message ownership prevents late metadata overwrite and orders concurrent transport.");
+
+await PaymentMessageQualification.CredentialOwnershipAsync(uncertain: true);
+Console.WriteLine("PASS: native unknown metadata edit fences the original credential target until explicit new-message recovery.");

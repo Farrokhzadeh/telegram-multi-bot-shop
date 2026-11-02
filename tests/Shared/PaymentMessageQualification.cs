@@ -129,7 +129,7 @@ public static class PaymentMessageQualification
         }
         Require(recovered && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0, "restart preserves metadata and money");
     }
-    public static async Task CredentialOwnershipAsync(CancellationToken ct = default)
+    public static async Task CredentialOwnershipAsync(CancellationToken ct = default, bool uncertain = false)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: ct);
         var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct); var order = await payments.OrderAsync(ct: ct);
@@ -141,12 +141,23 @@ public static class PaymentMessageQualification
         Require((await messages.ReadForSendAsync(f.Context(0), metadata, ct))?.TargetMessageId == 901, "metadata owns original saved target");
         var deliveryStore = new DeliveryStore(f.Sessions, f.Secrets);
         Require(await deliveryStore.PrepareAsync(f.Context(0), await CredentialClaim(f, JobKind.PrepareManifest, ct), ct) is not null, "complete manifest prepared");
+        if (uncertain)
+        {
+            await messages.RecordAsync(f.Context(0), metadata, new(PaymentMessageOutcomeKind.Unknown), ct); await DueAsync(f, ct);
+            var unknown = await Claim(messages, ct);
+            Require(await messages.BeginAsync(f.Context(0), unknown, TimeSpan.FromMilliseconds(100), ct) && await messages.ReadForSendAsync(f.Context(0), unknown, ct) is null, "uncertain metadata remains fenced after manifest ownership");
+        }
         var credential = await CredentialClaim(f, JobKind.SendTelegram, ct); int calls = 0;
         await new LocalDeliveryWorker(deliveryStore).RunAsync(f.Context(0), credential, (_, _) => { calls++; return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 901)); }, ct);
-        Require(calls == 0, "credential edit waits for active metadata transport");
-        await messages.RecordAsync(f.Context(0), metadata, new(PaymentMessageOutcomeKind.Sent, 901), ct); await DueAsync(f, ct);
-        var current = await CredentialClaim(f, JobKind.SendTelegram, ct);
-        await new LocalDeliveryWorker(deliveryStore).RunAsync(f.Context(0), current, (dispatch, _) => { Require(dispatch.TargetMessageId == 901 && dispatch.Content.Length > 0, "same protected complete manifest target"); calls++; return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 901)); }, ct);
+        Require(calls == 0, "credential edit waits for active or uncertain metadata transport");
+        if (uncertain)
+        {
+            Require(await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials' AND status='failed' AND last_error_code='credential_recovery'", ct) == 1, "unknown old edit cannot risk the credential target");
+            await deliveryStore.AuthorizeSendRecoveryAsync(f.Context(0), await f.AdminAsync(ct), order.Order, Guid.NewGuid(), ct);
+        }
+        else await messages.RecordAsync(f.Context(0), metadata, new(PaymentMessageOutcomeKind.Sent, 901), ct);
+        await DueAsync(f, ct); var current = await CredentialClaim(f, JobKind.SendTelegram, ct);
+        await new LocalDeliveryWorker(deliveryStore).RunAsync(f.Context(0), current, (dispatch, _) => { Require(dispatch.TargetMessageId == (uncertain ? null : (long?)901) && dispatch.Content.Length > 0, "same protected complete manifest with safe target"); calls++; return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, uncertain ? 902 : 901)); }, ct);
         Require(calls == 1 && await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'", ct) == 1, "credential result completed after metadata");
         await using (var enqueue = await f.Sessions.BeginAsync(ct))
         {
