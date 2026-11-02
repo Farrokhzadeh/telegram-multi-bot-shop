@@ -9,6 +9,7 @@ public enum DbSessionState { Active, Aborted, Committed, RolledBack, OutcomeUnkn
 public sealed record DbSessionOptions
 {
     public IsolationLevel Isolation { get; init; } = IsolationLevel.ReadCommitted;
+    public bool ReadOnly { get; init; }
     public TimeSpan StatementTimeout { get; init; } = TimeSpan.FromSeconds(30);
     public TimeSpan LockTimeout { get; init; } = TimeSpan.FromSeconds(5);
     public TimeSpan RollbackTimeout { get; init; } = TimeSpan.FromSeconds(5);
@@ -54,6 +55,11 @@ public sealed class DbSessionFactory
         {
             connection = await data.OpenConnectionAsync(cancellationToken);
             var transaction = await connection.BeginTransactionAsync(options.Isolation, cancellationToken);
+            if (options.ReadOnly)
+            {
+                await using var control = new NpgsqlCommand("SET TRANSACTION READ ONLY", connection, transaction);
+                await control.ExecuteNonQueryAsync(cancellationToken);
+            }
             session = new DbSession(connection, transaction, options);
             await session.ExecuteAsync(new DbStatement(
                 "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true),set_config('TimeZone','UTC',true)",
