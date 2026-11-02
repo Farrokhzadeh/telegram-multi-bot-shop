@@ -55,7 +55,8 @@ public sealed class AiOptionalIntegration
     { lock (state) { state.Failures = Math.Min(threshold, state.Failures + 1); if (state.Failures >= threshold) state.OpenUntil = clock.GetUtcNow() + circuitDuration; } }
     private static async Task ReleaseAsync(Task<AiAdvice> task, CancellationTokenSource cancellation, State state)
     {
-        try { await task; } catch (Exception) { }
+        try { await task; }
+        catch (Exception) { }
         finally { cancellation.Dispose(); lock (state) state.Busy = false; }
     }
     private static AiOptionalResult Human(AiFallback reason) => new(AiDisposition.HumanSupport, null, reason);
