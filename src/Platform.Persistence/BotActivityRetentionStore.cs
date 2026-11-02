@@ -8,7 +8,7 @@ public sealed class BotActivityRetentionStore(DbSessionFactory sessions)
     private long batches, failed, deleted;
     public BotActivityMaintenanceMetrics Metrics => new(Interlocked.Read(ref batches), Interlocked.Read(ref failed), Interlocked.Read(ref deleted));
     private const string Covered = """
-        (COALESCE(shop.telegram_update_seen(b.telegram_update_highwater,b.telegram_update_window,e.telegram_update_id),false)
+        (shop.activity_payment_origin(e) OR COALESCE(shop.telegram_update_seen(b.telegram_update_highwater,b.telegram_update_window,e.telegram_update_id),false)
         OR (e.action_code IN ('checkout_created','checkout_funded','checkout_expired','checkout_replaced') AND EXISTS(
             SELECT 1 FROM shop.orders o WHERE o.id=e.order_id AND o.user_id=e.user_id AND o.product_id=e.product_id AND o.quantity=e.quantity_selected
                 AND CASE e.action_code WHEN 'checkout_created' THEN o.created_at=e.occurred_at

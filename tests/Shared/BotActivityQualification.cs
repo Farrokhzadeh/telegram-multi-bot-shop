@@ -32,7 +32,7 @@ public static class BotActivityQualification
             Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM pg_indexes WHERE schemaname='shop' AND tablename='bot_activity_events' AND (indexname IN ('activity_retention','activity_member_time') OR indexdef LIKE '%UNIQUE%user_id, idempotency_key%')"), r => r.GetInt64(0), ct) == 3, "retention timeline and membership replay indexes");
         }
         string before = await Domain(f, ct);
-        var interactionActions = Enum.GetValues<BotActivityAction>().Where(a => a is not (BotActivityAction.CheckoutFunded or BotActivityAction.CheckoutExpired or BotActivityAction.CheckoutReplaced or BotActivityAction.CheckoutRejected)).ToArray();
+        var interactionActions = Enum.GetValues<BotActivityAction>().Where(a => a < BotActivityAction.TopupCreated && a is not (BotActivityAction.CheckoutFunded or BotActivityAction.CheckoutExpired or BotActivityAction.CheckoutReplaced or BotActivityAction.CheckoutRejected)).ToArray();
         foreach (var action in interactionActions)
         {
             var definition = BotActivityRegistry.Get(action);

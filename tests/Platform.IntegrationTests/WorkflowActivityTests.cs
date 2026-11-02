@@ -6,6 +6,14 @@ namespace Platform.IntegrationTests;
 public sealed class WorkflowActivityTests
 {
     [Fact]
+    public async Task PaymentHistoryExpiryPreservesIndependentReplayAndEveryDomainTable() => await PaymentActivityQualification.RetentionAsync(Ct);
+    [Fact]
+    public async Task PaymentAndTopupEventsFollowRealThreeBrandTransitionsAndReplay() => await PaymentActivityQualification.TopupAsync(Ct);
+    [Fact]
+    public async Task ReviewAndAuditedDenialRemainDistinctFromSettlement() => await PaymentActivityQualification.ReviewAndBankAsync(Ct);
+    [Fact]
+    public async Task PaymentActivityFailureRollsBackTopupCreditAndSettlement() => await PaymentActivityQualification.RollbackAsync(Ct);
+    [Fact]
     public async Task SignificantCheckoutFailuresHaveFiniteScopedPrivateDataFreeActivity() => await WorkflowActivityQualification.CheckoutErrorsAsync(Ct);
     [Fact]
     public async Task FundingEventCommitFailureRollsBackSettlementAndAllocationTogether() => await WorkflowActivityQualification.FundingRollbackAsync(Ct);

@@ -716,9 +716,9 @@ id uuid PRIMARY KEY,
 CREATE TABLE bot_activity_events (
 id uuid PRIMARY KEY,
     user_id uuid NOT NULL,
-    event_type text NOT NULL CHECK (event_type IN ('navigation','quantity','checkout','support','subscription','discount','policy','flow')),
+    event_type text NOT NULL CHECK (event_type IN ('navigation','quantity','checkout','support','subscription','discount','policy','flow','payment')),
     source_kind text NOT NULL CHECK (source_kind IN ('command','callback','flow','system')),
-    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check','checkout_created','flow_expired','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected')),
+    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check','checkout_created','flow_expired','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected','topup_created','payment_awaiting','payment_observed','payment_review','payment_denied','payment_evidence_ready','payment_settled')),
     product_id uuid,
     order_id uuid,
     support_ticket_id uuid,
@@ -736,7 +736,8 @@ id uuid PRIMARY KEY,
            (event_type='subscription' AND action_code IN ('subscribe','unsubscribe')) OR
            (event_type='discount' AND action_code='discounts_open') OR
            (event_type='policy' AND action_code='policy_check') OR
-           (event_type='flow' AND action_code='flow_expired')),
+           (event_type='flow' AND action_code='flow_expired') OR
+           (event_type='payment' AND action_code IN ('topup_created','payment_awaiting','payment_observed','payment_review','payment_denied','payment_evidence_ready','payment_settled'))),
     CHECK (action_code NOT IN ('product_open','quantity_enter','checkout_open','checkout_created','subscribe','unsubscribe','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected') OR product_id IS NOT NULL),
     CHECK (action_code NOT IN ('quantity_enter','checkout_created','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected') OR quantity_selected IS NOT NULL),
     CHECK (action_code <> 'support_reply' OR support_ticket_id IS NOT NULL),
@@ -746,6 +747,8 @@ id uuid PRIMARY KEY,
     CHECK (action_code <> 'checkout_rejected' OR (source_kind='flow' AND outcome_code='rejected' AND order_id IS NULL AND support_ticket_id IS NULL AND flow_revision IS NULL AND telegram_update_id IS NULL)),
     CHECK (action_code NOT IN ('checkout_funded','checkout_expired','checkout_replaced') OR (source_kind='system' AND
         outcome_code=CASE WHEN action_code='checkout_funded' THEN 'accepted' ELSE 'cancelled' END)),
+    CHECK (event_type<>'payment' OR (source_kind='system' AND support_ticket_id IS NULL AND flow_revision IS NULL AND telegram_update_id IS NULL
+        AND outcome_code=CASE action_code WHEN 'payment_denied' THEN 'rejected' WHEN 'payment_review' THEN 'blocked' ELSE 'accepted' END)),
     CHECK (isfinite(occurred_at))
 );
 
@@ -1528,6 +1531,58 @@ BEGIN
 END $$;
 CREATE TRIGGER claim_guard BEFORE INSERT OR UPDATE ON discount_uses FOR EACH ROW EXECUTE FUNCTION guard_discount_uses();
 
+CREATE FUNCTION activity_payment_origin(e bot_activity_events) RETURNS boolean
+LANGUAGE sql STABLE SET search_path=shop,pg_catalog AS $$
+    SELECT EXISTS(SELECT 1 FROM payments p LEFT JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=coalesce(p.topup_user_id,o.user_id)
+        WHERE u.id=e.user_id AND e.event_type='payment' AND e.source_kind='system' AND e.support_ticket_id IS NULL AND e.flow_revision IS NULL AND e.telegram_update_id IS NULL
+            AND ROW(e.product_id,e.order_id,e.quantity_selected) IS NOT DISTINCT FROM ROW(o.product_id,o.id,o.quantity)
+            AND CASE e.action_code WHEN 'payment_denied' THEN EXISTS(SELECT 1 FROM audit_events a WHERE a.entity_kind='payment' AND a.entity_id=p.id
+                AND a.brand_id=u.brand_id AND a.actor_kind='admin' AND a.action='update' AND a.created_at=e.occurred_at
+                AND e.idempotency_key='workflow:payment_denied:'||replace(a.id::text,'-',''))
+            ELSE e.idempotency_key='workflow:'||e.action_code||':'||replace(p.id::text,'-','') AND
+                CASE e.action_code WHEN 'topup_created' THEN p.topup_user_id IS NOT NULL AND p.created_at=e.occurred_at
+                    WHEN 'payment_awaiting' THEN p.provider_payment_ref IS NOT NULL
+                    WHEN 'payment_observed' THEN p.first_payment_observed_at=e.occurred_at
+                    WHEN 'payment_evidence_ready' THEN p.confirmed_at=e.occurred_at
+                    WHEN 'payment_review' THEN p.status='review'
+                    WHEN 'payment_settled' THEN p.status='settled' AND p.confirmed_at=e.occurred_at ELSE false END END)
+$$;
+
+CREATE FUNCTION record_payment_activity() RETURNS trigger
+LANGUAGE plpgsql SET search_path=shop,pg_catalog AS $$
+DECLARE member_id uuid; product_id uuid; quantity_no integer; action_name text; original_at timestamptz; identity_id uuid; outcome_name text; event_row bot_activity_events;
+BEGIN
+    SELECT coalesce(NEW.topup_user_id,o.user_id),o.product_id,o.quantity INTO member_id,product_id,quantity_no FROM (SELECT 1) seed LEFT JOIN orders o ON o.id=NEW.order_id;
+    IF member_id IS NULL THEN RETURN NEW; END IF;
+    FOR action_name IN SELECT unnest(ARRAY['topup_created','payment_awaiting','payment_observed','payment_evidence_ready','payment_review','payment_denied','payment_settled']) LOOP
+        original_at:=NULL; identity_id:=NEW.id; outcome_name:='accepted';
+        IF action_name='topup_created' AND TG_OP='INSERT' AND NEW.topup_user_id IS NOT NULL THEN original_at:=NEW.created_at;
+        ELSIF TG_OP='UPDATE' THEN
+            IF action_name='payment_awaiting' AND OLD.provider_payment_ref IS NULL AND NEW.provider_payment_ref IS NOT NULL THEN original_at:=clock_timestamp();
+            ELSIF action_name='payment_observed' AND OLD.first_payment_observed_at IS NULL AND NEW.first_payment_observed_at IS NOT NULL THEN original_at:=NEW.first_payment_observed_at;
+            ELSIF action_name='payment_evidence_ready' AND OLD.confirmed_at IS NULL AND NEW.confirmed_at IS NOT NULL THEN original_at:=NEW.confirmed_at;
+            ELSIF action_name='payment_review' AND OLD.status<>'review' AND NEW.status='review' THEN original_at:=clock_timestamp(); outcome_name:='blocked';
+            ELSIF action_name='payment_denied' AND OLD.status<>'rejected' AND NEW.status='rejected' THEN
+                SELECT a.id,a.created_at INTO identity_id,original_at FROM audit_events a WHERE a.entity_kind='payment' AND a.entity_id=NEW.id AND a.actor_kind='admin'
+                    AND a.actor_admin_id=NEW.review_admin_id AND a.action='update' AND a.created_at=CURRENT_TIMESTAMP ORDER BY a.id LIMIT 1;
+                outcome_name:='rejected';
+            ELSIF action_name='payment_settled' AND OLD.status<>'settled' AND NEW.status='settled' THEN original_at:=NEW.confirmed_at;
+            END IF;
+        END IF;
+        IF original_at IS NULL OR original_at>clock_timestamp() OR original_at<CURRENT_TIMESTAMP-INTERVAL '4320 hours' THEN CONTINUE; END IF;
+        event_row:=ROW(gen_random_uuid(),member_id,'payment','system',action_name,product_id,NEW.order_id,NULL,quantity_no,NULL,NULL,outcome_name,
+            'workflow:'||action_name||':'||replace(identity_id::text,'-',''),original_at)::bot_activity_events;
+        INSERT INTO bot_activity_events SELECT (event_row).* ON CONFLICT(user_id,idempotency_key) DO NOTHING;
+        IF NOT FOUND THEN
+            PERFORM require_true(EXISTS(SELECT 1 FROM bot_activity_events e WHERE e.user_id=member_id AND e.idempotency_key=event_row.idempotency_key
+                AND ROW(e.event_type,e.source_kind,e.action_code,e.product_id,e.order_id,e.support_ticket_id,e.quantity_selected,e.flow_revision,e.telegram_update_id,e.outcome_code,e.occurred_at)
+                IS NOT DISTINCT FROM ROW(event_row.event_type,event_row.source_kind,event_row.action_code,event_row.product_id,event_row.order_id,event_row.support_ticket_id,event_row.quantity_selected,event_row.flow_revision,event_row.telegram_update_id,event_row.outcome_code,event_row.occurred_at)),'activity_identity_conflict');
+        END IF;
+    END LOOP;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER payment_activity AFTER INSERT OR UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION record_payment_activity();
+
 CREATE FUNCTION guard_subscription_activity() RETURNS trigger
 LANGUAGE plpgsql SET search_path=shop,pg_catalog AS $$
 BEGIN
@@ -1543,6 +1598,7 @@ BEGIN
         PERFORM require_true(EXISTS(SELECT 1 FROM brand_products WHERE brand_id=member_brand(NEW.user_id) AND product_id=NEW.product_id),'context_listing');
     END IF;
     IF TG_TABLE_NAME='bot_activity_events' THEN
+        IF NEW.event_type='payment' THEN PERFORM require_true(activity_payment_origin(NEW),'activity_actual_payment_transition'); END IF;
         IF NEW.order_id IS NOT NULL THEN PERFORM require_true(EXISTS(SELECT 1 FROM orders WHERE id=NEW.order_id AND user_id=NEW.user_id),'activity_order_member'); END IF;
         IF NEW.support_ticket_id IS NOT NULL THEN PERFORM require_true(EXISTS(SELECT 1 FROM support_tickets WHERE id=NEW.support_ticket_id AND user_id=NEW.user_id),'activity_ticket_member'); END IF;
         IF NEW.action_code IN ('checkout_funded','checkout_expired','checkout_replaced') THEN

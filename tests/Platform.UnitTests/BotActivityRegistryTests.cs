@@ -5,10 +5,10 @@ namespace Platform.UnitTests;
 public sealed class BotActivityRegistryTests
 {
     [Fact]
-    public void VersionFourPreservesOriginalActionsAndAddsTypedCheckoutTransitions()
+    public void VersionFivePreservesOriginalActionsAndAddsTypedPaymentTransitions()
     {
-        Assert.Equal(4, BotActivityRegistry.Version);
-        var actions = Enum.GetValues<BotActivityAction>(); Assert.Equal(18, actions.Length);
+        Assert.Equal(5, BotActivityRegistry.Version);
+        var actions = Enum.GetValues<BotActivityAction>(); Assert.Equal(25, actions.Length);
         Assert.Equal("policy_check", BotActivityRegistry.Get((BotActivityAction)10).Code);
         Assert.Equal(11, (int)BotActivityAction.CheckoutCreated);
         Assert.Equal(12, (int)BotActivityAction.FlowExpired);

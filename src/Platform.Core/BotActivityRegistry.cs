@@ -2,14 +2,14 @@ using System.Globalization;
 
 namespace Platform.Core;
 
-public enum BotActivityAction { Start, CatalogOpen, ProductOpen, QuantityEnter, CheckoutOpen, SupportOpen, SupportReply, Subscribe, Unsubscribe, DiscountsOpen, PolicyCheck, CheckoutCreated, FlowExpired, QuantityRejected, CheckoutFunded, CheckoutExpired, CheckoutReplaced, CheckoutRejected }
+public enum BotActivityAction { Start, CatalogOpen, ProductOpen, QuantityEnter, CheckoutOpen, SupportOpen, SupportReply, Subscribe, Unsubscribe, DiscountsOpen, PolicyCheck, CheckoutCreated, FlowExpired, QuantityRejected, CheckoutFunded, CheckoutExpired, CheckoutReplaced, CheckoutRejected, TopupCreated, PaymentAwaiting, PaymentObserved, PaymentReview, PaymentDenied, PaymentEvidenceReady, PaymentSettled }
 public enum BotActivitySource { Command, Callback, Flow, System }
 public enum BotActivityOutcome { Accepted, Rejected, Unavailable, Blocked, Cancelled, Duplicate }
 public readonly record struct BotActivityDefinition(BotActivityAction Action, string EventType, string Code, bool ProductRequired = false, bool QuantityRequired = false, bool TicketRequired = false, bool OrderRequired = false, bool RevisionRequired = false);
 public readonly record struct BotActivityContext(Guid? Product = null, Guid? Order = null, Guid? Ticket = null, int? Quantity = null, long? FlowRevision = null, long? TelegramUpdate = null);
 public static class BotActivityRegistry
 {
-    public const int Version = 4;
+    public const int Version = 5;
     public static BotActivityDefinition Get(BotActivityAction action) => action switch
     {
         BotActivityAction.Start => new(action, "navigation", "start"),
@@ -30,6 +30,13 @@ public static class BotActivityRegistry
         BotActivityAction.CheckoutExpired => new(action, "checkout", "checkout_expired", true, true, OrderRequired: true),
         BotActivityAction.CheckoutReplaced => new(action, "checkout", "checkout_replaced", true, true, OrderRequired: true),
         BotActivityAction.CheckoutRejected => new(action, "checkout", "checkout_rejected", true, true),
+        BotActivityAction.TopupCreated => new(action, "payment", "topup_created"),
+        BotActivityAction.PaymentAwaiting => new(action, "payment", "payment_awaiting"),
+        BotActivityAction.PaymentObserved => new(action, "payment", "payment_observed"),
+        BotActivityAction.PaymentReview => new(action, "payment", "payment_review"),
+        BotActivityAction.PaymentDenied => new(action, "payment", "payment_denied"),
+        BotActivityAction.PaymentEvidenceReady => new(action, "payment", "payment_evidence_ready"),
+        BotActivityAction.PaymentSettled => new(action, "payment", "payment_settled"),
         _ => throw new ArgumentException("Unknown activity action.")
     };
     public static BotActivityDefinition FromCode(string code) => Enum.GetValues<BotActivityAction>().Select(Get).FirstOrDefault(d => d.Code == code) is var value && value.Code is not null ? value : throw new ArgumentException("Unknown activity action.");
@@ -59,6 +66,8 @@ public static class BotActivityRegistry
         if (action is BotActivityAction.CheckoutFunded or BotActivityAction.CheckoutExpired or BotActivityAction.CheckoutReplaced &&
             (source != BotActivitySource.System || context.Ticket is not null || context.FlowRevision is not null || context.TelegramUpdate is not null ||
                 outcome != (action == BotActivityAction.CheckoutFunded ? BotActivityOutcome.Accepted : BotActivityOutcome.Cancelled))) throw new ArgumentException("Invalid checkout transition.");
+        if (action >= BotActivityAction.TopupCreated && (source != BotActivitySource.System || context.Ticket is not null || context.FlowRevision is not null || context.TelegramUpdate is not null ||
+            outcome != (action == BotActivityAction.PaymentDenied ? BotActivityOutcome.Rejected : action == BotActivityAction.PaymentReview ? BotActivityOutcome.Blocked : BotActivityOutcome.Accepted))) throw new ArgumentException("Invalid payment transition.");
         if (context.Product == Guid.Empty || context.Order == Guid.Empty || context.Ticket == Guid.Empty || context.Quantity < 1 || context.FlowRevision < 0 || context.TelegramUpdate < 0 ||
             (definition.ProductRequired && context.Product is null) || (definition.QuantityRequired && context.Quantity is null) || (definition.TicketRequired && context.Ticket is null) || (definition.OrderRequired && context.Order is null) || (definition.RevisionRequired && context.FlowRevision is null)) throw new ArgumentException("Invalid typed activity context.");
     }
