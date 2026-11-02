@@ -63,19 +63,12 @@ public static class BotActivityRuntimeQualification
             await seed.CommitAsync(ct);
         }
         string before = await Domain(f, ct);
-        await using (var setup = await f.Sessions.BeginAsync(ct))
-        {
-            await setup.ExecuteAsync(new DbStatement("""
-                CREATE FUNCTION shop.synthetic_cleanup_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='synthetic commit failure'; END $$;
-                CREATE CONSTRAINT TRIGGER synthetic_cleanup_failure AFTER DELETE ON shop.bot_activity_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION shop.synthetic_cleanup_failure()
-                """), ct); await setup.CommitAsync(ct);
-        }
+        await using (var setup = f.Database.Data.CreateCommand("CREATE FUNCTION shop.synthetic_cleanup_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='synthetic commit failure'; END $$; CREATE CONSTRAINT TRIGGER synthetic_cleanup_failure AFTER DELETE ON shop.bot_activity_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION shop.synthetic_cleanup_failure()")) await setup.ExecuteNonQueryAsync(ct);
         bool failed = false;
         try { await new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct); }
         catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { failed = true; }
         Require(failed && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 6, "failed cleanup rolls back");
-        await using (var setup = await f.Sessions.BeginAsync(ct))
-        { await setup.ExecuteAsync(new DbStatement("DROP TRIGGER synthetic_cleanup_failure ON shop.bot_activity_events; DROP FUNCTION shop.synthetic_cleanup_failure()"), ct); await setup.CommitAsync(ct); }
+        await using (var setup = f.Database.Data.CreateCommand("DROP TRIGGER synthetic_cleanup_failure ON shop.bot_activity_events; DROP FUNCTION shop.synthetic_cleanup_failure()")) await setup.ExecuteNonQueryAsync(ct);
         var first = await new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct);
         Require(first.Deleted == 1 && first.Backlog.Expired == 4 && first.Backlog.Blocked == 2, "bounded restart and blocked backlog");
         var remaining = await Task.WhenAll(new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct), new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct));
@@ -114,7 +107,7 @@ public static class BotActivityRuntimeQualification
         Require(second.Items.Length == 2 && third.Items.Length == 1 && third.Next is null && first.Items.Concat(second.Items).Concat(third.Items).Select(e => e.Id).Distinct().Count() == 5 && first.AsOf == third.AsOf, "stable tuple pages hide expired and future rows");
         Require((await store.ReadAsync(actor, filter with { Brand = f.Brands[1] }, ct: ct)).Items.Length == 0, "foreign brand filter cannot expose member");
         bool tampered = false, rebound = false;
-        try { await store.ReadAsync(actor, filter, "A" + first.Next![1..], 2, ct); } catch (ArgumentException) { tampered = true; }
+        try { await store.ReadAsync(actor, filter, first.Next![..100] + (first.Next[100] == 'A' ? 'B' : 'A') + first.Next[101..], 2, ct); } catch (ArgumentException) { tampered = true; }
         try { await store.ReadAsync(actor, filter with { Member = f.Users[3] }, first.Next, 2, ct); } catch (ArgumentException) { rebound = true; }
         Require(tampered && rebound, "cursor signature and scope binding");
         var builder = WebApplication.CreateSlimBuilder(); builder.WebHost.UseUrls("http://127.0.0.1:0");
