@@ -39,7 +39,7 @@ public static class BotActivityRegistry
     public static void Validate(BotActivityAction action, BotActivitySource source, BotActivityOutcome outcome, BotActivityContext context)
     {
         var definition = Get(action); _ = Source(source); _ = Outcome(outcome);
-        if (context.Product == Guid.Empty || context.Order == Guid.Empty || context.Ticket == Guid.Empty || context.Quantity is < 1 or > 10000 || context.FlowRevision < 0 || context.TelegramUpdate < 0 ||
+        if (context.Product == Guid.Empty || context.Order == Guid.Empty || context.Ticket == Guid.Empty || context.Quantity < 1 || context.FlowRevision < 0 || context.TelegramUpdate < 0 ||
             (definition.ProductRequired && context.Product is null) || (definition.QuantityRequired && context.Quantity is null) || (definition.TicketRequired && context.Ticket is null)) throw new ArgumentException("Invalid typed activity context.");
     }
     public static string TelegramIdentity(long update)

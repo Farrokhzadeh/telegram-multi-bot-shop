@@ -928,6 +928,7 @@ CREATE UNIQUE INDEX delivery_staff_case_once ON telegram_deliveries (supplier_re
 CREATE UNIQUE INDEX support_external_message_once ON support_messages (ticket_id,telegram_message_id) WHERE telegram_message_id IS NOT NULL;
 CREATE UNIQUE INDEX discount_prepaid_source_once ON discounts (source_order_id) WHERE kind='prepaid_entitlement';
 CREATE INDEX activity_retention ON bot_activity_events (occurred_at,id);
+CREATE INDEX activity_member_time ON bot_activity_events (user_id,occurred_at DESC,id DESC);
 CREATE UNIQUE INDEX source_without_variant ON product_supplier_sources (product_id,provider_code,external_product_id) WHERE external_variant_id IS NULL;
 CREATE UNIQUE INDEX source_with_variant ON product_supplier_sources (product_id,provider_code,external_product_id,external_variant_id) WHERE external_variant_id IS NOT NULL;
 CREATE UNIQUE INDEX subscription_active_once ON product_stock_subscriptions (user_id,product_id) WHERE closed_at IS NULL;

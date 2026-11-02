@@ -28,7 +28,7 @@ public static class BotActivityQualification
         {
             Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events WHERE order_id=$1 AND product_id=$2 AND user_id=$3 AND action_code='checkout_open'", DbValue.Uuid(own.Order), DbValue.Uuid(f.Product), DbValue.Uuid(f.Users[0])), r => r.GetInt64(0), ct) == 1, "checked order/product event context");
             Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM information_schema.columns WHERE table_schema='shop' AND table_name='bot_activity_events'"), r => r.GetInt64(0), ct) == 14, "only canonical typed event fields");
-            Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM pg_indexes WHERE schemaname='shop' AND tablename='bot_activity_events' AND (indexname='activity_retention' OR indexdef LIKE '%UNIQUE%user_id, idempotency_key%')"), r => r.GetInt64(0), ct) == 2, "retention and membership replay indexes");
+            Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM pg_indexes WHERE schemaname='shop' AND tablename='bot_activity_events' AND (indexname IN ('activity_retention','activity_member_time') OR indexdef LIKE '%UNIQUE%user_id, idempotency_key%')"), r => r.GetInt64(0), ct) == 3, "retention timeline and membership replay indexes");
         }
         string before = await Domain(f, ct);
         foreach (var action in Enum.GetValues<BotActivityAction>())
@@ -36,7 +36,7 @@ public static class BotActivityQualification
             var definition = BotActivityRegistry.Get(action);
             var context = new BotActivityContext(definition.ProductRequired ? f.Product : null, action == BotActivityAction.CheckoutOpen ? own.Order : null,
                 definition.TicketRequired ? ticket : null, definition.QuantityRequired ? 2 : null, 2, 1000 + (int)action);
-            var source = action is BotActivityAction.QuantityEnter or BotActivityAction.SupportReply ? BotActivitySource.Flow : action == BotActivityAction.PolicyCheck ? BotActivitySource.System : BotActivitySource.Callback;
+            var source = action is BotActivityAction.QuantityEnter or BotActivityAction.SupportReply ? BotActivitySource.Flow : action == BotActivityAction.PolicyCheck ? BotActivitySource.System : action is BotActivityAction.Start or BotActivityAction.CatalogOpen or BotActivityAction.SupportOpen or BotActivityAction.DiscountsOpen ? BotActivitySource.Command : BotActivitySource.Callback;
             await Insert(f, 0, definition, source, context, ct);
         }
         for (int i = 0; i < 100; i++) await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.Start), BotActivitySource.Command, new(TelegramUpdate: 1000), ct);
