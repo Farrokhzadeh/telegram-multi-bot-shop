@@ -28,12 +28,20 @@ public static class BotActivityRegistry
     public static BotActivityDefinition FromCode(string code) => Enum.GetValues<BotActivityAction>().Select(Get).FirstOrDefault(d => d.Code == code) is var value && value.Code is not null ? value : throw new ArgumentException("Unknown activity action.");
     public static string Source(BotActivitySource source) => source switch
     {
-        BotActivitySource.Command => "command", BotActivitySource.Callback => "callback", BotActivitySource.Flow => "flow", BotActivitySource.System => "system",
+        BotActivitySource.Command => "command",
+        BotActivitySource.Callback => "callback",
+        BotActivitySource.Flow => "flow",
+        BotActivitySource.System => "system",
         _ => throw new ArgumentException("Unknown activity source.")
     };
     public static string Outcome(BotActivityOutcome outcome) => outcome switch
     {
-        BotActivityOutcome.Accepted => "accepted", BotActivityOutcome.Rejected => "rejected", BotActivityOutcome.Unavailable => "unavailable", BotActivityOutcome.Blocked => "blocked", BotActivityOutcome.Cancelled => "cancelled", BotActivityOutcome.Duplicate => "duplicate",
+        BotActivityOutcome.Accepted => "accepted",
+        BotActivityOutcome.Rejected => "rejected",
+        BotActivityOutcome.Unavailable => "unavailable",
+        BotActivityOutcome.Blocked => "blocked",
+        BotActivityOutcome.Cancelled => "cancelled",
+        BotActivityOutcome.Duplicate => "duplicate",
         _ => throw new ArgumentException("Unknown activity outcome.")
     };
     public static void Validate(BotActivityAction action, BotActivitySource source, BotActivityOutcome outcome, BotActivityContext context)
