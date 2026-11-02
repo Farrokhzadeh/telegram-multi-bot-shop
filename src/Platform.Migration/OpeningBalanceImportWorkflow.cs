@@ -48,36 +48,33 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
         if (manifest.TargetBrand != context.BrandId) throw new MigrationRejectedException();
         var proofs = row.Proofs(context.BrandId); foreach (var proof in proofs) manifest.Require(proof);
         await using var session = await sessions.BeginAsync(ct);
-        try
+        await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
+        bool brand = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND bot_id=$2)", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
+        if (!brand) throw new MigrationRejectedException();
+        bool newUser = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.User), ct);
+        if (newUser) await session.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language,first_seen_at,last_seen_at) VALUES ($1,$2,$3,$4,$5,$6)", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId), DbValue.Text(row.Language), DbValue.Utc(row.FirstSeen), DbValue.Utc(row.LastSeen)), ct);
+        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 AND telegram_id=$3 FOR UPDATE", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId)), r => r.GetGuid(0), ct);
+        bool first = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletSnapshot), ct);
+        if (first)
         {
-            await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
-            bool brand = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND bot_id=$2)", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
-            if (!brand) throw new MigrationRejectedException();
-            bool newUser = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.User), ct);
-            if (newUser) await session.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language,first_seen_at,last_seen_at) VALUES ($1,$2,$3,$4,$5,$6)", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId), DbValue.Text(row.Language), DbValue.Utc(row.FirstSeen), DbValue.Utc(row.LastSeen)), ct);
-            await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 AND telegram_id=$3 FOR UPDATE", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId)), r => r.GetGuid(0), ct);
-            bool first = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletSnapshot), ct);
-            if (first)
+            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1)", DbValue.Uuid(row.TargetUser)), ct);
+            if (row.BalanceUsd > 0)
             {
-                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1)", DbValue.Uuid(row.TargetUser)), ct);
-                if (row.BalanceUsd > 0)
-                {
-                    await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletOpening), ct);
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=1 WHERE user_id=$2", DbValue.Numeric(row.BalanceUsd), DbValue.Uuid(row.TargetUser)), ct);
-                    await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason) VALUES ($1,$2,$3,$3,1,'opening_balance',true,$4,$5,'Frozen authoritative USD opening; history is non-posting')",
-                        DbValue.Uuid(row.TargetOpening), DbValue.Uuid(row.TargetUser), DbValue.Numeric(row.BalanceUsd), DbValue.Text("opening:" + row.TargetOpening.ToString("D")), DbValue.Uuid(manifest.Batch)), ct);
-                }
-                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,correlation_id) VALUES ($1,'system',$2,'legacy_import','wallet',$3,'Frozen manifest-bound USD opening; no financial history replay',$4)", DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(context.BrandId), DbValue.Uuid(row.TargetUser), DbValue.Uuid(manifest.Batch)), ct);
+                await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletOpening), ct);
+                await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=1 WHERE user_id=$2", DbValue.Numeric(row.BalanceUsd), DbValue.Uuid(row.TargetUser)), ct);
+                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason) VALUES ($1,$2,$3,$3,1,'opening_balance',true,$4,$5,'Frozen authoritative USD opening; history is non-posting')",
+                    DbValue.Uuid(row.TargetOpening), DbValue.Uuid(row.TargetUser), DbValue.Numeric(row.BalanceUsd), DbValue.Text("opening:" + row.TargetOpening.ToString("D")), DbValue.Uuid(manifest.Batch)), ct);
             }
-            foreach (var history in row.History)
-            {
-                var proof = proofs.Single(p => p.Projection == LegacyProjection.Transaction && p.LegacyId == history.LegacyId);
-                if (!await LegacyMapStore.EnsureAsync(session, manifest, proof, ct)) continue;
-                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason,created_at) VALUES ($1,$2,$3,$4,'legacy_history',false,$5,$6,'Non-posting source evidence; see protected frozen snapshot',$7)",
-                    DbValue.Uuid(history.TargetEntry), DbValue.Uuid(row.TargetUser), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlDbType.Numeric), DbValue.Text("history:" + history.TargetEntry.ToString("D")), DbValue.Uuid(manifest.Batch), DbValue.Utc(history.OccurredAt)), ct);
-            }
-            await session.CommitAsync(ct);
+            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,correlation_id) VALUES ($1,'system',$2,'legacy_import','wallet',$3,'Frozen manifest-bound USD opening; no financial history replay',$4)", DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(context.BrandId), DbValue.Uuid(row.TargetUser), DbValue.Uuid(manifest.Batch)), ct);
         }
-        catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
+        foreach (var history in row.History)
+        {
+            var proof = proofs.Single(p => p.Projection == LegacyProjection.Transaction && p.LegacyId == history.LegacyId);
+            if (!await LegacyMapStore.EnsureAsync(session, manifest, proof, ct)) continue;
+            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason,created_at) VALUES ($1,$2,$3,$4,'legacy_history',false,$5,$6,'Non-posting source evidence; see protected frozen snapshot',$7)",
+                DbValue.Uuid(history.TargetEntry), DbValue.Uuid(row.TargetUser), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlDbType.Numeric), DbValue.Text("history:" + history.TargetEntry.ToString("D")), DbValue.Uuid(manifest.Batch), DbValue.Utc(history.OccurredAt)), ct);
+        }
+        await session.CommitAsync(ct);
+
     }
 }
