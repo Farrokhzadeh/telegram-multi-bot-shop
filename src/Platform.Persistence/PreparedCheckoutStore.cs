@@ -61,15 +61,8 @@ public sealed partial class CheckoutStore
             """, DbValue.Uuid(prepared.Member)), row => (Balance: row.IsDBNull(0) ? new Money(0, Currency.Usd) : DbValue.ReadMoney(row, 0, Currency.Usd), Version: row.IsDBNull(1) ? 0 : row.GetInt64(1)), ct);
         if (!free && !unpaid && wallet.Balance.Amount < quote.TotalUsd.Amount) return new(CheckoutOutcome.InsufficientBalance);
         int local = unpaid || request.Kind == CheckoutKind.PrepaidUnits ? 0 : prepared.Supply.LocalUnits;
-        var stock = new List<Stock>(local);
-        while (stock.Count < local)
-        {
-            int batch = Math.Min(1000, local - stock.Count);
-            var rows = await session.QueryManyAsync(new DbStatement("SELECT id,credential_ciphertext,credential_key_id FROM shop.inventory_items WHERE product_id=$1 AND state='available' ORDER BY id LIMIT $2 OFFSET $3 FOR UPDATE",
-                DbValue.Uuid(request.ProductId), DbValue.Integer(batch), DbValue.Integer(stock.Count)), row => new Stock(row.GetGuid(0), row.GetBinary(1), row.GetString(2)), batch, ct);
-            if (rows.Count != batch) return new(CheckoutOutcome.OutOfStock);
-            stock.AddRange(rows);
-        }
+        var stock = await ReadStockAsync(session, request.ProductId, local, ct);
+        if (stock.Count != local) return new(CheckoutOutcome.OutOfStock);
         if (System.Diagnostics.Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30)) Reject(session);
         var pricing = new PricingStore(sessions, secrets);
         foreach (var old in pending)
@@ -128,6 +121,21 @@ public sealed partial class CheckoutStore
         return new(CheckoutOutcome.Purchased, request.OrderId);
     }
 
+    internal static async Task<List<Stock>> ReadStockAsync(DbSession session, Guid product, int wanted, CancellationToken ct)
+    {
+        var stock = new List<Stock>(wanted);
+        while (stock.Count < wanted)
+        {
+            int batch = Math.Min(1000, wanted - stock.Count);
+            var rows = await session.QueryManyAsync(new DbStatement("""
+                SELECT id,credential_ciphertext,credential_key_id FROM shop.inventory_items WHERE product_id=$1 AND state='available'
+                ORDER BY id LIMIT $2 OFFSET $3 FOR UPDATE
+                """, DbValue.Uuid(product), DbValue.Integer(batch), DbValue.Integer(stock.Count)), r => new Stock(r.GetGuid(0), r.GetBinary(1), r.GetString(2)), batch, ct);
+            stock.AddRange(rows);
+            if (rows.Count != batch) break;
+        }
+        return stock;
+    }
     internal async Task AcquireAsync(DbSession session, BrandContext context, Guid order, IReadOnlyList<Stock> stock, CancellationToken ct)
     {
         var inventory = new InventoryCipher(secrets);

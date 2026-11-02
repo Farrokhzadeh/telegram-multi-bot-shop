@@ -117,17 +117,7 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
                 AND fulfillment_status IN ('waiting_stock','requires_admin'))
             """, DbValue.Uuid(product), DbValue.Uuid(order)), r => r.GetBoolean(0), ct);
         int wanted = queued || (data.Fulfillment == "supplier" && !data.LocalFirst) ? 0 : data.Quantity;
-        var stock = new List<CheckoutStore.Stock>(wanted);
-        while (stock.Count < wanted)
-        {
-            int batch = Math.Min(1000, wanted - stock.Count);
-            var rows = await session.QueryManyAsync(new DbStatement("""
-                SELECT id,credential_ciphertext,credential_key_id FROM shop.inventory_items WHERE product_id=$1 AND state='available'
-                ORDER BY id LIMIT $2 OFFSET $3 FOR UPDATE
-                """, DbValue.Uuid(product), DbValue.Integer(batch), DbValue.Integer(stock.Count)), r => new CheckoutStore.Stock(r.GetGuid(0), r.GetBinary(1), r.GetString(2)), batch, ct);
-            stock.AddRange(rows);
-            if (rows.Count != batch) break;
-        }
+        var stock = await CheckoutStore.ReadStockAsync(session, product, wanted, ct);
         if (data.Fulfillment == "local" && stock.Count != data.Quantity)
         {
             if (data.Method == "crypto") return ExternalSettlementRoute.LocalShortageCredit;
