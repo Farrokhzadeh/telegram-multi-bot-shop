@@ -66,7 +66,7 @@ public sealed class OpeningBalanceMigrationTests
         var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [row]);
         await using (var denied = await f.Sessions.BeginAsync(Ct))
         {
-            await denied.ExecuteAsync(new Platform.Persistence.DbStatement("SET LOCAL ROLE pg_read_all_data"), Ct);
+            await denied.ExecuteAsync(new Platform.Persistence.DbStatement("SELECT set_config('role',$1,true)", Platform.Persistence.DbValue.Text("pg_read_all_data")), Ct);
             await Assert.ThrowsAsync<MigrationRejectedException>(() => LegacyMapStore.EnsureAsync(denied, manifest, manifest.Proofs[0], Ct));
         }
         await using (var rollback = await f.Sessions.BeginAsync(Ct))
