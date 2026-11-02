@@ -500,3 +500,8 @@ Console.WriteLine("PASS: native typed coupon revision history, serialized overri
 
 await BotActivityQualification.RunAsync();
 Console.WriteLine("PASS: native finite activity registry, same-member checked context, replay scope and domain isolation.");
+
+await BotActivityRuntimeQualification.ReplayAsync();
+await BotActivityRuntimeQualification.RetentionAsync();
+await BotActivityRuntimeQualification.TimelineAsync();
+Console.WriteLine("PASS: native independent Telegram replay checkpoint, bounded safe activity cleanup and authenticated scoped cursor timeline.");

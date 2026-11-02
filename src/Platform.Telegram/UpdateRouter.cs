@@ -39,6 +39,11 @@ public sealed class UpdateRouter
         if (observation is not null && observation.ProductId != callback!.Target) throw new TelegramIngressRejectedException();
         await using var session = await sessions.BeginAsync(ct);
         if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(UpdateRouteCode.Busy, 0);
+        if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct))
+        {
+            var prior = await BrandUserStore.FindAsync(session, update.Context, update.ActorId, ct);
+            return new(UpdateRouteCode.Duplicate, prior?.Flow.Revision ?? 0);
+        }
         if (!update.IsCallback && update.Value.StartsWith("/bind ", StringComparison.Ordinal))
         {
             string[] binding = update.Value.Split(' ');
@@ -78,7 +83,8 @@ public sealed class UpdateRouter
             """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(member.Id), DbValue.Text(definition.EventType), DbValue.Text(BotActivityRegistry.Source(update.IsCallback ? BotActivitySource.Callback : BotActivitySource.Command)),
             DbValue.Text(action.Action), activityProduct is Guid observedProduct ? DbValue.Uuid(observedProduct) : DbValue.Null(NpgsqlDbType.Uuid),
             callback?.Action == 'o' ? DbValue.Uuid(callback.Target) : DbValue.Null(NpgsqlDbType.Uuid), DbValue.Bigint(member.Flow.Revision), DbValue.Bigint(update.UpdateId), DbValue.Text(key)), ct);
-        if (recorded == 0) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
+        if (recorded == 0)
+        { await session.CommitAsync(ct); return new(UpdateRouteCode.Duplicate, member.Flow.Revision); }
         Guid? entity = null;
         if (callback is null)
         {

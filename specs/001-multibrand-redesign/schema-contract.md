@@ -23,6 +23,7 @@ This file selects concrete types, ownership, keys and cross-row guards for new t
 
 ### 1. brands
 UUID id PK. TEXT code unique, internal_name, public_name, market, default_language, logo_asset_ref nullable, bot_username; BIGINT bot_id unique. Bot token ciphertext/key ID. BOOLEAN active and allow_wallet/crypto/bank/wallet_topup/zero_balance_topup, require_channel_join, support_enabled, fx_enabled. UUID customer_support_admin_id nullable FK admins; require a configured active contact before enabling the public support surface. Encrypted current bank number/holder, keyed global card fingerprint and changed time nullable as a complete bank-enabled tuple. Current FX NUMERIC/source/fetched_at/error; pricing_rounding_step NUMERIC, max_exchange_rate_age_seconds BIGINT, policy_version BIGINT, created_at/updated_at.
+Trusted ingress replay metadata: telegram_update_highwater BIGINT default -1 and telegram_update_window BYTEA exactly 128 bytes (1024 seen-ID bits relative to the highwater). This bounded per-bot checkpoint is independent of analytics and restores with the brand. Highwater never decreases; retained seen bits cannot be cleared. IDs below the window fail closed, including unqualified provider sequence resets. No automatic reset, epoch inference or shadow event archive.
 Guards: Iranian active card fingerprints differ; version-check replacements. Public contact is a published handle, never backend login/roster. No per-brand supplier account or NOWPayments credential copy.
 
 ### 2. brand_channels

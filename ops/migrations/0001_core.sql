@@ -42,6 +42,8 @@ id uuid PRIMARY KEY,
     fx_error_code short_text,
     pricing_rounding_step finite_numeric NOT NULL DEFAULT 5000 CHECK (pricing_rounding_step > 0),
     max_exchange_rate_age_seconds bigint NOT NULL DEFAULT 3600 CHECK (max_exchange_rate_age_seconds > 0),
+    telegram_update_highwater bigint NOT NULL DEFAULT -1 CHECK (telegram_update_highwater >= -1),
+    telegram_update_window bytea NOT NULL DEFAULT decode(repeat('00',128),'hex') CHECK (octet_length(telegram_update_window)=128),
     policy_version bigint NOT NULL DEFAULT 0 CHECK (policy_version >= 0),
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -974,12 +976,27 @@ BEGIN
     RAISE EXCEPTION 'immutable history' USING ERRCODE='23514';
 END $$;
 
+CREATE FUNCTION telegram_update_seen(highwater bigint,seen bytea,update_id bigint) RETURNS boolean
+LANGUAGE sql IMMUTABLE STRICT SET search_path=shop,pg_catalog AS $$
+    SELECT CASE WHEN update_id<0 OR update_id>highwater THEN false WHEN highwater-update_id>=1024 THEN true
+        ELSE (get_byte(seen,((highwater-update_id)/8)::integer) & (1<<((highwater-update_id)%8)::integer))<>0 END
+$$;
+
 CREATE FUNCTION guard_brands() RETURNS trigger
 LANGUAGE plpgsql SET search_path=shop,pg_catalog AS $$
+DECLARE offset_no integer;
 BEGIN
+    PERFORM require_true((NEW.telegram_update_highwater=-1 AND NEW.telegram_update_window=decode(repeat('00',128),'hex')) OR
+        (NEW.telegram_update_highwater>=0 AND (get_byte(NEW.telegram_update_window,0)&1)=1),'telegram_checkpoint_shape');
     IF TG_OP='UPDATE' THEN
         PERFORM require_true(ROW(NEW.id,NEW.code,NEW.bot_id)=ROW(OLD.id,OLD.code,OLD.bot_id),'brand_identity_immutable');
         PERFORM require_true(NEW.policy_version >= OLD.policy_version,'brand_revision');
+        PERFORM require_true(NEW.telegram_update_highwater>=OLD.telegram_update_highwater,'telegram_checkpoint_monotonic');
+        FOR offset_no IN 0..1023 LOOP
+            IF OLD.telegram_update_highwater>=offset_no AND (get_byte(OLD.telegram_update_window,offset_no/8)&(1<<(offset_no%8)))<>0 THEN
+                PERFORM require_true(telegram_update_seen(NEW.telegram_update_highwater,NEW.telegram_update_window,OLD.telegram_update_highwater-offset_no),'telegram_checkpoint_replay');
+            END IF;
+        END LOOP;
         IF ROW(NEW.bank_number_ciphertext,NEW.bank_holder_ciphertext,NEW.bank_key_id,NEW.bank_card_fingerprint,NEW.bank_changed_at)
             IS DISTINCT FROM ROW(OLD.bank_number_ciphertext,OLD.bank_holder_ciphertext,OLD.bank_key_id,OLD.bank_card_fingerprint,OLD.bank_changed_at) THEN
             PERFORM require_true(NEW.policy_version=OLD.policy_version+1,'card_revision');

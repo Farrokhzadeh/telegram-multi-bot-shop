@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Platform.Api/BotActivityEndpoints.cs" Link="Api/BotActivityEndpoints.cs" />
+    <Compile Include="../Shared/BotActivityRuntimeQualification.cs" Link="Shared/BotActivityRuntimeQualification.cs" />
     <Compile Include="../Shared/BotActivityQualification.cs" Link="Shared/BotActivityQualification.cs" />
     <Compile Include="../Shared/CouponRevisionQualification.cs" Link="Shared/CouponRevisionQualification.cs" />
     <Compile Include="../Shared/PaymentMessageQualification.cs" Link="Shared/PaymentMessageQualification.cs" />
