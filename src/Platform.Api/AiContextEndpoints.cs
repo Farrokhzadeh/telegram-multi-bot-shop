@@ -19,12 +19,12 @@ public static class AiContextEndpoints
 {
     public static void MapAiContext(this IEndpointRouteBuilder endpoints, AiContextStore store)
     {
-        endpoints.MapGet("/v1/ai/context", async (HttpContext http) =>
+        endpoints.MapGet("/v1/ai/context", (Func<HttpContext, Task<IResult>>)(async (HttpContext http) =>
         {
             var scope = AiReadGuardMiddleware.Scope(http) ?? throw new UnauthorizedAccessException();
             var result = await store.ReadAsync(scope, http.RequestAborted);
             return result is null ? Failure(http, 404, "not_found") : Results.Json(result, AiContextJson.Default.AiShopContext);
-        }).AddEndpointFilter((context, next) => next(context)).WithMetadata(AiReadEndpointMetadata.Instance);
+        })).WithMetadata(AiReadEndpointMetadata.Instance);
     }
     internal static IResult Failure(HttpContext http, int status, string code) => Results.Json(new ApiFailure(code, DiagnosticsMiddleware.Correlation(http) ?? Guid.NewGuid()), DiagnosticsJsonContext.Default.ApiFailure, statusCode: status);
 }

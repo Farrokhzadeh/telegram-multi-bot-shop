@@ -10,7 +10,7 @@ public sealed class AiContextStore
     public AiContextStore(NpgsqlDataSource data) => reads = new(data, new DbSessionOptions { ReadOnly = true });
     public async Task<AiShopContext?> ReadAsync(AiReadScope scope, CancellationToken ct = default)
     {
-        if (scope.ExpiresAt <= DateTime.UtcNow) throw new UnauthorizedAccessException();
+        if (!scope.IsActive) throw new UnauthorizedAccessException();
         await using var session = await reads.BeginAsync(ct);
         var members = await session.QueryManyAsync(new DbStatement("""
             SELECT u.id,b.public_name,CASE WHEN split_part(lower(u.language),'-',1) IN ('en','fa') THEN split_part(lower(u.language),'-',1)
@@ -27,6 +27,7 @@ public sealed class AiContextStore
             var orders = await session.QueryManyAsync(new DbStatement("SELECT id,product_title_snapshot,payment_status,fulfillment_status FROM shop.orders WHERE id=$1 AND user_id=$2", DbValue.Uuid(id), DbValue.Uuid(member.Member)), r => new AiOrderContext(r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3)), 1, ct);
             if (orders.Count != 1) return null; order = orders[0];
         }
+        if (!scope.IsActive) throw new UnauthorizedAccessException();
         return new(1, scope.Brand.BrandId, member.Brand, member.Language, member.Support, member.Contact, order);
     }
 }
