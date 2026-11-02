@@ -65,7 +65,8 @@ public static class TargetRestoreQualification
             {
                 Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events WHERE idempotency_key=$1", DbValue.Text(observationKey)), r => r.GetInt64(0), ct) == 0, "fresh preparation cannot replay an imported original observation identity");
             }
-            Require(CryptographicOperations.FixedTimeEquals(digest, SHA256.HashData(await File.ReadAllBytesAsync(backup, ct))) && original == await AiBoundaryQualification.Snapshot(source, ct), "target cleanup cannot mutate the original database or backup artifact");
+            byte[] restoredDigest = SHA256.HashData(await File.ReadAllBytesAsync(backup, ct));
+            Require(CryptographicOperations.FixedTimeEquals(digest, restoredDigest) && original == await AiBoundaryQualification.Snapshot(source, ct), "target cleanup cannot mutate the original database or backup artifact");
         }
         finally { Directory.Delete(directory, true); }
     }
