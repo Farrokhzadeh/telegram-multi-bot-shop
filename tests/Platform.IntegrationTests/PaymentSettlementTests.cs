@@ -112,7 +112,8 @@ public sealed class PaymentSettlementTests
         Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='compensated'", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_status'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_status' AND dedupe_key LIKE 'instruction-created:%'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_status' AND dedupe_key LIKE 'payment-status:%'", Ct));
         Assert.NotEqual(Guid.Empty, coupon);
     }
 

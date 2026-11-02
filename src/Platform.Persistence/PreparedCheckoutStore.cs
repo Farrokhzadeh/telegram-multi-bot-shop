@@ -48,9 +48,8 @@ public sealed partial class CheckoutStore
         var product = await session.QuerySingleAsync(new DbStatement("SELECT fulfillment_kind,local_first,availability_policy FROM shop.products WHERE id=$1", DbValue.Uuid(request.ProductId)),
             row => (Kind: row.GetString(0), LocalFirst: row.GetBoolean(1), Preorder: row.GetString(2) == "local_preorder"), ct);
         var pending = await session.QueryManyAsync(new DbStatement("""
-            SELECT o.id,o.payment_status FROM shop.orders o WHERE o.user_id=$1 AND o.payment_status IN ('awaiting_payment','under_review','confirmation_pending') ORDER BY o.id FOR UPDATE
+            SELECT o.id,o.payment_status FROM shop.orders o WHERE o.user_id=$1 AND o.payment_status='awaiting_payment' ORDER BY o.id FOR UPDATE
             """, DbValue.Uuid(prepared.Member)), row => (Id: row.GetGuid(0), State: row.GetString(1)), 1000, ct);
-        if (pending.Any(p => p.State != "awaiting_payment")) return new(CheckoutOutcome.Unavailable);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT p.id FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id WHERE o.user_id=$1 AND o.payment_status='awaiting_payment' ORDER BY p.id FOR UPDATE OF p) locked", DbValue.Uuid(prepared.Member)), row => row.GetInt64(0), ct);
         bool evidence = await session.QuerySingleAsync(new DbStatement("""
             SELECT EXISTS(SELECT 1 FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id WHERE o.user_id=$1 AND o.payment_status='awaiting_payment'
@@ -79,6 +78,7 @@ public sealed partial class CheckoutStore
             Guid? held = await session.QuerySingleAsync(new DbStatement("SELECT discount_id FROM (SELECT 1) seed LEFT JOIN shop.discount_uses ON order_id=$1 AND status='held'", DbValue.Uuid(old.Id)), row => row.IsDBNull(0) ? (Guid?)null : row.GetGuid(0), ct);
             if (held is Guid discount) await pricing.TransitionClaimAsync(session, context, discount, old.Id, false, ct);
             await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='cancelled',completed_at=clock_timestamp() WHERE order_id=$1 AND job_kind='expire_order_payment' AND status IN ('pending','retry')", DbValue.Uuid(old.Id)), ct);
+            await PaymentInstructionStore.EnqueueAsync(session, context, old.Id, "replaced", ct);
         }
         await session.ExecuteAsync(new DbStatement("""
             INSERT INTO shop.audit_events(id,actor_kind,actor_user_id,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id)
@@ -112,6 +112,7 @@ public sealed partial class CheckoutStore
             await CreatePaymentAsync(session, context, request, quote, ct);
             DateTime due = await session.QuerySingleAsync(new DbStatement("SELECT payment_due_at FROM shop.orders WHERE id=$1", DbValue.Uuid(request.OrderId)), row => row.GetUtc(0), ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.ExpireOrderPayment, context.BrandId, request.OrderId), request.OrderId, due, ct);
+            await PaymentInstructionStore.EnqueueAsync(session, context, request.OrderId, "created", ct);
             return new(CheckoutOutcome.AwaitingPayment, request.OrderId);
         }
         if (request.Kind == CheckoutKind.PrepaidUnits)

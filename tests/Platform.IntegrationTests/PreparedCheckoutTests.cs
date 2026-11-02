@@ -194,7 +194,7 @@ public sealed class PreparedCheckoutTests
             await review.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='under_review',revision=revision+1"), Ct);
             await review.CommitAsync(Ct);
         }
-        Assert.Equal(CheckoutOutcome.Unavailable, (await Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), Request(f), Member, Ct)).Outcome);
+        Assert.Equal(CheckoutOutcome.InsufficientBalance, (await Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), Request(f), Member, Ct)).Outcome);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='under_review'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }

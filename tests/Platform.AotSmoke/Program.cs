@@ -473,3 +473,8 @@ Console.WriteLine("PASS: native scoped AI context, read-only enforcement, AI-off
 
 await AcceptanceQualification.RunAsync(export: true);
 Console.WriteLine("PASS: native combined 50-buyer race, hundred settlements, durable manifest/edit restart and original supplier reconciliation.");
+
+await PaymentDeadlineQualification.SchemaAsync();
+await PaymentDeadlineQualification.ExpiryAsync();
+await PaymentDeadlineQualification.ProtectionAsync();
+Console.WriteLine("PASS: native canonical deadline guards, exactly-once expiry, protected evidence and late original-money recovery.");
