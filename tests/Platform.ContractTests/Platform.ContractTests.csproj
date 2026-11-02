@@ -5,6 +5,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/AiBoundaryQualification.cs" Link="Shared/AiBoundaryQualification.cs" />
+    <Compile Include="../Shared/AiHttpQualification.cs" Link="Shared/AiHttpQualification.cs" />
+    <Compile Include="../../src/Platform.Api/AiContextEndpoints.cs" Link="Api/AiContextEndpoints.cs" />
+
     <Compile Include="../../src/Platform.Api/PaymentEndpoints.cs" Link="Api/PaymentEndpoints.cs" />
     <Compile Include="../../src/Platform.Api/ManualDepositEndpoints.cs" Link="Api/ManualDepositEndpoints.cs" />
     <Compile Include="../Shared/ApiContractQualification.cs" Link="Shared/ApiContractQualification.cs" />

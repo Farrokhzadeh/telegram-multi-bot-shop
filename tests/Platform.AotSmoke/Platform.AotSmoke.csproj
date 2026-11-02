@@ -5,6 +5,9 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/AiBoundaryQualification.cs" Link="Shared/AiBoundaryQualification.cs" />
+    <Compile Include="../Shared/AiHttpQualification.cs" Link="Shared/AiHttpQualification.cs" />
+
     <Compile Include="../Shared/MigrationQualification.cs" Link="Shared/MigrationQualification.cs" />
     <Compile Include="../Shared/SupplierQualification.cs" Link="Shared/SupplierQualification.cs" />
     <Compile Include="../Shared/SupplierFixture.cs" Link="Shared/SupplierFixture.cs" />

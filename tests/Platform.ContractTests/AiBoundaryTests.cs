@@ -1,4 +1,4 @@
-using System.Security.Claims;
+using Platform.Core;
 using Platform.Security;
 using Platform.Telegram;
 using Platform.Testing;
@@ -55,6 +55,26 @@ public sealed class AiBoundaryTests
         Assert.Equal(AiFallback.InvalidContext, (await client.SuggestAsync(f.Context(1), true, AiBoundaryQualification.Context(f.Brands[0]), "public question", Ct)).Fallback);
         var malformed = new AiOptionalIntegration((_, _) => Task.FromResult(new AiAdvice(2, "public invalid version", false)), TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), 1);
         Assert.Equal(AiFallback.InvalidReply, (await malformed.SuggestAsync(f.Context(0), true, AiBoundaryQualification.Context(f.Brands[0]), "public question", Ct)).Fallback);
+    }
+    [Fact]
+    public async Task CooldownRecoversAfterCompletedFailureAndHumanFlagNeverReturnsAdvice()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var clock = new AiTestClock(); int calls = 0;
+        var client = new AiOptionalIntegration((_, _) => ++calls == 1 ? Task.FromException<AiAdvice>(new HttpRequestException("public fixture")) : Task.FromResult(new AiAdvice(1, "public handoff", true)), TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), 1, clock);
+        Assert.Equal(AiFallback.Unavailable, (await client.SuggestAsync(f.Context(0), true, AiBoundaryQualification.Context(f.Brands[0]), "public question", Ct)).Fallback);
+        Assert.Equal(AiFallback.CircuitOpen, (await client.SuggestAsync(f.Context(0), true, AiBoundaryQualification.Context(f.Brands[0]), "public question", Ct)).Fallback);
+        Assert.Equal(1, calls); clock.Now = clock.Now.AddMinutes(2);
+        var result = await client.SuggestAsync(f.Context(0), true, AiBoundaryQualification.Context(f.Brands[0]), "public question", Ct);
+        Assert.Equal(AiFallback.Requested, result.Fallback); Assert.Equal(AiDisposition.HumanSupport, result.Disposition); Assert.Null(result.Text); Assert.Equal(2, calls);
+    }
+    [Fact]
+    public async Task CallerCancellationPropagatesWithoutCallingDisabledOrMissingAdapter()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        var client = new AiOptionalIntegration(null, TimeSpan.FromSeconds(1), TimeSpan.FromMinutes(1), 1);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.SuggestAsync(f.Context(0), false, AiBoundaryQualification.Context(f.Brands[0]), "public question", cancelled.Token));
     }
     private sealed class AiTestClock : TimeProvider
     {

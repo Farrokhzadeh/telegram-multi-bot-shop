@@ -466,3 +466,7 @@ await using (var database = await DisposablePostgres.CreateAsync())
 }
 
 Console.WriteLine("PASS: native JSON, AES-GCM scope, legacy Fernet, schema/operator, exact money, sessions and lost-commit reconciliation.");
+
+await AiBoundaryQualification.RunAsync();
+await AiHttpQualification.RunAsync();
+Console.WriteLine("PASS: native scoped AI context, read-only enforcement, AI-off commerce and human support.");

@@ -5,6 +5,10 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/AiBoundaryQualification.cs" Link="Shared/AiBoundaryQualification.cs" />
+    <Compile Include="../Shared/AiHttpQualification.cs" Link="Shared/AiHttpQualification.cs" />
+    <Compile Include="../../src/Platform.Api/AiContextEndpoints.cs" Link="Api/AiContextEndpoints.cs" />
+
     <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
     <None Include="../fixtures/legacy-fernet-synthetic.json" Link="fixtures/legacy-fernet-synthetic.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../Shared/MigrationQualification.cs" Link="Shared/MigrationQualification.cs" />
