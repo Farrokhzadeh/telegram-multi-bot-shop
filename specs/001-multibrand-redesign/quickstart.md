@@ -1,270 +1,118 @@
-# Offline Validation Quickstart — Backend Redesign
+# Offline validation quickstart — executable evidence and remaining gates
 
-**This is a rehearsal contract, not an executable deployment recipe.** The specification repository now exists at `Farrokhzadeh/telegram-multi-bot-shop`; host code has not been implemented. Do not run live bank/crypto/Telegram or database migration commands from these examples.
+This quickstart runs only synthetic fixtures and owned disposable databases. It is not a deployment recipe. Normal Api, BotHost and JobHost executables fail closed without qualification mode. Do not use production/staging connection strings, real keys or source rows, live Telegram/payment/supplier/FX/AI services or actual recipients. The AI runtime belongs in a separate service; commerce contains only its optional read/advisory boundary.
 
-## Prerequisites
+The canonical baseline is constitution 3.0.0, 28 typed tables with no JSON columns, and the immutable financial, ownership, replay, coupon and complete-manifest contracts. [Requirements traceability](requirements-traceability.md) assigns all 84 FRs and 53 SCs to tasks. The [scenario catalog](../../ops/acceptance-scenarios.tsv) supplies exact executable witnesses and a digest of each current SC statement. A witness proves only its synthetic assertion subset; it never promotes a whole criterion, human result or environment to release-ready.
 
-1. New isolated repository with the planned C# solution, a .NET 10 SDK and a C/C++ toolchain for Native AOT publish.
-2. Disposable PostgreSQL database populated with **synthetic** three-brand, payment and encrypted fixtures, with fake provider/Telegram endpoints.
-3. Test-only brand keyrings; never use production bot tokens, keys, customer credentials or payment endpoints in local tests.
-4. Implemented test project names/targets corresponding to the plan. Final commands must match generated project files.
+## Required environment
 
-## Proposed validation sequence
+Use .NET SDK pinned by global.json, locked dependencies, Linux Native AOT build tools and the exact PostgreSQL version pinned by [CI](../../.github/workflows/backend-ci.yml). PostgreSQL must be an independently owned disposable service whose identity is approved for destructive synthetic database creation; its control role must have only the qualification provisioning permissions used by [DisposablePostgres](../../tests/Shared/DisposablePostgres.cs) and migration-role tests. Each test creates and drops its own synthetic database. Do not substitute a source copy, staging, production or shared database.
 
-### 0. Relational schema gate
+`SHOP_TEST_ALLOW_DATABASE_CREATION=1` and `SHOP_TEST_POSTGRES_ADMIN` must be set by the disposable test harness after identity verification. The latter is a private local/CI setting, never a command-line argument, artifact or copied real connection string. See the pinned CI service for the exact ephemeral role/membership provisioning and tooling. No local .NET/PostgreSQL/Docker availability or execution is assumed; the qualification record identifies the actual CI run that supplied proof.
 
-- Inspect the disposable PostgreSQL `information_schema.columns` after applying all migrations. There must be **zero** `json` or `jsonb` typed columns.
-- Verify typed FKs, composite brand/customer ownership, wallet idempotency, inventory-to-fulfillment uniqueness, typed job origins and nullable conversation state assumptions.
-- If regional discounts or multiple eligible products/customers require junction tables, stop and amend the reviewed schema instead of encoding collections in text, arrays or JSON.
+## Complete offline checkpoint
 
-Expected: the typed physical schema matches the approved table list, and no unsafe table removal was used merely to reduce the count.
-
-**Review baseline:** [schema-contract.md](schema-contract.md), [requirements-traceability.md](requirements-traceability.md), [consistency-review.md](consistency-review.md). Every check below is planned; no application, PostgreSQL, AOT, live provider or Telegram check ran in this documentation review.
-
-### A. Build proof
+From repository root, with that disposable harness already configured:
 
 ```bash
-dotnet test
-dotnet publish src/Platform.BotHost/Platform.BotHost.csproj -c Release -r linux-x64 -p:PublishAot=true
-dotnet publish src/Platform.Api/Platform.Api.csproj -c Release -r linux-x64 -p:PublishAot=true
-dotnet publish src/Platform.JobHost/Platform.JobHost.csproj -c Release -r linux-x64 -p:PublishAot=true
+bash .specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks
+python3 .specify/tests/test_linux_tooling.py
+python3 -m unittest discover -s ops/ci/tests -v
+python3 ops/ci/check-acceptance-evidence.py --catalog-only
+python3 ops/ci/check-secret-compose.py
+dotnet restore Platform.sln -r linux-x64 --locked-mode
+dotnet build Platform.sln -c Release --no-restore
+dotnet format whitespace Platform.sln --verify-no-changes --no-restore
+dotnet test tests/Platform.UnitTests/Platform.UnitTests.csproj -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory artifacts/test-results/UnitTests
+dotnet test tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory artifacts/test-results/IntegrationTests
+dotnet test tests/Platform.ContractTests/Platform.ContractTests.csproj -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory artifacts/test-results/ContractTests
+bash ops/ci/native-smoke.sh
+python3 ops/ci/check-acceptance-evidence.py --results-root artifacts/test-results --output artifacts/acceptance/scenario-witnesses.json
+sha256sum artifacts/acceptance/*.json
 ```
 
-Expected: zero unexpected AOT/trim warnings; each published native executable starts, responds to a health probe or synthetic update, and fails safely without required configuration. Actual commands and warnings must be recorded in CI after projects exist.
-
-### B. Brand and customer isolation
-
-- Create identical Telegram IDs in A, B and C with different **USD** wallets/orders/languages; each brand membership has its own distinct `users.id`.
-- Verify `wallets(user_id PK)` and `wallet_entries(user_id FK)` have **no currency columns**, while order/payment currency facts still distinguish USDT from toman. A 100%-free in-stock order succeeds even if a USD-wallet row has not been created yet.
-- Verify every outbound private DM resolves `chat_id` from `telegram_deliveries.user_id → users.telegram_id`; confirm customer deliveries store no redundant chat ID, while staff-only notices have a distinct trusted recipient kind/configured staff destination and that forced-join checks still use `brand_channels.chat_id`.
-- Simulate two overlapping private-chat menus from one user: a stale callback must fail `users.flow_revision` and may not reuse a newer active purchase flow. Group/topic customer commerce is unsupported in v1.
-- Exercise all customer actions and bot callbacks with each authenticated brand context.
-- Attempt forged or mismatched brand/context IDs; all cross-brand data retrieval and mutations fail.
-- Create per-brand encrypted token and required-channel records; normal admin reads reveal only metadata.
-- Encrypt unsold shared-stock credentials with a **different platform-inventory test key**, and prove a brand bot's key cannot decrypt it.
-
-Expected: zero foreign-brand data in customer output; admin audit identifies each allowed mutation; an isolated bot consumer cannot open shared stock without the privileged inventory service.
-
-### B2. Meaningful bot activity (table 25 in the 28-table approved candidate)
-
-- In separate Brand A/B/C private-DM fixtures, execute start, menu/navigation, product view, button action, quantity selection, checkout progression, support entry, a real flow timeout/abandonment transition and an actionable error. Expect one typed `bot_activity_events` entry per **logical** event, linked only to the originating `users.id`.
-- Replay Telegram updates and the timeout worker 100 times; deterministic event keys prevent duplicates while separate legitimate actions remain distinct. Wrong-brand `order_id` or `support_ticket_id` event references fail at the PostgreSQL boundary. Query by time, brand, membership and action through authorized pagination; customer access to another brand's timeline is forbidden.
-- Prove no raw DM message body, callback data, coupon code, credential, receipt, provider secret or JSON payload persists; domain orders/ledgers are still authoritative. Verify FR-071's 180-day operational retention and legacy `user_activity` archival/reconciliation plan without deleting protected source evidence.
-
-Expected: accurate brand-isolated behavioral history, no duplicate replay spam, and no private message capture or money-source ambiguity.
-
-### B3. 180-day bot activity retention (FR-071 / SC-040; future checks)
-
-- Freeze trusted UTC time and insert events just newer than, exactly at and just older than the 180-day cutoff. Read filtering and cleanup agree; retain equality and delete only older activity.
-- Interrupt/replay bounded cleanup while new events arrive. No unexpired/foreign-purpose records are removed; monitor cleanup lag/errors without copying event contents.
-- Verify users, orders, payments, ledgers, coupon revisions, support, admin audit and delivery evidence remain unchanged. Financial/domain replay tests still pass after old analytics rows are deleted.
-- Restore/import expired target activity or replay an old logical event: preserve original time and apply the cutoff before exposure, without a new timestamp or indefinite raw-event archive. Protected source archives/backups remain outside this cleanup.
-- Review indexes, least-privilege delete scope, scheduling/monitoring and backup restore behavior before implementation. These are future validation cases, not executed database deletion.
-
-### C. Atomic wallet checkout
-
-- Set one available local credential, 50 buyers with sufficient balance, and fire 50 simultaneous requests.
-- Crash/restart a delivery worker after database commit but before Telegram send; replay same checkout ID and delivery job.
-
-Expected: one allocation, one debit and one order; other wallets unchanged; durable delivery recovers without a duplicate charge.
-
-- Request 3 units when only 2 units remain, with a wallet balance sufficient for all 3.
-- Confirm that no stock is assigned, no wallet is debited and any presented coupon remains unused.
-
-Expected: a multi-unit wallet purchase commits **all requested units or none**, and all per-unit fulfillment records match the order quantity.
-
-### C2. Automatic coupons and current-source FX
-
-- Simulate one advance purchase of 100 future units and verify it issues **exactly one** account-bound 100%-off code with `max_total_uses=100`, `max_uses_per_user=100`, product/brand ownership, and a paid-source reference. Redeem 1, then 9, then 20 units in later orders; expect precisely 70 unspent/unheld uses and 30 recorded redemptions, **without 100 coupon rows or advance stock allocation**. Invalid 71-unit request returns max 70 without creating an order.
-- Verify the assigned user's “My Discounts” view and notification can reveal the code using the correct brand key, while another brand, an ineligible user and ordinary admin list output cannot read its plaintext.
-- Issue a **prepaid** 100%-off entitlement to a specific Brand A member from that person's paid product order. Try using their revealed code text as another Brand A customer and as the same Telegram ID in Brand B. Both must fail without consuming the paying owner's remaining quota. Attempt cross-brand/other-customer `eligible_user_id` and `source_order_id` pairings directly at the database layer: reject. An imported paid legacy code without verified original owner must produce a migration exception requiring reconciliation rather than guessing an owner.
-- Recreate the current automatic best-code selection; a customer cannot manually disable or skip an eligible required coupon.
-- With a 100%-off code at **10 remaining uses**, enter quantity **11** in both currencies: show **"Maximum quantity 10"** and remain at quantity selection, with **no failed order created**, stock allocation, code consumption or wallet debit. Then request **10** with enough stock: apply exactly 10 uses atomically.
-- Redeem the same code concurrently from two requests whose combined quantities exceed the remaining uses; only allowed uses can commit.
-- Create an unpaid 50%-discounted bank/crypto order: it gets `discount_uses(status='held')` and reduces available coupon uses, **without reserving any inventory**. Create a competing order for the last available discounted unit: it cannot overclaim. Expire the first without proof: the claim changes to `released` and capacity becomes available. Submit an on-time receipt on another order and let review run beyond 30 minutes: its claim remains held; successful fulfillment finalizes `redeemed` exactly once.
-- Redeem a valid 100%-off code with a zero or absent wallet balance; successful in-stock fulfillment must not require a wallet debit.
-- Run 10% and 50% campaigns and validate use limits, separate from prepaid code provenance.
-- With a 10%-off campaign limited to 10 eligible units, enter quantity 11 and verify a correction prompt **maximum 10** with no mixed-price checkout, new order, hold or money movement. Repeat with 50% and 100% codes. Change a promotion's cap through the authenticated owner backend and prove the next quote uses the latest valid capacity without altering existing frozen orders. Then deliberately reduce cap **below redeemed + held**, confirm the owner edit succeeds with a full before/after audit, new available capacity clamps to zero, and already-held orders remain intact.
-- Quote two brand listings of the same master product: one with `auto_price_toman=true` using fresh Nobitex USDT/RLS ÷ 10, and one with `auto_price_toman=false` using explicit toman price. Verify hourly refresh, stale-rate fail-closed, and **ceiling to 5,000 toman after discount**.
-- Confirm `orders.user_id`, `unit_price_usdt`, `currency`, `payment_method`, and nullable toman unit/rate fields. There must be **no `total_usdt`/`total_toman` or repeated `brand_id`/`telegram_id` on orders**. A USDT-only checkout is valid with toman/FX fields NULL. Historical displayed totals must recalculate identically using the saved calculation version; `payments.amount_due/received` and immutable wallet ledger must agree with actual financial movements.
-- Check that disabling `auto_price_toman` freezes manual toman prices **without removing USD wallet or USDT crypto payment** if that listing has a positive independent `price_usdt`.
-- Attempt to create an order for a product listed only in Brand B using Brand A's `users.id`; the database must reject the brand mismatch even if the application fails to filter the listing. Campaign/support/coupon cross-brand FK checks must fail likewise.
-
-Expected: no phantom/partial coupon redemption, no cross-brand coupon use or hidden cash-refund claim; legacy rounded quote parity and reproducible typed order snapshots **without** an `exchange_rates` table.
-
-### C3. Coupon revision audit (table 24 in the 28-table approved candidate)
-
-- Issue a coupon and verify its initial `discount_revisions` snapshot. Apply authenticated owner changes to percent-off, caps, effective used, activation/validity and eligibility after some units are genuinely redeemed and others held; verify one new immutable version and one linked `audit_events` actor/time/reason record per edit.
-- Check prior and next revisions reconstruct actual before/after edited settings while current `discounts.redeemed_count`, accepted order price snapshots and historical `discount_uses` are never rewritten. Normal redemption must not create a fake owner-edit revision.
-- Race an edit against held-claim creation/redemption and inject an abort between coupon update and revision insert; the transaction commits all facts once or rolls back all, with no gaps or split-brain revisions.
-
-Expected: typed immutable owner-edit history with accurate at-edit redeemed/held context, no JSON/EAV audit data and no change to owner override authority.
-
-### D. Externally paid checkout and manual review
-
-- For a live immediate local-only goods order, verify crypto payment, exhaust stock before complete allocation and replay the verified provider event 100 times.
-- For an immediate local-only product_purchase, apply a 50% code to a $10 USDT-quoted order, pay the $5 invoice through approved NOWPayments USDT network and exhaust local stock before the verified settlement allocates it. Verify **exactly one $5 USD wallet credit**, all units unfulfilled, `discount_uses.status='released'`, unchanged `discounts.redeemed_count` and available coupon use restored. Replay the callback 100 times; no repeated credit or coupon transition. If the campaign expiry passed before compensation, **preserve `ends_at` unchanged, do not automatically issue replacement goodwill, and explain that the returned use cannot be used for a new order** (owner-approved Option A).
-- Hold a campaign coupon at 11:55 PM with a valid bank receipt or crypto evidence before the payment deadline; advance past its midnight expiration and fulfill at 12:05 AM. Verify that the originally held discounted order can complete despite expiry, while a brand-new order cannot claim that code. For immediate local-only goods, run the equivalent no-stock compensation: returned campaign capacity stays expired; a separately paid 100%-off future-unit code with `ends_at IS NULL` remains available after release.
-- Review a bank receipt after stock has been exhausted; later manually resolve it.
-
-Expected: precisely one **USD wallet credit numerically matching the frozen USDT `payments.amount_due`** under the approved 1:1 accounting convention; receipt remains paid/unfulfilled indefinitely unless explicitly resolved with audit evidence. Existing USD wallets keep their denomination in the new platform.
-
-### D2. 30-minute unpaid invoice and Telegram edit
-
-- Create a pending bank/crypto order. Confirm both the payment page and Telegram payment message warn clearly that the order/payment is **valid for 30 minutes**, with the exact expiry time.
-- Advance time to minute 30 without a receipt or qualifying crypto payment evidence. Run expiry worker twice, including after restart; expect exactly one transition `awaiting_payment → expired` and an idempotent edit attempt targeting the **original message ID**. Simulate Telegram edit rejection: record a retry/fallback, but do not revert expiry.
-- Submit a receipt at minute 29; review it at hour 2. Confirm payment can be approved and wait for restock forever. Observe qualifying crypto transfer at minute 29 and final confirmations at minute 45; do not expire it merely for confirmation latency.
-- Simulate late real money after order expiry; keep an immutable payment record and route to the explicit owner-approved reconciliation path. Do not silently forfeit or re-fulfill after expiry. Simulate a boundary race between expiry job and webhook/receipt to prove only one valid state wins.
-- Settle a correctly bound, full-value TRC20/BEP20 USDT payment *after* the 30-minute expiry or after a later order replaced it. Verify a single **USD-wallet credit for the original brand membership**, no revive/rebind/stock allocation/coupon redemption and correct customer notice; replay event 100 times. Route underpayment, overpayment, wrong-network and uncertain provider evidence to staff, as well as all late bank transfers. Test the boundary race between timely evidence and expiry.
-- Simulate a confirmed-paid bank order pending restock while an administrator refunds or delivers it entirely **outside AccAbad**. No external refund record or API is expected. Without an explicit order-state update, the bot must not infer that event and the paid obligation/coupon hold remain. If staff choose to record an outcome in the admin backend, log actor/reason and the exact resulting coupon state. Raise a clear operator warning about otherwise indefinite holds. As owner, change a prepaid coupon's 100-unit cap to 5 despite 30 redeemed and 10 held: **allow it**, keep old holds and prior order snapshots unchanged, show zero new availability and audit the change. Set its **logical used count** from 30 to 0 using `usage_adjustment_units=-30` without deleting any actual `discount_uses` history; edit percent-off and `ends_at`/`starts_at`, verify only new quotes use the new terms. No automatic cash refund is triggered by an owner coupon edit.
-- Create a bank order, then successfully create a crypto order for the **same brand membership**. Verify the original `awaiting_payment` order is **cancelled immediately**, its held discount capacity is released, its immutable method/quote/provider ref preserved, and its original Telegram payment message is edited to **Cancelled — replaced** (not Expired); the new order has a fresh 30-minute deadline. An attempted new order with invalid quantity or quote must **not cancel the original**. Simulate late real bank/crypto money to the cancelled invoice: reconcile against the **original** order, never the replacement.
-- Race a new order against a receipt submitted at minute 29 or an on-time crypto observation; once the old order reaches `under_review` or `confirmation_pending`, it is **not automatically cancelled** by replacement and its coupon hold remains. A paid order awaiting restock is likewise protected. Attempt two simultaneous checkout creations for the same membership: a partial unique index must prevent two `awaiting_payment` orders; the losing request must not strand/corrupt a coupon hold. Repeat with the same Telegram ID in a different brand: membership isolation permits its own pending order.
-- Create a legitimate **NOWPayments crypto-funded USD wallet top-up** with no product order (as supported in legacy `main`); verify `payments.order_id IS NULL`, `payments.topup_user_id` references the right membership and `num_nonnulls(order_id,topup_user_id)=1`. Settle the same verified webhook repeatedly: exactly one USD wallet/ledger credit. Confirm topup attempt creation can work before the wallet row exists without bypassing brand/zero-balance eligibility guards.
-- Try to top up by card-to-card, or to pay an external **USD** order by card-to-card: reject both. Create a product order paid by **TOMAN card-to-card**, another by **NOWPayments crypto with a USD-valued quote**, and another by an **existing USD wallet**. Confirm each has a single immutable method, and the payment record retains actual cryptocurrency/network quantity separately from its USD quote. Check that **only `USDTTRC20` or `USDTBSC`** can be chosen for new NOWPayments invoices; an invoice selected as TRC20 cannot be fulfilled by a BEP20 callback (or vice versa), nor by native TRX, BNB or any other asset. Validate codes against live provider availability and verify invoice expiry; don't assume a wallet top-up shares the order's 30-minute deadline.
-- Start simultaneous NOWPayments invoices from all three brands through the **same merchant account**. Confirm each has a globally unique provider payment reference and a distinct internal `payments` origin; re-send one brand's signed provider callback with a forged brand/description field and verify it cannot credit, fulfill or expose any other brand's record. Inspect provider-hosted payment pages/receipts for a shared merchant name, payee identifier or unrelated brand label; record the operator's privacy acceptance or mitigation before launch.
-- Configure **different receiving bank cards** for the two Iranian brands; confirm each brand displays only its own card on TOMAN bank checkout and that the international brand need not have one. Attempt assigning the same card to both brands: reject via keyed fingerprint constraint. Create an unpaid bank order, save a replacement card and confirm **the last successful admin save is the sole active card for new orders**, with no list of active cards. A simultaneous stale admin save must fail its revision check. The old order still shows its **original destination**, original 30-minute deadline and receipt review snapshot; new orders show the replacement. Inspect banking-app holder-name display as a public brand-isolation risk.
-
-Expected: customer-visible **Cancelled — replaced** on valid replacement and **Failed/Expired** on genuine timeout, temporary coupon capacity returned exactly once, no premature cancellation of on-time payments, no missing late money or repeated wallet compensation.
-
-### E. Supplier and broadcast
-
-- Simulate supplier success, failure and timeout-after-success. For five requested/three acquired, persist three encrypted internal units, release zero customer content and retain the whole paid order under admin review with all coupon uses held. Export/status/restart replays cannot buy again or create partial delivery. Persist pre-call attempt intent and sanitized terminal/unknown evidence with per-unit dedupe and brand-key boundaries. Release only a complete verified five-unit manifest after any review clearance.
-- Send one campaign batch across three eligible bots for a Telegram ID in all three memberships; include multiple language variants in the international brand, block one bot, simulate Telegram throttling and restart worker.
-
-Expected: uncertain supplier outcome stays pending reconciliation; incomplete 3-of-5 acquisition leaves the whole paid order pending review with zero customer release, no repeated supplier purchase, no duplicate *local obligation*, and no unapproved compensation. Campaign records remain separate per brand; no user gets two recipients in the same brand/batch due to competing language variants. Keep ambiguous remote receipt explicit. Credential delivery prefers the saved order-message edit; uncertain new credential sends pause for explicit recovery, with no blind replacement message. Other delivery purposes retain their separately qualified policies.
-
-- Verify supplier-attempt historical mappings and sanitized evidence. Five held coupon uses stay held with three acquired items and zero customer fulfillment; full verified fulfillment redeems five once. Preserve actual historical partial deliveries separately; do not erase evidence or redeliver previously delivered units to force the new policy.
-
-### E1. Source selection and local-preorder FIFO (FR-064/FR-065; future checks)
-
-- Create an unpaid order with A selected, switch to B, then accept payment: bind to B. Opening an invoice or submitting an unapproved bank receipt does not bind. Verify committed wallet debit, accepted on-time crypto and admin-approved bank payment; 100 repeated callbacks after switching to C retain B, original pricing and one purchase intent. Disable/remove the selected source or mark supply unavailable at acceptance: preserve accepted payment and visible paid/unfulfilled admin review, no runnable purchase, fallback, credit or external refund. Later re-enablement alone cannot clear review. Race source edits against payment binding and verify one coherent source revision; late expired/replaced crypto retains wallet recovery without procurement.
-- Verify approved table 27 `product_supplier_sources`: same-product FK/selection guards, controlled provider codes, separate product/optional-variant identities, null-aware duplicate rejection and revision-safe edits. A paid request keeps its original source ID/revision and actual account/product/variant snapshots after a mapping edit; referenced history cannot be silently deleted or redirected.
-- Map several products to one provider and verify they use its one configured account across all brands, without credential copies, per-brand/account overrides or provider account pools. Rotate the credential for that same account: paid requests retain their original account identity. If config points to another account or original-account access is unavailable, old-request reconciliation must stop for admin review rather than use the replacement account. Do not put tokens in mappings/snapshots/evidence.
-- Configure two product sources with separate product/variant identities. Select A, bind a request, switch to B, then retry/reconcile the old request: it stays on A's original account/product snapshot; only newly bound work uses B. Bind equivalent requests in all three brands, switch the shared product source, and verify newly bound work in all three uses B while already bound requests retain A. Reject per-brand source overrides and cross-product source selection. Race admin edits and verify revision checks, one product-level active authority and actor/reason audit. No automatic failover after unknown/partial results.
-- With zero stock, pay preorder A for five and B for two in another brand. Add three: neither allocates/releases anything; no subset reservation or B bypass. Restart/replay and add three: A atomically allocates all five, B waits with only one item available. Add one: B gets both. Race all allocators/payment/restock; no duplicate debit, item, coupon transition or partial manifest.
-- Test wallet, verified crypto and accepted bank preorder payment: full payment persists once and absent units remain queued, without immediate-order shortage credit. Paid remainders survive the unpaid timer. Queue fairness spans brands; customer data does not.
-- Prepare a complete order manifest before any customer credential/file/link release; exercise all access paths and interrupt/resume multi-message Telegram transport. No partial business batch, duplicate logical fulfillment or coupon redemption; prefer the saved order-message edit, suppress known success and persist uncertain new credential sends for explicit recovery without automatic replacement messages. Include missing/uneditable anchors and qualified file/multi-part handling; no exactly-once remote receipt is claimed.
-- Re-run immediate-sale all-or-nothing wallet and crypto compensation scenarios. Supplier 3-of-5 still waits for admin review, outside local FIFO.
-- Gate implementation on source/account/blocker field design, whole-order coupon/manifest guards, remaining cancellation state/hold transition design (no preorder dates under FR-069), historical partial-order compatibility and exact transport links. No staging external-refund workflow is imported.
-
-These are future checks, not live staging results. The approved candidate contains 28 tables, including `product_supplier_sources`; its exact constraints/config and any further transport relations still need review. No new split-delivery table is implied.
-
-### E1b. Supplier product eligibility (FR-068 / SC-037; future checks)
-
-- Enable/publish verified ready-to-deliver account/key/code mappings with separate exact product/variant identity. Unverified requirements must not default to eligible.
-- Reject email activation, buyer-email slot assignment, existing-account upgrades and manual/custom supplier delivery before creating a payable checkout, invoice or wallet debit. No customer fulfillment-input prompts/payloads are created.
-- After accepting payment for an eligible item, simulate a provider requirement change before purchase: retain original source/payment and full paid obligation for admin review, with no purchase/fallback/automatic compensation. Retry/replay never duplicates or loses that obligation.
-- Allow ordinary redemption instructions for delivered codes and asynchronous provider processing/status/export. Keep full-order manifest release, one-time credential capture and source account isolation unchanged.
-- Reconcile any historical excluded product obligations explicitly; do not silently reclassify old customer orders or discard source evidence. No new operational input/activation table is implied.
-
-These are specified future checks, not executed live-provider results.
-
-### E1c. No configured preorder date or paid time cap (FR-069 / SC-038; future checks)
-
-- Create/publish/quote/pay a local preorder without ETA/date/duration inputs. Verify target product/admin/customer contracts and schema do not expose the removed date/snapshot fields or create date-change/fulfillment-expiry jobs.
-- Advance the clock well beyond usual waits: paid order, FIFO priority, full coupon hold and financial history remain; no automatic expiry/cancellation/reorder/credit/refund.
-- Add enough stock to complete the oldest order: fulfill normally under the existing full-quantity FIFO rule. Support ticket activity alone cannot alter it.
-- Verify created/paid audit times remain available, and an unpaid external invoice still follows the separate 30-minute payment window without affecting a confirmed-paid preorder.
-- Preserve/reconcile any genuine source promised dates without erasing source evidence or reintroducing active date settings. These are future checks, not live tests.
-
-### E1d. Preorder cancellation requests via support (FR-070 / SC-039; future checks)
-
-- Open an existing order-linked ticket for the customer's paid queued preorder. Reject foreign-member/brand order links with no information leak.
-- Create/reply/assign/close/reopen the ticket and replay updates: payment, FIFO priority, coupon holds, balance and stock stay unchanged; no cancellation-specific button/endpoint/request state or automatic queue pause is created.
-- Confirm normal complete-order fulfillment remains eligible while support discussion is open. Support text/status cannot authorize financial/order transitions.
-- For a separately approved admin resolution, verify actor/reason audit, retained paid history and serialization with allocation so stale workers cannot allocate afterward. Do not invent cancellation settlement/coupon rules or require external payout evidence.
-- For approved paid local-preorder cancellation, verify outside-shop repayment policy with no cancellation wallet credit/debit reversal, payout call or external payout record; original payment/debit history stays intact and the order audit does not assert repayment completion. Replay must not change money. Verify full `held → released` coupon release in the same cancellation transaction, replay 100 times, failed-approval rollback and allocation races; no partial release or release of redeemed claims. Keep original expiry/activation/caps/adjustments, test expired/disabled/reduced-cap coupons, and allow future use only if currently eligible. Exact admin state/hold representation remains a technical gate before implementation. These are future checks, not live test results.
-
-### E2. Human support without AI
-
-- Disable or disconnect the entire AI service.
-- From each brand open a support ticket, attach a test media reference, reply as staff, and restart the notification worker between message creation and delivery.
-- Attempt to fetch the ticket through another brand's authenticated context.
-
-Expected: the human ticket remains actionable, one durable staff/customer notification is recorded, no cross-brand details leak, and AI downtime does not delay purchase or support.
-
-### F. Encryption migration rehearsal
-
-- Use synthetic legacy keys and sample Django-format ciphertext, including historical prefixes/previous-key attempts.
-- Import repeatedly, re-encrypt sensitive fields with new test keys, decrypt and compare plaintext only in test assertions, verify mapping and counts.
-- Deliberately use wrong/missing key and corrupt ciphertext.
-
-Expected: exact round-trip, no plaintext logs, failed unsafe imports, no second balance credit after rerun. Old-key recovery remains possible for protected old snapshots.
-
-### F2. Opening balances and legacy feature retention
-
-- Import the same synthetic historical ledger and source opening balances twice; verify no posting duplication.
-- Examine real approved source-schema evidence for single-product order shape before omitting `order_items`; preserve any exceptional historical multi-product orders losslessly.
-- Exercise each operator-approved retained discount, exchange-rate staleness/rounding, zero-wallet topup policy and regional payment rule.
-
-Expected: every wallet equals its frozen source balance, an incomplete ledger causes explicit reconciliation failure, and price/payment rules match the approved behavior matrix.
-
-### G. Stage rehearsal (only after operator authorization)
-
-Use [staging-plan.md](staging-plan.md): staging shares the production server but has separate runtime, database/volumes, test identities, keys and resource limits. The following freeze/ownership steps run on authorized disposable source copies during rehearsal; stopping actual production writers belongs only to a separately authorized E6 cutover. No host-destructive tests run on the shared server.
-
-- Confirm immutable release identity, backup and restore result.
-- Stop **all** writers for one brand and reconcile inflight callbacks and deliveries.
-- Empty/disable active source stock for that brand deliberately; ensure no remaining legacy brand may allocate new-platform stock.
-- Compare historical balances, paid obligations, order snapshots, encrypted-field migration and callback ownership.
-- Test failure/rollback in isolated staging before any production canary.
-
-Expected: no split brain, no orphan paid order, no key loss, and approved data reconciliation report. Failure is a deployment stop.
-
-## Evidence to archive with the release
-
-- Commit/image digests, target platform, publish warnings, test counts, synthetic fixture hashes, redacted migration reconciliation, key-version inventory without values, provider callback evidence, baseline vs new RSS/startup measurements, signed approval and rollback observation.
-
-## Not included
-
-- Admin web UI/screenshots, frontend performance tests, public website deployment or AI model/provider implementation.
-
-## Supplier bonus items — admin disposition (owner approval 2026-10-30)
-
-If a supplier actually provides verified bonus accounts, keys or codes beyond the customer's ordered quantity, route those extras to authorized administrators through the existing admin facilities with protected content access. The customer receives the complete ordered quantity only; bonuses are excluded from every customer manifest, download, history and delivery path. Retain bonus content encrypted and attributable to its original supplier request/account/product and item identity; deduplicate purchase/export replays so the same item cannot become both a paid customer unit and an admin bonus. Do not increase order quantity, customer fulfillment rows, coupon usage or payment, automatically add bonuses to saleable shared inventory, or buy extra units to obtain a bonus. Do not expose credentials in logs, activity events, ordinary audit text or unprotected notices. Ambiguous extras or unprovable item identity require admin review rather than invented bonus attribution. This policy is conditional, not a claim that any current supplier is offering bonuses; incomplete customer quantities still follow the whole-order administrator-review rule.
-
-Future checks (SC-041): five ordered plus one verified bonus; no bonus; repeated/reordered export; duplicate item identity; ambiguous extras; insufficient complete customer quantity; unauthorized reveal. Assert exactly five customer units, one protected admin bonus when proven, no duplicate/overlap or extra purchase, unchanged money/coupon/order quantity, and no secret leakage. These are planned checks, not executed tests.
-
-## Fully coupon-covered supplier checkout — owner approved (2026-10-30)
-
-When a valid automatically selected 100%-off coupon covers every requested unit of an eligible supplier product, checkout automatically accepts the zero-due order and schedules purchase from the selected supplier without a separate administrator approval. Revalidate membership/brand/product eligibility, whole-quantity coupon capacity and the selected eligible source in one serialized local checkout transaction; commit the full coupon claim as `held`, `no_payment_required` acceptance, immutable source/account/product/variant revision and durable supplier procurement work together. This committed acceptance is the source-binding point for zero-due supplier orders. No customer wallet balance is required, no wallet debit/credit or fabricated external payment/invoice is created, and no unpaid-payment timer applies. Call the supplier only after commit using the original request/intent and existing provider-specific uncertainty rules. Hold the whole coupon claim while procurement is pending/unknown/incomplete; redeem it exactly once with complete-order fulfillment, not merely on checkout or supplier submission. Invalid coupon/quantity/source before commit leaves no accepted order, hold or procurement work. A source/eligibility failure discovered after acceptance retains the accepted order, held entitlement and original binding in administrator review without fallback, automatic repurchase or compensation; zero-due acceptance is not an actual monetary payment. Existing full-order delivery, verified-admin-only bonus routing, owner coupon-edit rights and local/immediate-sale rules remain unchanged.
-
-Future SC-042 checks: zero wallet plus valid five-use 100%-off coupon; duplicate checkout and worker replay; source switch concurrent with acceptance; invalid/disabled/expired/wrong-member/insufficient coupon before commit; source/type failure after acceptance; three-of-five acquisition then full fulfillment; coupon expiry after valid acceptance. Assert no admin approval/invoice/wallet movement, one held accepted request and original binding, then exactly one full redemption. These are planned checks, not executed tests.
-
-## Supplier cost increase guard — owner approval (2026-10-30)
-
-Automatic supplier procurement may absorb a cost increase of at most 10% inclusive against the immutable same-source cost at order acceptance; above that, retain the accepted order/claim for admin review. Customer pricing stays fixed, and 100%-off orders use the same guard. No rolling baseline, fallback purchase or automatic compensation.
-
-Future SC-043 checks: baseline 10.00 with current 9.00/10.00/11.00/11.01; five-unit totals and mandatory fees; 100%-off orders; invalid/mismatched cost evidence; retry staircase; source edits; blocked price later falls; explicit admin ceiling; provider price change between preflight/submit and ambiguous POST. Assert no customer repricing, rolling baseline, automatic blocker clearance or blind repeat purchase. These are planned checks, not executed supplier tests.
-
-## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
-
-An otherwise published supplier listing remains visible as Out of stock while its selected source cannot supply it; block new checkout without fallback, automatic hiding or effects on accepted orders.
-
-Future SC-044 checks: all three published brands show Out of stock; explicitly hidden listings stay hidden; stale/forged callbacks and each checkout method are blocked before mutation; verified recovery restores ordinary purchase eligibility; accepted-payment races retain existing obligations and review blockers. No live catalog update/test is performed.
-
-## Opt-in one-time restock alerts — owner approval (2026-10-30)
-
-Restock alerts are voluntary, one-time and brand-scoped; existing jobs/delivery machinery handles notices, without reservation, automatic purchase or interference with paid FIFO. Explicit opt-in is separate from activity history and ordinary campaign consent.
-
-Future SC-045 checks: opt-in/repeated opt-in/foreign callbacks, unsubscribe, all three brands, supplier/local recovery, hidden listings, stock lost before first send, repeated events/restart, activity purge, blocked sender and ambiguous Telegram result, fresh opt-in after completed notice. Prove one logical notification with no financial/order/stock/coupon action. Schema storage is approved table 28, with exact fields/constraints still reviewed; no alert or subscription is created by this documentation update.
-
-## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
-
-Future SC-046 covers stale cache versus direct refresh, every payment method/100%-off checkout, insufficient quantity, timeout/429/malformed or mismatched provider responses, source-switch-before-commit, duplicate request return, and post-creation stock/cost changes. Verify no mutation on pre-creation failure and preserved accepted obligations afterwards. Approved table 28 restock consent also needs the SC-045 lifecycle/brand/delivery checks. No provider or notification test was run.
-
-## Remaining business clarifications approved (2026-10-30)
-
-- Use eligible local stock first; mix local, selected-supplier and explicitly administered manual units while releasing one complete order. Full local coverage works without supplier access; refresh/revalidate only an actual supplier remainder (FR-078).
-- Admin pause/resume preserves a paid local preorder's priority; a paused head blocks later local allocations until explicit resume/cancellation (FR-079).
-- Confirmed supplier failure alerts staff and offers explicit reconciled retry or same-brand wallet credit. Bank credit requires admin-entered/confirmed USD plus reason; wallet/crypto credit uses original net USD. No automatic credit/retry or external payout record (FR-080).
-- Verified active staff personally bypass channel checks and may disable enforcement per brand, preserving channel lists. Approximately 4–6 staff is an expected team size, not a hard cap; one customer-facing admin contact is configured per bot (FR-081/082).
-- Private shared staff-chat notices use a separate trusted recipient kind, metadata and protected case/bonus access. Customers stay in membership DMs, and group text/membership grants no financial authority (FR-082).
-- Use orders.id directly, without new public_ref; preserve genuine historical aliases through reviewed migration evidence (FR-083).
-- Retain closed restock records 180 elapsed days from closed_at; retain cutoff equality and all active subscriptions. Coordinate only expired terminal restock evidence, with no financial/domain cascade or paid-preorder expiry (FR-084).
-
-SC-047–053 cover 3-local+2-supplier release, 5-local supplier-outage exemption and binding races; blocking holds; retry-vs-credit with bank-entered USD; verified staff/brand-wide bypass; public-contact/staff-recipient isolation; sole order-ID authorization; independent 180-day closed-subscription cleanup. These are planned checks, not executed app/provider tests.
-
-## Saved order-message recovery qualification — 2026-10-31 (future checks)
-
-Under FR-015 / SC-004/036, use synthetic transports and a complete prepared manifest. Save a validated order-message target before any credential edit; crash after the edit is accepted but before saving success, then recover by editing the same ID/generation without a new send intent or repeated business effects. Reject wrong bot/member/order targets and stale generations; race paid/delivery edits with expired/replaced-message jobs so stale work cannot overwrite current state. Suppress saved successes; retry only definite recoverable failures. Persist uncertain new sends for explicit authorized recovery, preserving protected manifest access and the paid obligation. Missing/deleted/uneditable anchors and file/multi-part cases must follow explicit qualified recovery, never a silent replacement send. T034/T052/T077 own these planned checks; none has run.
+Stop on any failed command. The CI workflow also runs the pinned redacted secret scanner and uploads TRX, redacted contract/migration/acceptance artifacts and lock files. The native script publishes and runs Api, BotHost, JobHost, SchemaRunner and AotSmoke, verifies expected fail-closed host exits and loopback authorization/error contracts, and runs source-generated JSON and the database/encryption/financial/delivery probes. It does not activate live callbacks, schedule business runtime work, invoke real services or deploy.
+
+The combined T077 command, after build, is:
+
+```bash
+dotnet test tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj -c Release --no-build --no-restore --filter FullyQualifiedName=Platform.IntegrationTests.AcceptanceSuite.OneDisposableRunRetainsMoneyStockDeliveryAndOriginalSupplierIntentAcrossRestarts
+```
+
+That single test owns one 50-member, three-brand synthetic shop. It races one last local item, reconstructs leased manifest/edit services after persisted lease expiry, verifies the original private edit target/generation and checkout replay, settles one original membership's crypto-only USD topup 100 times, switches the test product to a synthetic selected supplier, accepts a local-three/remote-two mixed order, reconciles its uncertain original submit without repurchase and delivers one whole five-unit manifest. It checks exact final balances, two completed orders, six released units, one topup posting and no invented compensation. This is service reconstruction and synthetic transport recovery, not an operating-system crash, live provider or staging durability claim.
+
+AotSmoke reruns the same helper and emits `artifacts/acceptance/synthetic-commerce.json` only after all its assertions pass. The report contains aggregate counts, scope and ReleaseReady=false; it contains no member/order/provider identity, plaintext credential, message body, connection string or key. `scenario-witnesses.json` is emitted only from actual complete passing TRX suites. It checks mapped test definitions/results and records observed-synthetic-subset versus planned-unexecuted, exact SC digests and remaining evidence. It always retains fullSuccessCriteriaVerified=false and releaseReady=false. Missing witnesses, duplicate criteria, stale specification digests and failed/skipped/incomplete test results stop report generation. Unit tests exercise those negative paths.
+
+## Commands and scope for every SC
+
+Render the exact current per-project test filters with:
+
+```bash
+python3 ops/ci/check-acceptance-evidence.py --print-command SC-001
+```
+
+Replace SC-001 with any row below. This only prints commands; it does not run them or produce observed evidence. SC-008 and SC-040 print their explicit planned/unexecuted reason instead of substituting unrelated tests. Individual filtered reruns are diagnostic and do not replace the complete checkpoint. All witnesses also run in the unfiltered three-suite checkpoint above. Exact witness names are in the TSV; the following limits are part of the evidence, not exceptions to the specification.
+
+| Criterion | Current executable scope | Evidence still unexecuted or outside the witness subset |
+| --- | --- | --- |
+| SC-001 | Synthetic witness subset; render its command | Actual deployed media/routes/recipient and security review under T075 remain unexecuted. |
+| SC-002 | Synthetic witness subset; render its command | Synthetic last-unit race only; real hosting/load and representative baseline remain unqualified. |
+| SC-003 | Synthetic witness subset; render its command | Synthetic authenticated lookup/replay only; real invoice creation, callbacks and provider lookup activation remain unqualified. |
+| SC-004 | Synthetic witness subset; render its command | Reconstructed services and synthetic uncertain transport only; actual process/scheduler/production durability gates remain open. |
+| SC-005 | Synthetic witness subset; render its command | Wallet-projection primitive only. Actual source schema, complete historical commerce import/reconciliation and cutover remain unexecuted T063/T064/T066/T068/T080. |
+| SC-006 | Synthetic witness subset; render its command | Backend synthetic HTTP/service assertions only; end-user deployed UI and real environment acceptance remain unexecuted. |
+| SC-007 | Synthetic witness subset; render its command | AI-off and synthetic commerce only. Separate AI service hosting and live integrations are not implemented/activated. |
+| SC-008 | **Planned/unexecuted; no test substitute** | Human participant measurement is NOT RUN. T079 defines the preregistered protocol; automated tests cannot populate its result. |
+| SC-009 | Synthetic witness subset; render its command | Synthetic verified ingress/staff replies only; live Telegram routing and deployed restart/durability remain unqualified. |
+| SC-010 | Synthetic witness subset; render its command | Synthetic campaign/transport/throttling only; real recipients, credentials, independent process controls and staging separation remain unverified. |
+| SC-011 | Synthetic witness subset; render its command | Service/callback representations only; actual participant-facing deployed quantity journey remains unexecuted. |
+| SC-012 | Synthetic witness subset; render its command | Synthetic FX/quote assertions only; real Nobitex transport and representative source/deployment parity remain unqualified. |
+| SC-013 | Synthetic witness subset; render its command | Expiry intents/evidence guards are observed; complete timer/instruction message editing coverage T082-T085 remains pending. |
+| SC-014 | Synthetic witness subset; render its command | Synthetic typed member ownership only; actual imported identities and deployed routes remain unverified. |
+| SC-015 | Synthetic witness subset; render its command | Typed synthetic balances/postings only; full historical totals/source reconciliation remain unqualified. |
+| SC-016 | Synthetic witness subset; render its command | Synthetic private/staff routing only; actual recipient separation and credentials remain unverified T075. |
+| SC-017 | Synthetic witness subset; render its command | Synthetic replacement guards only; complete user-visible replacement/expiry edit scenarios T082-T085 remain pending. |
+| SC-018 | Synthetic witness subset; render its command | Synthetic topup origin/settlement only; actual merchant invoice creation and live provider verification remain unqualified. |
+| SC-019 | Synthetic witness subset; render its command | Synthetic shared-account identities only; real merchant-hosted identity review/callback activation remain unexecuted. |
+| SC-020 | Synthetic witness subset; render its command | Synthetic card data and immutable destination only; no actual cards/source records or deployed media review accessed. |
+| SC-021 | Synthetic witness subset; render its command | Synthetic races only; complete end-user expiry/replacement scenarios remain pending T082-T085. |
+| SC-022 | Synthetic witness subset; render its command | Synthetic authenticated settlement only; real provider transport/durability and user-facing messages remain unqualified. |
+| SC-023 | Synthetic witness subset; render its command | Synthetic trusted-time/expired grant semantics only; deployed message wording and live payment timing remain unexecuted. |
+| SC-024 | Synthetic witness subset; render its command | Synthetic paid ownership only; imported legacy paid-code provenance must be validated, never guessed T063/T064/T066. |
+| SC-025 | Synthetic witness subset; render its command | Synthetic prepaid issuance/redemption only; historical paid liabilities and deployed customer journey remain unqualified. |
+| SC-026 | Synthetic witness subset; render its command | Synthetic quote/owner override assertions only; full follow-up coupon revision task T086 and participant journey remain pending. |
+| SC-027 | Synthetic witness subset; render its command | Synthetic late-money recovery only; live funds/provider evidence and final Telegram edit behavior remain unqualified. |
+| SC-028 | Synthetic witness subset; render its command | Synthetic staff decisions only; actual off-bot settlements, complete historical reconciliation and production review remain unexecuted. |
+| SC-029 | Synthetic witness subset; render its command | Existing immutable revision/override probes only; complete T086 revision-edit concurrency/provenance qualification remains pending. |
+| SC-030 | Synthetic witness subset; render its command | Selected flow/support event probes only; exhaustive T087/T088 meaningful event and 100-replay/retention coverage remains pending. |
+| SC-031 | Synthetic witness subset; render its command | Synthetic partial outcomes only; actual provider typed recovery/export capabilities and complete T090-T092 follow-up remain gated. |
+| SC-032 | Synthetic witness subset; render its command | Synthetic original-intent lookup only; real provider lookup/export/max-charge guarantees remain gated T057/T091. |
+| SC-033 | Synthetic witness subset; render its command | Synthetic selected-source snapshots only; authoritative real provider mappings, all-source rotations and T093/T094 qualification remain pending. |
+| SC-034 | Synthetic witness subset; render its command | Acceptance/FIFO head protection only; complete drain worker and late-import historical queue cases T095/T096 remain pending. |
+| SC-035 | Synthetic witness subset; render its command | Synthetic source-at-acceptance cases only; full T094 source/payment races and real account replacement proof remain pending. |
+| SC-036 | Synthetic witness subset; render its command | Synthetic complete-manifest holds/redemption only; real provider/transport durability and full T092 mixed recovery remain gated. |
+| SC-037 | Synthetic witness subset; render its command | Synthetic eligibility flags only; no actual provider ready-item wire capabilities inferred T057/T093/T094. |
+| SC-038 | Synthetic witness subset; render its command | No-date/FIFO protection only; full drain/hold/cancellation/import worker follow-up remains pending T095/T096. |
+| SC-039 | Synthetic witness subset; render its command | Synthetic same-member support lifecycle only; deployed transport and actual off-bot settlement reconciliation remain unexecuted. |
+| SC-040 | **Planned/unexecuted; no test substitute** | Activity 180-day cleanup/restore/replay invariants T089 are planned-unexecuted. Restock subscription cleanup is different and is not substituted. |
+| SC-041 | Synthetic witness subset; render its command | Synthetic attributable bonuses only; actual bonus offers/item identity and full T092 provider recovery/access proof remain gated. |
+| SC-042 | Synthetic witness subset; render its command | Synthetic zero-due binding/partial hold only; real provider safety/charge guarantees and complete follow-up qualification remain pending. |
+| SC-043 | Synthetic witness subset; render its command | Synthetic inclusive nonrolling ceiling only; real atomic maximum-charge enforcement/currency/fees need authoritative provider proof T057. |
+| SC-044 | Synthetic witness subset; render its command | Synthetic stock/eligibility observations only; actual direct provider refresh and production availability remain unqualified. |
+| SC-045 | Synthetic witness subset; render its command | Synthetic consent/recovery only; real stock/provider observations and Telegram delivery remain unqualified. |
+| SC-046 | Synthetic witness subset; render its command | Synthetic direct-refresh seam only; real authoritative wire reads and full source mapping/race proof remain gated T057/T094. |
+| SC-047 | Synthetic witness subset; render its command | Synthetic local-first mixed complete delivery only; full source/FIFO follow-up and real provider transport remain unqualified. |
+| SC-048 | Synthetic witness subset; render its command | Synthetic audited hold/resume/cancel decisions only; complete queue-blocking drain/FIFO/import behavior T095/T096 remains pending. |
+| SC-049 | Synthetic witness subset; render its command | Synthetic retry/credit/unknown proof only; actual provider no-effect guarantees and protected case routing remain unqualified. |
+| SC-050 | Synthetic witness subset; render its command | Synthetic binding/policy only; real private binding and deployed channel/recipient security review remain unexecuted T075. |
+| SC-051 | Synthetic witness subset; render its command | Synthetic public-contact/staff metadata only; actual shared staff chat, recipients and protected credentials remain unverified T075. |
+| SC-052 | Synthetic witness subset; render its command | Synthetic collision/ownership cases only; actual historical source identifiers/import mapping remain unqualified T063/T064/T066. |
+| SC-053 | Synthetic witness subset; render its command | Synthetic restock subscription cleanup only; actual scheduler/backup restore/environment verification remains unexecuted. This is not activity cleanup SC-040. |
+
+## Current evidence, independent AI and release boundary
+
+[Acceptance qualification](../../ops/ACCEPTANCE_QUALIFICATION.md) identifies the executable source/run and artifact digests. The catalog and commands themselves are planned mappings until their actual witnesses appear in passing TRX results; no table in this quickstart claims all SC clauses passed. Every future source/provider, activity/coupon/FIFO follow-up and live-operation case remains subject to its own task and evidence gate. Existing qualified synthetic tests can overlap an unchecked future task without completing that task.
+
+[Human acceptance protocol](../../ops/USER_ACCEPTANCE_PROTOCOL.md) defines the 95% preselected-participant measure and an explicitly NOT RUN result template. Synthetic buyers and automated pass rates are not human acceptance evidence. [AI boundary qualification](../../ops/AI_BOUNDARY_QUALIFICATION.md) covers only the shop-side read/client seam; a separate AI service is not implemented or activated.
+
+T075 actual data/secrets/routes/recipient security separation, T076 representative legacy CPU/RSS/startup comparison and same-server stop/resource controls, T080 authorized source-copy/staging rehearsal and T081 explicit release decision/manifests remain unexecuted. T057 provider capabilities and T063/T064/T066/T068 source/import/reconciliation/staging gates remain open. See [staging plan](staging-plan.md) and [release gates](../../ops/RELEASE_GATES.md). No result here authorizes real credentials/source access, live services, staging/production changes, migration or deployment. Reviewer checklists remain read-only at 92/126.

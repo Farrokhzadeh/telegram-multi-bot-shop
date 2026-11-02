@@ -1,7 +1,7 @@
 # Requirements and acceptance traceability
 
 **Reviewed baseline:** 2026-10-30 at 350a4d90ebfe6e4082d94820910806bb96c2484e. **Updated:** 2026-10-31 for owner-authorized six-finding remediation and saved-order-message recovery; read-only alignment reanalysis passed with E1 closed for governance only.
-**Meaning:** planned coverage only. 84/84 functional requirements and 53/53 success criteria have named backlog owners; none of the application tests has run. Only T001 repository setup is complete; T002–T096 remain unchecked.
+**Meaning:** this table retains planned task ownership for 84/84 functional requirements and 53/53 success criteria. It is not execution evidence or a current task-count ledger. Later offline implementation checkpoints in [tasks](tasks.md) supersede historical status notes. The [executable quickstart](quickstart.md), [digested scenario catalog](../../ops/acceptance-scenarios.tsv) and [qualification record](../../ops/ACCEPTANCE_QUALIFICATION.md) distinguish passing synthetic witness subsets from planned/unexecuted full-source, human, environment and release assertions; no blanket SC pass is claimed.
 
 [Specification](spec.md), [tasks](tasks.md), [schema contract](schema-contract.md), [review and evidence gates](consistency-review.md).
 
