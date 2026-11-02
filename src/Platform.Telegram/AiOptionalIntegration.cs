@@ -40,8 +40,8 @@ public sealed class AiOptionalIntegration
             lock (state) { state.Failures = 0; state.OpenUntil = default; }
             return advice.HumanRequested ? Human(AiFallback.Requested) : new(AiDisposition.Advice, advice.Text, AiFallback.None);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { cancellation.Cancel(); throw; }
-        catch (TimeoutException) { cancellation.Cancel(); Fail(state); return Human(AiFallback.Timeout); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { _ = CancelAsync(cancellation); throw; }
+        catch (TimeoutException) { _ = CancelAsync(cancellation); Fail(state); return Human(AiFallback.Timeout); }
         catch (Exception) { Fail(state); return Human(AiFallback.Unavailable); }
         finally
         {
@@ -49,6 +49,8 @@ public sealed class AiOptionalIntegration
             else _ = ReleaseAsync(task, cancellation, state);
         }
     }
+    private static async Task CancelAsync(CancellationTokenSource cancellation)
+    { try { await cancellation.CancelAsync(); } catch (Exception) { } }
     private void Fail(State state)
     { lock (state) { state.Failures = Math.Min(threshold, state.Failures + 1); if (state.Failures >= threshold) state.OpenUntil = clock.GetUtcNow() + circuitDuration; } }
     private static async Task ReleaseAsync(Task<AiAdvice> task, CancellationTokenSource cancellation, State state)
