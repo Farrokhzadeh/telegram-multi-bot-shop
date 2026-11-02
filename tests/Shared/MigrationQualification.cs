@@ -34,6 +34,19 @@ public static class MigrationQualification
             await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='legacy_history' AND NOT is_posting", ct) != 2) throw new InvalidOperationException("Frozen opening/non-posting history qualification failed.");
         var report = await new ReconciliationReport(f.Sessions).ReadAsync(manifest, ct);
         if (!report.Complete || report.OpeningUsd != 12.34m || report.NonPostingHistory != 2 || report.SaleableInventory != 0) throw new InvalidOperationException("Migration reconciliation qualification failed.");
+        using (var vectors = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "legacy-fernet-synthetic.json"))))
+        {
+            var vector = vectors.RootElement.GetProperty("vectors").EnumerateArray().First(v => v.GetProperty("kind").GetString() == "Secret");
+            string[] keys = vector.GetProperty("keys").EnumerateArray().Select(v => v.GetString()!).ToArray();
+            var protectedValue = new ReencryptionWorkflow(f.Secrets).Brand(f.Context(0), Guid.NewGuid(), MigrationCipherField.FulfillmentContent, vector.GetProperty("ciphertext").GetString()!, LegacyFieldKind.Secret, keys);
+            if (protectedValue.KeyId != "current") throw new InvalidOperationException("Native migration re-encryption key rejected.");
+        }
+        var now = DateTime.UtcNow;
+        var keyPlan = new KeyDependencyPlan(Guid.NewGuid(), "protected:synthetic/old-key-handle", "protected:synthetic/complete-inventory", true,
+            [new("protected:synthetic/backup", Convert.ToHexStringLower(SHA256.HashData("public synthetic backup"u8)), now.AddDays(-1), true, false, false, true)]);
+        byte[] keyBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(keyPlan, KeyDependencyJsonContext.Default.KeyDependencyPlan);
+        var assessment = KeyRetirementGate.Evaluate(KeyRetirementGate.Open("protected:synthetic/key-plan", SHA256.HashData(keyBytes), keyBytes), now);
+        if (!assessment.EligibleForSeparateReview || assessment.MayDelete) throw new InvalidOperationException("Native key retirement gate rejected.");
         Directory.CreateDirectory("artifacts/migration");
         byte[] bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(report, MigrationReportJsonContext.Default.MigrationReconciliation);
         await File.WriteAllBytesAsync("artifacts/migration/synthetic-reconciliation.json", bytes, ct);
