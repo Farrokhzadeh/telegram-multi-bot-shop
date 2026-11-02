@@ -497,3 +497,6 @@ await CouponRevisionQualification.OverrideAsync();
 await CouponRevisionQualification.RaceAsync();
 await CouponRevisionQualification.RollbackAsync();
 Console.WriteLine("PASS: native typed coupon revision history, serialized override/redemption context and atomic rollback.");
+
+await BotActivityQualification.RunAsync();
+Console.WriteLine("PASS: native finite activity registry, same-member checked context, replay scope and domain isolation.");

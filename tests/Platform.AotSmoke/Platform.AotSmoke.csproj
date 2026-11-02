@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/BotActivityQualification.cs" Link="Shared/BotActivityQualification.cs" />
     <Compile Include="../Shared/CouponRevisionQualification.cs" Link="Shared/CouponRevisionQualification.cs" />
     <Compile Include="../Shared/PaymentMessageQualification.cs" Link="Shared/PaymentMessageQualification.cs" />
     <Compile Include="../Shared/PaymentDeadlineQualification.cs" Link="Shared/PaymentDeadlineQualification.cs" />

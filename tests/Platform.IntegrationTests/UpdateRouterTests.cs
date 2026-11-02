@@ -42,7 +42,7 @@ public sealed class UpdateRouterTests
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 's', fixture.PrivateProduct), Ct));
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 's', fixture.Product, messageId: 78), Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => router.RouteAsync(Callback(fixture, 1, 's', fixture.Product, actor: 7999), Ct));
-        await Assert.ThrowsAsync<DbOperationException>(() => router.RouteAsync(Callback(fixture, 1, 'o', fixture.Orders[1]), Ct));
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 'o', fixture.Orders[1]), Ct));
         await using var read = await fixture.Sessions.BeginAsync(Ct);
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.product_stock_subscriptions"), row => row.GetInt64(0), Ct));
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events"), row => row.GetInt64(0), Ct));

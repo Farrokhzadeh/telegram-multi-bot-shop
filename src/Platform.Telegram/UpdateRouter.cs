@@ -1,5 +1,6 @@
 using System.Globalization;
 using NpgsqlTypes;
+using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
 
@@ -60,13 +61,22 @@ public sealed class UpdateRouter
             if (member.Flow.Revision != callback.Revision || member.Flow.AnchorMessageId != update.MessageId) throw new TelegramIngressRejectedException();
             if (callback.Action is 's' or 'u' && member.Flow.ProductId != callback.Target) throw new TelegramIngressRejectedException();
         }
-        string key = "telegram:" + update.UpdateId.ToString(CultureInfo.InvariantCulture);
+        string key = BotActivityRegistry.TelegramIdentity(update.UpdateId);
         var action = Action(update, callback);
+        var definition = BotActivityRegistry.FromCode(action.Action);
+        Guid? activityProduct = callback?.Action is 'p' or 's' or 'u' ? callback.Target : null;
+        if (callback?.Action == 'o')
+        {
+            activityProduct = await session.QuerySingleAsync(new DbStatement("SELECT product_id FROM (SELECT 1) seed LEFT JOIN shop.orders ON id=$1 AND user_id=$2", DbValue.Uuid(callback.Target), DbValue.Uuid(member.Id)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct);
+            if (activityProduct is null) throw new TelegramIngressRejectedException();
+        }
+        BotActivityRegistry.Validate(definition.Action, update.IsCallback ? BotActivitySource.Callback : BotActivitySource.Command, BotActivityOutcome.Accepted,
+            new(activityProduct, callback?.Action == 'o' ? callback.Target : null, FlowRevision: member.Flow.Revision, TelegramUpdate: update.UpdateId));
         int recorded = await session.ExecuteAsync(new DbStatement("""
             INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,order_id,flow_revision,telegram_update_id,outcome_code,idempotency_key)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'accepted',$10) ON CONFLICT (user_id,idempotency_key) DO NOTHING
-            """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(member.Id), DbValue.Text(action.Event), DbValue.Text(update.IsCallback ? "callback" : "command"),
-            DbValue.Text(action.Action), callback?.Action is 'p' or 's' or 'u' ? DbValue.Uuid(callback.Target) : DbValue.Null(NpgsqlDbType.Uuid),
+            """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(member.Id), DbValue.Text(definition.EventType), DbValue.Text(BotActivityRegistry.Source(update.IsCallback ? BotActivitySource.Callback : BotActivitySource.Command)),
+            DbValue.Text(action.Action), activityProduct is Guid observedProduct ? DbValue.Uuid(observedProduct) : DbValue.Null(NpgsqlDbType.Uuid),
             callback?.Action == 'o' ? DbValue.Uuid(callback.Target) : DbValue.Null(NpgsqlDbType.Uuid), DbValue.Bigint(member.Flow.Revision), DbValue.Bigint(update.UpdateId), DbValue.Text(key)), ct);
         if (recorded == 0) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
         Guid? entity = null;
