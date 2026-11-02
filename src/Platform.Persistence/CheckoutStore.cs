@@ -90,6 +90,7 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
             VALUES ($1,$2,$3,$4,'product_purchase','paid','USDT','wallet',$5,false,5000,'local-wallet-v1',$6,$7,$8,$9,$10,'USD store credit; complete-order delivery','local',$11,false,CURRENT_TIMESTAMP)
             """, DbValue.Uuid(request.OrderId), DbValue.Uuid(member.Id), DbValue.Uuid(request.ProductId), DbValue.Integer(request.Quantity), DbValue.Numeric(listing.Price),
             DbValue.Text(brand.Name), DbValue.Text(listing.Title), NullableText(listing.Description), NullableText(listing.Icon), NullableText(listing.Guidance), DbValue.Boolean(product.LocalFirst)), ct);
+        await BotActivityWriter.CheckoutAsync(session, context, verifiedActorId, request.OrderId, ct);
         Money balance = wallet.Balance.Subtract(total);
         await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=$2", DbValue.Money(balance, Currency.Usd), DbValue.Uuid(member.Id)), ct);
         await session.ExecuteAsync(new DbStatement("""

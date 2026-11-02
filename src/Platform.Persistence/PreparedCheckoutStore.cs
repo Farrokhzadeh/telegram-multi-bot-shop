@@ -97,6 +97,7 @@ public sealed partial class CheckoutStore
             DbValue.Text(terms.Product.Brand), DbValue.Text(terms.Product.Title), NullableText(terms.Product.Description), NullableText(terms.Product.Icon), NullableText(terms.Product.Guidance),
             DbValue.Text(product.Kind), DbValue.Boolean(product.LocalFirst), DbValue.Boolean(request.Kind == CheckoutKind.ProductPurchase && product.Preorder), DbValue.Text(unpaid || request.Kind == CheckoutKind.PrepaidUnits ? "unfulfilled" : prepared.Supply.WaitingForLocalStock ? "waiting_stock" : product.Kind == "manual" ? "requires_admin" : "acquiring"),
             DbValue.Text(request.Kind == CheckoutKind.PrepaidUnits ? "prepaid_units" : "product_purchase"), DbValue.Text(terms.Currency.ToCode()), DbValue.Boolean(unpaid)), ct);
+        await BotActivityWriter.CheckoutAsync(session, context, actor, request.OrderId, ct);
         if (terms.DiscountId is Guid coupon) await pricing.HoldAsync(session, context, actor, coupon, request.OrderId, ct);
         if (!free && !unpaid)
         {

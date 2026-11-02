@@ -35,14 +35,14 @@ public static class BotActivityQualification
         foreach (var action in Enum.GetValues<BotActivityAction>())
         {
             var definition = BotActivityRegistry.Get(action);
-            var context = new BotActivityContext(definition.ProductRequired ? f.Product : null, action == BotActivityAction.CheckoutOpen ? own.Order : null,
+            var context = new BotActivityContext(definition.ProductRequired ? f.Product : null, action == BotActivityAction.CheckoutOpen || definition.OrderRequired ? own.Order : null,
                 definition.TicketRequired ? ticket : null, definition.QuantityRequired ? 2 : null, 2, 1000 + (int)action);
             var source = action is BotActivityAction.QuantityEnter or BotActivityAction.SupportReply ? BotActivitySource.Flow : action == BotActivityAction.PolicyCheck ? BotActivitySource.System : action is BotActivityAction.Start or BotActivityAction.CatalogOpen or BotActivityAction.SupportOpen or BotActivityAction.DiscountsOpen ? BotActivitySource.Command : BotActivitySource.Callback;
             await Insert(f, 0, definition, source, context, ct);
         }
         for (int i = 0; i < 100; i++) await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.Start), BotActivitySource.Command, new(TelegramUpdate: 1000), ct);
         await Insert(f, 1, BotActivityRegistry.Get(BotActivityAction.Start), BotActivitySource.Command, new(TelegramUpdate: 1000), ct);
-        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 13, "same-member hundred replay dedupe and separate brand membership");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id IS NOT NULL", ct) == Enum.GetValues<BotActivityAction>().Length + 2, "same-member hundred replay dedupe and separate brand membership");
         bool ownership = false;
         try { await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.CheckoutOpen), BotActivitySource.Callback, new(f.Product, foreign.Order, TelegramUpdate: 9999), ct); }
         catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { ownership = true; }

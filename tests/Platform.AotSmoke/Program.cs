@@ -505,3 +505,9 @@ await BotActivityRuntimeQualification.ReplayAsync();
 await BotActivityRuntimeQualification.RetentionAsync();
 await BotActivityRuntimeQualification.TimelineAsync();
 Console.WriteLine("PASS: native independent Telegram replay checkpoint, bounded safe activity cleanup and authenticated scoped cursor timeline.");
+
+await WorkflowActivityQualification.CheckoutAsync();
+await WorkflowActivityQualification.AtomicAsync();
+await WorkflowActivityQualification.FlowAsync();
+await WorkflowActivityQualification.RetentionAsync();
+Console.WriteLine("PASS: native original-time quantity/checkout activity, atomic financial rollback, actual flow expiry and independent domain-fenced cleanup.");

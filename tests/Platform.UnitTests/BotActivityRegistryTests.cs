@@ -5,10 +5,13 @@ namespace Platform.UnitTests;
 public sealed class BotActivityRegistryTests
 {
     [Fact]
-    public void StableVersionOneHasOnlyTheElevenCanonicalActions()
+    public void VersionTwoPreservesElevenOriginalActionsAndAddsTypedDomainTransitions()
     {
-        Assert.Equal(1, BotActivityRegistry.Version);
-        var actions = Enum.GetValues<BotActivityAction>(); Assert.Equal(11, actions.Length);
+        Assert.Equal(2, BotActivityRegistry.Version);
+        var actions = Enum.GetValues<BotActivityAction>(); Assert.Equal(13, actions.Length);
+        Assert.Equal("policy_check", BotActivityRegistry.Get((BotActivityAction)10).Code);
+        Assert.Equal(11, (int)BotActivityAction.CheckoutCreated);
+        Assert.Equal(12, (int)BotActivityAction.FlowExpired);
         Assert.Equal(actions.Length, actions.Select(a => BotActivityRegistry.Get(a).Code).Distinct(StringComparer.Ordinal).Count());
         foreach (var action in actions) Assert.Equal(action, BotActivityRegistry.FromCode(BotActivityRegistry.Get(action).Code).Action);
     }
@@ -23,5 +26,7 @@ public sealed class BotActivityRegistryTests
         Assert.Throws<ArgumentException>(() => BotActivityRegistry.Validate(BotActivityAction.Start, (BotActivitySource)999, BotActivityOutcome.Accepted, new()));
         Assert.Throws<ArgumentOutOfRangeException>(() => BotActivityRegistry.TelegramIdentity(-1));
         Assert.Equal("telegram:123", BotActivityRegistry.TelegramIdentity(123));
+        Assert.Throws<ArgumentException>(() => BotActivityRegistry.Validate(BotActivityAction.CheckoutCreated, BotActivitySource.Flow, BotActivityOutcome.Accepted, new(Product: Guid.NewGuid(), Quantity: 1)));
+        Assert.Throws<ArgumentException>(() => BotActivityRegistry.Validate(BotActivityAction.FlowExpired, BotActivitySource.System, BotActivityOutcome.Cancelled, new()));
     }
 }

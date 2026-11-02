@@ -716,9 +716,9 @@ id uuid PRIMARY KEY,
 CREATE TABLE bot_activity_events (
 id uuid PRIMARY KEY,
     user_id uuid NOT NULL,
-    event_type text NOT NULL CHECK (event_type IN ('navigation','quantity','checkout','support','subscription','discount','policy')),
+    event_type text NOT NULL CHECK (event_type IN ('navigation','quantity','checkout','support','subscription','discount','policy','flow')),
     source_kind text NOT NULL CHECK (source_kind IN ('command','callback','flow','system')),
-    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check')),
+    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check','checkout_created','flow_expired')),
     product_id uuid,
     order_id uuid,
     support_ticket_id uuid,
@@ -731,14 +731,17 @@ id uuid PRIMARY KEY,
     UNIQUE (user_id,idempotency_key),
     CHECK ((event_type='navigation' AND action_code IN ('start','catalog_open','product_open')) OR
            (event_type='quantity' AND action_code='quantity_enter') OR
-           (event_type='checkout' AND action_code='checkout_open') OR
+           (event_type='checkout' AND action_code IN ('checkout_open','checkout_created')) OR
            (event_type='support' AND action_code IN ('support_open','support_reply')) OR
            (event_type='subscription' AND action_code IN ('subscribe','unsubscribe')) OR
            (event_type='discount' AND action_code='discounts_open') OR
-           (event_type='policy' AND action_code='policy_check')),
-    CHECK (action_code NOT IN ('product_open','quantity_enter','checkout_open','subscribe','unsubscribe') OR product_id IS NOT NULL),
-    CHECK (action_code <> 'quantity_enter' OR quantity_selected IS NOT NULL),
+           (event_type='policy' AND action_code='policy_check') OR
+           (event_type='flow' AND action_code='flow_expired')),
+    CHECK (action_code NOT IN ('product_open','quantity_enter','checkout_open','checkout_created','subscribe','unsubscribe') OR product_id IS NOT NULL),
+    CHECK (action_code NOT IN ('quantity_enter','checkout_created') OR quantity_selected IS NOT NULL),
     CHECK (action_code <> 'support_reply' OR support_ticket_id IS NOT NULL),
+    CHECK (action_code <> 'checkout_created' OR order_id IS NOT NULL),
+    CHECK (action_code <> 'flow_expired' OR flow_revision IS NOT NULL),
     CHECK (isfinite(occurred_at))
 );
 

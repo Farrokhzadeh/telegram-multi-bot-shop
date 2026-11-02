@@ -89,6 +89,8 @@ public sealed class CatalogStore
         CheckoutQuote quote = await BuildQuoteAsync(session, context, current, query, ct);
         var prepared = new PreparedCheckout(this, context, verifiedActorId, current.Member, query, quote, supply, current.PolicyRevision, current.ProductRevision,
             current.ListingRevision, supply.RemoteUnits > 0 ? current.Source?.Id : null, supply.RemoteUnits > 0 ? current.Source?.Revision : null, supply.RemoteUnits > 0 ? current.Source?.ObservationRevision : null);
+        await BotActivityWriter.RecordAsync(session, context, verifiedActorId, current.Member, BotActivityAction.QuantityEnter, BotActivitySource.Flow, BotActivityOutcome.Accepted,
+            new(query.ProductId, Quantity: query.Quantity), Guid.NewGuid(), current.Now, ct);
         await session.CommitAsync(ct);
         return prepared;
     }
