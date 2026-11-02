@@ -6,6 +6,12 @@ namespace Platform.IntegrationTests;
 public sealed class WorkflowActivityTests
 {
     [Fact]
+    public async Task SignificantCheckoutFailuresHaveFiniteScopedPrivateDataFreeActivity() => await WorkflowActivityQualification.CheckoutErrorsAsync(Ct);
+    [Fact]
+    public async Task FundingEventCommitFailureRollsBackSettlementAndAllocationTogether() => await WorkflowActivityQualification.FundingRollbackAsync(Ct);
+    [Fact]
+    public async Task ActualFundingReplacementAndReplayPreserveOriginalPaymentAuthority() => await WorkflowActivityQualification.CheckoutStatesAsync(Ct);
+    [Fact]
     public async Task ActualTargetBackupRestorePreservesReplayMoneyAndOriginalRetentionClock() => await TargetRestoreQualification.RunAsync(Ct);
     [Fact]
     public async Task VerifiedNumericIngressPreservesBrandScopeReplayAndSupportBoundary() => await WorkflowActivityQualification.QuantityAsync(Ct);

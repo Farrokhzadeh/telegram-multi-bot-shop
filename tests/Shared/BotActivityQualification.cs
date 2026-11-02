@@ -32,7 +32,8 @@ public static class BotActivityQualification
             Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM pg_indexes WHERE schemaname='shop' AND tablename='bot_activity_events' AND (indexname IN ('activity_retention','activity_member_time') OR indexdef LIKE '%UNIQUE%user_id, idempotency_key%')"), r => r.GetInt64(0), ct) == 3, "retention timeline and membership replay indexes");
         }
         string before = await Domain(f, ct);
-        foreach (var action in Enum.GetValues<BotActivityAction>())
+        var interactionActions = Enum.GetValues<BotActivityAction>().Where(a => a is not (BotActivityAction.CheckoutFunded or BotActivityAction.CheckoutExpired or BotActivityAction.CheckoutReplaced or BotActivityAction.CheckoutRejected)).ToArray();
+        foreach (var action in interactionActions)
         {
             var definition = BotActivityRegistry.Get(action);
             var context = new BotActivityContext(definition.ProductRequired ? f.Product : null, action == BotActivityAction.CheckoutOpen || definition.OrderRequired ? own.Order : null,
@@ -42,7 +43,7 @@ public static class BotActivityQualification
         }
         for (int i = 0; i < 100; i++) await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.Start), BotActivitySource.Command, new(TelegramUpdate: 1000), ct);
         await Insert(f, 1, BotActivityRegistry.Get(BotActivityAction.Start), BotActivitySource.Command, new(TelegramUpdate: 1000), ct);
-        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id IS NOT NULL", ct) == Enum.GetValues<BotActivityAction>().Length + 2, "same-member hundred replay dedupe and separate brand membership");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id IS NOT NULL", ct) == interactionActions.Length + 2, "same-member hundred replay dedupe and separate brand membership");
         bool ownership = false;
         try { await Insert(f, 0, BotActivityRegistry.Get(BotActivityAction.CheckoutOpen), BotActivitySource.Callback, new(f.Product, foreign.Order, TelegramUpdate: 9999), ct); }
         catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { ownership = true; }

@@ -507,10 +507,14 @@ await BotActivityRuntimeQualification.TimelineAsync();
 Console.WriteLine("PASS: native independent Telegram replay checkpoint, bounded safe activity cleanup and authenticated scoped cursor timeline.");
 
 await WorkflowActivityQualification.CheckoutAsync();
+await WorkflowActivityQualification.CheckoutStatesAsync();
+await WorkflowActivityQualification.FundingRollbackAsync();
+await WorkflowActivityQualification.CheckoutErrorsAsync();
 await WorkflowActivityQualification.QuantityAsync();
 await WorkflowActivityQualification.QuantityErrorsAsync();
 await WorkflowActivityQualification.QuantityRollbackAsync();
 await TargetRestoreQualification.RunAsync();
+Console.WriteLine("PASS: native actual PostgreSQL target backup/restore, original activity cutoff and independent financial/update replay.");
 await WorkflowActivityQualification.AtomicAsync();
 await WorkflowActivityQualification.FlowAsync();
 await WorkflowActivityQualification.RetentionAsync();

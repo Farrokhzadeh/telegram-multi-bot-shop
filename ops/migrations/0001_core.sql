@@ -718,7 +718,7 @@ id uuid PRIMARY KEY,
     user_id uuid NOT NULL,
     event_type text NOT NULL CHECK (event_type IN ('navigation','quantity','checkout','support','subscription','discount','policy','flow')),
     source_kind text NOT NULL CHECK (source_kind IN ('command','callback','flow','system')),
-    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check','checkout_created','flow_expired','quantity_rejected')),
+    action_code text NOT NULL CHECK (action_code IN ('start','catalog_open','product_open','quantity_enter','checkout_open','support_open','support_reply','subscribe','unsubscribe','discounts_open','policy_check','checkout_created','flow_expired','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected')),
     product_id uuid,
     order_id uuid,
     support_ticket_id uuid,
@@ -731,18 +731,21 @@ id uuid PRIMARY KEY,
     UNIQUE (user_id,idempotency_key),
     CHECK ((event_type='navigation' AND action_code IN ('start','catalog_open','product_open')) OR
            (event_type='quantity' AND action_code IN ('quantity_enter','quantity_rejected')) OR
-           (event_type='checkout' AND action_code IN ('checkout_open','checkout_created')) OR
+           (event_type='checkout' AND action_code IN ('checkout_open','checkout_created','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected')) OR
            (event_type='support' AND action_code IN ('support_open','support_reply')) OR
            (event_type='subscription' AND action_code IN ('subscribe','unsubscribe')) OR
            (event_type='discount' AND action_code='discounts_open') OR
            (event_type='policy' AND action_code='policy_check') OR
            (event_type='flow' AND action_code='flow_expired')),
-    CHECK (action_code NOT IN ('product_open','quantity_enter','checkout_open','checkout_created','subscribe','unsubscribe','quantity_rejected') OR product_id IS NOT NULL),
-    CHECK (action_code NOT IN ('quantity_enter','checkout_created') OR quantity_selected IS NOT NULL),
+    CHECK (action_code NOT IN ('product_open','quantity_enter','checkout_open','checkout_created','subscribe','unsubscribe','quantity_rejected','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected') OR product_id IS NOT NULL),
+    CHECK (action_code NOT IN ('quantity_enter','checkout_created','checkout_funded','checkout_expired','checkout_replaced','checkout_rejected') OR quantity_selected IS NOT NULL),
     CHECK (action_code <> 'support_reply' OR support_ticket_id IS NOT NULL),
-    CHECK (action_code <> 'checkout_created' OR order_id IS NOT NULL),
+    CHECK (action_code NOT IN ('checkout_created','checkout_funded','checkout_expired','checkout_replaced') OR order_id IS NOT NULL),
     CHECK (action_code NOT IN ('flow_expired','quantity_rejected') OR flow_revision IS NOT NULL),
     CHECK (action_code <> 'quantity_rejected' OR (source_kind='flow' AND outcome_code='rejected' AND quantity_selected IS NULL)),
+    CHECK (action_code <> 'checkout_rejected' OR (source_kind='flow' AND outcome_code='rejected' AND order_id IS NULL AND support_ticket_id IS NULL AND flow_revision IS NULL AND telegram_update_id IS NULL)),
+    CHECK (action_code NOT IN ('checkout_funded','checkout_expired','checkout_replaced') OR (source_kind='system' AND
+        outcome_code=CASE WHEN action_code='checkout_funded' THEN 'accepted' ELSE 'cancelled' END)),
     CHECK (isfinite(occurred_at))
 );
 
@@ -1542,6 +1545,13 @@ BEGIN
     IF TG_TABLE_NAME='bot_activity_events' THEN
         IF NEW.order_id IS NOT NULL THEN PERFORM require_true(EXISTS(SELECT 1 FROM orders WHERE id=NEW.order_id AND user_id=NEW.user_id),'activity_order_member'); END IF;
         IF NEW.support_ticket_id IS NOT NULL THEN PERFORM require_true(EXISTS(SELECT 1 FROM support_tickets WHERE id=NEW.support_ticket_id AND user_id=NEW.user_id),'activity_ticket_member'); END IF;
+        IF NEW.action_code IN ('checkout_funded','checkout_expired','checkout_replaced') THEN
+            PERFORM require_true(NEW.support_ticket_id IS NULL AND NEW.flow_revision IS NULL AND NEW.telegram_update_id IS NULL AND
+                EXISTS(SELECT 1 FROM orders o WHERE o.id=NEW.order_id AND o.user_id=NEW.user_id AND o.product_id=NEW.product_id AND o.quantity=NEW.quantity_selected
+                    AND CASE NEW.action_code WHEN 'checkout_funded' THEN o.payment_status IN ('paid','not_required') AND o.payment_confirmed_at=NEW.occurred_at
+                        WHEN 'checkout_expired' THEN o.resolution_kind='unpaid_expiry' AND o.resolution_at=NEW.occurred_at
+                        WHEN 'checkout_replaced' THEN o.resolution_kind='replaced' AND o.resolution_at=NEW.occurred_at ELSE false END),'activity_actual_checkout_transition');
+        END IF;
     ELSIF TG_OP='UPDATE' THEN
         PERFORM require_true(ROW(NEW.id,NEW.user_id,NEW.product_id,NEW.created_at)=ROW(OLD.id,OLD.user_id,OLD.product_id,OLD.created_at),'consent_origin_immutable');
         IF OLD.triggered_at IS NOT NULL THEN PERFORM require_true(NEW.triggered_at IS NOT DISTINCT FROM OLD.triggered_at,'consent_enqueue_clock'); END IF;
@@ -1553,6 +1563,34 @@ END $$;
 CREATE TRIGGER subscription_guard BEFORE INSERT OR UPDATE OR DELETE ON product_stock_subscriptions FOR EACH ROW EXECUTE FUNCTION guard_subscription_activity();
 CREATE TRIGGER activity_guard BEFORE INSERT OR DELETE ON bot_activity_events FOR EACH ROW EXECUTE FUNCTION guard_subscription_activity();
 CREATE TRIGGER activity_no_update BEFORE UPDATE ON bot_activity_events FOR EACH ROW EXECUTE FUNCTION immutable_history();
+
+CREATE FUNCTION record_order_activity() RETURNS trigger
+LANGUAGE plpgsql SET search_path=shop,pg_catalog AS $$
+DECLARE action_name text; original_at timestamptz; outcome_name text; event_key text;
+BEGIN
+    IF NEW.product_id IS NULL THEN RETURN NEW; END IF;
+    IF TG_OP='UPDATE' AND NEW.payment_status=OLD.payment_status THEN RETURN NEW; END IF;
+    IF NEW.payment_status IN ('paid','not_required') THEN action_name:='checkout_funded'; original_at:=NEW.payment_confirmed_at; outcome_name:='accepted';
+    ELSIF TG_OP='UPDATE' AND NEW.payment_status='expired' AND NEW.resolution_kind='unpaid_expiry' THEN
+        action_name:='checkout_expired'; original_at:=NEW.resolution_at; outcome_name:='cancelled';
+    ELSIF TG_OP='UPDATE' AND NEW.payment_status='cancelled' AND NEW.resolution_kind='replaced' THEN
+        action_name:='checkout_replaced'; original_at:=NEW.resolution_at; outcome_name:='cancelled';
+    ELSE RETURN NEW;
+    END IF;
+    IF original_at IS NULL OR original_at>clock_timestamp() OR original_at<CURRENT_TIMESTAMP-INTERVAL '4320 hours' THEN RETURN NEW; END IF;
+    event_key:='workflow:'||action_name||':'||replace(NEW.id::text,'-','');
+    INSERT INTO bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,order_id,quantity_selected,outcome_code,idempotency_key,occurred_at)
+    VALUES(gen_random_uuid(),NEW.user_id,'checkout','system',action_name,NEW.product_id,NEW.id,NEW.quantity,outcome_name,event_key,original_at)
+    ON CONFLICT(user_id,idempotency_key) DO NOTHING;
+    IF NOT FOUND THEN
+        PERFORM require_true(EXISTS(SELECT 1 FROM bot_activity_events e WHERE e.user_id=NEW.user_id AND e.idempotency_key=event_key
+            AND ROW(e.event_type,e.source_kind,e.action_code,e.product_id,e.order_id,e.quantity_selected,e.outcome_code,e.occurred_at)
+                IS NOT DISTINCT FROM ROW('checkout'::text,'system'::text,action_name,NEW.product_id,NEW.id,NEW.quantity,outcome_name,original_at)
+            AND e.support_ticket_id IS NULL AND e.flow_revision IS NULL AND e.telegram_update_id IS NULL),'activity_identity_conflict');
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER order_activity AFTER INSERT OR UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION record_order_activity();
 
 CREATE FUNCTION guard_deliveries() RETURNS trigger
 LANGUAGE plpgsql SET search_path=shop,pg_catalog AS $$

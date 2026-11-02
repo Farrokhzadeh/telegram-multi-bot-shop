@@ -36,6 +36,7 @@ public static class PaymentDeadlineQualification
         var lease = await ClaimAsync(f, ct);
         Require(await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(0), lease, ct) == PaymentExpiryOutcome.Expired, "expired original");
         Require(await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='expired' AND resolution_kind='unpaid_expiry'", ct) == 1, "terminal expiry");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events e JOIN shop.orders o ON o.id=e.order_id WHERE e.action_code='checkout_expired' AND e.source_kind='system' AND e.outcome_code='cancelled' AND e.occurred_at=o.resolution_at", ct) == 1, "actual unpaid expiry appends original-time typed state activity");
         Require(await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='released' AND units_covered=1", ct) == 1 && await f.CountAsync("SELECT redeemed_count FROM shop.discounts", ct) == 0, "whole held claim returned");
         Require(await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.fulfillments", ct) == 0, "no financial or stock effects");
         Require(await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_status' AND dedupe_key LIKE 'instruction-expired:%'", ct) == 1, "durable expired notice");

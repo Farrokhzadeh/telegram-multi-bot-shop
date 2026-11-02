@@ -347,7 +347,7 @@ public sealed class RelationalSchemaTests
             VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000101','navigation','command','start','accepted','public-expired',CURRENT_TIMESTAMP-INTERVAL '4320 hours'-INTERVAL '1 second');
             DELETE FROM shop.bot_activity_events WHERE idempotency_key='public-expired'
             """);
-        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM shop.bot_activity_events"));
+        Assert.Equal(1L, await ScalarAsync<long>(database, "SELECT count(*) FROM shop.bot_activity_events WHERE idempotency_key IN ('public-equality','public-expired')"));
         await ExecuteAsync(database, "INSERT INTO shop.product_stock_subscriptions(id,user_id,product_id,created_at) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000101','00000000-0000-0000-0000-000000000201',CURRENT_TIMESTAMP-INTERVAL '500 days')");
         await RejectAsync(database, "DELETE FROM shop.product_stock_subscriptions");
         await RejectAsync(database, "INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,outcome_code,idempotency_key) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000101','quantity','command','start','accepted','public-invalid-registry-pair')");

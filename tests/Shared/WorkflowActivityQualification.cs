@@ -7,6 +7,63 @@ namespace Platform.Testing;
 
 public static class WorkflowActivityQualification
 {
+    public static async Task CheckoutErrorsAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: ct);
+        var catalog = new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException());
+        var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
+        Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(OrderIds.New(), f.Product, 1), Member, ct)).Outcome == CheckoutOutcome.InsufficientBalance, "authorized wallet rejection");
+        bool shortage = false;
+        try { await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(OrderIds.New(), f.Product, 3), Member, ct); } catch (PricingRejectedException) { shortage = true; }
+        Require(shortage && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_rejected' AND outcome_code='rejected' AND source_kind='flow' AND order_id IS NULL AND quantity_selected IN (1,3)", ct) == 2, "significant checkout failures record only a finite scoped observation without a fictional order or raw error");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.orders", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.payments", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", ct) == 2, "rejection activity creates no financial or stock effects");
+    }
+    public static async Task FundingRollbackAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: ct);
+        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct);
+        var order = await payments.OrderAsync(ct: ct);
+        await payments.CaptureAsync(order.Payment, order.Origin, order.Due, ct: ct);
+        await using (var fail = f.Database.Data.CreateCommand("CREATE FUNCTION shop.synthetic_funding_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='synthetic funding failure'; END $$; CREATE CONSTRAINT TRIGGER synthetic_funding_failure AFTER INSERT ON shop.bot_activity_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.action_code='checkout_funded') EXECUTE FUNCTION shop.synthetic_funding_failure()")) await fail.ExecuteNonQueryAsync(ct);
+        bool failed = false;
+        try { await payments.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, ct); }
+        catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { failed = true; }
+        Require(failed && await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='confirmation_pending'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.payments WHERE status='settled'", ct) == 0, "funding event commit failure preserves verified pending evidence without false acceptance");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_funded'", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.fulfillments", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", ct) == 2 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0, "funding event and payment/allocation effects roll back together");
+        await using (var repair = f.Database.Data.CreateCommand("DROP TRIGGER synthetic_funding_failure ON shop.bot_activity_events; DROP FUNCTION shop.synthetic_funding_failure()")) await repair.ExecuteNonQueryAsync(ct);
+        Require((await payments.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, ct)).Outcome == PaymentSettlementOutcome.Settled && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_funded'", ct) == 1, "original invoice retries to one committed funding event");
+    }
+    public static async Task CheckoutStatesAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 5, ct: ct);
+        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct);
+        var first = await payments.OrderAsync(ct: ct);
+        var second = await payments.OrderAsync(ct: ct);
+        bool forged = false;
+        await using (var invalid = await f.Sessions.BeginAsync(ct))
+        {
+            try
+            {
+                await invalid.ExecuteAsync(new DbStatement("""
+                    INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,order_id,quantity_selected,outcome_code,idempotency_key)
+                    VALUES(gen_random_uuid(),$1,'checkout','system','checkout_funded',$2,$3,1,'accepted','public-false-unpaid-funding')
+                    """, DbValue.Uuid(f.Users[0]), DbValue.Uuid(f.Product), DbValue.Uuid(second.Order)), ct);
+            }
+            catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { forged = true; }
+        }
+        Require(forged, "awaiting payment cannot be represented as funded activity");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_replaced'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_funded'", ct) == 0, "replacement is an actual cancellation while unpaid creation is not funding");
+        await using (var block = await f.Sessions.BeginAsync(ct))
+        { await block.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(f.Users[0])), ct); await block.CommitAsync(ct); }
+        await payments.CaptureAsync(first.Payment, first.Origin, first.Due, ct: ct);
+        Require((await payments.Store.SettleAsync(f.Context(0), first.Payment, PaymentSettlementFixture.Lookup, ct)).Route == ExternalSettlementRoute.LateCredit, "replaced order retains original late-money recovery");
+        await payments.CaptureAsync(second.Payment, second.Origin, second.Due, ct: ct);
+        Require((await payments.Store.SettleAsync(f.Context(0), second.Payment, PaymentSettlementFixture.Lookup, ct)).Outcome == PaymentSettlementOutcome.Settled, "current invoice settles even if customer delivery is blocked");
+        for (int i = 0; i < 100; i++) Require((await payments.Store.SettleAsync(f.Context(0), second.Payment, (_, _) => throw new InvalidOperationException(), ct)).Outcome == PaymentSettlementOutcome.Replayed, "settlement replay does not repeat funding activity");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events e JOIN shop.orders o ON o.id=e.order_id WHERE e.action_code='checkout_funded' AND e.user_id=o.user_id AND e.product_id=o.product_id AND e.quantity_selected=o.quantity AND e.occurred_at=o.payment_confirmed_at", ct) == 1, "funding uses checked domain context and immutable original acceptance clock");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events e JOIN shop.orders o ON o.id=e.order_id WHERE e.action_code='checkout_replaced' AND o.resolution_kind='replaced' AND e.occurred_at=o.resolution_at", ct) == 1, "replacement uses original resolution clock");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='late_crypto_credit'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_funded' AND order_id IN (SELECT id FROM shop.orders WHERE payment_status='cancelled')", ct) == 0, "late recovery never fabricates order funding or revives cancellation");
+    }
     public static async Task QuantityAsync(CancellationToken ct = default)
     {
         await using var f = await CheckoutFixture.CreateAsync(users: 6, ct: ct);
@@ -119,6 +176,7 @@ public static class WorkflowActivityQualification
         Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events e JOIN shop.orders o ON o.id=e.order_id WHERE e.action_code='checkout_created' AND e.user_id=o.user_id AND e.product_id=o.product_id AND e.quantity_selected=o.quantity AND e.occurred_at=o.created_at AND e.telegram_update_id IS NULL", ct) == 3, "typed context and immutable original order clock");
         Require(await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct) == 2 && await f.CountAsync("SELECT balance::bigint FROM shop.wallets WHERE user_id=(SELECT user_id FROM shop.orders WHERE id='" + request.OrderId.ToString("D") + "')", ct) == 70, "exact original wallet effects");
         Require(await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.payments WHERE status='settled'", ct) == 0, "creation does not fabricate settlement");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events e JOIN shop.orders o ON o.id=e.order_id WHERE e.action_code='checkout_funded' AND o.payment_status='paid' AND e.occurred_at=o.payment_confirmed_at", ct) == 2, "only accepted local wallet orders are funded");
         bool changed = false;
         try { await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request with { Quantity = 3 }, Member, ct); } catch (UnauthorizedAccessException) { changed = true; }
         Require(changed && await f.CountAsync("SELECT count(*) FROM shop.orders", ct) == 3, "changed command remains rejected");
@@ -135,6 +193,7 @@ public static class WorkflowActivityQualification
         catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { failed = true; }
         Require(failed && await f.CountAsync("SELECT count(*) FROM shop.orders", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", ct) == 4, "event commit failure rolls back order debit and allocation");
         Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_created'", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='quantity_enter'", ct) == 1, "actual earlier preparation survives without a false order event");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_funded'", ct) == 0, "failed acceptance cannot leave funding activity");
         await using (var repair = f.Database.Data.CreateCommand("DROP TRIGGER synthetic_workflow_failure ON shop.bot_activity_events; DROP FUNCTION shop.synthetic_workflow_failure()")) await repair.ExecuteNonQueryAsync(ct);
         Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, ct)).Outcome == CheckoutOutcome.Purchased, "same order identity can retry rolled-back acceptance");
         Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='checkout_created'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct) == 1, "retry commits exactly one order event and debit");
