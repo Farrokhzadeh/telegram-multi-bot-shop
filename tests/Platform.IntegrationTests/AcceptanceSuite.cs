@@ -7,5 +7,5 @@ public sealed class AcceptanceSuite
 {
     [Fact]
     public async Task OneDisposableRunRetainsMoneyStockDeliveryAndOriginalSupplierIntentAcrossRestarts() =>
-        await AcceptanceQualification.RunAsync(TestContext.Current.CancellationToken);
+        await AcceptanceQualification.RunAsync(ct: TestContext.Current.CancellationToken);
 }

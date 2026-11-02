@@ -470,3 +470,6 @@ Console.WriteLine("PASS: native JSON, AES-GCM scope, legacy Fernet, schema/opera
 await AiBoundaryQualification.RunAsync();
 await AiHttpQualification.RunAsync();
 Console.WriteLine("PASS: native scoped AI context, read-only enforcement, AI-off commerce and human support.");
+
+await AcceptanceQualification.RunAsync(export: true);
+Console.WriteLine("PASS: native combined 50-buyer race, hundred settlements, durable manifest/edit restart and original supplier reconciliation.");
