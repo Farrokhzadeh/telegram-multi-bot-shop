@@ -14,6 +14,14 @@ public sealed class WalletCheckoutService(DbSessionFactory sessions, CheckoutSto
         BrandPolicySnapshot policy;
         await using (var read = await sessions.BeginAsync(ct)) policy = await BrandPolicyStore.ReadAsync(read, context, verifiedActorId, ct);
         ChannelAccess? access = await BrandPolicy.CheckChannelsAsync(policy, verifiedActorId, checkChannels, ct);
+        await using (var observation = await sessions.BeginAsync(ct))
+        {
+            BrandUser member = await BrandUserStore.RequireAsync(observation, context, verifiedActorId, null, ct);
+            DateTime at = await observation.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
+            await BotActivityWriter.RecordAsync(observation, context, verifiedActorId, member.Id, BotActivityAction.PolicyCheck, BotActivitySource.System,
+                access is null ? BotActivityOutcome.Blocked : BotActivityOutcome.Accepted, new(), Guid.NewGuid(), at, ct);
+            await observation.CommitAsync(ct);
+        }
         if (access is null)
         { await RecordRejectionAsync(context, verifiedActorId, request, ct); return new(CheckoutOutcome.Unavailable); }
         try

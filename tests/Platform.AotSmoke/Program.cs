@@ -518,6 +518,8 @@ await TargetActivityImportQualification.RunAsync();
 await TargetActivityImportQualification.AtomicAsync();
 await TargetActivityImportQualification.BoundsAsync();
 await WorkflowActivityQualification.AbandonmentAsync();
+await WorkflowActivityQualification.PolicyAsync();
+await ActivityMaintenanceQualification.RunAsync();
 await PaymentActivityQualification.TopupAsync();
 await PaymentActivityQualification.ReviewAndBankAsync();
 await PaymentActivityQualification.RollbackAsync();

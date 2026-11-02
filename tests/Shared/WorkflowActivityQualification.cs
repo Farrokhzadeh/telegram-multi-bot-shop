@@ -7,6 +7,22 @@ namespace Platform.Testing;
 
 public static class WorkflowActivityQualification
 {
+    public static async Task PolicyAsync(CancellationToken ct = default)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: ct);
+        await using (var seed = await f.Sessions.BeginAsync(ct))
+        {
+            await seed.ExecuteAsync(new DbStatement("UPDATE shop.brands SET require_channel_join=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(f.Brands[0])), ct);
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_channels(brand_id,chat_id,required,active) VALUES($1,-1001,true,true)", DbValue.Uuid(f.Brands[0])), ct);
+            await seed.CommitAsync(ct);
+        }
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException()));
+        Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(OrderIds.New(), f.Product, 1), (_, _, _) => Task.FromResult(ChannelMembership.Unknown), ct)).Outcome == CheckoutOutcome.Unavailable, "unverified channel policy still blocks checkout");
+        var accepted = new CheckoutRequest(OrderIds.New(), f.Product, 1);
+        Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), accepted, Member, ct)).Outcome == CheckoutOutcome.Purchased, "current verified policy permits original checkout");
+        Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), accepted, (_, _, _) => throw new InvalidOperationException(), ct)).Outcome == CheckoutOutcome.Replayed, "financial replay returns before fresh policy observation");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='policy_check' AND source_kind='system' AND outcome_code='blocked'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='policy_check' AND source_kind='system' AND outcome_code='accepted'", ct) == 1, "finite real policy observations contain no channel/profile payload or authority");
+    }
     public static async Task AbandonmentAsync(CancellationToken ct = default)
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: ct);

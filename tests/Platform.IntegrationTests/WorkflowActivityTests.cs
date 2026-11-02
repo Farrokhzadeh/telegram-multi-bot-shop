@@ -6,6 +6,10 @@ namespace Platform.IntegrationTests;
 public sealed class WorkflowActivityTests
 {
     [Fact]
+    public async Task RestrictedMaintenanceIdentityCannotReadOrMutatePrivateDomains() => await ActivityMaintenanceQualification.RunAsync(Ct);
+    [Fact]
+    public async Task RealPolicyChecksRecordSafeOutcomesWithoutGrantingCheckoutAuthority() => await WorkflowActivityQualification.PolicyAsync(Ct);
+    [Fact]
     public async Task ActualUiAbandonmentPreservesFinancialStateAndReplay() => await WorkflowActivityQualification.AbandonmentAsync(Ct);
     [Fact]
     public async Task TargetImportPreservesOriginalIdentityClockCutoffAndConflictingReplay() => await TargetActivityImportQualification.RunAsync(Ct);

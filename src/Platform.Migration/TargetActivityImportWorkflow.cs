@@ -51,7 +51,8 @@ public sealed class VerifiedTargetActivityBatch
                 (row.Origin == TargetActivityOrigin.Telegram && row.Identity != Guid.Empty)) throw new MigrationRejectedException();
             if (row.Origin == TargetActivityOrigin.Workflow)
             {
-                if (row.Action < BotActivityAction.CheckoutCreated && row.Action != BotActivityAction.QuantityEnter || row.Action == BotActivityAction.QuantityRejected ||
+                if (row.Action < BotActivityAction.CheckoutCreated && row.Action is not (BotActivityAction.QuantityEnter or BotActivityAction.PolicyCheck) || row.Action == BotActivityAction.QuantityRejected ||
+                    (row.Action == BotActivityAction.PolicyCheck && (row.Source != BotActivitySource.System || row.Outcome is not (BotActivityOutcome.Accepted or BotActivityOutcome.Blocked) || row.Context != new BotActivityContext())) ||
                     (row.Action == BotActivityAction.QuantityEnter && (row.Source != BotActivitySource.Flow || row.Outcome != BotActivityOutcome.Accepted || row.Context.Order is not null || row.Context.Ticket is not null || row.Context.FlowRevision is not null)) ||
                     (row.Action == BotActivityAction.CheckoutCreated && (row.Source != BotActivitySource.Flow || row.Outcome != BotActivityOutcome.Accepted)) ||
                     (row.Action is BotActivityAction.CheckoutCreated or BotActivityAction.CheckoutFunded or BotActivityAction.CheckoutExpired or BotActivityAction.CheckoutReplaced && row.Identity != row.Context.Order)) throw new MigrationRejectedException();
