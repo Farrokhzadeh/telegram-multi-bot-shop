@@ -39,11 +39,6 @@ public sealed class UpdateRouter
         if (observation is not null && observation.ProductId != callback!.Target) throw new TelegramIngressRejectedException();
         await using var session = await sessions.BeginAsync(ct);
         if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(UpdateRouteCode.Busy, 0);
-        if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct))
-        {
-            var prior = await BrandUserStore.FindAsync(session, update.Context, update.ActorId, ct);
-            return new(UpdateRouteCode.Duplicate, prior?.Flow.Revision ?? 0);
-        }
         if (!update.IsCallback && update.Value.StartsWith("/bind ", StringComparison.Ordinal))
         {
             string[] binding = update.Value.Split(' ');
@@ -57,7 +52,10 @@ public sealed class UpdateRouter
         BrandUser member = update.IsCallback
             ? await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct)
             : await BrandUserStore.ObservePrivateAsync(session, update.Context, update.ActorId, ct);
+        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member.Id)), r => r.GetGuid(0), ct);
+        member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
         if (member.Banned || (member.Blocked && update.Value != "/start")) throw new TelegramIngressRejectedException();
+        if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct)) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
         if (member.Blocked && update.Value == "/start")
             await session.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=NULL WHERE id=$1 AND brand_id=$2 AND telegram_id=$3",
                 DbValue.Uuid(member.Id), DbValue.Uuid(update.Context.BrandId), DbValue.Bigint(update.ActorId)), ct);

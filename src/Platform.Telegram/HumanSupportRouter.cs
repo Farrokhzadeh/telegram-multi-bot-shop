@@ -20,9 +20,11 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
         if (update.IsCallback || (update.Value.StartsWith('/') && !command)) throw new TelegramIngressRejectedException();
         await using var session = await sessions.BeginAsync(ct);
         if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(Guid.Empty, false, true);
-        bool fresh = await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct);
+        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member.Id)), r => r.GetGuid(0), ct);
+        member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
         if (member.Banned || member.Blocked) throw new TelegramIngressRejectedException();
+        bool fresh = await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct);
         bool enabled = await session.QuerySingleAsync(new DbStatement("""
             SELECT b.support_enabled AND EXISTS(SELECT 1 FROM shop.admins a WHERE a.id=b.customer_support_admin_id
                 AND a.disabled_at IS NULL AND a.telegram_user_id IS NOT NULL AND a.public_contact_handle IS NOT NULL)
