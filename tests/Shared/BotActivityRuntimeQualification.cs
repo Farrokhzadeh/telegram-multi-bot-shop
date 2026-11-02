@@ -76,7 +76,7 @@ public static class BotActivityRuntimeQualification
         var remaining = await Task.WhenAll(new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct), new BotActivityRetentionStore(f.Sessions).CleanAsync(1, ct));
         Require(remaining.Sum(r => r.Deleted) == 2, "concurrent cleaners partition rows");
         var final = await new BotActivityRetentionStore(f.Sessions).CleanAsync(500, ct);
-        Require(final.Deleted == 0 && final.Backlog.Expired == 2 && final.Backlog.Blocked == 2 && before == await Domain(f, ct), "no domain cascade or unsafe unqualified purge");
+        Require(final.Deleted == 0 && final.Backlog.Expired == 2 && final.Backlog.Blocked == 2 && final.Backlog.Oldest is null && before == await Domain(f, ct), "no domain cascade or unsafe unqualified purge; blocked rows are not reported as eligible cleanup lag");
         await using (var boundary = await f.Sessions.BeginAsync(ct))
         {
             await Insert(boundary, f.Users[0], "public-exact-cutoff", 12, "CURRENT_TIMESTAMP-INTERVAL '4320 hours'", ct);

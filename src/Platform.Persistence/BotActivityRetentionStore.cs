@@ -28,7 +28,7 @@ public sealed class BotActivityRetentionStore(DbSessionFactory sessions)
     public async Task<BotActivityBacklog> BacklogAsync(CancellationToken ct = default)
     { await using var session = await sessions.BeginAsync(ct); return await BacklogAsync(session, ct); }
     private static Task<BotActivityBacklog> BacklogAsync(DbSession session, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("""
-        SELECT count(*),count(*) FILTER (WHERE NOT shop.activity_retention_covered(e.id)),min(e.occurred_at)
+        SELECT count(*),count(*) FILTER (WHERE NOT shop.activity_retention_covered(e.id)),min(e.occurred_at) FILTER (WHERE shop.activity_retention_covered(e.id))
         FROM shop.bot_activity_events e
         WHERE e.occurred_at<CURRENT_TIMESTAMP-INTERVAL '4320 hours'
         """), r => new BotActivityBacklog(r.GetInt64(0), r.GetInt64(1), r.IsDBNull(2) ? null : r.GetUtc(2)), ct);
