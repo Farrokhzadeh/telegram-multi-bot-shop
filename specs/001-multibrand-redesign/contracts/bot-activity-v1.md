@@ -1,4 +1,4 @@
-# Bot activity registry and retention design — version 1
+# Bot activity registry and retention design — versions 1–2
 
 T087 fixes the version-1 vocabulary, field allowlist, ownership, privacy, index and permission design for the canonical bot_activity_events baseline. This document and the executable registry do not complete T088/T089 or activate reads, cleanup, imports, scheduling or a bot runtime. The table count stays 28; there is no new relation, JSON column or payload field. Original statement authority remains schema-contract.md and constitution 3.0.0.
 
