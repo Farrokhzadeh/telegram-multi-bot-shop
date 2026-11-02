@@ -67,15 +67,15 @@ Replace SC-001 with any row below. This only prints commands; it does not run th
 | SC-010 | Synthetic witness subset; render its command | Synthetic campaign/transport/throttling only; real recipients, credentials, independent process controls and staging separation remain unverified. |
 | SC-011 | Synthetic witness subset; render its command | Service/callback representations only; actual participant-facing deployed quantity journey remains unexecuted. |
 | SC-012 | Synthetic witness subset; render its command | Synthetic FX/quote assertions only; real Nobitex transport and representative source/deployment parity remain unqualified. |
-| SC-013 | Synthetic witness subset; render its command | Expiry intents/evidence guards are observed; complete timer/instruction message editing coverage T082-T085 remains pending. |
+| SC-013 | Synthetic witness subset; render its command | Synthetic expiry/evidence boundary, durable deadline/status dispatch and saved-message recovery only. Actual timer scheduling, live Telegram and complete T085 provider/merchant acceptance remain unqualified. |
 | SC-014 | Synthetic witness subset; render its command | Synthetic typed member ownership only; actual imported identities and deployed routes remain unverified. |
 | SC-015 | Synthetic witness subset; render its command | Typed synthetic balances/postings only; full historical totals/source reconciliation remain unqualified. |
 | SC-016 | Synthetic witness subset; render its command | Synthetic private/staff routing only; actual recipient separation and credentials remain unverified T075. |
-| SC-017 | Synthetic witness subset; render its command | Synthetic replacement guards only; complete user-visible replacement/expiry edit scenarios T082-T085 remain pending. |
+| SC-017 | Synthetic witness subset; render its command | Synthetic immutable method/replacement, independent reviewed obligations and current-state saved edits only. Complete T085 real invoice/merchant and live Telegram acceptance remain unqualified. |
 | SC-018 | Synthetic witness subset; render its command | Synthetic topup origin/settlement only; actual merchant invoice creation and live provider verification remain unqualified. |
 | SC-019 | Synthetic witness subset; render its command | Synthetic shared-account identities only; real merchant-hosted identity review/callback activation remain unexecuted. |
 | SC-020 | Synthetic witness subset; render its command | Synthetic card data and immutable destination only; no actual cards/source records or deployed media review accessed. |
-| SC-021 | Synthetic witness subset; render its command | Synthetic races only; complete end-user expiry/replacement scenarios remain pending T082-T085. |
+| SC-021 | Synthetic witness subset; render its command | Synthetic held-cap races, evidence protection and one independent awaiting slot observed. Complete T085 transport/merchant/environment acceptance remains unqualified. |
 | SC-022 | Synthetic witness subset; render its command | Synthetic authenticated settlement only; real provider transport/durability and user-facing messages remain unqualified. |
 | SC-023 | Synthetic witness subset; render its command | Synthetic trusted-time/expired grant semantics only; deployed message wording and live payment timing remain unexecuted. |
 | SC-024 | Synthetic witness subset; render its command | Synthetic paid ownership only; imported legacy paid-code provenance must be validated, never guessed T063/T064/T066. |
