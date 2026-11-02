@@ -25,7 +25,7 @@ public sealed class PaymentExpiryService(DbSessionFactory sessions, SecretSnapsh
             else if (data.OrderStatus != "awaiting_payment" || evidence) outcome = PaymentExpiryOutcome.Protected;
             else if (!PaymentDeadlinePolicy.CanExpire(data.OrderStatus, data.Deadline!.Value, proof.Now, false))
             {
-                int delay = Math.Clamp(checked((int)Math.Ceiling((data.Deadline.Value - proof.Now).TotalSeconds)) + 1, 1, 1801);
+                int delay = Math.Clamp(checked((int)Math.Ceiling((data.Deadline.Value - proof.Now).TotalSeconds)) + 1, 1, 300);
                 await OutboxStore.RetryAsync(session, lease, TimeSpan.FromSeconds(delay), int.MaxValue, JobError.Busy, ct);
                 await session.CommitAsync(ct); return PaymentExpiryOutcome.NotDue;
             }
