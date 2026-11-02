@@ -20,7 +20,7 @@ public static class CouponRevisionQualification
         Require(await store.EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, ct) == 1, "same command replay");
         bool conflict = false;
         try { await store.EditAsync(f.Context(0), actor, coupon, 0, edit with { Percent = 15 }, AuditReason.OperatorReview, command, ct); }
-        catch (FormatException) { conflict = true; }
+        catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.InvalidData) { conflict = true; }
         Require(conflict, "changed command rejected");
         Require(frozen == await Quotes(f, ct), "owner edit never rewrites accepted orders");
         await using (var read = await f.Sessions.BeginAsync(ct))
