@@ -49,7 +49,7 @@ public sealed class SupplierSourceSelectionTests
         {
             product = Guid.NewGuid();
             await using var seed = await f.Sessions.BeginAsync(Ct);
-            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,title,fulfillment_kind) VALUES ($1,'Public other product','supplier')", DbValue.Uuid(product)), Ct);
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,title,fulfillment_kind,availability_policy) VALUES ($1,'Public other product','supplier','immediate')", DbValue.Uuid(product)), Ct);
             await seed.CommitAsync(Ct);
         }
         Guid next = await SupplierSourceSelectionQualification.AddAsync(f, Ct, invalid != "disabled", product);
