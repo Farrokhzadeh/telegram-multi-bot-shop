@@ -1,4 +1,5 @@
 using Platform.Core;
+using Platform.Fulfillment;
 using Platform.Persistence;
 using Platform.Security;
 using Platform.Telegram;
@@ -92,6 +93,64 @@ public sealed class SupplierSourceRaceTests
         Assert.Single(errors, error => error is InvalidOperationException);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='select_source'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='evaluate_restock'", Ct));
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AdapterReplacementReconcilesOnlyTheOriginalAccountAndNeverSubmitsAgain(bool differentAccount)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        await SupplierFixture.AcceptAsync(f, 1, Ct);
+        var original = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), original, original).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await using (var due = await f.Sessions.BeginAsync(Ct))
+        { await due.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET available_at=clock_timestamp() WHERE job_kind='reconcile_supplier' AND status='pending'"), Ct); await due.CommitAsync(Ct); }
+        JobLease lease = await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct);
+        var fresh = new SyntheticSupplier();
+        var adapter = new AccountAdapter(fresh, differentAccount ? "public different account" : "public account");
+        var worker = new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), adapter, fresh);
+        if (differentAccount)
+        {
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => worker.RunAsync(f.Context(0), lease, Ct));
+            Assert.Equal(0, adapter.Calls);
+            Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='unknown' AND account_ref='public account'", Ct));
+            Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
+            await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), fresh, fresh).RunAsync(f.Context(0), lease, Ct);
+        }
+        else await worker.RunAsync(f.Context(0), lease, Ct);
+        Assert.Equal(1, original.Submits); Assert.Equal(0, fresh.Submits); Assert.Equal(1, fresh.Lookups);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='succeeded' AND account_ref='public account' AND source_revision=1 AND cost_baseline_amount=1", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE operation='submit'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-10", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='supplier_wallet_credit'", Ct));
+    }
+    [Fact]
+    public async Task ReferencedMappingIdentityCannotBeEditedOrDeletedAfterAcceptance()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        Guid source = await SupplierFixture.ConfigureAsync(f, Ct);
+        await SupplierFixture.AcceptAsync(f, 1, Ct);
+        foreach (string mutation in new[] { "provider_code='rapidx'", "external_product_id='public changed'", "external_variant_id='public changed'", "product_id=gen_random_uuid()" })
+        {
+            await using var invalid = await f.Sessions.BeginAsync(Ct);
+            var error = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET " + mutation + " WHERE id=$1", DbValue.Uuid(source)), Ct));
+            Assert.Equal(DbFailureKind.Constraint, error.Failure.Kind);
+        }
+        await using (var invalid = await f.Sessions.BeginAsync(Ct))
+            Assert.Equal(DbFailureKind.Constraint, (await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("DELETE FROM shop.product_supplier_sources WHERE id=$1", DbValue.Uuid(source)), Ct))).Failure.Kind);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='pending' AND source_revision=1 AND account_ref='public account' AND cost_baseline_amount=1", Ct));
+    }
+    private sealed class AccountAdapter(SyntheticSupplier inner, string account) : ISupplierAdapter
+    {
+        public string Provider => inner.Provider;
+        public string Account => account;
+        public bool ProvenIntentLookup => inner.ProvenIntentLookup;
+        public int Calls { get; private set; }
+        public Task<SupplierQuote> InspectAsync(SupplierBinding binding, CancellationToken ct) { Calls++; return inner.InspectAsync(binding, ct); }
+        public Task<SupplierOutcome> SubmitAsync(SupplierBinding binding, decimal maximumUnitCharge, CancellationToken ct) { Calls++; return inner.SubmitAsync(binding, maximumUnitCharge, ct); }
+        public Task<SupplierOutcome> LookupAsync(SupplierBinding binding, string? originalPurchaseReference, CancellationToken ct) { Calls++; return inner.LookupAsync(binding, originalPurchaseReference, ct); }
     }
     private static async Task<AuthenticatedAdmin> OtherAdminAsync(CheckoutFixture f)
     {
