@@ -60,37 +60,14 @@ Automatic approval review initially rejected the expanded payload. After the own
 
 T094 remains unchecked for exact provider observation/cost/account capability proof under E2/E3/E4, protected account/runtime composition and any remaining scoped matrix requirements. Total remains **78/96 complete, 18 unchecked**. Existing source/provider/legacy/human/operational/release gates are unchanged; do not infer whole-SC or release completion. SQL/checklist hashes, 28 typed/no-JSON tables, frozen administrator HTTP surface, constitution 3.0.0 and fail-closed normal hosts are unchanged. Local .NET/PostgreSQL/Docker remain unavailable; Actions supplies execution proof. Verify full CI on exact latest main after recording this evidence.
 
-## Protected credential continuation — pending execution
+## Protected credential continuation — qualified 2026-11-03
 
-The local T094 continuation implements a separate pinned, complete supplier credential manifest and immutable disposable snapshots through the existing secure Linux reader. Independent deployment/revision/service/account grants, strict fields, bounded read-only no-follow files, credential SHA-256 commitments, partial-load cleanup, metadata-only account projection and digest-bound rotation are implemented. Api/JobHost scopes are allowed; bots/account pools/inline credentials/unsafe or changed files fail closed. Protected CatalogStore composition checks deployment/service and shares one provider/account registry across brands. The old synthetic constructor remains available for qualification; normal hosts remain disabled.
+Source `876dae66ade5a9b41eca02e076b37631a9364b1f`, [CI 41645042624](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41645042624), passes **714 .NET tests (156 unit, 446 integration, 112 contract)**, **20 Python checks** and all five Native AOT executables, zero failures/skips and zero build warnings/errors. Locked restore, formatting, secret scan, Compose, 53 bounded acceptance-witness mappings and evidence guards pass. The approved batch adds 20 unit and 11 integration cases across T094/T092. T094's task-scoped commit is `de97f84b801db06fcf2e58216a12c7135dfbfefe`; T092's is `f5666d0ee27c64c8cb803e3acaf215e73b822dd9`.
 
-Twenty new unit cases and three new integration cases are authored; existing managed/native source-selection and original-account-recovery probes now use generated read-only credential files and real snapshot reloads. These C# changes are unbuilt/unexecuted because local .NET/PostgreSQL/Docker are unavailable. All 20 Python checks and static evidence/whitespace checks pass. Prior 683-test source/main CI does not qualify this continuation. T094 remains unchecked for execution and external provider/account/runtime gates; total remains 78/96 complete. No live credential/source data or service was accessed. The next eligible task prepared locally is T092's complete-set partial-acquisition review approval; it has a separate task commit and evidence scope.
+`SupplierCredentialFiles` uses the existing secure Linux reader for a separate complete manifest, independently granted deployment, service, revision and provider/account set. Api/JobHost scopes only, strict fields, nonempty bounded read-only no-follow files, SHA-256 credential commitments, duplicate-file/account rejection and all-or-nothing loading fail closed. Credential bytes stay private in disposable immutable snapshots; trusted synchronous callbacks check the exact provider/account. Dispose clears bytes; failed loads clear material. Metadata arrays are copies without credentials. Credential revisions are independent of commerce keyring revisions; protected catalog composition requires matching deployment/service and derives one shared account per provider across brands. Normal hosts remain disabled.
 
-## Expanded payload — upload authorized, execution pending
+Twenty unit cases cover digest-bound generated-file rotation, old snapshot immutability, disposal, exact account scope, complete grants, forbidden bot/account pools, strict malformed/missing/duplicate/inline fields, identity mismatches, unsafe paths and writable/symlink/empty/oversized/missing/directory/changed files. Three new integration cases qualify protected catalog composition and reject wrong deployment/service before provider transport. Existing account-recovery cases now load actual generated read-only revision-7 and revision-8 credential files into their adapters; same-account recovery uses lookup without resubmission, while a different account is blocked before a call. Actual native execution loads/rotates credentials and uses the protected registry for three-brand mapping/enablement/selection.
 
-Automatic approval review initially rejected the expanded payload. The owner has now explicitly approved uploading the listed 22 files to Farrokhzadeh/telegram-multi-bot-shop on main and running full CI. Upload and execution are proceeding; no passing execution is claimed yet. The previous qualified main is 19731699ac2d35b1dad2ac55d17e5091058b5f3c, CI 41634324671. Local task commits are 5220db4 (T094 credentials), 1641c69 (T092 complete review) and 17a7de1 (T092 audit/manifest lock regression). Full C# and Native AOT execution remain pending; the 683-test baseline does not qualify this work. The new local coverage comprises 20 unit and 11 integration cases, with generated-file/native probes. All earlier task/evidence gates remain open.
+This proves target code and generated file behavior, not actual provider identity, real credential custody, live key rotation, remote recovery guarantees or deployed service isolation. Provider capability and runtime evidence remain E2/E4 gates. T094 stays unchecked for its complete remaining scope; total remains 78/96 complete. No provider SDK, account pool, database table/column, live adapter or normal-host activation was introduced.
 
-The explicitly approved upload covers these 22 files on main, with full CI and fixes grouped by task:
-
-- ops/SUPPLIER_QUALIFICATION.md
-- ops/SUPPLIER_SOURCE_SELECTION_QUALIFICATION.md
-- specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md
-- specs/001-multibrand-redesign/contracts/backend-contracts.md
-- specs/001-multibrand-redesign/contracts/supplier-provider-matrix.md
-- specs/001-multibrand-redesign/tasks.md
-- src/Platform.Persistence/CatalogStore.cs
-- src/Platform.Persistence/DeliveryStore.cs
-- src/Platform.Persistence/SupplierRequestStore.cs
-- src/Platform.Security/SecretFiles.cs
-- src/Platform.Security/SupplierCredentialFiles.cs
-- tests/Platform.AotSmoke/Platform.AotSmoke.csproj
-- tests/Platform.AotSmoke/Program.cs
-- tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj
-- tests/Platform.IntegrationTests/SupplierPartialApprovalTests.cs
-- tests/Platform.IntegrationTests/SupplierSourceAdministrationTests.cs
-- tests/Platform.IntegrationTests/SupplierSourceRaceTests.cs
-- tests/Platform.UnitTests/Platform.UnitTests.csproj
-- tests/Platform.UnitTests/SupplierCredentialTests.cs
-- tests/Shared/SupplierCredentialQualification.cs
-- tests/Shared/SupplierPartialQualification.cs
-- tests/Shared/SupplierSourceSelectionQualification.cs
+Automatic approval review rejected earlier attempts to upload the expanded private payload. The owner then explicitly approved the listed 22 files to Farrokhzadeh/telegram-multi-bot-shop on main with full CI. That upload succeeded; exact remote file hashes and scope match the local checkpoint. The successful run above qualifies the actual uploaded source. No deployment or real-service permission follows. See the supplier qualification for T092's separate bounded result. Full exact-head CI remains required after recording this evidence.
