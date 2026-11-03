@@ -65,3 +65,32 @@ T094 remains unchecked for exact provider observation/cost/account capability pr
 The local T094 continuation implements a separate pinned, complete supplier credential manifest and immutable disposable snapshots through the existing secure Linux reader. Independent deployment/revision/service/account grants, strict fields, bounded read-only no-follow files, credential SHA-256 commitments, partial-load cleanup, metadata-only account projection and digest-bound rotation are implemented. Api/JobHost scopes are allowed; bots/account pools/inline credentials/unsafe or changed files fail closed. Protected CatalogStore composition checks deployment/service and shares one provider/account registry across brands. The old synthetic constructor remains available for qualification; normal hosts remain disabled.
 
 Twenty new unit cases and three new integration cases are authored; existing managed/native source-selection and original-account-recovery probes now use generated read-only credential files and real snapshot reloads. These C# changes are unbuilt/unexecuted because local .NET/PostgreSQL/Docker are unavailable. All 20 Python checks and static evidence/whitespace checks pass. Prior 683-test source/main CI does not qualify this continuation. T094 remains unchecked for execution and external provider/account/runtime gates; total remains 78/96 complete. No live credential/source data or service was accessed. The next eligible task prepared locally is T092's complete-set partial-acquisition review approval; it has a separate task commit and evidence scope.
+
+## Expanded payload — upload authorized, execution pending
+
+Automatic approval review initially rejected the expanded payload. The owner has now explicitly approved uploading the listed 22 files to Farrokhzadeh/telegram-multi-bot-shop on main and running full CI. Upload and execution are proceeding; no passing execution is claimed yet. The previous qualified main is 19731699ac2d35b1dad2ac55d17e5091058b5f3c, CI 41634324671. Local task commits are 5220db4 (T094 credentials), 1641c69 (T092 complete review) and 17a7de1 (T092 audit/manifest lock regression). Full C# and Native AOT execution remain pending; the 683-test baseline does not qualify this work. The new local coverage comprises 20 unit and 11 integration cases, with generated-file/native probes. All earlier task/evidence gates remain open.
+
+The explicitly approved upload covers these 22 files on main, with full CI and fixes grouped by task:
+
+- ops/SUPPLIER_QUALIFICATION.md
+- ops/SUPPLIER_SOURCE_SELECTION_QUALIFICATION.md
+- specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md
+- specs/001-multibrand-redesign/contracts/backend-contracts.md
+- specs/001-multibrand-redesign/contracts/supplier-provider-matrix.md
+- specs/001-multibrand-redesign/tasks.md
+- src/Platform.Persistence/CatalogStore.cs
+- src/Platform.Persistence/DeliveryStore.cs
+- src/Platform.Persistence/SupplierRequestStore.cs
+- src/Platform.Security/SecretFiles.cs
+- src/Platform.Security/SupplierCredentialFiles.cs
+- tests/Platform.AotSmoke/Platform.AotSmoke.csproj
+- tests/Platform.AotSmoke/Program.cs
+- tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj
+- tests/Platform.IntegrationTests/SupplierPartialApprovalTests.cs
+- tests/Platform.IntegrationTests/SupplierSourceAdministrationTests.cs
+- tests/Platform.IntegrationTests/SupplierSourceRaceTests.cs
+- tests/Platform.UnitTests/Platform.UnitTests.csproj
+- tests/Platform.UnitTests/SupplierCredentialTests.cs
+- tests/Shared/SupplierCredentialQualification.cs
+- tests/Shared/SupplierPartialQualification.cs
+- tests/Shared/SupplierSourceSelectionQualification.cs
