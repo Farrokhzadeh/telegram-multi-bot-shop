@@ -218,7 +218,7 @@ public sealed class LocalPreorderTests
         var admin = await f.AdminAsync(Ct);
         var resolution = new OrderResolution("cancel_local_preorder", await Revision(f, order), "Public cancellation race", Guid.NewGuid());
         var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
-        Task<Exception?> cancel = Record.ExceptionAsync(() => store.ResolveAsync(admin, f.Context(0), order, resolution, Ct));
+        var cancel = Record.ExceptionAsync(() => store.ResolveAsync(admin, f.Context(0), order, resolution, Ct));
         await Worker(f).RunAsync(await Claim(f), Ct);
         Exception? error = await cancel;
         if (error is null)
@@ -235,6 +235,102 @@ public sealed class LocalPreorderTests
         }
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-50", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE signed_amount>0 AND movement_kind<>'admin_adjustment'", Ct));
+    }
+    [Fact]
+    public async Task SupportAndCancelledClaimReplaysPreserveRedeemedFactsOwnerOverridesAndFinancialHistory()
+    {
+        await using var f = await Fixture();
+        var admin = await f.AdminAsync(Ct);
+        var pricing = new PricingStore(f.Sessions, f.Secrets);
+        Guid coupon = Guid.NewGuid();
+        await using (var issue = await f.Sessions.BeginAsync(Ct))
+        {
+            await pricing.IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-CANCEL-FIFO", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 7), Guid.NewGuid(), Ct);
+            await issue.CommitAsync(Ct);
+        }
+        Guid spent = await Purchase(f, 0, 2);
+        await Restock(f, 2); await DrainAll(f);
+        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct);
+        Guid waiting = await Purchase(f, 0, 5);
+        Assert.Equal(1, await pricing.EditAsync(f.Context(0), admin, coupon, 0, new(10, 0, 0, 1, null, DateTime.UtcNow.AddMinutes(-1), false, f.Product, f.Users[0]), AuditReason.OperatorReview, Guid.NewGuid(), Ct));
+        long revision = await Revision(f, waiting);
+        await using (var support = await f.Sessions.BeginAsync(Ct))
+        {
+            var ticket = await SupportStore.OpenTicketAsync(support, f.Context(0), CheckoutFixture.Actor(0), waiting, Ct);
+            Assert.True(ticket.Created);
+            Assert.False((await SupportStore.OpenTicketAsync(support, f.Context(0), CheckoutFixture.Actor(0), waiting, Ct)).Created);
+            await support.CommitAsync(Ct);
+        }
+        Assert.Equal(revision, await Revision(f, waiting));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.support_tickets WHERE category='preorder_cancellation'", Ct));
+        await using (var fault = await f.Sessions.BeginAsync(Ct))
+        {
+            await fault.ExecuteAsync(new DbStatement("CREATE FUNCTION shop.reject_fifo_release() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Public synthetic release failure' USING ERRCODE='23514'; END $$"), Ct);
+            await fault.ExecuteAsync(new DbStatement("CREATE CONSTRAINT TRIGGER reject_fifo_release AFTER UPDATE ON shop.discount_uses DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.status='released') EXECUTE FUNCTION shop.reject_fifo_release()"), Ct);
+            await fault.CommitAsync(Ct);
+        }
+        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var resolution = new OrderResolution("cancel_local_preorder", revision, "Public outside-shop resolution", Guid.NewGuid());
+        Assert.Equal(DbFailureKind.Constraint, (await Assert.ThrowsAsync<DbOperationException>(() => store.ResolveAsync(admin, f.Context(0), waiting, resolution, Ct))).Failure.Kind);
+        Assert.Equal(revision, await Revision(f, waiting));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='cancel_preorder'", Ct));
+        await using (var repair = await f.Sessions.BeginAsync(Ct))
+        {
+            await repair.ExecuteAsync(new DbStatement("DROP TRIGGER reject_fifo_release ON shop.discount_uses"), Ct);
+            await repair.ExecuteAsync(new DbStatement("DROP FUNCTION shop.reject_fifo_release()"), Ct);
+            await repair.CommitAsync(Ct);
+        }
+        await store.ResolveAsync(admin, f.Context(0), waiting, resolution, Ct);
+        for (int i = 0; i < 100; i++) await store.ResolveAsync(admin, f.Context(0), waiting, resolution, Ct);
+        long spentRevision = await Revision(f, spent);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.ResolveAsync(admin, f.Context(0), spent, new("cancel_local_preorder", spentRevision, "Public invalid completed cancellation", Guid.NewGuid()), Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='released' AND units_covered=5", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=2", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        Assert.Equal(-1L, await f.CountAsync("SELECT usage_adjustment_units FROM shop.discounts", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts WHERE NOT active AND ends_at<clock_timestamp() AND max_total_uses=0", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE signed_amount>0 AND movement_kind<>'admin_adjustment'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE resolution_kind='local_preorder_cancellation' AND resolution_wallet_entry_id IS NULL AND payment_status='paid'", Ct));
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LockedOrHeldHeadPreventsCompetingLocalAndLocalFirstSupplierStockBypass(bool held)
+    {
+        await using var f = await Fixture();
+        Guid head = await Purchase(f, 0, 5);
+        var admin = await f.AdminAsync(Ct);
+        var orders = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        if (held) await orders.ResolveAsync(admin, f.Context(0), head, new("pause_preorder", await Revision(f, head), "Public FIFO hold", Guid.NewGuid()), Ct);
+        await Restock(f, 3);
+        await using (var edit = await f.Sessions.BeginAsync(Ct))
+        {
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.products SET availability_policy='immediate',revision=revision+1"), Ct);
+            await edit.CommitAsync(Ct);
+        }
+        await using (var locked = await f.Sessions.BeginAsync(Ct))
+        {
+            await locked.QuerySingleAsync(new DbStatement("SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE", DbValue.Uuid(head)), r => r.GetGuid(0), Ct);
+            Assert.Equal(CheckoutOutcome.Unavailable, (await f.Store.PurchaseLocalAsync(f.Context(1), CheckoutFixture.Actor(1), f.Request() with { ProductRevision = 2 }, Ct)).Outcome);
+            await SupplierFixture.ConfigureAsync(f, Ct);
+            var service = new WalletCheckoutService(f.Sessions, f.Store, new PaymentSettlementFixture(f).Catalog);
+            var remote = await service.PurchaseAsync(f.Context(1), CheckoutFixture.Actor(1), new(Guid.CreateVersion7(), f.Product, 1), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
+            Assert.Equal(CheckoutOutcome.Purchased, remote.Outcome);
+            Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=1", Ct));
+            Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
+            Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
+        }
+        await Restock(f, 2); await DrainAll(f);
+        if (held)
+        {
+            Assert.Equal(0L, await Units(f, head));
+            await orders.ResolveAsync(admin, f.Context(0), head, new("resume_preorder", await Revision(f, head), "Public FIFO resume", Guid.NewGuid()), Ct);
+            await DrainAll(f);
+        }
+        Assert.Equal(5L, await Units(f, head));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
     }
     private static LocalPreorderWorker Worker(CheckoutFixture f) => new(new(f.Sessions, f.Secrets), f.Contexts);
     private static async Task<CheckoutFixture> Fixture()
