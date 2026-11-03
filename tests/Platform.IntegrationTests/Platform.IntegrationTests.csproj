@@ -29,6 +29,7 @@
     <Compile Include="../Shared/SupplierQualification.cs" Link="Shared/SupplierQualification.cs" />
     <Compile Include="../Shared/SupplierSourceSelectionQualification.cs" Link="Shared/SupplierSourceSelectionQualification.cs" />
     <Compile Include="../Shared/SupplierCredentialQualification.cs" Link="Shared/SupplierCredentialQualification.cs" />
+    <Compile Include="../Shared/SupplierPartialQualification.cs" Link="Shared/SupplierPartialQualification.cs" />
     <Compile Include="../Shared/SupplierFixture.cs" Link="Shared/SupplierFixture.cs" />
     <Compile Include="../../src/Platform.Api/DiagnosticsEndpoints.cs" Link="Api/DiagnosticsEndpoints.cs" />
     <ProjectReference Include="../../src/Platform.Campaigns/Platform.Campaigns.csproj" />

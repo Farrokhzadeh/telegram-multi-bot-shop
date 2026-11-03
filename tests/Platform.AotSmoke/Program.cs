@@ -27,6 +27,8 @@ await SupplierSourceSelectionQualification.RunAsync();
 Console.WriteLine("PASS: native audited shared supplier source selection, immutable paid bindings and command replay.");
 SupplierCredentialQualification.Run();
 Console.WriteLine("PASS: native read-only supplier credential snapshot, pinned scope and same-account rotation.");
+await SupplierPartialQualification.RunAsync();
+Console.WriteLine("PASS: native partial supplier status/export recovery, audited complete review and whole coupon redemption.");
 await AdministrationPhaseQualification.RunAsync();
 Console.WriteLine("PASS: native encrypted stock import, audited wallet posting and private campaign recovery.");
 await ApiContractQualification.RunAsync(true);

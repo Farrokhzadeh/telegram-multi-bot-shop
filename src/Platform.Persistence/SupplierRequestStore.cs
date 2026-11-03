@@ -8,6 +8,34 @@ public sealed record SupplierAttempt(SupplierBinding Binding, Guid Id, Guid? Par
 public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapshot secrets, long? trustedStaffChat = null, TimeSpan? remoteLeaseDuration = null)
 {
     private const string BindingColumns = "r.id,r.order_id,o.product_id,r.product_supplier_source_id,r.source_revision,r.provider_code,r.account_ref,r.external_product_id,r.external_variant_id,r.local_intent_key,r.requested_quantity,r.cost_baseline_amount::text,r.cost_currency,r.approved_cost_ceiling::text";
+    public async Task ApproveCompleteAsync(AuthenticatedAdmin actor, BrandContext context, Guid order, Guid request, long revision, Guid command, string reason, CancellationToken ct = default)
+    {
+        AdminCommand.Revision(revision); AdminCommand.Reason(reason);
+        byte[] hash = AdminCommand.Hash("supplier-complete-review-v1", request.ToString("D"), reason);
+        await using var session = await sessions.BeginAsync(ct);
+        try
+        {
+            if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.ManualFulfillment, AuditEntity.Order, order, context.BrandId, AuditReason.OperatorReview, command, hash, revision, revision + 1), ct)) return;
+            bool owned = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND o.id=$2 AND b.id=$3 AND b.bot_id=$4)", DbValue.Uuid(request), DbValue.Uuid(order), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
+            if (!owned) throw new UnauthorizedAccessException("Supplier review is unavailable.");
+            await LockAsync(session, context, request, ct);
+            var state = await session.QuerySingleAsync(new DbStatement("""
+                SELECT o.quantity,COALESCE(o.revision=$2 AND o.fulfillment_status='requires_admin' AND o.review_code='partial_acquisition'
+                    AND o.release_authorized_at IS NULL AND o.delivery_generation IS NULL AND r.status='succeeded' AND r.review_code IS NULL
+                    AND r.remote_ref IS NOT NULL AND r.evidence_ref IS NOT NULL
+                    AND (SELECT count(*) FROM shop.fulfillments f WHERE f.order_id=o.id)=o.quantity
+                    AND (SELECT count(*) FROM shop.fulfillments f WHERE f.supplier_request_id=r.id AND f.kind='supplier' AND f.status='acquired')=r.requested_quantity
+                    AND EXISTS(SELECT 1 FROM shop.supplier_request_attempts a WHERE a.supplier_request_id=r.id AND a.outcome='succeeded'
+                        AND a.error_code IS NULL AND a.evidence_ref=r.evidence_ref AND a.remote_ref=r.remote_ref AND a.finished_at IS NOT NULL),false)
+                FROM shop.orders o JOIN shop.supplier_requests r ON r.order_id=o.id WHERE r.id=$1
+                """, DbValue.Uuid(request), DbValue.Bigint(revision)), r => (Quantity: r.GetInt32(0), Valid: r.GetBoolean(1)), ct);
+            if (!state.Valid || !await new DeliveryStore(sessions, secrets).HasCompleteAcquisitionAsync(session, context, order, state.Quantity, ct)) throw new InvalidOperationException("Complete verified supplier acquisition requires current review.");
+            await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='acquiring',review_code=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(order)), ct);
+            await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, order), order, DateTime.UtcNow, ct);
+            await session.CommitAsync(ct);
+        }
+        catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
+    }
     public async Task<SupplierBinding> ReadAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
         Require(context, lease);

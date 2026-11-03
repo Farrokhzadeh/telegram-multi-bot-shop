@@ -26,6 +26,11 @@ public sealed class DeliveryDispatch : IDisposable
 
 public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secrets)
 {
+    internal async Task<bool> HasCompleteAcquisitionAsync(DbSession session, BrandContext context, Guid order, int quantity, CancellationToken ct)
+    {
+        try { using Manifest manifest = await BuildAsync(session, context, order, quantity, false, ct); return manifest.Complete; }
+        catch (ManifestNeedsRecoveryException) { return false; }
+    }
     public async Task<Guid?> PrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
         if (lease.Intent.Kind != JobKind.PrepareManifest || lease.Intent.BrandId != context.BrandId || lease.Intent.OriginId is not Guid order) throw new UnauthorizedAccessException();
@@ -252,7 +257,7 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
         if (identity is null) Reject(session);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE id=$1 FOR UPDATE) u", DbValue.Uuid(identity.User)), r => r.GetInt64(0), ct);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(identity.Product)), r => r.GetInt64(0), ct);
-        long registered = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
+        long registered = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR NO KEY UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
         if (registered != 1) Reject(session);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT d.id FROM shop.discounts d JOIN shop.discount_uses c ON c.discount_id=d.id WHERE c.order_id=$1 ORDER BY d.id FOR UPDATE OF d) coupons", DbValue.Uuid(order)), r => r.GetInt64(0), ct);
         return await session.QuerySingleAsync(new DbStatement("""
