@@ -373,6 +373,47 @@ public sealed class LocalPreorderTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-20", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE signed_amount>0 AND movement_kind<>'admin_adjustment'", Ct));
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentBankOrFreeAcceptanceAndDrainKeepEarlierPaidMembershipAhead(bool free)
+    {
+        await using var f = await Fixture();
+        var admin = await f.AdminAsync(Ct);
+        var payment = new PaymentSettlementFixture(f);
+        Guid order, paymentId = Guid.Empty;
+        if (free)
+        {
+            await using var issue = await f.Sessions.BeginAsync(Ct);
+            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-FREE-RACE", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await issue.CommitAsync(Ct); order = Guid.CreateVersion7();
+        }
+        else
+        {
+            await payment.EnableBankAsync(Ct);
+            (paymentId, order) = await payment.BankOrderAsync(Ct);
+            await payment.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), paymentId, "protected:synthetic/race-receipt", Ct);
+        }
+        Guid earlier = await Purchase(f, 1, 2);
+        await Restock(f, free ? 5 : 2);
+        JobLease lease = await Claim(f);
+        Task acceptance;
+        if (free)
+        {
+            var service = new WalletCheckoutService(f.Sessions, f.Store, payment.Catalog);
+            acceptance = service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(order, f.Product, 5), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
+        }
+        else acceptance = payment.Manual.DecideAsync(f.Context(0), admin, paymentId, true, await Revision(f, order), Guid.NewGuid(), "Public verified race receipt", Ct);
+        await Task.WhenAll(acceptance, Worker(f).RunAsync(lease, Ct));
+        await DrainAll(f);
+        Assert.Equal(2L, await Units(f, earlier)); Assert.Equal(0L, await Units(f, order));
+        Assert.Equal(free ? 3L : 0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
+        await Restock(f, free ? 2 : 1); await DrainAll(f);
+        Assert.Equal(free ? 5L : 1L, await Units(f, order));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-20", Ct));
+        if (free) Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", Ct));
+        else Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE status='settled'", Ct));
+    }
     [Fact]
     public async Task CompletedPreorderFileRecoversUnknownTransportOnlyAfterAuditWithoutRedeemingAgain()
     {
