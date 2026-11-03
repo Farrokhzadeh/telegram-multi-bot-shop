@@ -7,6 +7,7 @@
   <ItemGroup>
     <Compile Include="../Shared/CipherQualification.cs" Link="Shared/CipherQualification.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
+    <Compile Include="../Shared/SupplierCredentialQualification.cs" Link="Shared/SupplierCredentialQualification.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

@@ -1,5 +1,7 @@
 # Multi-brand redesign — conversation handoff (updated 2026-11-03)
 
+**Pending local T094 credential continuation:** strict digest-bound supplier credential snapshots and protected catalog composition are implemented with generated-file/native rotation probes, 20 new unit cases and three new integration cases. Execution remains pending; earlier 683-test CI is not evidence for these changes. T094 stays unchecked; 78/96 complete. See the source-selection qualification.
+
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
 **Branch:** `main`; authorized offline work uses task-grouped commits directly on main.
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  

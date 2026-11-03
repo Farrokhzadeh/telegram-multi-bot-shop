@@ -10,6 +10,36 @@ namespace Platform.IntegrationTests;
 public sealed class SupplierSourceAdministrationTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    [Theory]
+    [InlineData(SecretService.JobHost, false)]
+    [InlineData(SecretService.Api, false)]
+    [InlineData(SecretService.JobHost, true)]
+    public async Task ProtectedCatalogRegistryRequiresMatchingDeploymentServiceAndOneCredentialScope(SecretService service, bool otherDeployment)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        using var files = new SyntheticSecretFiles();
+        Guid deployment = otherDeployment ? Guid.NewGuid() : SyntheticSecretFiles.Deployment;
+        SupplierCredentialQualification.Write(files, service: service, deployment: deployment);
+        using var credentials = SupplierCredentialFiles.Load(files.Root, "supplier-config.json", SupplierCredentialQualification.Grant(service: service, deployment: deployment));
+        int calls = 0;
+        Task<SupplierCatalogResult> Inspect(SupplierCatalogRequest request, CancellationToken ct)
+        {
+            calls++; Assert.Equal(64, credentials.UseCredential(request.Provider, request.AccountRef, key => key.Length));
+            return Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, 10, 1, "USD", "public quote"));
+        }
+        if (service != f.Secrets.Service || deployment != f.Secrets.DeploymentId)
+        {
+            Assert.Equal(SecretConfigurationFailure.IdentityMismatch, Assert.Throws<SecretConfigurationException>(() => new CatalogStore(f.Sessions, f.Secrets, credentials, Inspect)).Failure);
+            Assert.Equal(0, calls);
+        }
+        else
+        {
+            var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, Inspect);
+            Assert.Equal(CatalogAvailability.Available, (await catalog.GetAsync(f.Context(0), CheckoutFixture.Actor(0), f.Product, Ct))!.Availability);
+            Assert.Equal(1, calls);
+        }
+    }
     [Fact]
     public async Task CreationIsDisabledReplaySafeVariantUniqueAndBoundedWithoutIdentityEdits()
     {

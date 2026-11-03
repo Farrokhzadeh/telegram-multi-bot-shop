@@ -25,6 +25,8 @@ await SupplierQualification.RunAsync();
 Console.WriteLine("PASS: native capped supplier intent, encrypted mixed acquisition, protected bonus and complete manifest.");
 await SupplierSourceSelectionQualification.RunAsync();
 Console.WriteLine("PASS: native audited shared supplier source selection, immutable paid bindings and command replay.");
+SupplierCredentialQualification.Run();
+Console.WriteLine("PASS: native read-only supplier credential snapshot, pinned scope and same-account rotation.");
 await AdministrationPhaseQualification.RunAsync();
 Console.WriteLine("PASS: native encrypted stock import, audited wallet posting and private campaign recovery.");
 await ApiContractQualification.RunAsync(true);

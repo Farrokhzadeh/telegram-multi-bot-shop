@@ -58,6 +58,12 @@ public sealed class CatalogStore
     private readonly SecretSnapshot secrets;
     private readonly Dictionary<string, string> accounts = new(StringComparer.Ordinal);
     private readonly Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>> fetch;
+    public CatalogStore(DbSessionFactory sessions, SecretSnapshot secrets, SupplierCredentialSnapshot credentials,
+        Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>> fetch)
+        : this(sessions, secrets, credentials.Accounts.Select(x => new SupplierAccount(x.Key, x.Value)), fetch)
+    {
+        if (credentials.DeploymentId != secrets.DeploymentId || credentials.Service != secrets.Service) throw new SecretConfigurationException(SecretConfigurationFailure.IdentityMismatch);
+    }
     public CatalogStore(DbSessionFactory sessions, SecretSnapshot secrets, IEnumerable<SupplierAccount> accounts,
         Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>> fetch)
     {

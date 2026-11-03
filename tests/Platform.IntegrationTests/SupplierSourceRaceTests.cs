@@ -102,13 +102,18 @@ public sealed class SupplierSourceRaceTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 1, Ct);
+        using var files = new SyntheticSecretFiles();
+        SupplierCredentialQualification.Write(files);
+        using var oldCredentials = SupplierCredentialFiles.Load(files.Root, "supplier-config.json", SupplierCredentialQualification.Grant());
         var original = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), original, original).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), new AccountAdapter(original, "public account", oldCredentials), original).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         await using (var due = await f.Sessions.BeginAsync(Ct))
         { await due.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET available_at=clock_timestamp() WHERE job_kind='reconcile_supplier' AND status='pending'"), Ct); await due.CommitAsync(Ct); }
         JobLease lease = await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct);
         var fresh = new SyntheticSupplier();
-        var adapter = new AccountAdapter(fresh, differentAccount ? "public different account" : "public account");
+        SupplierCredentialQualification.Write(files, 8);
+        using var newCredentials = SupplierCredentialFiles.Load(files.Root, "supplier-config.json", SupplierCredentialQualification.Grant(8));
+        var adapter = new AccountAdapter(fresh, differentAccount ? "public different account" : "public account", newCredentials);
         var worker = new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), adapter, fresh);
         if (differentAccount)
         {
@@ -116,7 +121,7 @@ public sealed class SupplierSourceRaceTests
             Assert.Equal(0, adapter.Calls);
             Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='unknown' AND account_ref='public account'", Ct));
             Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
-            await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), fresh, fresh).RunAsync(f.Context(0), lease, Ct);
+            await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), new AccountAdapter(fresh, "public account", newCredentials), fresh).RunAsync(f.Context(0), lease, Ct);
         }
         else await worker.RunAsync(f.Context(0), lease, Ct);
         Assert.Equal(1, original.Submits); Assert.Equal(0, fresh.Submits); Assert.Equal(1, fresh.Lookups);
@@ -142,15 +147,16 @@ public sealed class SupplierSourceRaceTests
             Assert.Equal(DbFailureKind.Constraint, (await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("DELETE FROM shop.product_supplier_sources WHERE id=$1", DbValue.Uuid(source)), Ct))).Failure.Kind);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='pending' AND source_revision=1 AND account_ref='public account' AND cost_baseline_amount=1", Ct));
     }
-    private sealed class AccountAdapter(SyntheticSupplier inner, string account) : ISupplierAdapter
+    private sealed class AccountAdapter(SyntheticSupplier inner, string account, SupplierCredentialSnapshot credentials) : ISupplierAdapter
     {
         public string Provider => inner.Provider;
         public string Account => account;
         public bool ProvenIntentLookup => inner.ProvenIntentLookup;
         public int Calls { get; private set; }
-        public Task<SupplierQuote> InspectAsync(SupplierBinding binding, CancellationToken ct) { Calls++; return inner.InspectAsync(binding, ct); }
-        public Task<SupplierOutcome> SubmitAsync(SupplierBinding binding, decimal maximumUnitCharge, CancellationToken ct) { Calls++; return inner.SubmitAsync(binding, maximumUnitCharge, ct); }
-        public Task<SupplierOutcome> LookupAsync(SupplierBinding binding, string? originalPurchaseReference, CancellationToken ct) { Calls++; return inner.LookupAsync(binding, originalPurchaseReference, ct); }
+        public Task<SupplierQuote> InspectAsync(SupplierBinding binding, CancellationToken ct) { Authenticate(); Calls++; return inner.InspectAsync(binding, ct); }
+        public Task<SupplierOutcome> SubmitAsync(SupplierBinding binding, decimal maximumUnitCharge, CancellationToken ct) { Authenticate(); Calls++; return inner.SubmitAsync(binding, maximumUnitCharge, ct); }
+        public Task<SupplierOutcome> LookupAsync(SupplierBinding binding, string? originalPurchaseReference, CancellationToken ct) { Authenticate(); Calls++; return inner.LookupAsync(binding, originalPurchaseReference, ct); }
+        private void Authenticate() { if (credentials.UseCredential(Provider, Account, token => token.Length) != 64) throw new InvalidOperationException("Synthetic supplier credential unavailable."); }
     }
     private static async Task<AuthenticatedAdmin> OtherAdminAsync(CheckoutFixture f)
     {

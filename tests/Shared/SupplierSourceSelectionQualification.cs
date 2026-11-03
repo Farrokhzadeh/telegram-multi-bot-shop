@@ -1,5 +1,6 @@
 using Platform.Core;
 using Platform.Persistence;
+using Platform.Security;
 using Platform.Telegram;
 
 namespace Platform.Testing;
@@ -13,11 +14,18 @@ public static class SupplierSourceSelectionQualification
         Guid oldOrder = await SupplierFixture.AcceptAsync(f, 1, ct);
         var admin = await f.AdminAsync(ct);
         var selection = new SupplierSourceSelectionStore(f.Sessions);
+        using var supplierFiles = new SyntheticSecretFiles();
+        SupplierCredentialQualification.Write(supplierFiles);
+        using var credentials = SupplierCredentialFiles.Load(supplierFiles.Root, "supplier-config.json", SupplierCredentialQualification.Grant());
+        var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, (request, _) =>
+        {
+            if (credentials.UseCredential(request.Provider, request.AccountRef, token => token.Length) != 64) throw new InvalidOperationException("Synthetic supplier credential scope failed.");
+            return Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, 10000, 1, "USD", "public quote"));
+        });
         await selection.CreateAsync(admin, f.Product, next, "synthetic", "public next product", "public next variant", Guid.NewGuid(), ct);
-        await selection.SetEnabledAsync(admin, f.Product, next, true, 1, Guid.NewGuid(), new PaymentSettlementFixture(f).Catalog, ct);
+        await selection.SetEnabledAsync(admin, f.Product, next, true, 1, Guid.NewGuid(), catalog, ct);
         Guid command = Guid.NewGuid();
         if (await selection.SelectAsync(admin, f.Product, next, 1, 2, command, ct) != 2) throw new InvalidOperationException("Source selection revision failed.");
-        var catalog = new PaymentSettlementFixture(f).Catalog;
         var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
         for (int user = 0; user < 3; user++)
         {

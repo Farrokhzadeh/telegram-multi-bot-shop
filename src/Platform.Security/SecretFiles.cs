@@ -209,7 +209,7 @@ public static class SecretFiles
     internal static bool IsFileName(string value) => !string.IsNullOrEmpty(value) && value.Length <= 160 &&
         char.IsAsciiLetterOrDigit(value[0]) && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 
-    private static Dictionary<string, JsonElement> Object(JsonElement element, params string[] names)
+    internal static Dictionary<string, JsonElement> Object(JsonElement element, params string[] names)
     {
         if (element.ValueKind != JsonValueKind.Object) Invalid();
         var fields = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
