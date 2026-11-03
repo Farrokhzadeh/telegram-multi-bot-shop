@@ -23,6 +23,7 @@
 
     <Compile Include="../Shared/MigrationQualification.cs" Link="Shared/MigrationQualification.cs" />
     <Compile Include="../Shared/SupplierQualification.cs" Link="Shared/SupplierQualification.cs" />
+    <Compile Include="../Shared/SupplierSourceSelectionQualification.cs" Link="Shared/SupplierSourceSelectionQualification.cs" />
     <Compile Include="../Shared/SupplierFixture.cs" Link="Shared/SupplierFixture.cs" />
     <ProjectReference Include="../../src/Platform.Campaigns/Platform.Campaigns.csproj" />
     <Compile Include="../Shared/AdministrationPhaseQualification.cs" Link="Shared/AdministrationPhaseQualification.cs" />

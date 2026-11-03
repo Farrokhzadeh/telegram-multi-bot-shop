@@ -1,5 +1,7 @@
 # Multi-brand redesign — conversation handoff (updated 2026-11-03)
 
+**Pending local T094 checkpoint:** audited shared-source selection and eleven integration cases plus a native probe are implemented but unbuilt/unexecuted. The owner explicitly approved the ten-file upload to the existing repository on main and full CI after automatic approval review initially blocked it. Upload/CI are proceeding; no passing result is claimed yet. Remote main remains `63a048d`, successful CI `41611401617`. See [pending checkpoint](../../ops/SUPPLIER_SOURCE_SELECTION_QUALIFICATION.md). T094 remains unchecked; 78/96 tasks complete. The previous 650-test run does not qualify these local changes.
+
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
 **Branch:** `main`; authorized offline work uses task-grouped commits directly on main.
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  

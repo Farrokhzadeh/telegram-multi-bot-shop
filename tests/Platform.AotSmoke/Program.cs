@@ -23,6 +23,8 @@ await PreorderProcessQualification.RunAsync(true, Environment.ProcessPath ?? thr
 Console.WriteLine("PASS: native preorder SIGKILL before/after commit and fresh-process scheduler recovery.");
 await SupplierQualification.RunAsync();
 Console.WriteLine("PASS: native capped supplier intent, encrypted mixed acquisition, protected bonus and complete manifest.");
+await SupplierSourceSelectionQualification.RunAsync();
+Console.WriteLine("PASS: native audited shared supplier source selection, immutable paid bindings and command replay.");
 await AdministrationPhaseQualification.RunAsync();
 Console.WriteLine("PASS: native encrypted stock import, audited wallet posting and private campaign recovery.");
 await ApiContractQualification.RunAsync(true);
