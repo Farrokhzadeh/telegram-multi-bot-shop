@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/LocalPreorderQualification.cs" Link="Shared/LocalPreorderQualification.cs" />
     <Compile Include="../Shared/ActivityMaintenanceQualification.cs" Link="Shared/ActivityMaintenanceQualification.cs" />
     <Compile Include="../Shared/TargetActivityImportQualification.cs" Link="Shared/TargetActivityImportQualification.cs" />
     <Compile Include="../Shared/PaymentActivityQualification.cs" Link="Shared/PaymentActivityQualification.cs" />

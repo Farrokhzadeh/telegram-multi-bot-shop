@@ -13,6 +13,8 @@ using Platform.Telegram;
 
 await MigrationQualification.RunAsync();
 Console.WriteLine("PASS: native pinned migration manifest, atomic mappings, frozen USD opening and non-posting history.");
+await LocalPreorderQualification.RunAsync();
+Console.WriteLine("PASS: native shared-product FIFO, whole local allocation and private complete manifests.");
 await SupplierQualification.RunAsync();
 Console.WriteLine("PASS: native capped supplier intent, encrypted mixed acquisition, protected bonus and complete manifest.");
 await AdministrationPhaseQualification.RunAsync();

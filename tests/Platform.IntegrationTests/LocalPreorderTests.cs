@@ -3,6 +3,7 @@ using Npgsql;
 using Platform.Core;
 using Platform.Fulfillment;
 using Platform.Persistence;
+using Platform.Payments;
 using Platform.Security;
 using Platform.Telegram;
 using Platform.Testing;
@@ -14,14 +15,18 @@ public sealed class LocalPreorderTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
-    public async Task FiveThenTwoAcrossBrandsWaitWholeThroughThreeThreeOneAndReleaseOnlyCompleteManifests()
+    public async Task NativeCompatibleWholeFifoAndPrivateManifests() => await LocalPreorderQualification.RunAsync(Ct);
+    [Theory]
+    [InlineData(50)]
+    [InlineData(100)]
+    public async Task FiveThenTwoAcrossBrandsWaitWholeThroughThreeThreeOneAndReleaseOnlyCompleteManifests(int percent)
     {
         await using var f = await Fixture();
         var admin = await f.AdminAsync(Ct);
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-FIFO", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-FIFO", CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         Guid a = await Purchase(f, 0, 5), b = await Purchase(f, 1, 2);
@@ -44,7 +49,7 @@ public sealed class LocalPreorderTests
         await delivery.PrepareAsync(f.Context(1), await Claim(f, JobKind.PrepareManifest), Ct);
         await DrainAll(f);
         Assert.Equal(7L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='ready'", Ct));
-        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+        Assert.Equal(percent == 100 ? 1L : 2L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='expire_order_payment'", Ct));
     }
@@ -141,6 +146,95 @@ public sealed class LocalPreorderTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new LocalPreorderWorker(new(f.Sessions, f.Secrets), [f.Context(1)]).RunAsync(lease, Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
         Assert.NotNull(await Worker(f).RunAsync(lease, Ct));
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OlderUnpaidQuoteDoesNotBlockAndExternalSettlementJoinsAtPaymentTime(bool bank)
+    {
+        await using var f = await Fixture();
+        var payment = new PaymentSettlementFixture(f);
+        Guid order, id; string? origin = null; decimal due = 0;
+        if (bank)
+        {
+            await payment.EnableBankAsync(Ct);
+            (id, order) = await payment.BankOrderAsync(Ct);
+        }
+        else
+        {
+            await payment.EnableAsync(Ct);
+            var invoice = await payment.OrderAsync(5, ct: Ct);
+            order = invoice.Order; id = invoice.Payment; origin = invoice.Origin; due = invoice.Due;
+        }
+        Guid paid = await Purchase(f, 1, 2);
+        await Restock(f, 2); await DrainAll(f);
+        Assert.Equal(2L, await Units(f, paid)); Assert.Equal(0L, await Units(f, order));
+        if (bank)
+        {
+            await payment.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), id, "protected:synthetic/fifo-receipt", Ct);
+            long revision = await Revision(f, order); Guid command = Guid.NewGuid();
+            var admin = await f.AdminAsync(Ct);
+            Assert.Equal(ManualDepositOutcome.ConfirmedPaid, await payment.Manual.DecideAsync(f.Context(0), admin, id, true, revision, command, "Public verified receipt", Ct));
+            for (int i = 0; i < 100; i++) Assert.Equal(ManualDepositOutcome.Replayed, await payment.Manual.DecideAsync(f.Context(0), admin, id, true, revision, command, "Public verified receipt", Ct));
+        }
+        else
+        {
+            await payment.CaptureAsync(id, origin!, due, ct: Ct);
+            Assert.Equal(ExternalSettlementRoute.LocalPreorder, (await payment.Store.SettleAsync(f.Context(0), id, PaymentSettlementFixture.Lookup, Ct)).Route);
+            Assert.Equal(PaymentSettlementOutcome.Replayed, (await payment.Store.SettleAsync(f.Context(0), id, (_, _) => throw new InvalidOperationException("Unexpected replay lookup."), Ct)).Outcome);
+        }
+        await DrainAll(f);
+        Assert.Equal(0L, await Units(f, order));
+        await Restock(f, bank ? 1 : 5); await DrainAll(f);
+        Assert.Equal(bank ? 1L : 5L, await Units(f, order));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='acquiring'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='expire_order_payment' AND status IN ('pending','retry','leased')", Ct));
+    }
+    [Fact]
+    public async Task ExpiredWorkerLeaseCannotAllocateAndRestartReclaimsTheSameDurableJob()
+    {
+        await using var f = await Fixture();
+        Guid order = await Purchase(f, 0, 5); await Restock(f, 5);
+        JobLease old = await Claim(f);
+        await using (var crash = await f.Sessions.BeginAsync(Ct))
+        {
+            await crash.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET lease_until=clock_timestamp()-INTERVAL '1 second' WHERE id=$1", DbValue.Uuid(old.Id)), Ct);
+            await crash.CommitAsync(Ct);
+        }
+        Assert.Equal(DbFailureKind.LeaseLost, (await Assert.ThrowsAsync<DbOperationException>(() => Worker(f).RunAsync(old, Ct))).Failure.Kind);
+        Assert.Equal(0L, await Units(f, order));
+        JobLease recovered = await Claim(f);
+        Assert.Equal(old.Id, recovered.Id); Assert.Equal(old.Attempt + 1, recovered.Attempt);
+        Assert.Equal(order, await Worker(f).RunAsync(recovered, Ct));
+        Assert.Equal(DbFailureKind.LeaseLost, (await Assert.ThrowsAsync<DbOperationException>(() => Worker(f).RunAsync(old, Ct))).Failure.Kind);
+        Assert.Equal(5L, await Units(f, order));
+    }
+    [Fact]
+    public async Task CancellationAndAllocationRaceKeepsEitherWholeGoodsOrOneTerminalResolution()
+    {
+        await using var f = await Fixture();
+        Guid order = await Purchase(f, 0, 5); await Restock(f, 5);
+        var admin = await f.AdminAsync(Ct);
+        var resolution = new OrderResolution("cancel_local_preorder", await Revision(f, order), "Public cancellation race", Guid.NewGuid());
+        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        Task<Exception?> cancel = Record.ExceptionAsync(() => store.ResolveAsync(admin, f.Context(0), order, resolution, Ct));
+        await Worker(f).RunAsync(await Claim(f), Ct);
+        Exception? error = await cancel;
+        if (error is null)
+        {
+            for (int i = 0; i < 100; i++) await store.ResolveAsync(admin, f.Context(0), order, resolution, Ct);
+            Assert.Equal(0L, await Units(f, order));
+            Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE resolution_kind='local_preorder_cancellation' AND fulfillment_status='cancelled'", Ct));
+        }
+        else
+        {
+            Assert.IsType<InvalidOperationException>(error);
+            Assert.Equal(5L, await Units(f, order));
+            Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE resolution_kind IS NOT NULL", Ct));
+        }
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-50", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE signed_amount>0 AND movement_kind<>'admin_adjustment'", Ct));
     }
     private static LocalPreorderWorker Worker(CheckoutFixture f) => new(new(f.Sessions, f.Secrets), f.Contexts);
     private static async Task<CheckoutFixture> Fixture()
