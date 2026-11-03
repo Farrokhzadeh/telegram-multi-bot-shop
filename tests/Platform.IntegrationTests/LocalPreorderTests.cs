@@ -109,6 +109,21 @@ public sealed class LocalPreorderTests
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'", Ct));
     }
     [Fact]
+    public async Task PendingAdministratorAuditBrandReferenceCannotDeadlockWholeHeadAllocation()
+    {
+        await using var f = await Fixture();
+        Guid order = await Purchase(f, 0, 5); await Restock(f, 5);
+        JobLease lease = await Claim(f);
+        var admin = await f.AdminAsync(Ct);
+        long revision = await Revision(f, order);
+        await using var audit = await f.Sessions.BeginAsync(Ct);
+        Assert.True(await AdminAuditStore.AppendAsync(audit, admin, new(Guid.NewGuid(), AuditAction.HoldPreorder, AuditEntity.Order, order, f.Brands[0], AuditReason.OperatorReview, Guid.NewGuid(), new byte[32], revision, revision + 1), Ct));
+        await using (var incompatible = await new DbSessionFactory(f.Database.Data, new() { LockTimeout = TimeSpan.FromMilliseconds(100) }).BeginAsync(Ct))
+            Assert.Equal(DbFailureKind.Busy, (await Assert.ThrowsAsync<DbOperationException>(() => incompatible.QuerySingleAsync(new DbStatement("SELECT id FROM shop.brands WHERE id=$1 FOR UPDATE", DbValue.Uuid(f.Brands[0])), r => r.GetGuid(0), Ct))).Failure.Kind);
+        Assert.Equal(order, await Worker(f).RunAsync(lease, Ct));
+        Assert.Equal(5L, await Units(f, order));
+    }
+    [Fact]
     public async Task DecryptionFailureRollsBackAllUnitsOrderRevisionAndOutboxAndCanRetry()
     {
         await using var f = await Fixture();

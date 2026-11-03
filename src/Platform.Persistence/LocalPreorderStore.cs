@@ -22,7 +22,7 @@ public sealed class LocalPreorderStore(DbSessionFactory sessions, SecretSnapshot
             if (current is not null && current == candidate)
             {
                 BrandContext context = contexts.SingleOrDefault(c => c.BrandId == current.Brand) ?? throw new UnauthorizedAccessException("FIFO head has no trusted brand registration.");
-                bool active = await session.QuerySingleAsync(new DbStatement("SELECT active AND bot_id=$2 FROM shop.brands WHERE id=$1 FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
+                bool active = await session.QuerySingleAsync(new DbStatement("SELECT active AND bot_id=$2 FROM shop.brands WHERE id=$1 FOR NO KEY UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
                 var state = await session.QuerySingleAsync(new DbStatement("""
                     SELECT o.quantity,o.hold_at IS NOT NULL OR o.review_code IS NOT NULL OR o.resolution_kind IS NOT NULL OR u.blocked_at IS NOT NULL OR u.banned_at IS NOT NULL,
                         EXISTS(SELECT 1 FROM shop.fulfillments WHERE order_id=o.id),o.fulfillment_kind_snapshot
