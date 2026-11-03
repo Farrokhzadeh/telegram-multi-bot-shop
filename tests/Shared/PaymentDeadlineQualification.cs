@@ -68,19 +68,19 @@ public static class PaymentDeadlineQualification
         Require(await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(2), await ClaimAsync(f, ct), ct) == PaymentExpiryOutcome.NotDue, "early expiry defers");
         Require(await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status IN ('confirmation_pending','under_review','awaiting_payment') AND resolution_kind IS NULL", ct) == 3 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) == 0, "protected obligations unchanged");
     }
-    public static async Task<(Guid Order, Guid Payment, string Origin, decimal Due, DateTime Deadline)> SeedAsync(CheckoutFixture f, int user, bool past, Guid? coupon = null, bool proof = false, string? state = null, CancellationToken ct = default)
+    public static async Task<(Guid Order, Guid Payment, string Origin, decimal Due, DateTime Deadline)> SeedAsync(CheckoutFixture f, int user, bool past, Guid? coupon = null, bool proof = false, string? state = null, CancellationToken ct = default, bool preorder = false, TimeSpan? age = null)
     {
         Guid order = Guid.NewGuid(), payment = Guid.NewGuid(); string origin = "order:" + order.ToString("D"); decimal due = coupon is null ? 10 : 5;
         await using var seed = await f.Sessions.BeginAsync(ct);
-        DateTime created = await seed.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct); if (past) created = created.AddMinutes(-31);
+        DateTime created = await seed.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct); if (past) created = created.Subtract(age ?? TimeSpan.FromMinutes(31));
         DateTime deadline = created.AddMinutes(30);
         await seed.ExecuteAsync(new DbStatement("""
             INSERT INTO shop.orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,unit_price_usdt,auto_price_toman_snapshot,
                 pricing_rounding_step_snapshot,price_calculation_version,discount_pct_snapshot,discount_units_snapshot,brand_public_name_snapshot,product_title_snapshot,
                 payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,created_at,payment_due_at)
-            VALUES ($1,$2,$3,1,'product_purchase',$4,'USDT','crypto',10,false,5000,$5,$6,$7,'public brand','public title','public terms','local',true,false,$8,$9)
+            VALUES ($1,$2,$3,1,'product_purchase',$4,'USDT','crypto',10,false,5000,$5,$6,$7,'public brand','public title','public terms','local',true,$10,$8,$9)
             """, DbValue.Uuid(order), DbValue.Uuid(f.Users[user]), DbValue.Uuid(f.Product), DbValue.Text(state ?? (proof ? "confirmation_pending" : "awaiting_payment")), DbValue.Text(PricingPolicy.Version),
-            coupon is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Numeric) : DbValue.Numeric(50), coupon is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Integer) : DbValue.Integer(1), DbValue.Utc(created), DbValue.Utc(deadline)), ct);
+            coupon is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Numeric) : DbValue.Numeric(50), coupon is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Integer) : DbValue.Integer(1), DbValue.Utc(created), DbValue.Utc(deadline), DbValue.Boolean(preorder)), ct);
         await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.payments(id,order_id,payment_method,quote_currency,amount_due,idempotency_ref,network_asset,created_at) VALUES ($1,$2,'crypto','USD',$3,$4,'USDTTRC20',$5)", DbValue.Uuid(payment), DbValue.Uuid(order), DbValue.Numeric(due), DbValue.Text(origin), DbValue.Utc(created)), ct);
         await new PaymentEvidenceStore(f.Sessions, f.Secrets).BindInvoiceAsync(seed, f.Context(user), CheckoutFixture.Actor(user), payment, PaymentSettlementFixture.Provider(payment), 10.4m, ct);
         if (coupon is Guid id) await new PricingStore(f.Sessions, f.Secrets).HoldAsync(seed, f.Context(user), CheckoutFixture.Actor(user), id, order, ct);
