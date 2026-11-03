@@ -456,6 +456,11 @@ public sealed class LocalPreorderTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task KilledWorkerProcessRecoversThroughAFreshSchedulerWithoutPartialOrRepeatedAllocation(bool afterCommit) =>
+        await PreorderProcessQualification.RunAsync(afterCommit, Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../Platform.AotSmoke/bin/Release/net10.0/Platform.AotSmoke.dll")), Ct);
     [Fact]
     public async Task LostCancellationCommitAcknowledgementReplaysOneWholeReleaseAndLetsTheNextBrandDrain()
     {

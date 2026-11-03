@@ -12,9 +12,11 @@ public sealed class CheckoutFixture : IAsyncDisposable
     public DisposablePostgres Database { get; }
     public DbSessionFactory Sessions { get; }
     public SecretSnapshot Secrets { get; }
+    public string SecretRoot => files.Root;
     public CheckoutStore Store => new(Sessions, Secrets);
     public Guid Product { get; } = Guid.NewGuid();
-    public Guid[] Brands { get; } = [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc")];
+    public static Guid[] BrandIds => [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc")];
+    public Guid[] Brands { get; } = BrandIds;
     public Guid[] Users { get; }
     public BrandContext[] Contexts { get; }
     private readonly Guid admin = Guid.NewGuid();
@@ -23,8 +25,12 @@ public sealed class CheckoutFixture : IAsyncDisposable
     {
         Database = database; Sessions = new(database.Data); this.files = files; Secrets = secrets;
         Users = Enumerable.Range(0, users).Select(_ => Guid.NewGuid()).ToArray();
-        var registry = new BotBrandRegistry(Brands.Select((b, i) => new BotBrandBinding("checkout-test", "bot" + i, b, 1001 + i, SyntheticSecretFiles.Deployment, 7, true)));
-        Contexts = Enumerable.Range(0, 3).Select(i =>
+        Contexts = ResolveContexts();
+    }
+    public static BrandContext[] ResolveContexts()
+    {
+        var registry = new BotBrandRegistry(BrandIds.Select((b, i) => new BotBrandBinding("checkout-test", "bot" + i, b, 1001 + i, SyntheticSecretFiles.Deployment, 7, true)));
+        return Enumerable.Range(0, 3).Select(i =>
         {
             if (!registry.TryResolveAuthenticated("checkout-test", new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "bot" + i)], "checkout-test")), out var context)) throw new InvalidOperationException();
             return context!;
@@ -41,7 +47,7 @@ public sealed class CheckoutFixture : IAsyncDisposable
         SecretSnapshot? secrets = null;
         try
         {
-            Guid[] brands = [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc")];
+            Guid[] brands = BrandIds;
             files.WriteManifest(brands: brands);
             secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: brands));
             await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);

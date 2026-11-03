@@ -11,12 +11,16 @@ using Platform.Security;
 using Platform.Testing;
 using Platform.Telegram;
 
+if (args is ["--preorder-worker-probe"]) { await PreorderProcessQualification.ChildAsync(); return; }
 await MigrationQualification.RunAsync();
 Console.WriteLine("PASS: native pinned migration manifest, atomic mappings, frozen USD opening and non-posting history.");
 await LocalPreorderQualification.RunAsync();
 Console.WriteLine("PASS: native shared-product FIFO, whole local allocation and private complete manifests.");
 await LocalPreorderQualification.RunAsync(lostCommit: true);
 Console.WriteLine("PASS: native lost FIFO COMMIT acknowledgement, durable continuation and stale-owner reconciliation.");
+await PreorderProcessQualification.RunAsync(false, Environment.ProcessPath ?? throw new InvalidOperationException("Native qualification path is missing."));
+await PreorderProcessQualification.RunAsync(true, Environment.ProcessPath ?? throw new InvalidOperationException("Native qualification path is missing."));
+Console.WriteLine("PASS: native preorder SIGKILL before/after commit and fresh-process scheduler recovery.");
 await SupplierQualification.RunAsync();
 Console.WriteLine("PASS: native capped supplier intent, encrypted mixed acquisition, protected bonus and complete manifest.");
 await AdministrationPhaseQualification.RunAsync();
