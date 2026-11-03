@@ -209,21 +209,36 @@ public sealed class CatalogStore
         if (result is not null && account is not null)
         {
             Source observedSource = current.Source!;
-            string status = result.Status switch { SupplierCatalogStatus.Available => "available", SupplierCatalogStatus.OutOfStock => "out_of_stock", SupplierCatalogStatus.Ineligible => "ineligible", _ => "error" };
-            int changed = await apply.ExecuteAsync(new DbStatement("""
-                UPDATE shop.product_supplier_sources SET observation_revision=observation_revision+1,observed_source_revision=revision,observed_account_ref=$1,
-                    observed_at=clock_timestamp(),availability_code=$2,available_quantity=$3,observed_unit_cost=$4,observed_currency=$5,quote_ref=$6,
-                    eligibility_code=$7,observation_error_code=$8,updated_at=clock_timestamp()
-                WHERE id=$9 AND revision=$10 AND observation_revision=$11 AND enabled
-                """, DbValue.Text(account), DbValue.Text(status), DbValue.Integer(result.Quantity), Numeric(result.UnitCost), Text(result.Currency), Text(result.QuoteRef),
-                DbValue.Text(result.Status == SupplierCatalogStatus.Available || result.Status == SupplierCatalogStatus.OutOfStock ? "ready_item" : result.Status == SupplierCatalogStatus.Ineligible ? "ineligible" : "error"),
-                result.Status == SupplierCatalogStatus.Error ? DbValue.Text("source_unavailable") : DbValue.Null(NpgsqlDbType.Text), DbValue.Uuid(observedSource.Id), DbValue.Bigint(observedSource.Revision), DbValue.Bigint(observedSource.ObservationRevision)), ct);
-            if (changed != 1) Reject(apply);
+            await WriteObservationAsync(apply, observedSource.Id, observedSource.Revision, observedSource.ObservationRevision, account, result, ct);
             current = await LoadAsync(apply, context, actor, query.ProductId, ct) ?? throw new PricingRejectedException();
         }
         if (Supply(current, current.Minimum) is not null) await WakeRestockAsync(apply, current.ProductId, ct);
         await apply.CommitAsync(ct);
         return current;
+    }
+
+    internal async Task<(string Account, SupplierCatalogResult Result)> InspectSourceAsync(string provider, string product, string? variant, CancellationToken ct)
+    {
+        if (!accounts.TryGetValue(provider, out string? account)) throw new PricingRejectedException();
+        SupplierCatalogResult result;
+        try { result = Normalize(await fetch(new(provider, account, product, variant, 1), ct)); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception) { throw new PricingRejectedException(); }
+        if (result.Status is not (SupplierCatalogStatus.Available or SupplierCatalogStatus.OutOfStock) || !result.ReadyItem) throw new PricingRejectedException();
+        return (account, result);
+    }
+    internal static async Task WriteObservationAsync(DbSession session, Guid source, long revision, long observation, string account, SupplierCatalogResult result, CancellationToken ct)
+    {
+        string status = result.Status switch { SupplierCatalogStatus.Available => "available", SupplierCatalogStatus.OutOfStock => "out_of_stock", SupplierCatalogStatus.Ineligible => "ineligible", _ => "error" };
+        int changed = await session.ExecuteAsync(new DbStatement("""
+            UPDATE shop.product_supplier_sources SET observation_revision=observation_revision+1,observed_source_revision=revision,observed_account_ref=$1,
+                observed_at=clock_timestamp(),availability_code=$2,available_quantity=$3,observed_unit_cost=$4,observed_currency=$5,quote_ref=$6,
+                eligibility_code=$7,observation_error_code=$8,updated_at=clock_timestamp()
+            WHERE id=$9 AND revision=$10 AND observation_revision=$11 AND enabled
+            """, DbValue.Text(account), DbValue.Text(status), DbValue.Integer(result.Quantity), Numeric(result.UnitCost), Text(result.Currency), Text(result.QuoteRef),
+            DbValue.Text(result.Status == SupplierCatalogStatus.Available || result.Status == SupplierCatalogStatus.OutOfStock ? "ready_item" : result.Status == SupplierCatalogStatus.Ineligible ? "ineligible" : "error"),
+            result.Status == SupplierCatalogStatus.Error ? DbValue.Text("source_unavailable") : DbValue.Null(NpgsqlDbType.Text), DbValue.Uuid(source), DbValue.Bigint(revision), DbValue.Bigint(observation)), ct);
+        if (changed != 1) Reject(session);
     }
 
     private async Task<CheckoutQuote> BuildQuoteAsync(DbSession session, BrandContext context, Data data, CatalogQuery query, CancellationToken ct)

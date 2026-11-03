@@ -1,5 +1,7 @@
 # Multi-brand redesign — conversation handoff (updated 2026-11-03)
 
+**Pending local T094 lifecycle continuation:** mapping creation, metadata pagination, verified enable/disable and nineteen added integration cases are implemented but unbuilt/unexecuted. The managed/native source-selection probe now exercises real creation and enablement. The owner has now directed proceeding with the reviewed nine-file upload to the existing repository on main and full CI after the initial approval rejection. Execution qualification remains pending. See [pending continuation](../../ops/SUPPLIER_SOURCE_SELECTION_QUALIFICATION.md). Latest qualified remote main remains `9b2998e`, CI `41626780834`; its 661 tests do not qualify these changes. T094 stays unchecked; 78/96 complete.
+
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
 **Branch:** `main`; authorized offline work uses task-grouped commits directly on main.
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  
