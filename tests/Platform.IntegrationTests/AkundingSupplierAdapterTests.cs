@@ -158,6 +158,20 @@ public sealed class AkundingSupplierAdapterTests
         Assert.Equal("partial_acquisition", SupplierRules.Validate(Binding(), result));
     }
     private static SupplierBinding Binding() => new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "akunding", "public account", "7", null, Guid.NewGuid().ToString("N"), 2, 1, "USDT", null);
+    [Fact]
+    public async Task ResolverCannotSubstituteContentAndRejectedCredentialBuffersAreCleared()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        using var files = new SyntheticSecretFiles();
+        using var credentials = AkundingSourceInspectionTests.Credentials(files);
+        SupplierItem[] supplied = [new("public first identity", SupplierItemDisposition.Customer, "code", "public substituted first"u8), new("public second identity", SupplierItemDisposition.Customer, "code", "public substituted second"u8)];
+        using var adapter = await Adapter(f, credentials, new Handler((_, _) => Task.FromResult(Reply(Delivered))), (_, _) => supplied);
+        using var result = await adapter.LookupAsync(Binding(), "71", Ct);
+        Assert.Equal(SupplierOutcomeKind.Unknown, result.Kind);
+        Assert.Empty(result.Items);
+        Assert.All(supplied, item => Assert.All(item.Content.ToArray(), value => Assert.Equal(0, value)));
+        Assert.NotEmpty(result.Evidence.ToArray());
+    }
     private static async Task<AkundingSupplierAdapter> Adapter(CheckoutFixture f, SupplierCredentialSnapshot credentials, HttpMessageHandler handler, Func<SupplierBinding, AkundingOrderReceipt, SupplierItem[]>? verify = null)
     {
         using var preview = new HttpClient(new Handler((_, _) => Task.FromResult(Reply(Product))));

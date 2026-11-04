@@ -104,6 +104,7 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
     private async Task<SupplierOutcome> SendAsync(SupplierBinding binding, HttpRequestMessage request, long? expectedOrder, CancellationToken ct)
     {
         byte[] evidence = [];
+        SupplierItem[]? acquired = null;
         try
         {
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -136,22 +137,27 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
             if (receipt.Status == "failed") return new(SupplierOutcomeKind.ConfirmedNoEffect, reference, "USDT", 0, [], evidence);
             if (receipt.Status == "draft") return new(SupplierOutcomeKind.Unknown, reference, null, null, [], evidence);
             if (receipt.Status == "paid") return new(SupplierOutcomeKind.Processing, reference, "USDT", receipt.Payable, [], evidence);
-            SupplierItem[] items = verify(binding, receipt);
+            SupplierItem[] items = acquired = verify(binding, receipt);
             bool valid = items.Length == 0 || (approved.TryGetValue(long.Parse(binding.Product, CultureInfo.InvariantCulture), out var approval) && items.Length == receipt.Items.Count &&
                 items.All(i => i.Disposition == SupplierItemDisposition.Customer && i.ContentKind == approval.ContentKind) &&
                 items.Select(i => i.Reference).Distinct(StringComparer.Ordinal).Count() == items.Length &&
                 receipt.Items.Select(raw => Convert.ToHexString(SHA256.HashData(raw.Span))).Order(StringComparer.Ordinal).SequenceEqual(items.Select(i => Convert.ToHexString(SHA256.HashData(i.Content.Span))).Order(StringComparer.Ordinal)));
             if (!valid)
             {
-                foreach (var item in items) item.Dispose();
                 return Unknown(evidence);
             }
-            return new(SupplierOutcomeKind.Completed, reference, "USDT", receipt.Payable, items, evidence);
+            var result = new SupplierOutcome(SupplierOutcomeKind.Completed, reference, "USDT", receipt.Payable, items, evidence);
+            acquired = null;
+            return result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception)
         { return Unknown(evidence); }
-        finally { CryptographicOperations.ZeroMemory(evidence); }
+        finally
+        {
+            if (acquired is not null) foreach (var item in acquired) item?.Dispose();
+            CryptographicOperations.ZeroMemory(evidence);
+        }
     }
     private static SupplierOutcome Unknown(ReadOnlySpan<byte> evidence) => new(SupplierOutcomeKind.Unknown, null, null, null, [], evidence.IsEmpty ? "akunding:unconfirmed-transport-outcome"u8 : evidence);
     private static AkundingOrderReceipt Parse(JsonElement root, SupplierBinding binding, long? expected)
