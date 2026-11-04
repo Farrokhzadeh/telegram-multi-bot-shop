@@ -68,6 +68,30 @@ public sealed class SupplierContractTests
         Assert.Equal(12, SupplierRules.UnitCeiling(binding with { ApprovedUnitCeiling = 12 }));
         Assert.Equal(10, binding.UnitBaseline);
     }
+    [Theory]
+    [InlineData("USDT")]
+    [InlineData("VND")]
+    [InlineData("usd")]
+    public void DocumentedSupplierBillingCurrencyCannotBeSilentlyRelabelledAsUsd(string currency)
+    {
+        var binding = Bound();
+        DateTime now = DateTime.UtcNow;
+        var quote = new SupplierQuote(binding.Provider, binding.Account, binding.Product, binding.Variant, currency, 10, true, true, now, "protected:synthetic/quote");
+        Assert.Equal("cost_unverified", SupplierRules.Preflight(binding, quote, now));
+        using var result = new SupplierOutcome(SupplierOutcomeKind.Completed, "public purchase", currency, 50, [], "public wire"u8);
+        Assert.Equal("cost_unverified", SupplierRules.Validate(binding, result));
+    }
+    [Theory]
+    [InlineData("different product", "public variant")]
+    [InlineData("public product", "different variant")]
+    [InlineData("public product", null)]
+    public void ExactProductAndVariantProofCannotBeReusedForAnotherMapping(string product, string? variant)
+    {
+        var binding = Bound();
+        DateTime now = DateTime.UtcNow;
+        var quote = new SupplierQuote(binding.Provider, binding.Account, product, variant, "USD", 10, true, true, now, "protected:synthetic/quote");
+        Assert.Equal("identity_mismatch", SupplierRules.Preflight(binding, quote, now));
+    }
     private static SupplierOutcome Outcome(int customers, int bonus) => new(SupplierOutcomeKind.Completed, "public purchase", "USD", 50,
         Enumerable.Range(0, customers + bonus).Select(i => new SupplierItem("public item " + i, i < customers ? SupplierItemDisposition.Customer : SupplierItemDisposition.Bonus, "code", "public credential"u8)).ToArray(), "public wire"u8);
 }

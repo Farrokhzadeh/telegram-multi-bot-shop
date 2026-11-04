@@ -158,3 +158,17 @@ A generic HTTP retry flag, historical source comment, local intent, configured a
 ## Owner-supplied documentation references — 2026-11-04
 
 The durable [API inventory](../../../ops/API_INVENTORY.md) preserves the owner's complete 14-service list, exact supplied URLs, AIVaultHub base URL/header and dated retrieval limitations. Use the supplied Akunding, ProdSeller, Canboso, RoboticVN and RapidX documentation links for the next read-only contract review; do not reuse the removed adapters' assumed hosts or payloads. The other nine services remain saved for later scope review. No provider gate is reopened by receipt of URLs: readable authoritative contract and capability evidence are still required.
+
+## Current official contract review — 2026-11-04
+
+The rendered official documentation is now readable for all five current suppliers. See the [dated contract review](../../../ops/SUPPLIER_CONTRACT_REVIEW.md) for verified roots/authentication, denomination, eligibility/recovery details, schema discrepancies and exact sources. Earlier pinned source notes remain historical evidence.
+
+| Provider | Published purchase ceiling / binding quote | Automatic adapter decision |
+|---|---|---|
+| Akunding | Not established by the reviewed contract | Keep closed |
+| ProdSeller | Not established by the reviewed contract | Keep closed |
+| Canboso | Not established by the reviewed contract | Keep closed |
+| RoboticVN | Realtime quote exists; purchase does not consume a binding quote or cap | Keep closed |
+| RapidX | Not established by the reviewed contract | Keep closed |
+
+No actual provider capability, account continuity or live operation is qualified by documentation review. Currency is provider-specific; do not silently relabel USDT, VND or USD. The added synthetic eligibility/currency/identity tests qualify the existing boundary only. T057/T091 remain unchecked; do not reinstate the quarantined adapters or bypass FR-074.

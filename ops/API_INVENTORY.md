@@ -40,3 +40,7 @@ Read-only documentation retrieval on 2026-11-04 returned these limited results:
 These are retrieval limitations, not findings that the services are unavailable or lack capabilities. The remaining nine entries have been saved without a capability review. The next read-only evidence step is to obtain readable official documentation or the site's actual linked OpenAPI schema, then record exact endpoint/version and evidence for eligibility, currency, enforceable maximum charge, purchase/item identity, uncertain outcomes and credential recovery. Never replace missing evidence with guessed endpoints or mock responses.
 
 The [quarantine record](SUPPLIER_ADAPTER_QUARANTINE.md), [supplier qualification](SUPPLIER_QUALIFICATION.md) and existing per-provider gates remain authoritative. Documentation availability alone does not close T057/T091 or prove account-specific/live behavior. Do not call purchase/payment endpoints, use real credentials, enable a normal host or deploy as part of saving or reviewing this list. Store actual credentials only through the existing protected configuration boundary.
+
+## Rendered documentation review — 2026-11-04
+
+The initial text-retrieval limitations above were subsequently resolved using the rendered official pages for Akunding, ProdSeller, Canboso, RoboticVN and RapidX. The [T057 contract review](SUPPLIER_CONTRACT_REVIEW.md) records the observed contracts and remaining gaps. All 14 original entries remain preserved. The other nine services remain deferred; no automatic procurement adapter is qualified by this review.
