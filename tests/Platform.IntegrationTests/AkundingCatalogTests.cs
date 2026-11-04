@@ -84,6 +84,7 @@ public sealed class AkundingCatalogTests
     [Theory]
     [InlineData("id", "8")]
     [InlineData("your_price", "0")]
+    [InlineData("your_price", "1.00000000000000000000000000001")]
     [InlineData("stock", "-1")]
     [InlineData("available", "false")]
     public async Task RejectsChangedIdentityAndInvalidPriceStockOrAvailability(string field, string replacement)

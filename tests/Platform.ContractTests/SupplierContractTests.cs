@@ -92,6 +92,15 @@ public sealed class SupplierContractTests
         var quote = new SupplierQuote(binding.Provider, binding.Account, product, variant, "USD", 10, true, true, now, "protected:synthetic/quote");
         Assert.Equal("identity_mismatch", SupplierRules.Preflight(binding, quote, now));
     }
+    [Fact]
+    public void UnrepresentableAllowanceCannotRoundIntoAnApprovedPrice()
+    {
+        var binding = Bound() with { UnitBaseline = ExactDecimal.Parse("1.0000000000000000000000000001") };
+        Assert.ThrowsAny<ArithmeticException>(() => SupplierRules.UnitCeiling(binding));
+        DateTime now = DateTime.UtcNow;
+        var quote = new SupplierQuote(binding.Provider, binding.Account, binding.Product, binding.Variant, binding.Currency, binding.UnitBaseline, true, false, now, "public exact-price observation");
+        Assert.Equal("cost_unverified", SupplierRules.Preflight(binding, quote, now));
+    }
     private static SupplierOutcome Outcome(int customers, int bonus) => new(SupplierOutcomeKind.Completed, "public purchase", "USD", 50,
         Enumerable.Range(0, customers + bonus).Select(i => new SupplierItem("public item " + i, i < customers ? SupplierItemDisposition.Customer : SupplierItemDisposition.Bonus, "code", "public credential"u8)).ToArray(), "public wire"u8);
 }

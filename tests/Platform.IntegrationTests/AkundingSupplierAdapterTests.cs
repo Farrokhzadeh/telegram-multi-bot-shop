@@ -82,6 +82,7 @@ public sealed class AkundingSupplierAdapterTests
     [InlineData("wrong quantity")]
     [InlineData("duplicate")]
     [InlineData("wrong total")]
+    [InlineData("inexact")]
     [InlineData("http")]
     [InlineData("timeout")]
     public async Task BadOrAmbiguousPurchaseEvidenceIsRetainedWithoutInventingSuccess(string fault)
@@ -101,6 +102,7 @@ public sealed class AkundingSupplierAdapterTests
                 "wrong quantity" => Delivered.Replace("\"quantity\":2", "\"quantity\":3", StringComparison.Ordinal),
                 "duplicate" => Delivered.Replace("\"id\":71", "\"id\":71,\"id\":71", StringComparison.Ordinal),
                 "wrong total" => Delivered.Replace("\"payable\":2", "\"payable\":3", StringComparison.Ordinal),
+                "inexact" => Delivered.Replace("\"unit_price\":1", "\"unit_price\":1.00000000000000000000000000001", StringComparison.Ordinal),
                 _ => Delivered
             };
             return Task.FromResult(Reply(body, fault == "http" ? HttpStatusCode.InternalServerError : HttpStatusCode.OK));

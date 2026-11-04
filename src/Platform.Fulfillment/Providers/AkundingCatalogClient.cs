@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Platform.Core;
 
 namespace Platform.Fulfillment.Providers;
 
@@ -67,7 +68,7 @@ public sealed class AkundingCatalogClient(HttpClient client)
             if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != root.EnumerateObject().Count()) throw new FormatException();
             long id = root.GetProperty("id").GetInt64();
             string? name = root.GetProperty("name").GetString(), label = root.GetProperty("unit_label").GetString();
-            decimal price = root.GetProperty("your_price").GetDecimal();
+            decimal price = ExactDecimal.Parse(root.GetProperty("your_price").GetRawText());
             int stock = root.GetProperty("stock").GetInt32();
             bool available = root.GetProperty("available").GetBoolean();
             if (id <= 0 || string.IsNullOrWhiteSpace(name) || name.Length > 1000 || string.IsNullOrWhiteSpace(label) || label.Length > 100 || price <= 0 || stock < 0 || available != (stock > 0)) throw new FormatException();

@@ -46,14 +46,15 @@ public static class SupplierRules
     public static decimal UnitCeiling(SupplierBinding binding)
     {
         if (binding.Quantity <= 0 || binding.UnitBaseline <= 0 || binding.ApprovedUnitCeiling <= 0) throw new ArgumentException("Invalid original supplier cost.");
-        return binding.ApprovedUnitCeiling ?? checked(binding.UnitBaseline * 1.10m);
+        return binding.ApprovedUnitCeiling ?? ExactDecimal.Multiply(binding.UnitBaseline, 1.10m);
     }
     public static string? Preflight(SupplierBinding binding, SupplierQuote quote, DateTime now)
     {
         if (quote.Provider != binding.Provider || quote.Account != binding.Account || quote.Product != binding.Product || quote.Variant != binding.Variant) return "identity_mismatch";
         if (!quote.Ready) return "source_ineligible";
         if (quote.Currency != binding.Currency || quote.UnitCost <= 0 || quote.ObservedAt.Kind != DateTimeKind.Utc || quote.ObservedAt > now || now - quote.ObservedAt > TimeSpan.FromSeconds(30) || string.IsNullOrWhiteSpace(quote.EvidenceReference)) return "cost_unverified";
-        return quote.UnitCost <= UnitCeiling(binding) ? null : "cost_limit";
+        try { return quote.UnitCost <= UnitCeiling(binding) ? null : "cost_limit"; }
+        catch (ArithmeticException) { return "cost_unverified"; }
     }
     public static string? Identity(SupplierBinding binding, SupplierOutcome result)
     {
@@ -70,7 +71,8 @@ public static class SupplierRules
         if (result.Kind == SupplierOutcomeKind.Unknown) return "provider_unknown";
         if (result.Kind == SupplierOutcomeKind.Processing) return "provider_unknown";
         if (result.Currency != binding.Currency || result.ChargedAmount is null) return "cost_unverified";
-        if (result.ChargedAmount > checked(UnitCeiling(binding) * binding.Quantity)) return "cost_limit";
+        try { if (result.ChargedAmount > ExactDecimal.Multiply(UnitCeiling(binding), binding.Quantity)) return "cost_limit"; }
+        catch (ArithmeticException) { return "cost_unverified"; }
         return result.Items.Count(i => i.Disposition == SupplierItemDisposition.Customer) == binding.Quantity ? null : "partial_acquisition";
     }
     public static byte[] ItemKey(SupplierBinding binding, string reference)

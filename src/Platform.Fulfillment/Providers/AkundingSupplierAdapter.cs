@@ -169,14 +169,14 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
         long id = root.GetProperty("id").GetInt64();
         var product = root.GetProperty("product"); Object(product);
         string? status = root.GetProperty("status").GetString();
-        decimal unit = root.GetProperty("unit_price").GetDecimal(), subtotal = root.GetProperty("subtotal").GetDecimal(), discount = root.GetProperty("discount").GetDecimal(), payable = root.GetProperty("payable").GetDecimal();
+        decimal unit = ExactDecimal.Parse(root.GetProperty("unit_price").GetRawText()), subtotal = ExactDecimal.Parse(root.GetProperty("subtotal").GetRawText()), discount = ExactDecimal.Parse(root.GetProperty("discount").GetRawText()), payable = ExactDecimal.Parse(root.GetProperty("payable").GetRawText());
         string? method = root.GetProperty("payment_method").GetString();
         var array = root.GetProperty("items");
         if (id <= 0 || (expected.HasValue && id != expected.Value) || product.GetProperty("id").GetInt64().ToString(CultureInfo.InvariantCulture) != binding.Product ||
             root.GetProperty("quantity").GetInt32() != binding.Quantity || status is not ("delivered" or "paid" or "failed" or "draft") ||
-            unit <= 0 || subtotal != checked(unit * binding.Quantity) || discount != 0 || payable != subtotal || (status != "draft" && method != "wallet") ||
+            unit <= 0 || subtotal != ExactDecimal.Multiply(unit, binding.Quantity) || discount != 0 || payable != subtotal || (status != "draft" && method != "wallet") ||
             array.ValueKind != JsonValueKind.Array || (status == "delivered" ? array.GetArrayLength() != binding.Quantity : array.GetArrayLength() != 0)) throw new FormatException();
-        if (root.TryGetProperty("charged", out var charged) && (status is "delivered" or "paid") && charged.GetDecimal() != payable) throw new FormatException();
+        if (root.TryGetProperty("charged", out var charged) && (status is "delivered" or "paid") && ExactDecimal.Parse(charged.GetRawText()) != payable) throw new FormatException();
         var items = new List<byte[]>();
         try
         {
