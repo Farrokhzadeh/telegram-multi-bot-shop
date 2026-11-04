@@ -33,6 +33,7 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
     public string Provider => "akunding";
     public string Account { get; }
     public bool ProvenIntentLookup => false;
+    public bool UsesPurchaseKey => true;
     public AkundingSupplierAdapter(SecretSnapshot commerce, SupplierCredentialSnapshot credentials, string account, IEnumerable<AkundingProductApproval> approvals,
         Func<SupplierBinding, AkundingOrderReceipt, SupplierItem[]> verifyItems, HttpMessageHandler? transport = null)
     {
@@ -69,12 +70,14 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
         bool ready = approved.TryGetValue(product, out var approval) && item.EligibilityFingerprint == approval.EligibilityFingerprint;
         return new(!ready ? SupplierCatalogStatus.Ineligible : item.Available ? SupplierCatalogStatus.Available : SupplierCatalogStatus.OutOfStock, item.Stock, item.UnitPrice, "USDT", "akunding:product/" + request.ProductRef, ready);
     }
-    public async Task<SupplierOutcome> SubmitAsync(SupplierBinding binding, decimal maximumUnitCharge, CancellationToken ct)
+    public Task<SupplierOutcome> SubmitAsync(SupplierBinding binding, decimal maximumUnitCharge, CancellationToken ct) => SubmitAttemptAsync(binding, null, maximumUnitCharge, ct);
+    public async Task<SupplierOutcome> SubmitAttemptAsync(SupplierBinding binding, string? purchaseKey, decimal maximumUnitCharge, CancellationToken ct)
     {
         long product = Require(binding);
         lock (gate)
         {
-            if (!permits.Remove(binding.RequestId, out var permit) || permit.Binding != binding || maximumUnitCharge != SupplierRules.UnitCeiling(binding) || SupplierRules.Preflight(binding, permit.Quote, DateTime.UtcNow) is not null)
+            if (!permits.Remove(binding.RequestId, out var permit) || permit.Binding != binding || maximumUnitCharge != SupplierRules.UnitCeiling(binding) || SupplierRules.Preflight(binding, permit.Quote, DateTime.UtcNow) is not null ||
+                purchaseKey is null || purchaseKey.Length is < 1 or > 120 || purchaseKey.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_' or ':' or '.')))
                 return new(SupplierOutcomeKind.ConfirmedNoEffect, null, "USDT", 0, [], "akunding:local-prepurchase-rejection"u8);
         }
         using var body = new MemoryStream();
@@ -82,7 +85,7 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
         { writer.WriteStartObject(); writer.WriteNumber("product_id", product); writer.WriteNumber("quantity", binding.Quantity); writer.WriteEndObject(); }
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://akunding.shop/api/v1/orders") { Content = new ByteArrayContent(body.ToArray()) };
         request.Content.Headers.ContentType = new("application/json");
-        request.Headers.Add("X-Idempotency-Key", binding.Intent);
+        request.Headers.Add("X-Idempotency-Key", purchaseKey);
         return await SendAsync(binding, request, null, ct);
     }
     public async Task<SupplierOutcome> LookupAsync(SupplierBinding binding, string? originalPurchaseReference, CancellationToken ct)

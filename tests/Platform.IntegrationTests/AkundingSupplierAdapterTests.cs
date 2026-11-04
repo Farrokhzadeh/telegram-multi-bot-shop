@@ -49,7 +49,8 @@ public sealed class AkundingSupplierAdapterTests
         var binding = await store.ReadAsync(f.Context(0), lease, Ct);
         var archive = new SyntheticSupplier();
         await new SupplierFulfillmentWorker(store, adapter, archive).RunAsync(f.Context(0), lease, Ct);
-        Assert.Equal(binding.Intent, intent); Assert.Equal(1, posts); Assert.Equal(1, archive.Archives);
+        Assert.NotEqual(binding.Intent, intent); Assert.StartsWith("purchase:", intent!); Assert.Equal(1, posts); Assert.Equal(1, archive.Archives);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE purchase_idempotency_key='" + intent + "' AND operation='submit' AND outcome='succeeded'", Ct));
         Assert.Null(posted!.Headers.Authorization);
         Assert.False(adapter.ProvenIntentLookup);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE provider_code='akunding' AND cost_currency='USDT' AND cost_baseline_amount=1 AND status='succeeded' AND remote_ref='71'", Ct));
@@ -142,7 +143,7 @@ public sealed class AkundingSupplierAdapterTests
         var quote = await adapter.InspectAsync(binding, Ct);
         Assert.False(quote.EnforcesMaximum);
         Assert.Equal(price ? "cost_limit" : "source_ineligible", SupplierRules.Preflight(binding, quote, DateTime.UtcNow));
-        using var result = await adapter.SubmitAsync(binding, SupplierRules.UnitCeiling(binding), Ct);
+        using var result = await adapter.SubmitAttemptAsync(binding, "purchase:" + Guid.NewGuid().ToString("D"), SupplierRules.UnitCeiling(binding), Ct);
         Assert.Equal(SupplierOutcomeKind.ConfirmedNoEffect, result.Kind); Assert.Equal(0, posts);
     }
     [Fact]
@@ -158,6 +159,57 @@ public sealed class AkundingSupplierAdapterTests
         Assert.Equal("partial_acquisition", SupplierRules.Validate(Binding(), result));
     }
     private static SupplierBinding Binding() => new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "akunding", "public account", "7", null, Guid.NewGuid().ToString("N"), 2, 1, "USDT", null);
+    [Fact]
+    public async Task AuditedRetryUsesNewCommittedKeyAndReconcilesItsOwnOrderWhilePreservingFailedHistory()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        using var files = new SyntheticSecretFiles();
+        using var credentials = AkundingSourceInspectionTests.Credentials(files);
+        var keys = new List<string>();
+        using var adapter = await Adapter(f, credentials, new Handler((request, _) =>
+        {
+            string body = Delivered;
+            if (request.RequestUri!.AbsolutePath.StartsWith("/api/v1/products/", StringComparison.Ordinal)) return Task.FromResult(Reply(Product));
+            if (request.Method == HttpMethod.Post)
+            {
+                keys.Add(Assert.Single(request.Headers.GetValues("X-Idempotency-Key")));
+                body = keys.Count == 1 ? Delivered.Replace("\"status\":\"delivered\"", "\"status\":\"failed\"", StringComparison.Ordinal) : Delivered.Replace("\"id\":71", "\"id\":72", StringComparison.Ordinal).Replace("\"status\":\"delivered\"", "\"status\":\"paid\"", StringComparison.Ordinal);
+                body = body.Replace("[\"public code A\",\"public code B\"]", "[]", StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.Equal("/api/v1/orders/72", request.RequestUri.AbsolutePath);
+                body = Delivered.Replace("\"id\":71", "\"id\":72", StringComparison.Ordinal);
+            }
+            return Task.FromResult(Reply(body));
+        }));
+        await Configure(f);
+        var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, adapter.InspectCatalogAsync);
+        var accepted = await new WalletCheckoutService(f.Sessions, f.Store, catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 2), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
+        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var first = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
+        var binding = await store.ReadAsync(f.Context(0), first, Ct);
+        var worker = new SupplierFulfillmentWorker(store, adapter, new SyntheticSupplier());
+        await worker.RunAsync(f.Context(0), first, Ct);
+        var actor = await f.AdminAsync(Ct);
+        long revision = await f.CountAsync("SELECT revision FROM shop.orders", Ct), requestRevision = await f.CountAsync("SELECT revision FROM shop.supplier_requests", Ct);
+        var command = new OrderResolution("retry_supplier", revision, "Public verified recredited failure", Guid.NewGuid(), binding.RequestId, requestRevision);
+        var administration = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        await administration.ResolveAsync(actor, f.Context(0), accepted.OrderId!.Value, command, Ct);
+        await administration.ResolveAsync(actor, f.Context(0), accepted.OrderId.Value, command, Ct);
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await using (var due = await f.Sessions.BeginAsync(Ct))
+        {
+            await due.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET available_at=clock_timestamp() WHERE job_kind='reconcile_supplier' AND status='pending'"), Ct); await due.CommitAsync(Ct);
+        }
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct), Ct);
+        Assert.Equal(2, keys.Count); Assert.NotEqual(keys[0], keys[1]);
+        Assert.Equal(2L, await f.CountAsync("SELECT count(DISTINCT purchase_idempotency_key) FROM shop.supplier_request_attempts WHERE operation='submit'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE operation='submit' AND remote_ref='71' AND outcome='failed' AND error_code='confirmed_no_effect'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE operation='status_lookup' AND remote_ref='72' AND outcome='succeeded'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='succeeded' AND remote_ref='71' AND cost_baseline_amount=1", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
+    }
     [Fact]
     public async Task ResolverCannotSubstituteContentAndRejectedCredentialBuffersAreCleared()
     {

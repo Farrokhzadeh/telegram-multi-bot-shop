@@ -45,7 +45,7 @@ public sealed class SupplierCatalogHttpTests
     {
         await using var f = await Fixture.CreateAsync();
         await f.LoginAsync();
-        using (var first = await f.Client.GetAsync(f.Root + "/catalog?productRevision=2&limit=1", Ct))
+        using (var first = await f.Client.GetAsync(f.Catalog("&limit=1"), Ct))
         {
             Assert.Equal(HttpStatusCode.OK, first.StatusCode);
             Assert.True(first.Headers.CacheControl!.NoStore);
@@ -54,7 +54,7 @@ public sealed class SupplierCatalogHttpTests
             Assert.Equal(7, json.RootElement.GetProperty("Next").GetInt64());
             Assert.DoesNotContain("credential", json.RootElement.ToString(), StringComparison.OrdinalIgnoreCase);
         }
-        using (var second = await f.Client.GetAsync(f.Root + "/catalog?productRevision=2&after=7&search=code", Ct))
+        using (var second = await f.Client.GetAsync(f.Catalog("&after=7&search=code"), Ct))
         {
             Assert.Equal(HttpStatusCode.OK, second.StatusCode);
             using var json = JsonDocument.Parse(await second.Content.ReadAsStringAsync(Ct));
@@ -62,7 +62,7 @@ public sealed class SupplierCatalogHttpTests
             Assert.False(json.RootElement.GetProperty("Items")[0].GetProperty("Available").GetBoolean());
         }
         Guid source = Guid.NewGuid(), command = Guid.NewGuid();
-        string body = Choice(source, command);
+        string body = f.Choice(source, command);
         for (int i = 0; i < 2; i++)
         {
             using var saved = await f.PostAsync(body);
@@ -83,18 +83,18 @@ public sealed class SupplierCatalogHttpTests
         }
         using (var preview = await f.Client.GetAsync(f.Root + "/sources/" + source.ToString("D") + "?sourceRevision=1", Ct))
             Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
-        using (var stale = await f.Client.GetAsync(f.Root + "/catalog?productRevision=1", Ct))
+        using (var stale = await f.Client.GetAsync(f.Root + "/catalog?productRevision=" + (f.Revision + 1), Ct))
             await Error(stale, HttpStatusCode.Conflict);
-        using (var conflict = await f.PostAsync(Choice(source, command, 9)))
+        using (var conflict = await f.PostAsync(f.Choice(source, command, 9)))
             await Error(conflict, HttpStatusCode.Conflict);
         int calls = f.Calls;
-        string[] invalidBodies = ["{}", body[..^1] + ",\"CommandId\":\"" + command.ToString("D") + "\"}", body[..^1] + ",\"ApiKey\":\"public-do-not-echo\"}", body.Replace("\"ProductRevision\":2", "\"ProductRevision\":0", StringComparison.Ordinal)];
+        string[] invalidBodies = ["{}", body[..^1] + ",\"CommandId\":\"" + command.ToString("D") + "\"}", body[..^1] + ",\"ApiKey\":\"public-do-not-echo\"}", body.Replace("\"ProductRevision\":" + f.Revision, "\"ProductRevision\":0", StringComparison.Ordinal)];
         foreach (string input in invalidBodies)
         {
             using var rejected = await f.PostAsync(input);
             await Error(rejected, HttpStatusCode.BadRequest);
         }
-        using (var invalid = await f.Client.GetAsync(f.Root + "/catalog?productRevision=2&limit=101", Ct))
+        using (var invalid = await f.Client.GetAsync(f.Catalog("&limit=101"), Ct))
             await Error(invalid, HttpStatusCode.BadRequest);
         using (var missing = await f.Client.GetAsync(f.Root + "/catalog", Ct))
             await Error(missing, HttpStatusCode.BadRequest);
@@ -109,7 +109,7 @@ public sealed class SupplierCatalogHttpTests
         {
             await AdminSessionStore.LogoutAsync(revoke, f.Actor!, Ct); await revoke.CommitAsync(Ct);
         }
-        using var denied = await f.Client.GetAsync(f.Root + "/catalog?productRevision=2", Ct);
+        using var denied = await f.Client.GetAsync(f.Catalog(), Ct);
         await Error(denied, HttpStatusCode.Unauthorized);
         Assert.Equal(calls, f.Calls);
     }
@@ -127,7 +127,7 @@ public sealed class SupplierCatalogHttpTests
             else await edit.ExecuteAsync(new DbStatement("UPDATE shop.products SET revision=revision+1 WHERE id=$1", DbValue.Uuid(f.Data.Product)), ct);
             await edit.CommitAsync(ct);
         };
-        using var response = await f.PostAsync(Choice(Guid.NewGuid(), Guid.NewGuid()));
+        using var response = await f.PostAsync(f.Choice(Guid.NewGuid(), Guid.NewGuid()));
         await Error(response, revoke ? HttpStatusCode.Unauthorized : HttpStatusCode.Conflict);
         Assert.Equal(1, f.Calls);
         Assert.Equal(0L, await f.Data.CountAsync("SELECT count(*) FROM shop.product_supplier_sources", Ct));
@@ -139,12 +139,11 @@ public sealed class SupplierCatalogHttpTests
         await using var f = await Fixture.CreateAsync();
         await f.LoginAsync();
         f.Fail = true;
-        using var response = await f.PostAsync(Choice(Guid.NewGuid(), Guid.NewGuid()));
+        using var response = await f.PostAsync(f.Choice(Guid.NewGuid(), Guid.NewGuid()));
         await Error(response, HttpStatusCode.Conflict);
         Assert.Equal(1, f.Calls);
         Assert.Equal(0L, await f.Data.CountAsync("SELECT count(*) FROM shop.product_supplier_sources", Ct));
     }
-    private static string Choice(Guid source, Guid command, long external = 7) => "{\"ProductRevision\":2,\"ExternalProductId\":" + external + ",\"SourceId\":\"" + source.ToString("D") + "\",\"CommandId\":\"" + command.ToString("D") + "\"}";
     private static async Task Error(HttpResponseMessage response, HttpStatusCode status)
     {
         Assert.Equal(status, response.StatusCode);
@@ -162,6 +161,7 @@ public sealed class SupplierCatalogHttpTests
         public HttpClient Client { get; }
         public AuthenticatedAdmin? Actor { get; private set; }
         public int Calls { get; private set; }
+        public long Revision { get; }
         public bool Fail { get; set; }
         public Func<CancellationToken, Task>? OnRequest { get; set; }
         public string Root => "/v1/admin/products/" + Data.Product.ToString("D") + "/suppliers/akunding";
@@ -169,9 +169,9 @@ public sealed class SupplierCatalogHttpTests
         private readonly SyntheticSecretFiles files;
         private readonly SupplierCredentialSnapshot credentials;
         private readonly AkundingSourceInspection inspection;
-        private Fixture(CheckoutFixture data, WebApplication app, SyntheticSecretFiles files, SupplierCredentialSnapshot credentials, AkundingSourceInspection inspection)
+        private Fixture(CheckoutFixture data, WebApplication app, SyntheticSecretFiles files, SupplierCredentialSnapshot credentials, AkundingSourceInspection inspection, long revision)
         {
-            Data = data; App = app; this.files = files; this.credentials = credentials; this.inspection = inspection;
+            Data = data; App = app; Revision = revision; this.files = files; this.credentials = credentials; this.inspection = inspection;
             Client = new() { BaseAddress = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };
         }
         public static async Task<Fixture> CreateAsync()
@@ -209,7 +209,7 @@ public sealed class SupplierCatalogHttpTests
             }));
             app.MapAkundingSupplierAdministration(inspection, new(data.Sessions));
             await app.StartAsync(Ct);
-            fixture = new(data, app, files, credentials, inspection);
+            fixture = new(data, app, files, credentials, inspection, await data.CountAsync("SELECT revision FROM shop.products", Ct));
             return fixture;
         }
         public async Task LoginAsync()
@@ -221,6 +221,8 @@ public sealed class SupplierCatalogHttpTests
             Actor = await AdminSessionStore.AuthenticateAsync(resolve, issued.Token, Ct);
             Client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.Token.ExportForTransport());
         }
+        public string Catalog(string suffix = "") => Root + "/catalog?productRevision=" + Revision + suffix;
+        public string Choice(Guid source, Guid command, long external = 7) => "{\"ProductRevision\":" + Revision + ",\"ExternalProductId\":" + external + ",\"SourceId\":\"" + source.ToString("D") + "\",\"CommandId\":\"" + command.ToString("D") + "\"}";
         public Task<HttpResponseMessage> PostAsync(string body) => Client.PostAsync(Root + "/sources", new StringContent(body, Encoding.UTF8, "application/json"), Ct);
         public async ValueTask DisposeAsync()
         {

@@ -4,7 +4,7 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed record SupplierAttempt(SupplierBinding Binding, Guid Id, Guid? ParentSubmit, string Operation, string? PurchaseReference);
+public sealed record SupplierAttempt(SupplierBinding Binding, Guid Id, Guid? ParentSubmit, string Operation, string? PurchaseReference, string? PurchaseKey = null);
 public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapshot secrets, long? trustedStaffChat = null, TimeSpan? remoteLeaseDuration = null)
 {
     private const string BindingColumns = "r.id,r.order_id,o.product_id,r.product_supplier_source_id,r.source_revision,r.provider_code,r.account_ref,r.external_product_id,r.external_variant_id,r.local_intent_key,r.requested_quantity,r.cost_baseline_amount::text,r.cost_currency,r.approved_cost_ceiling::text";
@@ -26,7 +26,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
                     AND (SELECT count(*) FROM shop.fulfillments f WHERE f.order_id=o.id)=o.quantity
                     AND (SELECT count(*) FROM shop.fulfillments f WHERE f.supplier_request_id=r.id AND f.kind='supplier' AND f.status='acquired')=r.requested_quantity
                     AND EXISTS(SELECT 1 FROM shop.supplier_request_attempts a WHERE a.supplier_request_id=r.id AND a.outcome='succeeded'
-                        AND a.error_code IS NULL AND a.evidence_ref=r.evidence_ref AND a.remote_ref=r.remote_ref AND a.finished_at IS NOT NULL),false)
+                        AND a.error_code IS NULL AND a.evidence_ref=r.evidence_ref AND a.remote_ref IS NOT NULL AND a.finished_at IS NOT NULL),false)
                 FROM shop.orders o JOIN shop.supplier_requests r ON r.order_id=o.id WHERE r.id=$1
                 """, DbValue.Uuid(request), DbValue.Bigint(revision)), r => (Quantity: r.GetInt32(0), Valid: r.GetBoolean(1)), ct);
             if (!state.Valid || !await new DeliveryStore(sessions, secrets).HasCompleteAcquisitionAsync(session, context, order, state.Quantity, ct)) throw new InvalidOperationException("Complete verified supplier acquisition requires current review.");
@@ -43,7 +43,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         return await session.QuerySingleAsync(new DbStatement("SELECT " + BindingColumns + " FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND b.id=$2 AND b.bot_id=$3",
             DbValue.Uuid(lease.Intent.OriginId!.Value), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), ReadBinding, ct);
     }
-    public async Task<SupplierAttempt?> BeginAsync(BrandContext context, JobLease lease, SupplierQuote? quote, CancellationToken ct = default)
+    public async Task<SupplierAttempt?> BeginAsync(BrandContext context, JobLease lease, SupplierQuote? quote, CancellationToken ct = default, bool usesPurchaseKey = false)
     {
         Require(context, lease);
         await using var session = await sessions.BeginAsync(ct);
@@ -68,15 +68,17 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
                 }
             }
             Guid? parent = submit ? null : await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.supplier_request_attempts WHERE supplier_request_id=$1 AND operation='submit' ORDER BY attempt_no DESC LIMIT 1", DbValue.Uuid(binding.RequestId)), r => r.GetGuid(0), ct);
+            string? purchaseReference = parent is Guid original ? await PurchaseReferenceAsync(session, original, ct) : null;
             Guid attempt = AttemptId(lease.Id, lease.Attempt);
+            string? purchaseKey = submit && usesPurchaseKey ? "purchase:" + attempt.ToString("D") : null;
             string operation = submit ? "submit" : lease.Intent.Kind == JobKind.ExportSupplier ? "export" : "status_lookup";
             await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,parent_submit_attempt_id,admin_authorization_audit_id,max_charge_amount)
-                SELECT $1,$2,COALESCE(max(attempt_no),0)+1,$3,$4,$5,$6 FROM shop.supplier_request_attempts WHERE supplier_request_id=$2
+                INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,parent_submit_attempt_id,admin_authorization_audit_id,max_charge_amount,purchase_idempotency_key)
+                SELECT $1,$2,COALESCE(max(attempt_no),0)+1,$3,$4,$5,$6,$7 FROM shop.supplier_request_attempts WHERE supplier_request_id=$2
                 """, DbValue.Uuid(attempt), DbValue.Uuid(binding.RequestId), DbValue.Text(operation), AdminCommand.Id(parent), AdminCommand.Id(submit ? lease.Intent.AuditId : null),
-                submit ? DbValue.Numeric(SupplierRules.UnitCeiling(binding)) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Numeric)), ct);
+                submit ? DbValue.Numeric(SupplierRules.UnitCeiling(binding)) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Numeric), AdminCommand.Text(purchaseKey)), ct);
             if (submit) await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='in_flight',updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(binding.RequestId)), ct);
-            await session.CommitAsync(ct); return new(binding, attempt, parent, operation, state.Remote);
+            await session.CommitAsync(ct); return new(binding, attempt, parent, operation, purchaseReference, purchaseKey);
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
@@ -101,7 +103,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             string? review = SupplierRules.Validate(binding, result);
             bool archived = !string.IsNullOrWhiteSpace(evidence) && result.Evidence.Length > 0;
             bool identity = SupplierRules.Identity(binding, result) is null;
-            string? prior = await session.QuerySingleAsync(new DbStatement("SELECT remote_ref FROM shop.supplier_requests WHERE id=$1", DbValue.Uuid(binding.RequestId)), r => r.IsDBNull(0) ? null : r.GetString(0), ct);
+            string? prior = attempt.ParentSubmit is Guid original ? await PurchaseReferenceAsync(session, original, ct) : null;
             if (prior is not null && result.PurchaseReference is not null && prior != result.PurchaseReference) { identity = false; review = "identity_mismatch"; }
             if (!archived) review = "credential_recovery";
             if (identity && archived && result.Items.Count > 0)
@@ -139,6 +141,10 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
+    private static Task<string?> PurchaseReferenceAsync(DbSession session, Guid submit, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("""
+        SELECT COALESCE(a.remote_ref,(SELECT l.remote_ref FROM shop.supplier_request_attempts l WHERE l.parent_submit_attempt_id=a.id AND l.remote_ref IS NOT NULL ORDER BY l.attempt_no DESC LIMIT 1))
+        FROM shop.supplier_request_attempts a WHERE a.id=$1 AND a.operation='submit'
+        """, DbValue.Uuid(submit)), r => r.IsDBNull(0) ? null : r.GetString(0), ct);
     private async Task<bool> ExistingItemsMatchAsync(DbSession session, BrandContext context, SupplierBinding binding, SupplierOutcome result, CancellationToken ct)
     {
         int newCustomers = 0;
