@@ -88,8 +88,8 @@ public sealed class SupplierCatalogHttpTests
         using (var conflict = await f.PostAsync(Choice(source, command, 9)))
             await Error(conflict, HttpStatusCode.Conflict);
         int calls = f.Calls;
-        string[] invalid = ["{}", body[..^1] + ",\"CommandId\":\"" + command.ToString("D") + "\"}", body[..^1] + ",\"ApiKey\":\"public-do-not-echo\"}", body.Replace("\"ProductRevision\":2", "\"ProductRevision\":0", StringComparison.Ordinal)];
-        foreach (string input in invalid)
+        string[] invalidBodies = ["{}", body[..^1] + ",\"CommandId\":\"" + command.ToString("D") + "\"}", body[..^1] + ",\"ApiKey\":\"public-do-not-echo\"}", body.Replace("\"ProductRevision\":2", "\"ProductRevision\":0", StringComparison.Ordinal)];
+        foreach (string input in invalidBodies)
         {
             using var rejected = await f.PostAsync(input);
             await Error(rejected, HttpStatusCode.BadRequest);

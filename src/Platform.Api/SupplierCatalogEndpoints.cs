@@ -16,11 +16,11 @@ public static class SupplierCatalogEndpoints
             Results.Json(await inspection.BrowseAsync(http.GetRequiredAdministrator(), product, productRevision, search ?? "", after, limit ?? 50, http.RequestAborted), SupplierCatalogJsonContext.Default.AkundingCatalogPage))).RequireAdministrator();
         endpoints.MapGet("/v1/admin/products/{product:guid}/supplier-sources", (HttpContext http, Guid product, Guid? after, int? limit) => HandleAsync(http, async () =>
             Results.Json(await sources.SourcesAsync(http.GetRequiredAdministrator(), product, after, limit ?? 50, http.RequestAborted), SupplierCatalogJsonContext.Default.AdminPageSupplierSourceMetadata))).RequireAdministrator();
-        endpoints.MapPost("/v1/admin/products/{product:guid}/suppliers/akunding/sources", (Func<HttpContext, Guid, Task<IResult>>)((http, product) => HandleAsync(http, async () =>
+        endpoints.MapPost("/v1/admin/products/{product:guid}/suppliers/akunding/sources", (HttpContext http, Guid product) => HandleAsync(http, async () =>
         {
             var input = await AdminHttp.ReadAsync(http, SupplierCatalogJsonContext.Default.AkundingSourceChoice);
             return Results.Json(await inspection.AddCandidateAsync(http.GetRequiredAdministrator(), product, input.ProductRevision, input.ExternalProductId, input.SourceId, input.CommandId, http.RequestAborted), SupplierCatalogJsonContext.Default.AkundingSourcePreview);
-        }))).RequireAdministrator();
+        })).RequireAdministrator();
         endpoints.MapGet("/v1/admin/products/{product:guid}/suppliers/akunding/sources/{source:guid}", (HttpContext http, Guid product, Guid source, long sourceRevision) => HandleAsync(http, async () =>
             Results.Json(await inspection.InspectAsync(http.GetRequiredAdministrator(), product, source, sourceRevision, http.RequestAborted), SupplierCatalogJsonContext.Default.AkundingSourcePreview))).RequireAdministrator();
     }

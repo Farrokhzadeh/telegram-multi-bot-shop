@@ -4,7 +4,7 @@ Reviewed the five current suppliers from [API_INVENTORY.md](API_INVENTORY.md) th
 
 ## Decision
 
-No reviewed purchase contract establishes a server-enforced buyer charge limit or a binding quote consumed by purchase. This is an evidence gap, not proof that a provider cannot offer such a capability. FR-074 therefore blocks restoring any automatic purchasing adapter. T057/T091 and provider-dependent gates remain unchecked. Do not weaken the inclusive 10% rule or treat an administrator's local approval as a remotely enforced cap. The existing worker already routes unverified capabilities to review.
+No reviewed purchase contract establishes a server-enforced buyer charge limit or a binding quote consumed by purchase. This is an evidence gap, not proof that a provider cannot offer such a capability. The owner subsequently approved option A on 2026-11-04: a fresh verified price check within the inclusive immutable 10% allowance can permit an uncapped purchase, accepting execution-price movement after the check. Missing remote caps alone no longer block implementation. T057/T091 and other provider-dependent gates remain unchecked for their remaining identity/eligibility/recovery/account requirements. Do not represent a local check or administrator approval as a remotely enforced cap. The existing worker already routes unverified capabilities to review.
 
 ## Akunding
 
@@ -28,7 +28,7 @@ Wallet pricing/currency depends on the key; history separates stored VND/USD amo
 
 Source: [Customer API 2.2.0 Swagger](https://api.roboticvn.com/api/v2/docs) and its linked [OpenAPI](https://api.roboticvn.com/api/v2/docs/openapi.json). Root: `https://api.roboticvn.com`; `x-api-key`; currency enums distinguish `vnd` and `usd`.
 
-Product detail carries variants and their stock/prices. A quantity quote returns current totals/availability, but no binding token or expiration guarantee consumed by purchase is defined. The order schema accepts variant items, currency and wallet payment, without a cap or idempotency input. The quote's existence therefore does not satisfy FR-074. Order details omit credentials; a separate delivery endpoint exposes credential arrays with nullable item identities. Exact eligibility, ambiguous-create correlation and stable unit identity remain unqualified. Never count the two delivery-array aliases as independent acquisitions without proof.
+Product detail carries variants and their stock/prices. A quantity quote returns current totals/availability, but no binding token or expiration guarantee consumed by purchase is defined. The order schema accepts variant items, currency and wallet payment, without a cap or idempotency input. The quote is a current price observation, not a remote cap; the owner-approved option A permits such a local check after its other requirements qualify. Order details omit credentials; a separate delivery endpoint exposes credential arrays with nullable item identities. Exact eligibility, ambiguous-create correlation and stable unit identity remain unqualified. Never count the two delivery-array aliases as independent acquisitions without proof.
 
 ## RapidX
 
@@ -47,4 +47,4 @@ This batch adds:
 
 These tests exercise trusted observation boundaries, not real provider JSON parsing. Future parsers must explicitly translate missing/unknown requirements to rejection; a synthetic ready flag proves no provider capability. Exact activation, slot, upgrade, manual and unknown wire fixtures remain required for each parser before its implementation. No generic input form, account pool, table/column or runtime activation is added.
 
-To advance a provider, obtain authoritative purchase-limit/binding-quote semantics including mandatory charges and currency, exact eligibility fields, stable unit identity and original-purchase/credential recovery guarantees. Then author its sanitized wire fixtures before implementing one adapter. Account-specific/live qualification remains separately gated. Do not ask the owner to resend saved documentation URLs.
+To advance a provider under owner-approved option A, obtain authoritative current prices including mandatory charges/currency, exact eligibility fields, stable unit identity and original-purchase/credential recovery guarantees. A remote purchase cap is optional; report its actual capability honestly. Then author its sanitized wire fixtures before implementing one adapter. Account-specific/live qualification remains separately gated. Do not ask the owner to resend saved documentation URLs.

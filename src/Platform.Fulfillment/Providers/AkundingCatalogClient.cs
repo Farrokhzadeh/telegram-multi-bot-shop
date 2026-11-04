@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Platform.Fulfillment.Providers;
@@ -6,6 +8,9 @@ namespace Platform.Fulfillment.Providers;
 public sealed record AkundingCatalogProduct(long Id, string Name, string UnitLabel, decimal UnitPrice, int Stock, bool Available)
 {
     public string Currency => "USDT";
+    public string? EligibilityFingerprint { get; init; }
+    public string? Description { get; init; }
+    public string? Features { get; init; }
 }
 public sealed record AkundingCatalogPage(AkundingCatalogProduct[] Items, long? Next);
 public sealed class AkundingCatalogClient(HttpClient client)
@@ -66,7 +71,17 @@ public sealed class AkundingCatalogClient(HttpClient client)
             int stock = root.GetProperty("stock").GetInt32();
             bool available = root.GetProperty("available").GetBoolean();
             if (id <= 0 || string.IsNullOrWhiteSpace(name) || name.Length > 1000 || string.IsNullOrWhiteSpace(label) || label.Length > 100 || price <= 0 || stock < 0 || available != (stock > 0)) throw new FormatException();
-            return new(id, name, label, price, stock, available);
+            string? fingerprint = null;
+            string? descriptionText = null, featuresText = null;
+            if (root.TryGetProperty("description", out var description) && description.ValueKind == JsonValueKind.String && root.TryGetProperty("features", out var features) && features.ValueKind == JsonValueKind.String)
+            {
+                descriptionText = description.GetString(); featuresText = features.GetString();
+                using var bytes = new MemoryStream();
+                using (var writer = new BinaryWriter(bytes, Encoding.UTF8, true))
+                { writer.Write("akunding-eligibility-v1"); writer.Write(id); writer.Write(name); writer.Write(label); writer.Write(description.GetString()!); writer.Write(features.GetString()!); }
+                fingerprint = Convert.ToHexString(SHA256.HashData(bytes.ToArray()));
+            }
+            return new(id, name, label, price, stock, available) { EligibilityFingerprint = fingerprint, Description = descriptionText, Features = featuresText };
         }
         catch (Exception error) when (error is FormatException or InvalidOperationException or KeyNotFoundException or OverflowException)
         { throw new InvalidOperationException("Supplier catalog is unavailable."); }

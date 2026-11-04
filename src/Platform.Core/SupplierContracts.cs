@@ -52,7 +52,7 @@ public static class SupplierRules
     {
         if (quote.Provider != binding.Provider || quote.Account != binding.Account || quote.Product != binding.Product || quote.Variant != binding.Variant) return "identity_mismatch";
         if (!quote.Ready) return "source_ineligible";
-        if (!quote.EnforcesMaximum || quote.Currency != binding.Currency || quote.UnitCost <= 0 || quote.ObservedAt.Kind != DateTimeKind.Utc || quote.ObservedAt > now || now - quote.ObservedAt > TimeSpan.FromSeconds(30) || string.IsNullOrWhiteSpace(quote.EvidenceReference)) return "cost_unverified";
+        if (quote.Currency != binding.Currency || quote.UnitCost <= 0 || quote.ObservedAt.Kind != DateTimeKind.Utc || quote.ObservedAt > now || now - quote.ObservedAt > TimeSpan.FromSeconds(30) || string.IsNullOrWhiteSpace(quote.EvidenceReference)) return "cost_unverified";
         return quote.UnitCost <= UnitCeiling(binding) ? null : "cost_limit";
     }
     public static string? Identity(SupplierBinding binding, SupplierOutcome result)

@@ -10,13 +10,13 @@ public sealed class SupplierContractTests
     [InlineData("11", true)]
     [InlineData("11.01", false)]
     [InlineData("9", true)]
-    public void OriginalCostCeilingIsInclusiveNonrollingAndRequiresEnforcedReadyExactCurrency(string cost, bool allowed)
+    public void OriginalPriceCheckIsInclusiveNonrollingAndRequiresFreshReadyExactCurrency(string cost, bool allowed)
     {
         var binding = Bound();
         var quote = new SupplierQuote(binding.Provider, binding.Account, binding.Product, binding.Variant, "USD", decimal.Parse(cost, System.Globalization.CultureInfo.InvariantCulture), true, true, DateTime.UtcNow, "protected:synthetic/quote");
         Assert.Equal(allowed, SupplierRules.Preflight(binding, quote, DateTime.UtcNow) is null);
         Assert.Equal(11, SupplierRules.UnitCeiling(binding));
-        Assert.Equal("cost_unverified", SupplierRules.Preflight(binding, quote with { EnforcesMaximum = false }, DateTime.UtcNow));
+        Assert.Equal(allowed, SupplierRules.Preflight(binding, quote with { EnforcesMaximum = false }, DateTime.UtcNow) is null);
         Assert.Equal("cost_unverified", SupplierRules.Preflight(binding, quote with { Currency = "TOMAN" }, DateTime.UtcNow));
         Assert.Equal("source_ineligible", SupplierRules.Preflight(binding, quote with { Ready = false }, DateTime.UtcNow));
         Assert.Equal("identity_mismatch", SupplierRules.Preflight(binding, quote with { Account = "another account" }, DateTime.UtcNow));

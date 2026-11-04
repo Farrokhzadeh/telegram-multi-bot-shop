@@ -10,6 +10,21 @@ public sealed class SupplierRecoveryTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
+    public async Task PriceChangeAfterApprovedPrecheckRetainsActualAcquisitionForCostReviewWithoutAnotherPurchase()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        await SupplierFixture.AcceptAsync(f, 1, Ct);
+        var port = new SyntheticSupplier { Enforced = false, UnitCost = 1.10m, Submit = b => new(SupplierOutcomeKind.Completed, "public purchase", b.Currency, 1.11m, [new("public item", SupplierItemDisposition.Customer, "code", "public acquired code"u8)], "public actual higher charge"u8) };
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        Assert.Equal(1, port.Submits);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE cost_baseline_amount=1 AND review_code='cost_limit'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND unit_price_usdt=10 AND fulfillment_status='requires_admin' AND review_code='cost_limit' AND release_authorized_at IS NULL", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind IN ('prepare_manifest','submit_supplier') AND status IN ('pending','retry')", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='supplier_wallet_credit'", Ct));
+    }
+    [Fact]
     public async Task NativeCompatibleMixedRemainderBonusAndCompleteManifest() => await SupplierQualification.RunAsync(Ct);
     [Theory]
     [InlineData(false)]
@@ -66,7 +81,7 @@ public sealed class SupplierRecoveryTests
     [InlineData("1.10", true, true, null)]
     [InlineData("1.10000001", true, true, "cost_limit")]
     [InlineData("0.9", true, true, null)]
-    [InlineData("1", false, true, "cost_unverified")]
+    [InlineData("1", false, true, null)]
     [InlineData("1", true, false, "source_ineligible")]
     public async Task PrepurchaseChargeGateNeverRepricesOrInventsFinancialCompensation(string cost, bool enforced, bool ready, string? blocker)
     {
