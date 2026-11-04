@@ -40,7 +40,7 @@ public sealed class AkundingAdapter : ISupplierAdapter, IDisposable
 		using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/v1/orders");
 		request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 		request.Headers.Add("X-Idempotency-Key", binding.Intent);
-		string body = JsonSerializer.Serialize(new { product_id = binding.Product, quantity = binding.Quantity });
+		string body = $"{{\"product_id\":\"{binding.Product}\",\"quantity\":{binding.Quantity}}}";
 		request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 		using var response = await client.SendAsync(request, ct);
 		byte[] raw = await response.Content.ReadAsByteArrayAsync(ct);

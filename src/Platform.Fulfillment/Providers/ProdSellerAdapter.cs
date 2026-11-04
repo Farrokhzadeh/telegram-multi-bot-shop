@@ -39,7 +39,7 @@ public sealed class ProdSellerAdapter : ISupplierAdapter, IDisposable
 		using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v1/orders");
 		request.Headers.Add("X-Api-Key", apiKey);
 		request.Headers.Add("Idempotency-Key", binding.Intent);
-		string body = JsonSerializer.Serialize(new { product_id = binding.Product, count = binding.Quantity });
+		string body = $"{{\"product_id\":\"{binding.Product}\",\"count\":{binding.Quantity}}}";
 		request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 		using var response = await client.SendAsync(request, ct);
 		byte[] raw = await response.Content.ReadAsByteArrayAsync(ct);

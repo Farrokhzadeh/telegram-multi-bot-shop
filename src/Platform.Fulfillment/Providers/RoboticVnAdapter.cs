@@ -37,7 +37,7 @@ public sealed class RoboticVnAdapter : ISupplierAdapter, IDisposable
 	{
 		using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/v2/orders");
 		request.Headers.Add("Authorization", "Token " + apiKey);
-		string body = JsonSerializer.Serialize(new { product = binding.Product, variant = binding.Variant, quantity = binding.Quantity, client_ref = binding.Intent });
+		string body = $"{{\"product\":\"{binding.Product}\",\"variant\":{(binding.Variant is null ? "null" : $"\"{binding.Variant}\"")},\"quantity\":{binding.Quantity},\"client_ref\":\"{binding.Intent}\"}}";
 		request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 		using var response = await client.SendAsync(request, ct);
 		byte[] raw = await response.Content.ReadAsByteArrayAsync(ct);

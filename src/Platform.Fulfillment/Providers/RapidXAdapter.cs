@@ -36,7 +36,7 @@ public sealed class RapidXAdapter : ISupplierAdapter, IDisposable
 	{
 		using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/transactions");
 		request.Headers.Add("X-RapidX-Key", apiKey);
-		string body = JsonSerializer.Serialize(new { sku = binding.Product, count = binding.Quantity, reference = binding.Intent });
+		string body = $"{{\"sku\":\"{binding.Product}\",\"count\":{binding.Quantity},\"reference\":\"{binding.Intent}\"}}";
 		request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 		using var response = await client.SendAsync(request, ct);
 		byte[] raw = await response.Content.ReadAsByteArrayAsync(ct);
