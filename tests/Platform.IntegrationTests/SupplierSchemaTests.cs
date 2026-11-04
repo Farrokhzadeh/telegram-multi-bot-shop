@@ -105,4 +105,45 @@ public sealed class SupplierSchemaTests
 		var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("TRUNCATE shop.product_supplier_sources"), Ct));
 		Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
 	}
+	[Fact]
+	public async Task SourceIdentityFieldsAreImmutableAndEnabledToggleRequiresRevisionIncrement()
+	{
+		await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+		Guid source = await SupplierFixture.ConfigureAsync(f, Ct);
+		await using (var invalid = await f.Sessions.BeginAsync(Ct))
+		{
+			var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET provider_code='rapidx' WHERE id=$1", DbValue.Uuid(source)), Ct));
+			Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
+		}
+		await using (var invalid = await f.Sessions.BeginAsync(Ct))
+		{
+			var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET external_product_id='changed' WHERE id=$1", DbValue.Uuid(source)), Ct));
+			Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
+		}
+		await using (var invalid = await f.Sessions.BeginAsync(Ct))
+		{
+			var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET enabled=false WHERE id=$1", DbValue.Uuid(source)), Ct));
+			Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
+		}
+		await using (var valid = await f.Sessions.BeginAsync(Ct))
+		{
+			await valid.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET enabled=false,revision=revision+1 WHERE id=$1", DbValue.Uuid(source)), Ct);
+			await valid.CommitAsync(Ct);
+		}
+		Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources WHERE enabled=false AND revision=2", Ct));
+		Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.products WHERE active_supplier_source_id IS NOT NULL", Ct));
+	}
+	[Fact]
+	public async Task SupplierRequestSnapshotsAreStrictlyImmutableOnUpdate()
+	{
+		await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+		await SupplierFixture.ConfigureAsync(f, Ct);
+		Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
+		foreach (string mutation in new[] { "provider_code='rapidx'", "external_product_id='other'", "cost_currency='EUR'", "cost_quote_ref='other'", "request_sha256='\\x01'::bytea" })
+		{
+			await using var invalid = await f.Sessions.BeginAsync(Ct);
+			var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET " + mutation + " WHERE order_id=$1", DbValue.Uuid(order)), Ct));
+			Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
+		}
+	}
 }
