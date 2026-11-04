@@ -4,24 +4,24 @@ Recorded 2026-11-04 from the owner's complete API list. This is the durable proj
 
 ## Complete list
 
-| Reference | API / service | Owner-supplied URL | URL type | Owner-supplied authentication |
+| Reference | API / service | Supplier URL and bot | URL type | Authentication / credential status |
 |---|---|---|---|---|
-| `akunding` | Akunding | [https://akunding.shop/api/docs](https://akunding.shop/api/docs) | Documentation | Not supplied |
-| `prodseller` | ProdSeller | [https://prodseller.com/api-docs/](https://prodseller.com/api-docs/) | Documentation | Not supplied |
-| `canboso` | Canboso | [https://canboso.com/api/swagger](https://canboso.com/api/swagger) | Swagger documentation | Not supplied |
-| `roboticvn` | RoboticVN | [https://api.roboticvn.com/api/v2/docs](https://api.roboticvn.com/api/v2/docs) | Documentation | Not supplied |
-| `aivaulthub` | AIVaultHub | [https://reseller.aivaulthub.store](https://reseller.aivaulthub.store) | Base URL | `X-API-Key: <your key>` |
-| `rapidx` | RapidX | [https://pay.rapidx.me/docs](https://pay.rapidx.me/docs) | Documentation | Not supplied |
-| `aitoolifystudio` | AIToolifyStudio | [https://bot.aitoolifystudio.io/api/reseller/v1](https://bot.aitoolifystudio.io/api/reseller/v1) | API URL | Not supplied |
-| `lahastore` | LahaStore | [https://lahastore.up.railway.app/api/v1/docs](https://lahastore.up.railway.app/api/v1/docs) | Documentation | Not supplied |
-| `vokhong` | VoKhong | [https://vokhong.xyz/api](https://vokhong.xyz/api) | API/documentation URL | Not supplied |
-| `qamify` | Qamify | [https://api.qamify.site/docs](https://api.qamify.site/docs) | Documentation | Not supplied |
-| `nastele` | Nastele | [https://nastele.online/api/partner/docs](https://nastele.online/api/partner/docs) | Partner documentation | Not supplied |
-| `testflighty` | Testflighty MAX | [https://api-tgbot.testflighty.com/t/MAX/api-guide](https://api-tgbot.testflighty.com/t/MAX/api-guide) | API guide | Not supplied |
-| `silvex-ai` | Silvex AI | [https://silvex-ai.com/api/public/reseller](https://silvex-ai.com/api/public/reseller) | API URL | Not supplied |
-| `insightxpro` | InsightXPro | [https://api.insightxpro.store/docs](https://api.insightxpro.store/docs) | Documentation | Not supplied |
+| `akunding` | Akunding | [API reference](https://akunding.shop/api/docs) · [@Akunding_store_bot](https://t.me/Akunding_store_bot) | Documentation | Bearer token; value supplied, not stored in Git |
+| `prodseller` | ProdSeller | [API reference](https://prodseller.com/api-docs/) · [@ProdSellerBot](https://t.me/ProdSellerBot) | Documentation | `X-API-Key`; value supplied, not stored in Git |
+| `canboso` | Canboso | [API reference](https://canboso.com/api/swagger) · [@PremiKeyBot](https://t.me/PremiKeyBot) | Swagger documentation | Value supplied; type/validity unverified; not stored in Git. Purchase body `key`; history `x-buyer-key` per reviewed docs |
+| `roboticvn` | RoboticVN | [API reference](https://api.roboticvn.com/api/v2/docs) · [@hiroboticvn_bot](https://t.me/hiroboticvn_bot) | Documentation | `x-api-key`; value supplied, not stored in Git |
+| `aivaulthub` | AIVaultHub | [API reference](https://reseller.aivaulthub.store) · [@Gemini_Shop_Robot](https://t.me/Gemini_Shop_Robot) | Base URL | `X-API-Key`; value supplied, not stored in Git |
+| `rapidx` | RapidX | [API reference](https://pay.rapidx.me/docs) · [@Clustershopbot](https://t.me/Clustershopbot) | Documentation | Bearer token; value supplied, not stored in Git |
+| `aitoolifystudio` | AIToolifyStudio | [API reference](https://bot.aitoolifystudio.io/api/reseller/v1) · [@aitoolify_bot](https://t.me/aitoolify_bot) | API URL | Value supplied, not stored in Git; authentication transport unverified |
+| `lahastore` | LahaStore | [API reference](https://lahastore.up.railway.app/api/v1/docs) · [@ver_pixel_bot](https://t.me/ver_pixel_bot) | Documentation | Value supplied, not stored in Git; authentication transport unverified |
+| `vokhong` | VoKhong | [API reference](https://vokhong.xyz/api) · [@Tainguyen_gptbot](https://t.me/Tainguyen_gptbot) | API/documentation URL | Value supplied, not stored in Git; authentication transport unverified |
+| `qamify` | Qamify | [API reference](https://api.qamify.site/docs) · [@Qamify_bot](https://t.me/Qamify_bot) | Documentation | Value supplied, not stored in Git; authentication transport unverified |
+| `nastele` | Nastele | [API reference](https://nastele.online/api/partner/docs) · [@Gashopchipchip_bot](https://t.me/Gashopchipchip_bot) | Partner documentation | Value supplied, not stored in Git; authentication transport unverified |
+| `testflighty` | Testflighty MAX | [API reference](https://api-tgbot.testflighty.com/t/MAX/api-guide) · [@thaois_bot](https://t.me/thaois_bot) | API guide | Value supplied, not stored in Git; authentication transport unverified |
+| `silvex-ai` | Silvex AI | [API reference](https://silvex-ai.com/api/public/reseller) · [@silvexaibot](https://t.me/silvexaibot) | API URL | `x-api-key` (owner supplied); value supplied, not stored in Git |
+| `insightxpro` | InsightXPro | [API reference](https://api.insightxpro.store/docs) · Bot not supplied | Documentation | Not supplied; latest row incomplete |
 
-The AIVaultHub address is explicitly a base URL. Its authentication header name is `X-API-Key`; `<your key>` is a placeholder, not a stored credential. Other API roots, headers and routes must come from verified documentation; do not infer them from a documentation hostname or from the removed adapters. URL formatting escapes from the owner's message were normalized without changing hosts or paths.
+The AIVaultHub address is explicitly a base URL. Bot handles and credential-supplied status were updated from the owner's 2026-11-04 message. Bot ownership and credential validity have not been checked. Raw authentication values are deliberately omitted from this source-controlled inventory; no protected credential files have been provisioned by this update. Store actual credentials only through the existing protected configuration boundary. Authentication transports for the five reviewed providers come from [the contract review](SUPPLIER_CONTRACT_REVIEW.md); other transports remain unverified unless explicitly identified as owner supplied. Do not infer headers from key prefixes. The InsightXPro row was incomplete, so its existing URL is preserved without guessing a bot or credential. URL formatting escapes were normalized without changing hosts or paths.
 
 ## Current supplier work
 
