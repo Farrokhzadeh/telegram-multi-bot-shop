@@ -238,7 +238,7 @@ public sealed class AkundingSourceInspectionTests
         await new SupplierSourceSelectionStore(f.Sessions).CreateAsync(actor, f.Product, source, "akunding", "7", variant, Guid.NewGuid(), Ct);
         return source;
     }
-    private static SupplierCredentialSnapshot Credentials(SyntheticSecretFiles files, Guid? deployment = null, SecretService service = SecretService.JobHost)
+    internal static SupplierCredentialSnapshot Credentials(SyntheticSecretFiles files, Guid? deployment = null, SecretService service = SecretService.JobHost)
     {
         byte[] token = Encoding.ASCII.GetBytes(Guid.NewGuid().ToString("N"));
         files.Write("public-supplier-token", token);
