@@ -80,7 +80,7 @@ public sealed class PaymentExpiryTests
         var first = await payments.OrderAsync(ct: Ct);
         var service = new WalletCheckoutService(f.Sessions, f.Store, payments.Catalog);
         var badReq = new CheckoutRequest(OrderIds.New(), Guid.NewGuid(), 1, CheckoutPayment.Crypto);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), badReq, (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct));
+        await Assert.ThrowsAsync<PricingRejectedException>(() => service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), badReq, (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct));
         await using var read = await f.Sessions.BeginAsync(Ct);
         var original = await read.QuerySingleAsync(new DbStatement("SELECT payment_due_at=created_at+INTERVAL '30 minutes' AND resolution_kind IS NULL FROM shop.orders WHERE id=$1", DbValue.Uuid(first.Order)), r => r.GetBoolean(0), Ct);
         Assert.True(original);

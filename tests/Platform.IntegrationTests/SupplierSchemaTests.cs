@@ -101,9 +101,9 @@ public sealed class SupplierSchemaTests
     public async Task ProductSupplierSourcesCannotBeTruncated()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
-        await using var invalid = await f.Sessions.BeginAsync(Ct);
-        var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("TRUNCATE shop.product_supplier_sources CASCADE"), Ct));
-        Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
+        await using var command = f.Database.Data.CreateCommand("TRUNCATE shop.product_supplier_sources CASCADE");
+        var err = await Assert.ThrowsAsync<Npgsql.PostgresException>(() => command.ExecuteNonQueryAsync(Ct));
+        Assert.Equal("23514", err.SqlState);
     }
     [Fact]
     public async Task SourceIdentityFieldsAreImmutableAndEnabledToggleRequiresRevisionIncrement()
@@ -139,11 +139,14 @@ public sealed class SupplierSchemaTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
-        foreach (string mutation in new[] { "provider_code='rapidx'", "external_product_id='other'", "cost_currency='EUR'", "cost_quote_ref='other'", "request_sha256='\\x01'::bytea" })
+        foreach (string mutation in new[] { "provider_code='rapidx'", "external_product_id='other'", "cost_currency='EUR'", "cost_quote_ref='other'" })
         {
             await using var invalid = await f.Sessions.BeginAsync(Ct);
             var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET " + mutation + " WHERE order_id=$1", DbValue.Uuid(order)), Ct));
             Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
         }
+        await using var digest = await f.Sessions.BeginAsync(Ct);
+        var changed = await Assert.ThrowsAsync<DbOperationException>(() => digest.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET request_sha256=$2 WHERE order_id=$1", DbValue.Uuid(order), DbValue.Binary(Enumerable.Repeat((byte)1, 32).ToArray())), Ct));
+        Assert.Equal(DbFailureKind.Constraint, changed.Failure.Kind);
     }
 }
