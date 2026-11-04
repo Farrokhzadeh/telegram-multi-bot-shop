@@ -111,7 +111,7 @@ public sealed class PaymentExpiryTests
         await using var read = await f.Sessions.BeginAsync(Ct);
         string asset = await read.QuerySingleAsync(new DbStatement("SELECT network_asset FROM shop.payments WHERE order_id=$1", DbValue.Uuid(order.Order)), r => r.GetString(0), Ct);
         Assert.Equal("USDTTRC20", asset);
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM pg_constraint WHERE conrelid='shop.payments'::regclass AND consrc LIKE '%USDTTRC20%' AND consrc LIKE '%USDTBSC%'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM pg_constraint WHERE conrelid='shop.payments'::regclass AND pg_get_constraintdef(oid) LIKE '%USDTTRC20%' AND pg_get_constraintdef(oid) LIKE '%USDTBSC%'", Ct));
     }
     [Theory]
     [InlineData("USDTTRC20")]

@@ -102,7 +102,7 @@ public sealed class SupplierSchemaTests
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await using var invalid = await f.Sessions.BeginAsync(Ct);
-        var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("TRUNCATE shop.product_supplier_sources"), Ct));
+        var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("TRUNCATE shop.product_supplier_sources CASCADE"), Ct));
         Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
     }
     [Fact]
