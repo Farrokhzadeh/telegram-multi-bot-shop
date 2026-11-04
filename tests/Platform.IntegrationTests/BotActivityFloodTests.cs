@@ -49,7 +49,7 @@ public sealed class BotActivityFloodTests
 		}));
 		Assert.False(dup);
 		Assert.Equal(1, committed);
-		Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE idempotency_key=$1", Ct));
+		Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE idempotency_key='" + key + "'", Ct));
 	}
 	[Fact]
 	public async Task ActivityExpiryDoesNotCascadeToDomainTablesOrInvalidateWalletFacts()
@@ -115,5 +115,40 @@ public sealed class BotActivityFloodTests
 		await using (var write = await f.Sessions.BeginAsync(Ct))
 		{ try { await write.ExecuteAsync(new DbStatement("DELETE FROM shop.bot_activity_events"), Ct); } catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { blocked = true; } }
 		Assert.True(immutable && blocked);
+	}
+	[Fact]
+	public async Task ActivityEventsHaveNoRawSecretsAndEnforceRestrictedColumnSet()
+	{
+		await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+		await using var read = await f.Sessions.BeginAsync(Ct);
+		long forbiddenColumns = await read.QuerySingleAsync(new DbStatement("""
+			SELECT count(*) FROM information_schema.columns WHERE table_schema='shop' AND table_name='bot_activity_events'
+				AND (column_name IN ('body','text','message','secret','token','ciphertext','payload','data') OR data_type IN ('json','jsonb','ARRAY','bytea'))
+			"""), r => r.GetInt64(0), Ct);
+		Assert.Equal(0L, forbiddenColumns);
+		long totalColumns = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM information_schema.columns WHERE table_schema='shop' AND table_name='bot_activity_events'"), r => r.GetInt64(0), Ct);
+		Assert.Equal(14L, totalColumns);
+	}
+	[Fact]
+	public async Task DiscountRevisionsAreImmutableAndTrackRedemptionStateAtRevision()
+	{
+		await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+		Guid coupon = Guid.NewGuid();
+		await using (var issue = await f.Sessions.BeginAsync(Ct))
+		{
+			await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(coupon, "PUBLIC-REV-TEST", CouponKind.Promotion, 20, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+			await issue.CommitAsync(Ct);
+		}
+		await using (var invalid = await f.Sessions.BeginAsync(Ct))
+		{
+			var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("UPDATE shop.discount_revisions SET percent_off=50 WHERE discount_id=$1", DbValue.Uuid(coupon)), Ct));
+			Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
+		}
+		await using (var invalid = await f.Sessions.BeginAsync(Ct))
+		{
+			var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("DELETE FROM shop.discount_revisions WHERE discount_id=$1", DbValue.Uuid(coupon)), Ct));
+			Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
+		}
+		Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_revisions WHERE percent_off=20 AND revision_no=0", Ct));
 	}
 }
