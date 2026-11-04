@@ -154,3 +154,7 @@ Synthetic adapters now exercise a committed original intent, explicit per-unit m
 | RapidX | Closed | Sanitized currency and ready-item wire shapes, maximum charge, original ambiguous-purchase recovery and stable credential identities |
 
 A generic HTTP retry flag, historical source comment, local intent, configured account reference or synthetic capability flag supplies none of this evidence. Provider-specific direct pre-checkout refresh and exact response parsing remain gated with the adapter. Public documentation/source evidence may be reviewed read-only; live service calls, credentials and source database rows remain excluded. See `ops/SUPPLIER_QUALIFICATION.md` for the executable offline scope and `supplier-failure-policy.md` for retained liabilities and explicit decisions.
+
+## Owner-supplied documentation references — 2026-11-04
+
+The durable [API inventory](../../../ops/API_INVENTORY.md) preserves the owner's complete 14-service list, exact supplied URLs, AIVaultHub base URL/header and dated retrieval limitations. Use the supplied Akunding, ProdSeller, Canboso, RoboticVN and RapidX documentation links for the next read-only contract review; do not reuse the removed adapters' assumed hosts or payloads. The other nine services remain saved for later scope review. No provider gate is reopened by receipt of URLs: readable authoritative contract and capability evidence are still required.
