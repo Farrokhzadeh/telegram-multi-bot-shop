@@ -238,7 +238,7 @@ public sealed class AkundingSourceInspectionTests
         await new SupplierSourceSelectionStore(f.Sessions).CreateAsync(actor, f.Product, source, "akunding", "7", variant, Guid.NewGuid(), Ct);
         return source;
     }
-    internal static SupplierCredentialSnapshot Credentials(SyntheticSecretFiles files, Guid? deployment = null, SecretService service = SecretService.JobHost)
+    internal static SupplierCredentialSnapshot Credentials(SyntheticSecretFiles files, Guid? deployment = null, SecretService service = SecretService.JobHost, string provider = "akunding")
     {
         byte[] token = Encoding.ASCII.GetBytes(Guid.NewGuid().ToString("N"));
         files.Write("public-supplier-token", token);
@@ -247,12 +247,12 @@ public sealed class AkundingSourceInspectionTests
         {
             writer.WriteStartObject(); writer.WriteNumber("schemaVersion", 1); writer.WriteString("deploymentId", deployment ?? SyntheticSecretFiles.Deployment);
             writer.WriteNumber("revision", 7); writer.WriteString("service", service.ToString()); writer.WriteStartArray("accounts"); writer.WriteStartObject();
-            writer.WriteString("provider", "akunding"); writer.WriteString("accountRef", "public account"); writer.WriteString("credentialFile", "public-supplier-token");
+            writer.WriteString("provider", provider); writer.WriteString("accountRef", "public account"); writer.WriteString("credentialFile", "public-supplier-token");
             writer.WriteString("credentialSha256", Convert.ToHexString(SHA256.HashData(token))); writer.WriteEndObject(); writer.WriteEndArray(); writer.WriteEndObject();
         }
         CryptographicOperations.ZeroMemory(token);
         files.Write("supplier-config.json", bytes.ToArray());
-        return SupplierCredentialFiles.Load(files.Root, "supplier-config.json", new(service, deployment ?? SyntheticSecretFiles.Deployment, 7, [new("akunding", "public account")]));
+        return SupplierCredentialFiles.Load(files.Root, "supplier-config.json", new(service, deployment ?? SyntheticSecretFiles.Deployment, 7, [new(provider, "public account")]));
     }
     private static HttpResponseMessage Reply() => new(HttpStatusCode.OK) { Content = new StringContent("""{"id":7,"name":"Public account","unit_label":"account","your_price":1.25,"stock":2,"available":true}""", Encoding.UTF8, "application/json") };
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler

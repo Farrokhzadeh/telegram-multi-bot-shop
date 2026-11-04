@@ -28,8 +28,7 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
     private readonly AkundingCatalogClient catalog;
     private readonly Dictionary<long, AkundingProductApproval> approved;
     private readonly Func<SupplierBinding, AkundingOrderReceipt, SupplierItem[]> verify;
-    private readonly Dictionary<Guid, (SupplierBinding Binding, SupplierQuote Quote)> permits = [];
-    private readonly object gate = new();
+    private readonly SupplierPricePermits permits = new();
     public string Provider => "akunding";
     public string Account { get; }
     public bool ProvenIntentLookup => false;
@@ -54,12 +53,7 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
         var item = await catalog.GetProductAsync(product, ct);
         bool ready = approved.TryGetValue(product, out var approval) && item.EligibilityFingerprint == approval.EligibilityFingerprint && item.Stock >= binding.Quantity && item.Available;
         var quote = new SupplierQuote(Provider, Account, binding.Product, null, "USDT", item.UnitPrice, ready, false, DateTime.UtcNow, "akunding:product/" + binding.Product);
-        lock (gate)
-        {
-            foreach (var id in permits.Where(p => DateTime.UtcNow - p.Value.Quote.ObservedAt > TimeSpan.FromSeconds(30)).Select(p => p.Key).ToArray()) permits.Remove(id);
-            if (permits.Count >= 1000 && !permits.ContainsKey(binding.RequestId)) throw new InvalidOperationException("Supplier inspection capacity is unavailable.");
-            permits[binding.RequestId] = (binding, quote);
-        }
+        permits.Remember(binding, quote);
         return quote;
     }
     public async Task<SupplierCatalogResult> InspectCatalogAsync(SupplierCatalogRequest request, CancellationToken ct)
@@ -74,12 +68,8 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
     public async Task<SupplierOutcome> SubmitAttemptAsync(SupplierBinding binding, string? purchaseKey, decimal maximumUnitCharge, CancellationToken ct)
     {
         long product = Require(binding);
-        lock (gate)
-        {
-            if (!permits.Remove(binding.RequestId, out var permit) || permit.Binding != binding || maximumUnitCharge != SupplierRules.UnitCeiling(binding) || SupplierRules.Preflight(binding, permit.Quote, DateTime.UtcNow) is not null ||
-                purchaseKey is null || purchaseKey.Length is < 1 or > 120 || purchaseKey.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_' or ':' or '.')))
-                return new(SupplierOutcomeKind.ConfirmedNoEffect, null, "USDT", 0, [], "akunding:local-prepurchase-rejection"u8);
-        }
+        if (!permits.Consume(binding, maximumUnitCharge) || !SupplierWire.PurchaseKey(purchaseKey, 120))
+            return new(SupplierOutcomeKind.ConfirmedNoEffect, null, "USDT", 0, [], "akunding:local-prepurchase-rejection"u8);
         using var body = new MemoryStream();
         using (var writer = new Utf8JsonWriter(body))
         { writer.WriteStartObject(); writer.WriteNumber("product_id", product); writer.WriteNumber("quantity", binding.Quantity); writer.WriteEndObject(); }
@@ -110,30 +100,9 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
         SupplierItem[]? acquired = null;
         try
         {
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            deadline.CancelAfter(TimeSpan.FromSeconds(25));
-            request.Headers.Accept.ParseAdd("application/json");
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
-            if (response.Content.Headers.ContentLength > 1048576) throw new FormatException();
-            await using var input = await response.Content.ReadAsStreamAsync(deadline.Token);
-            using var bytes = new MemoryStream();
-            byte[] buffer = new byte[8192];
-            try
-            {
-                int count;
-                while ((count = await input.ReadAsync(buffer, deadline.Token)) != 0)
-                {
-                    if (bytes.Length + count > 1048576) throw new FormatException();
-                    bytes.Write(buffer, 0, count);
-                }
-                evidence = bytes.ToArray();
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(buffer);
-                CryptographicOperations.ZeroMemory(bytes.GetBuffer());
-            }
-            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType != "application/json") return Unknown(evidence);
+            using var response = await SupplierWire.ReadAsync(http, request, ct);
+            evidence = response.Evidence.ToArray();
+            if (!response.Success || !response.Json) return Unknown(evidence);
             using var doc = JsonDocument.Parse(evidence, new JsonDocumentOptions { MaxDepth = 16 });
             using var receipt = Parse(doc.RootElement, binding, expectedOrder);
             string reference = receipt.Id.ToString(CultureInfo.InvariantCulture);
@@ -141,10 +110,7 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
             if (receipt.Status == "draft") return new(SupplierOutcomeKind.Unknown, reference, null, null, [], evidence);
             if (receipt.Status == "paid") return new(SupplierOutcomeKind.Processing, reference, "USDT", receipt.Payable, [], evidence);
             SupplierItem[] items = acquired = verify(binding, receipt);
-            bool valid = items.Length == 0 || (approved.TryGetValue(long.Parse(binding.Product, CultureInfo.InvariantCulture), out var approval) && items.Length == receipt.Items.Count &&
-                items.All(i => i.Disposition == SupplierItemDisposition.Customer && i.ContentKind == approval.ContentKind) &&
-                items.Select(i => i.Reference).Distinct(StringComparer.Ordinal).Count() == items.Length &&
-                receipt.Items.Select(raw => Convert.ToHexString(SHA256.HashData(raw.Span))).Order(StringComparer.Ordinal).SequenceEqual(items.Select(i => Convert.ToHexString(SHA256.HashData(i.Content.Span))).Order(StringComparer.Ordinal)));
+            bool valid = items.Length == 0 || (approved.TryGetValue(long.Parse(binding.Product, CultureInfo.InvariantCulture), out var approval) && SupplierWire.VerifiedItems(items, receipt.Items, approval.ContentKind));
             if (!valid)
             {
                 return Unknown(evidence);
@@ -194,7 +160,7 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
     {
         if (element.ValueKind != JsonValueKind.Object || element.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != element.EnumerateObject().Count()) throw new FormatException();
     }
-    public void Dispose() { http.Dispose(); lock (gate) permits.Clear(); }
+    public void Dispose() { http.Dispose(); permits.Clear(); }
     private sealed class Authorization(SupplierCredentialSnapshot credentials, string account, HttpMessageHandler transport) : DelegatingHandler(transport)
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
