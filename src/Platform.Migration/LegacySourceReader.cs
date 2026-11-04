@@ -1,0 +1,71 @@
+using System.Data;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using Npgsql;
+using Platform.Core;
+using Platform.Persistence;
+namespace Platform.Migration;
+public sealed record LegacySourceEndpoint(string Host, int Port, string Database, string Username)
+{
+    public override string ToString() => "LegacySourceEndpoint [redacted]";
+}
+public sealed class LegacySourceReader
+{
+    private readonly DbSessionFactory sessions;
+    private readonly LegacySourceEndpoint endpoint;
+    public LegacySourceReader(NpgsqlDataSource source, LegacySourceEndpoint approved)
+    {
+        endpoint = approved;
+        if (string.IsNullOrWhiteSpace(approved.Host) || string.IsNullOrWhiteSpace(approved.Database) || string.IsNullOrWhiteSpace(approved.Username) || approved.Port is < 1 or > 65535) throw new MigrationRejectedException();
+        sessions = new(source, new DbSessionOptions { ReadOnly = true, Isolation = IsolationLevel.RepeatableRead });
+    }
+    private async Task<DbSession> OpenAsync(CancellationToken ct)
+    {
+        var session = await sessions.BeginAsync(ct);
+        try
+        {
+            if (!session.MatchesEndpoint(endpoint.Host, endpoint.Port, endpoint.Database, endpoint.Username) ||
+                !await session.QuerySingleAsync(new DbStatement("SELECT current_setting('transaction_read_only')='on' AND current_setting('transaction_isolation')='repeatable read'"), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
+            return session;
+        }
+        catch { await session.DisposeAsync(); throw; }
+    }
+    public async Task<byte[]> InspectSchemaAsync(CancellationToken ct = default)
+    {
+        await using var session = await OpenAsync(ct);
+        return await SchemaAsync(session, ct);
+    }
+    private static async Task<byte[]> SchemaAsync(DbSession session, CancellationToken ct)
+    {
+        var columns = await session.QueryManyAsync(new DbStatement("SELECT table_name,column_name,ordinal_position::text,data_type,udt_name,is_nullable,COALESCE(character_maximum_length::text,''),COALESCE(numeric_precision::text,''),COALESCE(numeric_scale::text,''),COALESCE(column_default,'') FROM information_schema.columns WHERE table_schema='public' ORDER BY table_name,column_name"),
+            r => Enumerable.Range(0, 10).Select(r.GetString).ToArray(), 1000, ct);
+        var migrations = await session.QueryManyAsync(new DbStatement("SELECT app,name FROM public.django_migrations ORDER BY app,name"), r => (App: r.GetString(0), Name: r.GetString(1)), 1000, ct);
+        if (columns.Count == 0 || migrations.Count == 0 || migrations.Distinct().Count() != migrations.Count) throw new MigrationRejectedException();
+        using var bytes = new MemoryStream();
+        using (var writer = new BinaryWriter(bytes, Encoding.UTF8, true))
+        {
+            writer.Write("accabad-source-schema-v1"); writer.Write(columns.Count);
+            foreach (var row in columns) foreach (var value in row) writer.Write(value);
+            writer.Write(migrations.Count);
+            foreach (var row in migrations) { writer.Write(row.App); writer.Write(row.Name); }
+        }
+        return SHA256.HashData(bytes.ToArray());
+    }
+    public async Task<LegacyWalletSnapshot> ReadWalletAsync(VerifiedImportManifest manifest, long telegramId, Guid targetUser, Guid targetOpening, IReadOnlyDictionary<string, Guid> historyTargets, CancellationToken ct = default)
+    {
+        if (telegramId <= 0 || historyTargets.Count > 1000) throw new MigrationRejectedException();
+        await using var session = await OpenAsync(ct);
+        if (Convert.ToHexStringLower(await SchemaAsync(session, ct)) != manifest.SourceSchemaDigest) throw new MigrationRejectedException();
+        var user = await session.QuerySingleAsync(new DbStatement("SELECT balance::text,balance_irr::text,lang,joined_at,COALESCE(last_seen_at,joined_at),is_active,is_banned FROM public.users WHERE id=$1", DbValue.Bigint(telegramId)),
+            r => (Balance: ExactDecimal.Parse(r.GetString(0)), Other: ExactDecimal.Parse(r.GetString(1)), Language: r.GetString(2), First: r.GetUtc(3), Last: r.GetUtc(4), Active: r.GetBoolean(5), Banned: r.GetBoolean(6)), ct);
+        if (!user.Active || user.Banned) throw new MigrationRejectedException();
+        var history = await session.QueryManyAsync(new DbStatement("SELECT id,amount::text,currency,created_at FROM public.transactions WHERE user_id=$1 ORDER BY created_at,id", DbValue.Bigint(telegramId)),
+            r => new LegacyHistoryRow(r.GetString(0), historyTargets.TryGetValue(r.GetString(0), out var target) ? target : throw new MigrationRejectedException(), ExactDecimal.Parse(r.GetString(1)), r.GetString(2), r.GetUtc(3), null), 1000, ct);
+        if (history.Count != historyTargets.Count) throw new MigrationRejectedException();
+        var result = new LegacyWalletSnapshot(telegramId.ToString(CultureInfo.InvariantCulture), targetUser, targetOpening, telegramId, user.Language, user.First, user.Last, user.Balance, "USD", user.Other, history);
+        result.Validate();
+        foreach (var proof in result.Proofs(manifest.TargetBrand)) manifest.Require(proof);
+        return result;
+    }
+}
