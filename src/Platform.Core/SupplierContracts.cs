@@ -54,7 +54,7 @@ public static class SupplierRules
         if (!quote.Ready) return "source_ineligible";
         if (quote.Currency != binding.Currency || quote.UnitCost <= 0 || quote.ObservedAt.Kind != DateTimeKind.Utc || quote.ObservedAt > now || now - quote.ObservedAt > TimeSpan.FromSeconds(30) || string.IsNullOrWhiteSpace(quote.EvidenceReference)) return "cost_unverified";
         try { return quote.UnitCost <= UnitCeiling(binding) ? null : "cost_limit"; }
-        catch (ArithmeticException) { return "cost_unverified"; }
+        catch (Exception error) when (error is ArithmeticException or ArgumentException) { return "cost_unverified"; }
     }
     public static string? Identity(SupplierBinding binding, SupplierOutcome result)
     {
@@ -72,7 +72,7 @@ public static class SupplierRules
         if (result.Kind == SupplierOutcomeKind.Processing) return "provider_unknown";
         if (result.Currency != binding.Currency || result.ChargedAmount is null) return "cost_unverified";
         try { if (result.ChargedAmount > ExactDecimal.Multiply(UnitCeiling(binding), binding.Quantity)) return "cost_limit"; }
-        catch (ArithmeticException) { return "cost_unverified"; }
+        catch (Exception error) when (error is ArithmeticException or ArgumentException) { return "cost_unverified"; }
         return result.Items.Count(i => i.Disposition == SupplierItemDisposition.Customer) == binding.Quantity ? null : "partial_acquisition";
     }
     public static byte[] ItemKey(SupplierBinding binding, string reference)

@@ -101,6 +101,17 @@ public sealed class SupplierContractTests
         var quote = new SupplierQuote(binding.Provider, binding.Account, binding.Product, binding.Variant, binding.Currency, binding.UnitBaseline, true, false, now, "public exact-price observation");
         Assert.Equal("cost_unverified", SupplierRules.Preflight(binding, quote, now));
     }
+    [Fact]
+    public void InvalidOriginalCostTermsFailClosedAtBothValidationBoundaries()
+    {
+        var binding = Bound() with { UnitBaseline = 0 };
+        DateTime now = DateTime.UtcNow;
+        var quote = new SupplierQuote(binding.Provider, binding.Account, binding.Product, binding.Variant, binding.Currency, 10, true, false, now, "synthetic observation");
+        Assert.Equal("cost_unverified", SupplierRules.Preflight(binding, quote, now));
+        using var result = Outcome(5, 0);
+        Assert.Equal("cost_unverified", SupplierRules.Validate(binding, result));
+        Assert.Equal("cost_unverified", SupplierRules.Preflight(binding with { UnitBaseline = 10, ApprovedUnitCeiling = 0 }, quote, now));
+    }
     private static SupplierOutcome Outcome(int customers, int bonus) => new(SupplierOutcomeKind.Completed, "public purchase", "USD", 50,
         Enumerable.Range(0, customers + bonus).Select(i => new SupplierItem("public item " + i, i < customers ? SupplierItemDisposition.Customer : SupplierItemDisposition.Bonus, "code", "public credential"u8)).ToArray(), "public wire"u8);
 }
