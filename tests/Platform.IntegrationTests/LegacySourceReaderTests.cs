@@ -14,6 +14,8 @@ public sealed class LegacySourceReaderTests
     [InlineData("schema")]
     [InlineData("migration")]
     [InlineData("endpoint")]
+    [InlineData("constraint")]
+    [InlineData("index")]
     public async Task ApprovedCopyImportIsRepeatSafeAndRejectsChangedSourceBeforeTargetWrites(string fault)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -35,6 +37,8 @@ public sealed class LegacySourceReaderTests
         var manifest = VerifiedImportManifest.Open("protected:synthetic/manifest", SHA256.HashData(body), body);
         string? mutation = fault switch
         {
+            "constraint" => "ALTER TABLE public.users ADD CONSTRAINT positive_balance CHECK(balance>=0)",
+            "index" => "CREATE INDEX legacy_language_probe ON public.users(lang)",
             "balance" => "UPDATE public.users SET balance=13",
             "irr" => "UPDATE public.users SET balance_irr=1",
             "schema" => "ALTER TABLE public.users ADD COLUMN unexpected text",
@@ -49,6 +53,16 @@ public sealed class LegacySourceReaderTests
         {
             var report = await workflow.ImportWalletAsync(f.Context(0), manifest, row.TelegramId, row.TargetUser, row.TargetOpening, targets, ct);
             Assert.True(report.Complete); Assert.False(report.ReleaseReady); Assert.Equal(12.34m, report.OpeningUsd);
+            var expected = new LegacyAggregateExpectations(manifest.Batch, Convert.ToHexStringLower(manifest.Digest.Span), 0, 0, 0);
+            var comparison = await new ReconciliationReport(f.Sessions).CompareAsync(manifest, expected, ct);
+            Assert.True(comparison.Matched); Assert.False(comparison.ReleaseReady);
+            var mismatch = LegacyAggregateComparison.Compare(manifest, expected with { PaidUnfulfilledOrders = 1, HeldCouponUnits = 2, TargetCiphertexts = 3 }, report);
+            Assert.False(mismatch.Matched); Assert.Equal(-1L, mismatch.PaidObligationDifference); Assert.Equal(-2L, mismatch.HeldCouponDifference); Assert.Equal(-3L, mismatch.CiphertextDifference);
+            Assert.Throws<MigrationRejectedException>(() => LegacyAggregateComparison.Compare(manifest, expected with { Batch = Guid.NewGuid() }, report));
+            Assert.Throws<MigrationRejectedException>(() => LegacyAggregateComparison.Compare(manifest, expected with { ManifestDigest = new string('0', 64) }, report));
+            Assert.Throws<MigrationRejectedException>(() => LegacyAggregateComparison.Compare(manifest, expected with { TargetCiphertexts = -1 }, report));
+            Assert.False(LegacyAggregateComparison.Compare(manifest, expected, report with { SaleableInventory = 1 }).Matched);
+            Assert.False(LegacyAggregateComparison.Compare(manifest, expected, report with { Complete = false }).Matched);
             Assert.True((await workflow.ImportWalletAsync(f.Context(0), manifest, row.TelegramId, row.TargetUser, row.TargetOpening, targets, ct)).Complete);
             Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", ct));
         }

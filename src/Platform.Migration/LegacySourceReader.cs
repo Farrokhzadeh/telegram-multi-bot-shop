@@ -42,11 +42,15 @@ public sealed class LegacySourceReader
             r => Enumerable.Range(0, 10).Select(r.GetString).ToArray(), 1000, ct);
         var migrations = await session.QueryManyAsync(new DbStatement("SELECT app,name FROM public.django_migrations ORDER BY app,name"), r => (App: r.GetString(0), Name: r.GetString(1)), 1000, ct);
         if (columns.Count == 0 || migrations.Count == 0 || migrations.Distinct().Count() != migrations.Count) throw new MigrationRejectedException();
+        var constraints = await session.QueryManyAsync(new DbStatement("SELECT c.relname,k.conname,pg_get_constraintdef(k.oid,true) FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY c.relname,k.conname"), r => new[] { r.GetString(0), r.GetString(1), r.GetString(2) }, 1000, ct);
+        var indexes = await session.QueryManyAsync(new DbStatement("SELECT tablename,indexname,indexdef FROM pg_indexes WHERE schemaname='public' ORDER BY tablename,indexname"), r => new[] { r.GetString(0), r.GetString(1), r.GetString(2) }, 1000, ct);
         using var bytes = new MemoryStream();
         using (var writer = new BinaryWriter(bytes, Encoding.UTF8, true))
         {
-            writer.Write("accabad-source-schema-v1"); writer.Write(columns.Count);
+            writer.Write("accabad-source-schema-v2"); writer.Write(columns.Count);
             foreach (var row in columns) foreach (var value in row) writer.Write(value);
+            writer.Write(constraints.Count); foreach (var row in constraints) foreach (var value in row) writer.Write(value);
+            writer.Write(indexes.Count); foreach (var row in indexes) foreach (var value in row) writer.Write(value);
             writer.Write(migrations.Count);
             foreach (var row in migrations) { writer.Write(row.App); writer.Write(row.Name); }
         }

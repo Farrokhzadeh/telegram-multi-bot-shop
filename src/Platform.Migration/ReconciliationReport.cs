@@ -13,6 +13,8 @@ public sealed record MigrationReconciliation(Guid Batch, long ExpectedMappings, 
 }
 public sealed class ReconciliationReport(DbSessionFactory sessions)
 {
+    public async Task<LegacyAggregateReconciliation> CompareAsync(VerifiedImportManifest manifest, LegacyAggregateExpectations expected, CancellationToken ct = default) =>
+        LegacyAggregateComparison.Compare(manifest, expected, await ReadAsync(manifest, ct));
     public async Task<MigrationReconciliation> ReadAsync(VerifiedImportManifest manifest, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
@@ -46,4 +48,5 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
 }
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(MigrationReconciliation))]
+[JsonSerializable(typeof(LegacyAggregateReconciliation))]
 public sealed partial class MigrationReportJsonContext : JsonSerializerContext;
