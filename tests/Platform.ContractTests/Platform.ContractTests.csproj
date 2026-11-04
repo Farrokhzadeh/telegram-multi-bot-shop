@@ -18,7 +18,6 @@
     <Compile Include="../../src/Platform.Api/CampaignEndpoints.cs" Link="Api/CampaignEndpoints.cs" />
     <Compile Include="../../src/Platform.Api/OperationsEndpoints.cs" Link="Api/OperationsEndpoints.cs" />
     <ProjectReference Include="../../src/Platform.Payments/Platform.Payments.csproj" />
-    <ProjectReference Include="../../src/Platform.Fulfillment/Platform.Fulfillment.csproj" />
     <Compile Include="../../src/Platform.Api/OrderAndWalletEndpoints.cs" Link="Api/OrderAndWalletEndpoints.cs" />
     <Compile Include="../../src/Platform.Api/AdminHttp.cs" Link="Api/AdminHttp.cs" />
     <Compile Include="../../src/Platform.Api/CatalogEndpoints.cs" Link="Api/CatalogEndpoints.cs" />
