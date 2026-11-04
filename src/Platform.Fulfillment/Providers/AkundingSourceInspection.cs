@@ -32,6 +32,31 @@ public sealed class AkundingSourceInspection : IDisposable
         credentials.UseCredential("akunding", account, key => key.Length);
         return new(source, revision, result);
     }
+    public async Task<AkundingCatalogPage> BrowseAsync(AuthenticatedAdmin actor, Guid product, long revision, string search, long? after, int limit, CancellationToken ct)
+    {
+        await RequireProductAsync(actor, product, revision, ct);
+        var page = await catalog.ListProductsAsync(search, after, limit, ct);
+        await RequireProductAsync(actor, product, revision, ct);
+        return page;
+    }
+    public async Task<AkundingSourcePreview> AddCandidateAsync(AuthenticatedAdmin actor, Guid product, long revision, long externalProduct, Guid source, Guid command, CancellationToken ct)
+    {
+        if (source == Guid.Empty || command == Guid.Empty) throw new ArgumentException("Invalid supplier selection.");
+        await RequireProductAsync(actor, product, revision, ct);
+        var selected = await catalog.GetProductAsync(externalProduct, ct);
+        await RequireProductAsync(actor, product, revision, ct);
+        long created = await new SupplierSourceSelectionStore(sessions).CreateAtRevisionAsync(actor, product, source, "akunding", externalProduct.ToString(CultureInfo.InvariantCulture), null, command, revision, ct);
+        return new(source, created, selected);
+    }
+    private async Task RequireProductAsync(AuthenticatedAdmin actor, Guid product, long revision, CancellationToken ct)
+    {
+        if (product == Guid.Empty || revision <= 0 || revision == long.MaxValue) throw new ArgumentException("Invalid supplier product.");
+        credentials.UseCredential("akunding", account, key => key.Length);
+        await using var session = await sessions.BeginAsync(ct);
+        await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
+        long count = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products WHERE id=$1 AND revision=$2 AND fulfillment_kind='supplier'", DbValue.Uuid(product), DbValue.Bigint(revision)), r => r.GetInt64(0), ct);
+        if (count != 1) throw new InvalidOperationException("Supplier product revision conflict.");
+    }
     private async Task<(long External, long ProductRevision)> ReadAsync(AuthenticatedAdmin actor, Guid product, Guid source, long revision, CancellationToken ct)
     {
         await using var session = await sessions.BeginAsync(ct);
@@ -50,7 +75,7 @@ public sealed class AkundingSourceInspection : IDisposable
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            if (request.Method != HttpMethod.Get || request.Content is not null || request.RequestUri is not { Scheme: "https", Host: "akunding.shop", Port: 443 } uri || !uri.AbsolutePath.StartsWith("/api/v1/products/", StringComparison.Ordinal) || uri.Query.Length != 0 || uri.UserInfo.Length != 0)
+            if (request.Method != HttpMethod.Get || request.Content is not null || request.RequestUri is not { Scheme: "https", Host: "akunding.shop", Port: 443 } uri || uri.UserInfo.Length != 0 || !Allowed(uri))
                 throw new UnauthorizedAccessException("Supplier transport is unavailable.");
             credentials.UseCredential("akunding", account, key =>
             {
@@ -60,6 +85,14 @@ public sealed class AkundingSourceInspection : IDisposable
             });
             try { return await base.SendAsync(request, ct); }
             finally { request.Headers.Authorization = null; }
+        }
+        private static bool Allowed(Uri uri)
+        {
+            if (uri.AbsolutePath == "/api/v1/products") return uri.Query == "?include_out_of_stock=true";
+            const string prefix = "/api/v1/products/";
+            return uri.Query.Length == 0 && uri.AbsolutePath.StartsWith(prefix, StringComparison.Ordinal)
+                && long.TryParse(uri.AbsolutePath.AsSpan(prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out long id) && id > 0
+                && uri.AbsolutePath == prefix + id.ToString(CultureInfo.InvariantCulture);
         }
     }
 }

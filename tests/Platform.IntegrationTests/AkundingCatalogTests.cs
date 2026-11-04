@@ -9,6 +9,61 @@ public sealed class AkundingCatalogTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private const string Product = """{"id":7,"name":"Public test account","unit_label":"account","your_price":1.25,"stock":2,"available":true}""";
     [Fact]
+    public async Task CatalogSearchPagesByStableIdentityAndRetainsSoldOutChoices()
+    {
+        string soldOut = Product.Replace("\"id\":7", "\"id\":9", StringComparison.Ordinal).Replace("\"stock\":2", "\"stock\":0", StringComparison.Ordinal).Replace("\"available\":true", "\"available\":false", StringComparison.Ordinal);
+        using var handler = new Handler(request =>
+        {
+            Assert.Equal("https://akunding.shop/api/v1/products?include_out_of_stock=true", request.RequestUri!.AbsoluteUri);
+            Assert.Equal(HttpMethod.Get, request.Method); Assert.Null(request.Content);
+            return Reply("[" + soldOut + "," + Product + "]");
+        });
+        using var http = new HttpClient(handler);
+        var catalog = new AkundingCatalogClient(http);
+        var first = await catalog.ListProductsAsync("PUBLIC", null, 1, Ct);
+        Assert.Equal(7, Assert.Single(first.Items).Id); Assert.Equal(7L, first.Next);
+        var second = await catalog.ListProductsAsync("PUBLIC", first.Next, 1, Ct);
+        Assert.Equal(9, Assert.Single(second.Items).Id); Assert.False(second.Items[0].Available); Assert.Null(second.Next);
+        Assert.Equal(9, Assert.Single((await catalog.ListProductsAsync("9", null, 100, Ct)).Items).Id);
+        Assert.Empty((await catalog.ListProductsAsync("absent", null, 100, Ct)).Items);
+    }
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("[{}]")]
+    [InlineData("[null]")]
+    public async Task InvalidListNeverBecomesAnEmptySuccessfulCatalog(string body)
+    {
+        using var handler = new Handler(_ => Reply(body));
+        using var http = new HttpClient(handler);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new AkundingCatalogClient(http).ListProductsAsync("", null, 100, Ct));
+        Assert.Equal(1, handler.Calls);
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DuplicateIdentitiesAndOverlargeCatalogsAreRejectedBeforeFiltering(bool oversized)
+    {
+        string body = "[" + string.Join(",", Enumerable.Repeat(Product, oversized ? 1001 : 2)) + "]";
+        using var handler = new Handler(_ => Reply(body));
+        using var http = new HttpClient(handler);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new AkundingCatalogClient(http).ListProductsAsync("absent", null, 100, Ct));
+    }
+    [Fact]
+    public async Task InvalidQueryAndCallerCancellationNeverProduceCatalogSuccess()
+    {
+        using var handler = new Handler(_ => Reply("[]"));
+        using var http = new HttpClient(handler);
+        var catalog = new AkundingCatalogClient(http);
+        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListProductsAsync("", 0, 10, Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListProductsAsync("", null, 101, Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListProductsAsync(new string('x', 81), null, 10, Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => catalog.ListProductsAsync("\n", null, 10, Ct));
+        Assert.Equal(0, handler.Calls);
+        using var cancelled = CancellationTokenSource.CreateLinkedTokenSource(Ct); cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => catalog.ListProductsAsync("", null, 10, cancelled.Token));
+        Assert.Equal(0, handler.Calls);
+    }
+    [Fact]
     public async Task ReadsOnlyExactSelectedProductAndPreservesSupplierBillingCurrency()
     {
         using var handler = new Handler(request =>

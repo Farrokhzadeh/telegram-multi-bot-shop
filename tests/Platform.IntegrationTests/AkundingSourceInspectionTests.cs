@@ -13,6 +13,127 @@ public sealed class AkundingSourceInspectionTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
+    public async Task AdministratorBrowsesThenMapsOnlyOneChosenItemWithAuditedReplay()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var actor = await f.AdminAsync(Ct);
+        await Mapping(f, actor);
+        using var files = new SyntheticSecretFiles();
+        using var credentials = Credentials(files);
+        int lists = 0, details = 0;
+        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(request =>
+        {
+            Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            if (request.RequestUri!.AbsolutePath == "/api/v1/products")
+            {
+                lists++; Assert.Equal("?include_out_of_stock=true", request.RequestUri.Query);
+                return new(HttpStatusCode.OK) { Content = new StringContent("[" + """{"id":9,"name":"Chosen public code","unit_label":"code","your_price":2,"stock":0,"available":false}""" + "]", Encoding.UTF8, "application/json") };
+            }
+            details++; Assert.Equal("/api/v1/products/9", request.RequestUri.AbsolutePath);
+            return new(HttpStatusCode.OK) { Content = new StringContent("""{"id":9,"name":"Chosen public code","unit_label":"code","your_price":2,"stock":0,"available":false}""", Encoding.UTF8, "application/json") };
+        }));
+        long revision = await f.CountAsync("SELECT revision FROM shop.products", Ct);
+        var page = await inspection.BrowseAsync(actor, f.Product, revision, "code", null, 10, Ct);
+        Assert.Equal(9, Assert.Single(page.Items).Id);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources", Ct));
+        Guid source = Guid.NewGuid(), command = Guid.NewGuid();
+        for (int i = 0; i < 2; i++)
+        {
+            var chosen = await inspection.AddCandidateAsync(actor, f.Product, revision, 9, source, command, Ct);
+            Assert.Equal(source, chosen.SourceId); Assert.Equal(1, chosen.SourceRevision); Assert.False(chosen.Product.Available);
+        }
+        Assert.Equal(1, lists); Assert.Equal(2, details);
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources WHERE NOT enabled AND observation_revision=0", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources WHERE external_product_id='9'", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='create' AND entity_kind='product_supplier_source'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.products WHERE active_supplier_source_id IS NOT NULL", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs", Ct));
+    }
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task BrowseAndChoiceRejectRevocationOrProductChangesDuringNetwork(bool choose, bool revoke)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var actor = await f.AdminAsync(Ct);
+        await Mapping(f, actor);
+        long revision = await f.CountAsync("SELECT revision FROM shop.products", Ct);
+        using var files = new SyntheticSecretFiles();
+        using var credentials = Credentials(files);
+        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new AsyncHandler(async (_, ct) =>
+        {
+            await using var edit = await f.Sessions.BeginAsync(ct);
+            if (revoke) await AdminSessionStore.LogoutAsync(edit, actor, ct);
+            else await edit.ExecuteAsync(new DbStatement("UPDATE shop.products SET revision=revision+1 WHERE id=$1", DbValue.Uuid(f.Product)), ct);
+            await edit.CommitAsync(ct);
+            if (choose) return Reply();
+            return new(HttpStatusCode.OK) { Content = new StringContent("[]", Encoding.UTF8, "application/json") };
+        }));
+        async Task Read()
+        {
+            if (choose) await inspection.AddCandidateAsync(actor, f.Product, revision, 7, Guid.NewGuid(), Guid.NewGuid(), Ct);
+            else await inspection.BrowseAsync(actor, f.Product, revision, "", null, 10, Ct);
+        }
+        if (revoke) await Assert.ThrowsAsync<AdminAuthenticationException>(Read);
+        else await Assert.ThrowsAsync<InvalidOperationException>(Read);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs", Ct));
+    }
+    [Fact]
+    public async Task RevisionCheckedMappingCreationRejectsStaleAndChangedReplayInputsAtomically()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var actor = await f.AdminAsync(Ct);
+        await Mapping(f, actor);
+        long revision = await f.CountAsync("SELECT revision FROM shop.products", Ct);
+        var store = new SupplierSourceSelectionStore(f.Sessions);
+        Guid source = Guid.NewGuid(), command = Guid.NewGuid();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.CreateAtRevisionAsync(actor, f.Product, source, "akunding", "9", null, command, revision + 1, Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='create' AND entity_kind='product_supplier_source'", Ct));
+        await store.CreateAtRevisionAsync(actor, f.Product, source, "akunding", "9", null, command, revision, Ct);
+        await Assert.ThrowsAsync<DbOperationException>(() => store.CreateAtRevisionAsync(actor, f.Product, source, "akunding", "10", null, command, revision, Ct));
+        await Assert.ThrowsAsync<DbOperationException>(() => store.CreateAtRevisionAsync(actor, f.Product, source, "akunding", "9", null, command, revision + 1, Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources", Ct));
+    }
+    [Fact]
+    public async Task StaleProductAndRevokedAdministratorFailBeforeCatalogAccess()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var actor = await f.AdminAsync(Ct);
+        await Mapping(f, actor);
+        long revision = await f.CountAsync("SELECT revision FROM shop.products", Ct);
+        using var files = new SyntheticSecretFiles();
+        using var credentials = Credentials(files);
+        int calls = 0;
+        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(_ => { calls++; return Reply(); }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => inspection.BrowseAsync(actor, f.Product, revision + 1, "", null, 10, Ct));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => inspection.AddCandidateAsync(actor, f.Product, revision + 1, 7, Guid.NewGuid(), Guid.NewGuid(), Ct));
+        await using (var logout = await f.Sessions.BeginAsync(Ct))
+        {
+            await AdminSessionStore.LogoutAsync(logout, actor, Ct); await logout.CommitAsync(Ct);
+        }
+        await Assert.ThrowsAsync<AdminAuthenticationException>(() => inspection.BrowseAsync(actor, f.Product, revision, "", null, 10, Ct));
+        await Assert.ThrowsAsync<AdminAuthenticationException>(() => inspection.AddCandidateAsync(actor, f.Product, revision, 7, Guid.NewGuid(), Guid.NewGuid(), Ct));
+        Assert.Equal(0, calls);
+    }
+    [Fact]
+    public async Task MismatchedDetailNeverCreatesAChosenMapping()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var actor = await f.AdminAsync(Ct);
+        await Mapping(f, actor);
+        using var files = new SyntheticSecretFiles();
+        using var credentials = Credentials(files);
+        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(_ => Reply()));
+        long revision = await f.CountAsync("SELECT revision FROM shop.products", Ct);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => inspection.AddCandidateAsync(actor, f.Product, revision, 9, Guid.NewGuid(), Guid.NewGuid(), Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='create' AND entity_kind='product_supplier_source'", Ct));
+    }
+    [Fact]
     public async Task ProtectedAdminPreviewReadsOnlyTheChosenDisabledMappingWithoutPublishingOrBuying()
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);

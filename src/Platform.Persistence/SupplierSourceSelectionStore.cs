@@ -18,15 +18,26 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
             """, DbValue.Uuid(product), AdminCommand.Id(after), DbValue.Integer(limit + 1)), r => new SupplierSourceMetadata(r.GetGuid(0), r.GetString(1), r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3), r.GetBoolean(4), r.GetInt64(5), r.GetBoolean(6)), limit + 1, ct);
         return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
     }
-    public async Task<long> CreateAsync(AuthenticatedAdmin actor, Guid product, Guid source, string provider, string externalProduct, string? variant, Guid command, CancellationToken ct = default)
+    public Task<long> CreateAsync(AuthenticatedAdmin actor, Guid product, Guid source, string provider, string externalProduct, string? variant, Guid command, CancellationToken ct = default)
+        => CreateCoreAsync(actor, product, source, provider, externalProduct, variant, command, null, ct);
+    public Task<long> CreateAtRevisionAsync(AuthenticatedAdmin actor, Guid product, Guid source, string provider, string externalProduct, string? variant, Guid command, long productRevision, CancellationToken ct = default)
+    {
+        AdminCommand.Revision(productRevision);
+        if (productRevision == 0) throw new ArgumentException("Invalid product revision.");
+        return CreateCoreAsync(actor, product, source, provider, externalProduct, variant, command, productRevision, ct);
+    }
+    private async Task<long> CreateCoreAsync(AuthenticatedAdmin actor, Guid product, Guid source, string provider, string externalProduct, string? variant, Guid command, long? productRevision, CancellationToken ct)
     {
         if (product == Guid.Empty || source == Guid.Empty || !Label(provider) || !Label(externalProduct) || (variant is not null && !Label(variant))) throw new ArgumentException("Invalid supplier mapping.");
-        byte[] hash = AdminCommand.Hash("supplier-source-create-v1", product.ToString("D"), provider, externalProduct, variant);
+        byte[] hash = productRevision is long expected
+            ? AdminCommand.Hash("supplier-source-create-at-revision-v1", product.ToString("D"), provider, externalProduct, variant, expected.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            : AdminCommand.Hash("supplier-source-create-v1", product.ToString("D"), provider, externalProduct, variant);
         await using var session = await sessions.BeginAsync(ct);
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Create, AuditEntity.ProductSupplierSource, source, null, AuditReason.ConfigurationChange, command, hash, 0, 1), ct)) return 1;
-            if (await session.QuerySingleAsync(new DbStatement("SELECT fulfillment_kind FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetString(0), ct) != "supplier") throw new InvalidOperationException("Supplier product required.");
+            var current = await session.QuerySingleAsync(new DbStatement("SELECT fulfillment_kind,revision FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => (Kind: r.GetString(0), Revision: r.GetInt64(1)), ct);
+            if (current.Kind != "supplier" || (productRevision.HasValue && current.Revision != productRevision.Value)) throw new InvalidOperationException("Supplier product revision conflict.");
             await session.ExecuteAsync(new DbStatement("INSERT INTO shop.product_supplier_sources(id,product_id,provider_code,external_product_id,external_variant_id) VALUES ($1,$2,$3,$4,$5)", DbValue.Uuid(source), DbValue.Uuid(product), DbValue.Text(provider), DbValue.Text(externalProduct), AdminCommand.Text(variant)), ct);
             await session.CommitAsync(ct); return 1;
         }
