@@ -1,7 +1,10 @@
+import contextlib
+import io
 import importlib.util
 import json
 import pathlib
 import unittest
+from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location('evidence', pathlib.Path(__file__).parents[1] / 'inspect-legacy-order-evidence.py')
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -18,6 +21,16 @@ class LegacyOrderEvidenceTests(unittest.TestCase):
     rows['transactions'][0]['currency'] = 'IRR'
     rows['transactions'][0]['user_id'] = 'OTHER-USER'
     self.assertEqual(0, MODULE.analyze(rows)['transaction_exact'])
+  def test_cli_includes_validation_and_never_prints_partial_evidence_on_failure(self):
+    tables = {'orders':[],'transactions':[],'manual_deposits':[],'payment_attempts':[],'inventory':[],'users':[],'products':[]}
+    with patch.object(MODULE.sys, 'argv', ['inspect','PRIVATE-ARCHIVE']), patch.object(MODULE.INVENTORY, 'inspect', return_value=({'archive_sha256':'a'*64},tables)), contextlib.redirect_stdout(io.StringIO()) as output:
+      self.assertEqual(0, MODULE.main())
+      result = json.loads(output.getvalue())
+      self.assertEqual(0, result['sources'][0]['linked_snapshot_validation']['representable_by_current_importer'])
+      self.assertNotIn('PRIVATE', output.getvalue())
+    with patch.object(MODULE.sys, 'argv', ['inspect','PRIVATE-A','PRIVATE-B']), patch.object(MODULE.INVENTORY, 'inspect', side_effect=[({'archive_sha256':'a'*64},tables),ValueError('PRIVATE-ROW')]), contextlib.redirect_stdout(io.StringIO()) as output, contextlib.redirect_stderr(io.StringIO()) as errors:
+      self.assertEqual(1, MODULE.main())
+      self.assertEqual('', output.getvalue()); self.assertNotIn('PRIVATE', errors.getvalue())
   def test_invalid_linked_snapshot_and_duplicate_transactions_reject(self):
     rows = {'orders':[],'transactions':[],'manual_deposits':[{'fulfilled_order_id':'o','checkout_snapshot':'[]'}],'payment_attempts':[],'inventory':[]}
     with self.assertRaises(ValueError):

@@ -8,6 +8,9 @@ import sys
 SPEC = importlib.util.spec_from_file_location('inventory', pathlib.Path(__file__).with_name('inspect-legacy-backups.py'))
 INVENTORY = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(INVENTORY)
+LINKED_SPEC = importlib.util.spec_from_file_location('linked_snapshots', pathlib.Path(__file__).with_name('inspect-legacy-linked-snapshots.py'))
+LINKED = importlib.util.module_from_spec(LINKED_SPEC)
+LINKED_SPEC.loader.exec_module(LINKED)
 
 def analyze(tables):
   links = collections.defaultdict(list)
@@ -58,7 +61,7 @@ def main():
     sources = []
     for path in args.archives:
       meta, tables = INVENTORY.inspect(path, args.pg_restore)
-      sources.append({'archive_sha256':meta['archive_sha256'], **analyze(tables)})
+      sources.append({'archive_sha256':meta['archive_sha256'], **analyze(tables), 'linked_snapshot_validation':LINKED.analyze(tables)})
     print(json.dumps({'scope':'empty_order_snapshot_source_evidence_only','release_ready':False,'sources':sources}, sort_keys=True, indent=2))
   except (OSError, ValueError, KeyError, TypeError, OverflowError, INVENTORY.decimal.InvalidOperation):
     print('Order evidence inspection rejected; retain protected inputs for review.', file=sys.stderr)
