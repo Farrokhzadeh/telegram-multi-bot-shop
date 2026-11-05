@@ -61,7 +61,7 @@ public sealed class LegacyRecordFixture : IAsyncDisposable
                     raw.Add((new(LegacyProjection.SupplierRefundArchive, "33", $$$"""{"id":33,"order_id":"{{{reference}}}","amount":"1","currency":"USD","state":"completed","external_settlement_reference":"{{{ciphertext}}}","created_at":"2024-02-03T00:00:00Z"}"""), orderId));
                 }
             }
-            if (route != "preorder") { raw.Add((header, orderId)); raw.Add((part, orderId)); }
+            if (route != "preorder") { raw.Add((header, orderId)); raw.Add((part, orderId)); raw.Add((new(LegacyProjection.DeliveryAttempt, "12", $$$"""{"id":12,"delivery_id":10,"generation":2,"source":"worker","actor_id":null,"started_at":"2024-02-01T23:59:00Z","finished_at":"2024-02-02T00:00:00Z","outcome":"{{{(route == "delivery_retry" ? "retry_wait" : "sent")}}}","error_code":""}"""), orderId)); }
             if (payment is not null) raw.Add((payment, paymentId)); if (zero is not null) raw.Add((zero, orderId));
             var initial = LegacyRecordQualification.Manifest(f, batch, wallet.Proofs(f.Brands[0]).Concat(raw.Select(r => r.Source.Proof(r.Target, f.Context(0), f.Secrets))), wallet.BalanceUsd);
             var protectedFiles = new Dictionary<string, ProtectedLegacyEvidence>(); var archived = new Dictionary<LegacyProjection, ArchivedLegacyRecord>();
@@ -96,7 +96,7 @@ public static class LegacyRecordQualification
     }
     public static async Task RunAsync(CancellationToken ct = default)
     {
-        foreach (string route in new[] { "bank", "crypto", "topup", "free", "partial", "preorder", "api", "service" })
+        foreach (string route in new[] { "bank", "crypto", "topup", "free", "partial", "preorder", "api", "service", "delivery_retry" })
         {
             await using var world = await LegacyRecordFixture.CreateAsync(route, ct);
             var report = await world.Reports.CompareAsync(world.Fixture.Context(0), world.Manifest, world.Set, world.Read, ct);

@@ -23,7 +23,7 @@ public sealed class LegacyDeliveryImportWorkflow(DbSessionFactory sessions, Secr
             LegacyProjection.InventoryUnit or LegacyProjection.Delivery or LegacyProjection.PreorderBatch or LegacyProjection.SupplierFulfillment or LegacyProjection.SupplierRefundArchive or LegacyProjection.PreorderState or LegacyProjection.PreorderRefundArchive or LegacyProjection.ServiceJob => (LegacyProjection.OrderRecord, "order_id"),
             LegacyProjection.ZeroTransaction => (LegacyProjection.OrderRecord, "id"),
             LegacyProjection.SupplierItem or LegacyProjection.SupplierAttempt => (LegacyProjection.SupplierFulfillment, "fulfillment_id"),
-            LegacyProjection.DeliveryPart => (LegacyProjection.Delivery, "delivery_id"),
+            LegacyProjection.DeliveryPart or LegacyProjection.DeliveryAttempt => (LegacyProjection.Delivery, "delivery_id"),
             LegacyProjection.PreorderPart => (LegacyProjection.PreorderBatch, "batch_id"),
             LegacyProjection.PreorderItem => (LegacyProjection.PreorderBatch, "preorderdeliverybatch_id"),
             _ => throw new MigrationRejectedException()

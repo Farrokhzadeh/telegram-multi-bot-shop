@@ -1,5 +1,6 @@
 # Multi-brand redesign — conversation handoff (updated 2026-11-03)
 
+**2026-11-05 current migration continuation:** the owner authorized the three uploaded production backups for read-only protected offline inspection/testing. See [actual-copy assessment](../../ops/PRODUCTION_BACKUP_RECONCILIATION.md). Native pg_restore decoding and separate PostgreSQL 18.6 WASM schema/data/constraint restores passed; source inventory exposes IRR liabilities/history, missing snapshots, unlinked payments, missing keys/media and ownership/source-brand gates. T063/T064/T066/T068 remain unchecked. Ban-time preservation, payment-origin scoping and encrypted delivery-attempt evidence extend existing implementations; exact-main CI supplies synthetic managed/native execution proof. No live production/staging/provider/key access or cutover is authorized. Earlier no-real-source-data statements describe their dated batches.
 **Repository:** `Farrokhzadeh/telegram-multi-bot-shop`  
 **Branch:** `main`; authorized offline work uses task-grouped commits directly on main.
 **Imported source:** `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`  

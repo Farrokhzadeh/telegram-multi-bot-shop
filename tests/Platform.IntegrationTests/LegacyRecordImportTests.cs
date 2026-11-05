@@ -20,6 +20,7 @@ public sealed class LegacyRecordImportTests
     [InlineData(LegacyProjection.InventoryUnit, "inventory")]
     [InlineData(LegacyProjection.Delivery, "common_orderdelivery")]
     [InlineData(LegacyProjection.DeliveryPart, "common_orderdeliverypart")]
+    [InlineData(LegacyProjection.DeliveryAttempt, "common_deliveryattempt")]
     [InlineData(LegacyProjection.PreorderBatch, "common_preorderdeliverybatch")]
     [InlineData(LegacyProjection.PreorderPart, "common_preorderdeliverybatchpart")]
     [InlineData(LegacyProjection.PreorderItem, "common_preorderdeliverybatch_items")]
@@ -62,6 +63,7 @@ public sealed class LegacyRecordImportTests
     [InlineData("preorder")]
     [InlineData("api")]
     [InlineData("service")]
+    [InlineData("delivery_retry")]
     public async Task FrozenRecordsImportOnceWithoutNewMoneyStockOrCustomerSendsAndReconcileExactly(string route)
     {
         await using var world = await LegacyRecordFixture.CreateAsync(route, Ct);

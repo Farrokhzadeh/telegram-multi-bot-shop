@@ -7,7 +7,7 @@ namespace Platform.Migration;
 
 public sealed record LegacySourceRecord(LegacyProjection Projection, string Id, string Body)
 {
-    internal static IReadOnlyList<LegacyProjection> Projections { get; } = Array.AsReadOnly<LegacyProjection>([LegacyProjection.OrderRecord, LegacyProjection.ProductRecord, LegacyProjection.DiscountRecord, LegacyProjection.PaymentAttempt, LegacyProjection.ManualDeposit, LegacyProjection.InventoryUnit, LegacyProjection.Delivery, LegacyProjection.DeliveryPart, LegacyProjection.PreorderBatch, LegacyProjection.PreorderPart, LegacyProjection.PreorderItem, LegacyProjection.SupplierFulfillment, LegacyProjection.SupplierItem, LegacyProjection.SupplierAttempt, LegacyProjection.SupplierRefundArchive, LegacyProjection.PreorderState, LegacyProjection.PreorderRefundArchive, LegacyProjection.ServiceJob, LegacyProjection.ZeroTransaction]);
+    internal static IReadOnlyList<LegacyProjection> Projections { get; } = Array.AsReadOnly<LegacyProjection>([LegacyProjection.OrderRecord, LegacyProjection.ProductRecord, LegacyProjection.DiscountRecord, LegacyProjection.PaymentAttempt, LegacyProjection.ManualDeposit, LegacyProjection.InventoryUnit, LegacyProjection.Delivery, LegacyProjection.DeliveryPart, LegacyProjection.PreorderBatch, LegacyProjection.PreorderPart, LegacyProjection.PreorderItem, LegacyProjection.SupplierFulfillment, LegacyProjection.SupplierItem, LegacyProjection.SupplierAttempt, LegacyProjection.SupplierRefundArchive, LegacyProjection.PreorderState, LegacyProjection.PreorderRefundArchive, LegacyProjection.ServiceJob, LegacyProjection.ZeroTransaction, LegacyProjection.DeliveryAttempt]);
     internal static string Table(LegacyProjection projection) => projection switch
     {
         LegacyProjection.SupplierFulfillment => "supplier_fulfillments",
@@ -26,6 +26,7 @@ public sealed record LegacySourceRecord(LegacyProjection Projection, string Id, 
         LegacyProjection.InventoryUnit => "inventory",
         LegacyProjection.Delivery => "common_orderdelivery",
         LegacyProjection.DeliveryPart => "common_orderdeliverypart",
+        LegacyProjection.DeliveryAttempt => "common_deliveryattempt",
         LegacyProjection.PreorderBatch => "common_preorderdeliverybatch",
         LegacyProjection.PreorderPart => "common_preorderdeliverybatchpart",
         LegacyProjection.PreorderItem => "common_preorderdeliverybatch_items",
