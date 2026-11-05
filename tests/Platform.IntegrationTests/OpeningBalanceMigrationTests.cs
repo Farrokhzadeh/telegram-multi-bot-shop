@@ -7,6 +7,30 @@ namespace Platform.IntegrationTests;
 public sealed class OpeningBalanceMigrationTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    [Fact]
+    public async Task RecordComparisonRejectsMissingEvidenceAndTargetDriftWithoutExposingSource()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
+        await MigrationQualification.EnableRoleAsync(f, Ct);
+        var row = MigrationQualification.Wallet();
+        var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [row]);
+        var importer = new OpeningBalanceImportWorkflow(f.Sessions);
+        var reports = new ReconciliationReport(f.Sessions);
+        await importer.ImportAsync(f.Context(0), manifest, row with { History = row.History.Take(1).ToArray() }, Ct);
+        Assert.False((await reports.CompareWalletsAsync(manifest, [row], Ct)).Matched);
+        Assert.False((await reports.CompareWalletsAsync(manifest, [row with { History = row.History.Take(1).ToArray() }], Ct)).Matched);
+        await importer.ImportAsync(f.Context(0), manifest, row, Ct);
+        var result = await reports.CompareWalletsAsync(manifest, [row], Ct);
+        Assert.True(result.Matched); Assert.False(result.ReleaseReady);
+        Assert.False((await reports.CompareWalletsAsync(manifest, [], Ct)).Matched);
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => reports.CompareWalletsAsync(manifest, [row with { BalanceUsd = row.BalanceUsd + 1 }], Ct));
+        string json = System.Text.Json.JsonSerializer.Serialize(result, MigrationReportJsonContext.Default.WalletRecordReconciliation);
+        Assert.DoesNotContain(row.TelegramId.ToString(), json, StringComparison.Ordinal);
+        Assert.DoesNotContain(row.LegacyUser, json, StringComparison.Ordinal);
+        await using (var change = f.Database.Data.CreateCommand("UPDATE shop.users SET language=CASE WHEN language='en' THEN 'fa' ELSE 'en' END")) await change.ExecuteNonQueryAsync(Ct);
+        Assert.True((await reports.ReadAsync(manifest, Ct)).Complete);
+        Assert.False((await reports.CompareWalletsAsync(manifest, [row], Ct)).Matched);
+    }
     [Theory]
     [InlineData("0")]
     [InlineData("12.34")]
