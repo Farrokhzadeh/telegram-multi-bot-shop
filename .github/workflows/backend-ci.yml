@@ -50,11 +50,10 @@ jobs:
         run: |
           python3 -m venv /tmp/legacy-verifier-tests
           /tmp/legacy-verifier-tests/bin/python -m pip install -r ops/ci/legacy-assets-requirements.txt
-          echo '/tmp/legacy-verifier-tests/bin' >> "$GITHUB_PATH"
       - name: Validate scenario mappings and evidence guards
         run: |
           python3 .specify/tests/test_linux_tooling.py
-          python3 -m unittest discover -s ops/ci/tests -v
+          /tmp/legacy-verifier-tests/bin/python -m unittest discover -s ops/ci/tests -v
           python3 ops/ci/check-acceptance-evidence.py --catalog-only
       - name: Restore locked dependencies
         run: dotnet restore Platform.sln -r linux-x64 --locked-mode
