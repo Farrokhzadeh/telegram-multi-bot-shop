@@ -7,6 +7,7 @@ using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 internal static class LegacyValues
 {
     internal static string Text(JsonElement row, string name) => row.GetProperty(name).GetString() ?? throw new MigrationRejectedException();

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 public sealed class LegacyDeliveryImportWorkflow(DbSessionFactory sessions, SecretSnapshot secrets)
 {
     public async Task ImportAsync(BrandContext context, VerifiedImportManifest manifest, ArchivedLegacyRecord row, CancellationToken ct = default)

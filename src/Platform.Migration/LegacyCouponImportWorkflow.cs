@@ -4,6 +4,7 @@ using System.Text;
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 public sealed record LegacyCouponRecord(ArchivedLegacyRecord Record, Guid Revision, Guid? Product, Guid? Member, string Kind, Guid? PaidSourceOrder = null)
 {
     internal CouponImportTerms Terms()

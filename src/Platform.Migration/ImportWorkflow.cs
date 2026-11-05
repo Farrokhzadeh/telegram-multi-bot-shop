@@ -10,6 +10,8 @@ public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory d
         var set = new LegacyImportSet(input.Wallets.Select(w => w with { History = Array.AsReadOnly(w.History.ToArray()) }).ToArray(), input.Orders.ToArray(), input.Payments.ToArray(), input.Coupons.ToArray(), input.Catalog.ToArray(), input.Delivery.ToArray());
         var rows = set.Orders.Select(o => o.Record).Concat(set.Payments.Select(p => p.Record)).Concat(set.Coupons.Select(c => c.Record)).Concat(set.Catalog).Concat(set.Delivery).ToArray();
         if (rows.Select(r => (r.Source.Projection, r.Source.Id)).Distinct().Count() != rows.Length || rows.Length != manifest.Proofs.Count(p => LegacySourceRecord.Projections.Contains(p.Projection)) || set.Wallets.Count != manifest.Proofs.Count(p => p.Projection == LegacyProjection.User)) throw new MigrationRejectedException();
+        foreach (var order in set.Orders) foreach (var proof in order.Proofs(context, secrets)) manifest.Require(proof);
+        foreach (var coupon in set.Coupons) foreach (var proof in coupon.Proofs(context, secrets)) manifest.Require(proof);
         await source.VerifyWalletCoverageAsync(manifest, ct);
         foreach (var projection in LegacySourceRecord.Projections)
             if (projection != LegacyProjection.ProductRecord || context.BrandId == approvedMasterBrand) await source.VerifyRecordCoverageAsync(context, secrets, manifest, projection, ct);

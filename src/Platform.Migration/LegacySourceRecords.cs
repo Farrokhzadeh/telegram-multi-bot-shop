@@ -4,14 +4,32 @@ using System.Text.Json;
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 public sealed record LegacySourceRecord(LegacyProjection Projection, string Id, string Body)
 {
     internal static IReadOnlyList<LegacyProjection> Projections { get; } = Array.AsReadOnly<LegacyProjection>([LegacyProjection.OrderRecord, LegacyProjection.ProductRecord, LegacyProjection.DiscountRecord, LegacyProjection.PaymentAttempt, LegacyProjection.ManualDeposit, LegacyProjection.InventoryUnit, LegacyProjection.Delivery, LegacyProjection.DeliveryPart, LegacyProjection.PreorderBatch, LegacyProjection.PreorderPart, LegacyProjection.PreorderItem, LegacyProjection.SupplierFulfillment, LegacyProjection.SupplierItem, LegacyProjection.SupplierAttempt, LegacyProjection.SupplierRefundArchive, LegacyProjection.PreorderState, LegacyProjection.PreorderRefundArchive, LegacyProjection.ServiceJob, LegacyProjection.ZeroTransaction]);
     internal static string Table(LegacyProjection projection) => projection switch
     {
-        LegacyProjection.SupplierFulfillment => "supplier_fulfillments", LegacyProjection.SupplierItem => "supplier_fulfillment_items", LegacyProjection.SupplierAttempt => "supplier_procurement_attempts", LegacyProjection.SupplierRefundArchive => "supplier_refund_records", LegacyProjection.PreorderState => "preorder_order_states", LegacyProjection.PreorderRefundArchive => "preorder_refund_records", LegacyProjection.ServiceJob => "service_jobs", LegacyProjection.ZeroTransaction => "transactions", LegacyProjection.OrderRecord => "orders", LegacyProjection.DiscountRecord => "discounts", LegacyProjection.ProductRecord => "products", LegacyProjection.PaymentAttempt => "payment_attempts", LegacyProjection.ManualDeposit => "manual_deposits", LegacyProjection.InventoryUnit => "inventory",
-        LegacyProjection.Delivery => "common_orderdelivery", LegacyProjection.DeliveryPart => "common_orderdeliverypart", LegacyProjection.PreorderBatch => "common_preorderdeliverybatch",
-        LegacyProjection.PreorderPart => "common_preorderdeliverybatchpart", LegacyProjection.PreorderItem => "common_preorderdeliverybatch_items", _ => throw new MigrationRejectedException()
+        LegacyProjection.SupplierFulfillment => "supplier_fulfillments",
+        LegacyProjection.SupplierItem => "supplier_fulfillment_items",
+        LegacyProjection.SupplierAttempt => "supplier_procurement_attempts",
+        LegacyProjection.SupplierRefundArchive => "supplier_refund_records",
+        LegacyProjection.PreorderState => "preorder_order_states",
+        LegacyProjection.PreorderRefundArchive => "preorder_refund_records",
+        LegacyProjection.ServiceJob => "service_jobs",
+        LegacyProjection.ZeroTransaction => "transactions",
+        LegacyProjection.OrderRecord => "orders",
+        LegacyProjection.DiscountRecord => "discounts",
+        LegacyProjection.ProductRecord => "products",
+        LegacyProjection.PaymentAttempt => "payment_attempts",
+        LegacyProjection.ManualDeposit => "manual_deposits",
+        LegacyProjection.InventoryUnit => "inventory",
+        LegacyProjection.Delivery => "common_orderdelivery",
+        LegacyProjection.DeliveryPart => "common_orderdeliverypart",
+        LegacyProjection.PreorderBatch => "common_preorderdeliverybatch",
+        LegacyProjection.PreorderPart => "common_preorderdeliverybatchpart",
+        LegacyProjection.PreorderItem => "common_preorderdeliverybatch_items",
+        _ => throw new MigrationRejectedException()
     };
     internal JsonDocument Open()
     {
@@ -164,8 +182,10 @@ public sealed class LegacyRecordArchive(SecretSnapshot secrets)
     {
         var field = source.Projection switch
         {
-            LegacyProjection.InventoryUnit => ("data", LegacyFieldKind.Text), LegacyProjection.SupplierItem => ("content", LegacyFieldKind.Text),
-            LegacyProjection.ServiceJob => ("submitted_data", LegacyFieldKind.Json), LegacyProjection.SupplierRefundArchive or LegacyProjection.PreorderRefundArchive => ("external_settlement_reference", LegacyFieldKind.Text),
+            LegacyProjection.InventoryUnit => ("data", LegacyFieldKind.Text),
+            LegacyProjection.SupplierItem => ("content", LegacyFieldKind.Text),
+            LegacyProjection.ServiceJob => ("submitted_data", LegacyFieldKind.Json),
+            LegacyProjection.SupplierRefundArchive or LegacyProjection.PreorderRefundArchive => ("external_settlement_reference", LegacyFieldKind.Text),
             _ => ("", LegacyFieldKind.Text)
         };
         if (field.Item1.Length == 0) return [];

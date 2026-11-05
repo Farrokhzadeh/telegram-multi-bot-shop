@@ -1,6 +1,7 @@
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 public sealed record LegacyCatalogImportResult(Guid Product, bool RequiresReview);
 public sealed class LegacyCatalogImportWorkflow(DbSessionFactory sessions, SecretSnapshot secrets, Guid approvedMasterBrand)
 {

@@ -5,6 +5,7 @@ using Platform.Migration;
 using Platform.Persistence;
 using Platform.Testing;
 namespace Platform.IntegrationTests;
+
 [Collection("PostgreSQL races")]
 public sealed class LegacyRecordImportTests
 {

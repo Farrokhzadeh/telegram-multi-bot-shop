@@ -3,6 +3,7 @@ using System.Text.Json;
 using Platform.Migration;
 using Platform.Persistence;
 namespace Platform.Testing;
+
 public sealed class LegacyRecordFixture : IAsyncDisposable
 {
     private LegacyRecordFixture(CheckoutFixture fixture, VerifiedImportManifest manifest, LegacyImportSet set, Dictionary<string, ProtectedLegacyEvidence> files)

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 public sealed record LegacyPaymentRecord(ArchivedLegacyRecord Record, Guid Member, Guid? Order)
 {
     internal LegacyPaymentTerms Terms(VerifiedImportManifest manifest)

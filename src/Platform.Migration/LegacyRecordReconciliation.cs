@@ -3,6 +3,7 @@ using Npgsql;
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 public sealed record LegacyImportSet(IReadOnlyList<LegacyWalletSnapshot> Wallets, IReadOnlyList<LegacyHistoricalRecord> Orders, IReadOnlyList<LegacyPaymentRecord> Payments, IReadOnlyList<LegacyCouponRecord> Coupons, IReadOnlyList<ArchivedLegacyRecord> Catalog, IReadOnlyList<ArchivedLegacyRecord> Delivery)
 {
     public override string ToString() => "LegacyImportSet [redacted]";
