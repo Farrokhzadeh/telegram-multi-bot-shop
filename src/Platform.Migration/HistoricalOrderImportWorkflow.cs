@@ -24,11 +24,11 @@ public sealed record LegacyHistoricalOrder(LegacySourceOrder Source, Guid Target
                 ExactDecimal.Parse(root.GetProperty("savings_usd").GetString()!) != 0 || ExactDecimal.Parse(root.GetProperty("savings_toman").GetString()!) != 0 ||
                 ExactDecimal.Parse(root.GetProperty("original_toman").GetString()!) != ExactDecimal.Parse(root.GetProperty("total_toman").GetString()!)) throw new MigrationRejectedException();
             string title = root.GetProperty("product_name").GetString()!;
-            decimal unit = Source.Total / Source.Quantity;
-            if (string.IsNullOrWhiteSpace(title) || title.Length > 160 || unit * Source.Quantity != Source.Total) throw new MigrationRejectedException();
+            decimal unit = ExactDecimal.Divide(Source.Total, Source.Quantity);
+            if (string.IsNullOrWhiteSpace(title) || title.Length > 160 || ExactDecimal.Multiply(unit, Source.Quantity) != Source.Total) throw new MigrationRejectedException();
             return (title, unit);
         }
-        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException or OverflowException or DivideByZeroException or ArgumentNullException) { throw new MigrationRejectedException(); }
+        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException or ArithmeticException or ArgumentNullException) { throw new MigrationRejectedException(); }
     }
     public IReadOnlyList<LegacyMapProof> Proofs(Guid brand)
     {
@@ -51,7 +51,7 @@ public sealed class HistoricalOrderImportWorkflow(DbSessionFactory sessions)
         await using var session = await sessions.BeginAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         bool member = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=$1 AND b.id=$2 AND b.bot_id=$3 AND u.telegram_id=$4)", DbValue.Uuid(row.User), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(row.Source.UserId)), r => r.GetBoolean(0), ct);
-        if (!member) throw new MigrationRejectedException();
+        if (!member || !await LegacyValues.HasHistoricalDebitAsync(session, manifest, row.Source.Id, row.User, row.Source.Total, ct)) throw new MigrationRejectedException();
         bool first = await LegacyMapStore.EnsureAsync(session, manifest, proofs[0], ct);
         bool projection = await LegacyMapStore.EnsureAsync(session, manifest, proofs[1], ct);
         bool alias = await LegacyMapStore.EnsureAsync(session, manifest, proofs[2], ct);

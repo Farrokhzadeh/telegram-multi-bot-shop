@@ -21,7 +21,7 @@ public sealed class HistoricalOrderImportTests
         await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: ct);
         await MigrationQualification.EnableRoleAsync(f, ct);
         var wallet = MigrationQualification.Wallet() with { LegacyUser = "99001234" };
-        var order = Order(wallet); var manifest = Manifest(f, wallet, order);
+        var order = Order(wallet); wallet = wallet with { History = wallet.History.Append(new LegacyHistoryRow(order.Source.Id, Guid.NewGuid(), -order.Source.Total, "USD", order.Source.CreatedAt, null)).ToArray() }; var manifest = Manifest(f, wallet, order);
         await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, wallet, ct);
         var importer = new HistoricalOrderImportWorkflow(f.Sessions);
         await importer.ImportAsync(f.Context(0), manifest, order, ct);
@@ -50,6 +50,20 @@ public sealed class HistoricalOrderImportTests
         await using (var change = f.Database.Data.CreateCommand("UPDATE shop.orders SET fulfillment_status='waiting_stock'")) await change.ExecuteNonQueryAsync(ct);
         Assert.False((await reports.CompareOrdersAsync(manifest, [order], ct)).Matched);
         await Assert.ThrowsAsync<MigrationRejectedException>(() => importer.ImportAsync(f.Context(0), manifest, order, ct));
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HistoricalWalletOrderRequiresMatchingOriginalDebitEvidence(bool wrongAmount)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: ct); await MigrationQualification.EnableRoleAsync(f, ct);
+        var wallet = MigrationQualification.Wallet() with { LegacyUser = "99001234" }; var order = Order(wallet);
+        if (wrongAmount) wallet = wallet with { History = wallet.History.Append(new LegacyHistoryRow(order.Source.Id, Guid.NewGuid(), -12.49m, "USD", order.Source.CreatedAt, null)).ToArray() };
+        var manifest = Manifest(f, wallet, order); await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, wallet, ct);
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => new HistoricalOrderImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, order, ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", ct)); Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map WHERE source_table='orders'", ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", ct));
     }
     [Theory]
     [InlineData("currency")]

@@ -16,7 +16,7 @@ public sealed record LegacySourceOrder(string Id, long UserId, long ProductId, i
 {
     public LegacyMapProof Proof(Guid target, Guid brand)
     {
-        if (string.IsNullOrWhiteSpace(Id) || UserId <= 0 || ProductId <= 0 || Quantity <= 0 || Total < 0 || Currency is not ("USD" or "IRR") || CreatedAt.Kind != DateTimeKind.Utc || CheckoutSnapshot is null) throw new MigrationRejectedException();
+        if (string.IsNullOrWhiteSpace(Id) || UserId <= 0 || ProductId <= 0 || Quantity <= 0 || Total < 0 || Currency is not ("USD" or "IRR") || CreatedAt.Kind != DateTimeKind.Utc || CreatedAt == DateTime.MinValue || CreatedAt == DateTime.MaxValue || CreatedAt.Ticks % 10 != 0 || CheckoutSnapshot is null) throw new MigrationRejectedException();
         using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
         writer.Write("accabad-order-v1"); writer.Write(Id); writer.Write(UserId); writer.Write(ProductId); writer.Write(Quantity); writer.Write(ExactDecimal.Format(Total)); writer.Write(Currency); writer.Write(CreatedAt.Ticks); writer.Write(CheckoutSnapshot); writer.Flush();
         return new(LegacyProjection.Order, Id, target, brand, SHA256.HashData(bytes.ToArray()));

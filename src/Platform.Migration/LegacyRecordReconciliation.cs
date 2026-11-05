@@ -56,7 +56,8 @@ public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destinatio
             string kind = row.Source.Projection switch { LegacyProjection.PaymentAttempt or LegacyProjection.ManualDeposit => "payment", LegacyProjection.ProductRecord => "product", LegacyProjection.DiscountRecord => "discount", _ => "order" };
             if (!await LegacyValues.MatchesAuditAsync(session, manifest, row, kind, ct)) mismatched++;
         }
-        bool walletMatched = mapping.Complete;
+        bool walletMatched = mapping.OpeningUsd == manifest.ExpectedOpeningUsd && mapping.TargetWalletUsd == manifest.ExpectedOpeningUsd && mapping.WalletDifferenceUsd == 0 &&
+            mapping.OpeningPostings == manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) && mapping.NonPostingHistory == manifest.Proofs.Count(p => p.Projection == LegacyProjection.Transaction) && wallets.Length == manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletSnapshot);
         foreach (var wallet in wallets)
         {
             if (!await OpeningBalanceImportWorkflow.MatchesWalletAsync(session, manifest, wallet, ct)) walletMatched = false;

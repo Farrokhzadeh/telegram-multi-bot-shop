@@ -111,6 +111,17 @@ public sealed class LegacyRecordImportTests
         await Assert.ThrowsAsync<MigrationRejectedException>(() => store.ImportAsync(f.Context(0), manifest, source with { State = null }, Ct));
     }
     [Fact]
+    public async Task PartialLegacyPricesCannotBeRoundedIntoDifferentTargetMoney()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
+        const string id = "ORD-FED123FED123"; Guid target = Guid.NewGuid();
+        var source = new LegacySourceRecord(LegacyProjection.OrderRecord, id, """{"id":"ORD-FED123FED123","user_id":99001234,"product_id":456,"qty":3,"total":"100","currency":"USD","created_at":"2024-02-01T00:00:00Z","checkout_snapshot":{"version":1,"product_id":456,"product_name":"Original synthetic partial price","product_type":"credential","quantity":3,"original_usd":"300","total_usd":"100","original_toman":"9000000","total_toman":"3000000","savings_usd":"200","savings_toman":"6000000","discount_code":"PRIVATE-PARTIAL","discount_pct":"100","discount_quantity":2,"currency":"USD","payment_method":"wallet"}}""");
+        var manifest = Manifest(f, Guid.NewGuid(), [source.Proof(target, f.Context(0), f.Secrets)]);
+        var archived = await new LegacyRecordArchive(f.Secrets).WriteAsync(f.Context(0), manifest, source, target, (_, _) => Task.FromResult("protected:synthetic/unrepresentable-price"), Ct);
+        Assert.Throws<MigrationRejectedException>(() => new LegacyHistoricalRecord(archived, Guid.NewGuid(), "Original brand").Proofs(f.Context(0), f.Secrets));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
+    }
+    [Fact]
     public async Task ImportExceptionsCannotCreateOrdinaryBankPaymentsOrAssignUnownedPaidCodes()
     {
         await using var world = await LegacyRecordFixture.CreateAsync("bank", Ct); var f = world.Fixture;
