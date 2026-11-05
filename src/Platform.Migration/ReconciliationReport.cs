@@ -56,7 +56,12 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         long expected = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.HistoricalOrder);
         long unmatched = expected - rows.LongLength;
         var mappings = await ReadAsync(manifest, ct);
-        return new(manifest.Batch, expected, rows.LongLength, mismatched, unmatched, mappings.MissingMappings, mappings.MismatchedMappings);
+        long batchMappings = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        long expectedKeysInBatch = 0;
+        foreach (var proof in manifest.Proofs)
+            if (await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind=$3 AND legacy_id=$4 AND import_batch=$5 AND import_manifest_ref=$6)", DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetBoolean(0), ct)) expectedKeysInBatch++;
+        long unexpected = Math.Max(0, batchMappings - expectedKeysInBatch);
+        return new(manifest.Batch, expected, rows.LongLength, mismatched, unmatched, mappings.MissingMappings, mappings.MismatchedMappings, unexpected);
     }
     public async Task<LegacyAggregateReconciliation> CompareAsync(VerifiedImportManifest manifest, LegacyAggregateExpectations expected, CancellationToken ct = default) =>
         LegacyAggregateComparison.Compare(manifest, expected, await ReadAsync(manifest, ct));
@@ -104,9 +109,9 @@ public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets
     public string Scope => "source_bound_wallet_records_only";
     public override string ToString() => "WalletRecordReconciliation [redacted]";
 }
-public sealed record HistoricalOrderReconciliation(Guid Batch, long ExpectedOrders, long ComparedOrders, long MismatchedOrders, long UnmatchedOrders, long MissingMappings, long MismatchedMappings)
+public sealed record HistoricalOrderReconciliation(Guid Batch, long ExpectedOrders, long ComparedOrders, long MismatchedOrders, long UnmatchedOrders, long MissingMappings, long MismatchedMappings, long UnexpectedMappings)
 {
-    public bool Matched => ExpectedOrders == ComparedOrders && MismatchedOrders == 0 && UnmatchedOrders == 0 && MissingMappings == 0 && MismatchedMappings == 0;
+    public bool Matched => ExpectedOrders == ComparedOrders && MismatchedOrders == 0 && UnmatchedOrders == 0 && MissingMappings == 0 && MismatchedMappings == 0 && UnexpectedMappings == 0;
     public bool ReleaseReady => false;
     public string Scope => "source_bound_wallet_paid_order_snapshots";
     public override string ToString() => "HistoricalOrderReconciliation [redacted]";

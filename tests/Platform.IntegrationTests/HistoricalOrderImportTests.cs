@@ -44,6 +44,9 @@ public sealed class HistoricalOrderImportTests
         Assert.Equal(1L, (await reports.ReadAsync(manifest, ct)).PaidUnfulfilledOrders);
         Assert.False((await reports.CompareOrdersAsync(manifest, [], ct)).Matched);
         await Assert.ThrowsAsync<MigrationRejectedException>(() => importer.ImportAsync(f.Context(0), manifest, order with { HistoricalBrandName = "changed" }, ct));
+        await using (var extra = f.Database.Data.CreateCommand("INSERT INTO shop.legacy_id_map(source_brand,source_table,source_key_kind,legacy_id,target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref) SELECT source_brand,source_table,source_key_kind,'ORD-EXTRA',target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref FROM shop.legacy_id_map WHERE source_table='orders' AND source_key_kind='primary'")) await extra.ExecuteNonQueryAsync(ct);
+        var extraReport = await reports.CompareOrdersAsync(manifest, [order], ct);
+        Assert.False(extraReport.Matched); Assert.Equal(1, extraReport.UnexpectedMappings);
         await using (var change = f.Database.Data.CreateCommand("UPDATE shop.orders SET fulfillment_status='waiting_stock'")) await change.ExecuteNonQueryAsync(ct);
         Assert.False((await reports.CompareOrdersAsync(manifest, [order], ct)).Matched);
         await Assert.ThrowsAsync<MigrationRejectedException>(() => importer.ImportAsync(f.Context(0), manifest, order, ct));
