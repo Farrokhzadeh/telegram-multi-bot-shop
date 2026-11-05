@@ -166,8 +166,8 @@ public sealed partial class LegacySourceReader
         historyTargets = new Dictionary<string, Guid>(historyTargets, StringComparer.Ordinal);
         await using var session = await OpenAsync(ct);
         if (Convert.ToHexStringLower(await SchemaAsync(session, ct)) != manifest.SourceSchemaDigest) throw new MigrationRejectedException();
-        var user = await session.QuerySingleAsync(new DbStatement("SELECT balance::text,balance_irr::text,lang,joined_at,COALESCE(last_seen_at,joined_at),is_active,is_banned,to_jsonb(u)->>'username',to_jsonb(u)->>'first_name',to_jsonb(u)->>'last_name' FROM public.users u WHERE id=$1", DbValue.Bigint(telegramId)),
-            r => (Balance: ExactDecimal.Parse(r.GetString(0)), Other: ExactDecimal.Parse(r.GetString(1)), Language: r.GetString(2), First: r.GetUtc(3), Last: r.GetUtc(4), Active: r.GetBoolean(5), Banned: r.GetBoolean(6), Username: r.IsDBNull(7) ? null : r.GetString(7), FirstName: r.IsDBNull(8) ? null : r.GetString(8), LastName: r.IsDBNull(9) ? null : r.GetString(9)), ct);
+        var user = await session.QuerySingleAsync(new DbStatement("SELECT balance::text,balance_irr::text,lang,joined_at,COALESCE(last_seen_at,joined_at),is_active,is_banned,to_jsonb(u)->>'username',to_jsonb(u)->>'first_name',to_jsonb(u)->>'last_name',NULLIF(to_jsonb(u)->>'banned_at','')::timestamptz FROM public.users u WHERE id=$1", DbValue.Bigint(telegramId)),
+            r => (Balance: ExactDecimal.Parse(r.GetString(0)), Other: ExactDecimal.Parse(r.GetString(1)), Language: r.GetString(2), First: r.GetUtc(3), Last: r.GetUtc(4), Active: r.GetBoolean(5), Banned: r.GetBoolean(6), Username: r.IsDBNull(7) ? null : r.GetString(7), FirstName: r.IsDBNull(8) ? null : r.GetString(8), LastName: r.IsDBNull(9) ? null : r.GetString(9), BannedAt: r.IsDBNull(10) ? (DateTime?)null : r.GetUtc(10)), ct);
         bool profile = !user.Active || user.Banned || !string.IsNullOrEmpty(user.Username) || !string.IsNullOrEmpty(user.FirstName) || !string.IsNullOrEmpty(user.LastName);
         if (profile && observedAt is null) throw new MigrationRejectedException();
         var zeros = await session.QueryManyAsync(new DbStatement("SELECT id FROM public.transactions WHERE user_id=$1 AND amount=0 ORDER BY id", DbValue.Bigint(telegramId)), r => r.GetString(0), 1000, ct);
@@ -176,7 +176,7 @@ public sealed partial class LegacySourceReader
             r => (Id: r.GetString(0), Amount: r.GetString(1), Currency: r.GetString(2), Created: r.GetUtc(3)), 1000, ct);
         if (historyRows.Count != historyTargets.Count || historyRows.Any(h => !historyTargets.ContainsKey(h.Id))) throw new MigrationRejectedException();
         var history = historyRows.Select(h => new LegacyHistoryRow(h.Id, historyTargets[h.Id], ExactDecimal.Parse(h.Amount), h.Currency, h.Created, null)).ToArray();
-        var result = new LegacyWalletSnapshot(telegramId.ToString(CultureInfo.InvariantCulture), targetUser, targetOpening, telegramId, user.Language, user.First, user.Last, user.Balance, "USD", user.Other, history, observedAt is DateTime observed ? new LegacyMemberState(string.IsNullOrEmpty(user.Username) ? null : user.Username, string.IsNullOrEmpty(user.FirstName) ? null : user.FirstName, string.IsNullOrEmpty(user.LastName) ? null : user.LastName, user.Active, user.Banned, observed) : null);
+        var result = new LegacyWalletSnapshot(telegramId.ToString(CultureInfo.InvariantCulture), targetUser, targetOpening, telegramId, user.Language, user.First, user.Last, user.Balance, "USD", user.Other, history, observedAt is DateTime observed ? new LegacyMemberState(string.IsNullOrEmpty(user.Username) ? null : user.Username, string.IsNullOrEmpty(user.FirstName) ? null : user.FirstName, string.IsNullOrEmpty(user.LastName) ? null : user.LastName, user.Active, user.Banned, observed, user.BannedAt) : null);
         result.Validate();
         foreach (var proof in result.Proofs(manifest.TargetBrand)) manifest.Require(proof);
         return result;

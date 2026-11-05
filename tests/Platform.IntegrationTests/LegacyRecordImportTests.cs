@@ -86,12 +86,14 @@ public sealed class LegacyRecordImportTests
         Assert.False((await reports.CompareAsync(f.Context(0), manifest, set, Read, Ct)).Matched);
         await Assert.ThrowsAsync<MigrationRejectedException>(() => orders.ImportAsync(f.Context(0), manifest, historical, Ct));
     }
-    [Fact]
-    public async Task ImportedMemberRestrictionsAndNamesAreCommittedAndCannotBeDroppedOnReplay()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ImportedMemberRestrictionsAndNamesAreCommittedAndCannotBeDroppedOnReplay(bool originalBanTime)
     {
         await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct); await MigrationQualification.EnableRoleAsync(f, Ct);
         var source = MigrationQualification.Wallet() with { LegacyUser = "99001234", State = new("synthetic", "Original", "Member", false, true, new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc)) };
-        source = source with { History = source.History.Select(h => h with { BalanceAfter = null }).ToArray() };
+        source = source with { State = source.State! with { BannedAt = originalBanTime ? new DateTime(2024, 1, 20, 0, 0, 0, DateTimeKind.Utc) : null }, History = source.History.Select(h => h with { BalanceAfter = null }).ToArray() };
         await using (var setup = f.Database.Data.CreateCommand("""
             CREATE TABLE public.django_migrations(id bigint PRIMARY KEY,app text,name text); INSERT INTO public.django_migrations VALUES(1,'accounts','0001_initial');
             CREATE TABLE public.users(id bigint PRIMARY KEY,balance numeric(18,2),balance_irr numeric(24,2),lang text,joined_at timestamptz,last_seen_at timestamptz,is_active boolean,is_banned boolean,username text,first_name text,last_name text);
@@ -99,15 +101,22 @@ public sealed class LegacyRecordImportTests
             CREATE TABLE public.transactions(id text PRIMARY KEY,user_id bigint,amount numeric(24,2),currency text,created_at timestamptz);
             INSERT INTO public.transactions VALUES('source-entry-1',99001234,100,'USD','2024-01-01 01:00Z'),('source-entry-2',99001234,-10,'USD','2024-01-01 02:00Z');
             """)) await setup.ExecuteNonQueryAsync(Ct);
+        if (originalBanTime)
+        {
+            await using var setup = f.Database.Data.CreateCommand("ALTER TABLE public.users ADD COLUMN banned_at timestamptz; UPDATE public.users SET banned_at='2024-01-20 00:00Z'"); await setup.ExecuteNonQueryAsync(Ct);
+        }
         var endpoint = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString);
         var reader = new LegacySourceReader(f.Database.Data, new(endpoint.Host!, endpoint.Port, endpoint.Database!, endpoint.Username!));
         var manifest = Manifest(f, Guid.NewGuid(), source.Proofs(f.Brands[0]), source.BalanceUsd, await reader.InspectSchemaAsync(Ct)); var store = new OpeningBalanceImportWorkflow(f.Sessions);
         var targets = source.History.ToDictionary(h => h.LegacyId, h => h.TargetEntry);
         await Assert.ThrowsAsync<MigrationRejectedException>(() => reader.ReadWalletAsync(manifest, source.TelegramId, source.TargetUser, source.TargetOpening, targets, Ct));
         var actual = await reader.ReadWalletAsync(manifest, source.TelegramId, source.TargetUser, source.TargetOpening, targets, Ct, source.State!.ObservedAt);
-        Assert.Equal(source.State, actual.State); Assert.Equal(1L, await reader.VerifyWalletCoverageAsync(manifest, Ct));
+        Assert.Equal(source.State, actual.State);
+        Assert.Throws<MigrationRejectedException>(() => (source with { State = source.State! with { BannedAt = source.State!.ObservedAt.AddDays(1) } }).Validate()); Assert.Equal(1L, await reader.VerifyWalletCoverageAsync(manifest, Ct));
         await store.ImportAsync(f.Context(0), manifest, source, Ct); await store.ImportAsync(f.Context(0), manifest, source, Ct);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.users WHERE username='synthetic' AND first_name='Original' AND last_name='Member' AND blocked_at IS NOT NULL AND banned_at IS NOT NULL", Ct));
+        await using (var check = f.Database.Data.CreateCommand("SELECT banned_at FROM shop.users")) Assert.Equal(source.State!.BannedAt ?? source.State!.ObservedAt, (DateTime)(await check.ExecuteScalarAsync(Ct))!);
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => store.ImportAsync(f.Context(0), manifest, source with { State = source.State! with { BannedAt = new DateTime(2024, 1, 21, 0, 0, 0, DateTimeKind.Utc) } }, Ct));
         await Assert.ThrowsAsync<MigrationRejectedException>(() => store.ImportAsync(f.Context(0), manifest, source with { State = null }, Ct));
     }
     [Fact]
@@ -135,5 +144,26 @@ public sealed class LegacyRecordImportTests
         var coupon = new LegacyCouponRecord(archive, Guid.NewGuid(), world.Set.Catalog[0].Target, null, "prepaid_entitlement", world.Set.Orders[0].Record.Target);
         Assert.Throws<MigrationRejectedException>(() => coupon.Proofs(f.Context(0), f.Secrets));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts", Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", Ct));
+    }
+    [Fact]
+    public async Task SameLegacyPaymentIdAcrossBrandsRetainsSeparateRepeatSafeOrigins()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct); await MigrationQualification.EnableRoleAsync(f, Ct);
+        for (int brand = 0; brand < 2; brand++)
+        {
+            var context = f.Context(brand); Guid target = Guid.NewGuid();
+            var wallet = MigrationQualification.Wallet() with { TargetUser = Guid.NewGuid(), TargetOpening = Guid.NewGuid(), BalanceUsd = 0, History = [] };
+            var source = new LegacySourceRecord(LegacyProjection.PaymentAttempt, "shared-payment", """{"id":"shared-payment","user_id":99001234,"kind":"wallet_topup","expected_amount":"5","expected_currency":"USD","pay_currency":"usdtbsc","fulfilled_order_id":null,"status":"created","created_at":"2024-02-01T00:00:00Z"}""");
+            wallet = wallet with { TelegramId = 99001234, LegacyUser = "99001234" };
+            byte[] body = VerifiedImportManifest.EncodePlan(SchemaManifest.ForQualification(f.Database.Data.ConnectionString), "synthetic-" + brand, context.BrandId, "66371a23a1c8149dc5bdf89a0355aa689d454dba", SHA256.HashData("synthetic schema"u8), "protected:synthetic/collision-copy", SHA256.HashData("synthetic copy"u8), Guid.NewGuid(), wallet.Proofs(context.BrandId).Append(source.Proof(target, context, f.Secrets)));
+            var manifest = VerifiedImportManifest.Open("protected:synthetic/collision-plan", SHA256.HashData(body), body);
+            var archived = await new LegacyRecordArchive(f.Secrets).WriteAsync(context, manifest, source, target, (_, _) => Task.FromResult("protected:synthetic/payment-copy"), Ct);
+            await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(context, manifest, wallet, Ct);
+            var payment = new LegacyPaymentRecord(archived, wallet.TargetUser, null); var store = new LegacyPaymentImportWorkflow(f.Sessions, f.Secrets);
+            await store.ImportAsync(context, manifest, payment, Ct); await store.ImportAsync(context, manifest, payment, Ct);
+        }
+        Assert.Equal(2L, await f.CountAsync("SELECT count(DISTINCT idempotency_ref) FROM shop.payments", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(DISTINCT source_brand) FROM shop.legacy_id_map WHERE source_table='payment_attempts' AND legacy_id='shared-payment'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
     }
 }

@@ -54,7 +54,7 @@ public sealed class LegacyPaymentImportWorkflow(DbSessionFactory sessions, Secre
                     status,provider_status_code,confirmed_at,evidence_asset_ref,evidence_digest,legacy_kind,created_at)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
                 """, DbValue.Uuid(row.Record.Target), LegacyValues.Uuid(row.Order), LegacyValues.Uuid(row.Order is null ? row.Member : null), DbValue.Text(terms.Bank ? "bank" : "crypto"), DbValue.Text(terms.Bank ? "TOMAN" : "USD"), DbValue.Numeric(terms.Due),
-                LegacyValues.String(terms.Provider is null ? null : "nowpayments"), LegacyValues.String(terms.Provider), DbValue.Text(row.Record.Source.Id), LegacyValues.String(terms.Asset), DbValue.Text(terms.Status), LegacyValues.String(terms.ProviderStatus),
+                LegacyValues.String(terms.Provider is null ? null : "nowpayments"), LegacyValues.String(terms.Provider), DbValue.Text("legacy-payment:" + row.Record.Target.ToString("D")), LegacyValues.String(terms.Asset), DbValue.Text(terms.Status), LegacyValues.String(terms.ProviderStatus),
                 LegacyValues.Date(terms.Confirmed), DbValue.Text(row.Record.Reference), DbValue.Binary(row.Record.Digest), DbValue.Text(terms.Bank ? "manual_deposit" : "payment_attempt"), DbValue.Utc(terms.Created)), ct);
             await LegacyValues.AuditAsync(session, manifest, row.Record, "payment", ct);
         }
@@ -71,7 +71,7 @@ public sealed class LegacyPaymentImportWorkflow(DbSessionFactory sessions, Secre
                 AND amount_received IS NULL AND bank_destination_ciphertext IS NULL AND review_admin_id IS NULL AND receipt_asset_ref IS NULL AND compensating_wallet_entry_id IS NULL
                 AND provider_confirmations IS NULL AND expected_network_amount IS NULL AND network_amount IS NULL AND first_payment_observed_at IS NULL AND ipn_key_id IS NULL)
             """, DbValue.Uuid(row.Record.Target), LegacyValues.Uuid(row.Order), LegacyValues.Uuid(row.Order is null ? row.Member : null), DbValue.Text(t.Bank ? "bank" : "crypto"), DbValue.Text(t.Bank ? "TOMAN" : "USD"), DbValue.Numeric(t.Due),
-            LegacyValues.String(t.Provider is null ? null : "nowpayments"), LegacyValues.String(t.Provider), DbValue.Text(row.Record.Source.Id), LegacyValues.String(t.Asset), DbValue.Text(t.Status), LegacyValues.String(t.ProviderStatus), LegacyValues.Date(t.Confirmed),
+            LegacyValues.String(t.Provider is null ? null : "nowpayments"), LegacyValues.String(t.Provider), DbValue.Text("legacy-payment:" + row.Record.Target.ToString("D")), LegacyValues.String(t.Asset), DbValue.Text(t.Status), LegacyValues.String(t.ProviderStatus), LegacyValues.Date(t.Confirmed),
             DbValue.Text(row.Record.Reference), DbValue.Binary(row.Record.Digest), DbValue.Text(t.Bank ? "manual_deposit" : "payment_attempt"), DbValue.Utc(t.Created)), r => r.GetBoolean(0), ct);
     }
 }
