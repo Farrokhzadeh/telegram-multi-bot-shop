@@ -14,6 +14,7 @@ public sealed class LegacyOrderSourceTests
     [InlineData("product")]
     [InlineData("schema")]
     [InlineData("line_table")]
+    [InlineData("extra")]
     public async Task OrderReadRequiresCommittedSourceAndSingleProductShape(string fault)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -32,13 +33,19 @@ public sealed class LegacyOrderSourceTests
         var source = new LegacySourceOrder("synthetic-order", 123, 456, 2, 12.50m, "USD", new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), "{\"name\": \"synthetic\"}");
         byte[] body = VerifiedImportManifest.EncodePlan(SchemaManifest.ForQualification(f.Database.Data.ConnectionString), "public-a", f.Brands[0], "66371a23a1c8149dc5bdf89a0355aa689d454dba", schema, "protected:synthetic/source", SHA256.HashData("synthetic copy"u8), Guid.NewGuid(), [source.Proof(target, f.Brands[0])]);
         var manifest = VerifiedImportManifest.Open("protected:synthetic/manifest", SHA256.HashData(body), body);
-        string? mutation = fault switch { "snapshot" => "UPDATE public.orders SET checkout_snapshot='{}'", "product" => "UPDATE public.orders SET product_id=457", "schema" => "ALTER TABLE public.orders ADD COLUMN extra text", _ => null };
+        string? mutation = fault switch { "snapshot" => "UPDATE public.orders SET checkout_snapshot='{}'", "product" => "UPDATE public.orders SET product_id=457", "schema" => "ALTER TABLE public.orders ADD COLUMN extra text", "extra" => "INSERT INTO public.orders SELECT 'extra-order',user_id,product_id,qty,total,currency,created_at,checkout_snapshot FROM public.orders", _ => null };
         if (mutation is not null) { await using var change = f.Database.Data.CreateCommand(mutation); await change.ExecuteNonQueryAsync(ct); }
         if (fault == "valid")
         {
             var result = await reader.ReadOrderAsync(manifest, source.Id, target, ct);
             Assert.Equal(source, result); Assert.Equal("LegacySourceOrder [redacted]", result.ToString());
+            Assert.Equal(1, await reader.VerifyOrderCoverageAsync(manifest, ct));
             await Assert.ThrowsAsync<MigrationRejectedException>(() => reader.ReadOrderAsync(manifest, source.Id, Guid.NewGuid(), ct));
+        }
+        else if (fault == "extra")
+        {
+            Assert.Equal(source, await reader.ReadOrderAsync(manifest, source.Id, target, ct));
+            await Assert.ThrowsAsync<MigrationRejectedException>(() => reader.VerifyOrderCoverageAsync(manifest, ct));
         }
         else await Assert.ThrowsAsync<MigrationRejectedException>(() => reader.ReadOrderAsync(manifest, source.Id, target, ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map", ct));

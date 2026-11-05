@@ -95,6 +95,31 @@ public sealed class LegacySourceReader
         manifest.Require(row.Proof(target, manifest.TargetBrand));
         return row;
     }
+    public async Task<long> VerifyOrderCoverageAsync(VerifiedImportManifest manifest, CancellationToken ct = default)
+    {
+        var expected = manifest.Proofs.Where(p => p.Projection == LegacyProjection.Order).ToDictionary(p => p.LegacyId, StringComparer.Ordinal);
+        await using var session = await OpenAsync(ct);
+        if (Convert.ToHexStringLower(await SchemaAsync(session, ct)) != manifest.SourceSchemaDigest ||
+            await session.QuerySingleAsync(new DbStatement("SELECT to_regclass('public.order_items') IS NOT NULL"), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
+        long count = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM public.orders"), r => r.GetInt64(0), ct);
+        if (count != expected.Count) throw new MigrationRejectedException();
+        long seen = 0; string last = "";
+        while (true)
+        {
+            var rows = await session.QueryManyAsync(new DbStatement("SELECT id,user_id,product_id,qty,total::text,currency,created_at,checkout_snapshot::text FROM public.orders WHERE id COLLATE \"C\" > $1 COLLATE \"C\" ORDER BY id COLLATE \"C\" LIMIT 1000", DbValue.Text(last)),
+                r => new LegacySourceOrder(r.GetString(0), r.GetInt64(1), r.GetInt64(2), r.GetInt32(3), ExactDecimal.Parse(r.GetString(4)), r.GetString(5), r.GetUtc(6), r.GetString(7)), 1000, ct);
+            if (rows.Count == 0) break;
+            foreach (var row in rows)
+            {
+                if (!expected.TryGetValue(row.Id, out var proof)) throw new MigrationRejectedException();
+                manifest.Require(row.Proof(proof.Target, manifest.TargetBrand));
+                seen++;
+            }
+            last = rows[^1].Id;
+        }
+        if (seen != count) throw new MigrationRejectedException();
+        return seen;
+    }
     public async Task<LegacySourceDiscount> ReadDiscountAsync(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest manifest, string code, Guid target, CancellationToken ct = default)
     {
         if (context.BrandId != manifest.TargetBrand || string.IsNullOrWhiteSpace(code) || code.Length > 64 || code.Any(char.IsControl)) throw new MigrationRejectedException();
