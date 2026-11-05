@@ -2,6 +2,12 @@
   "version": 2,
   "dependencies": {
     "net10.0": {
+      "Microsoft.DotNet.ILCompiler": {
+        "type": "Direct",
+        "requested": "[10.0.14, )",
+        "resolved": "10.0.14",
+        "contentHash": "CDQ/+XRT1JT/0u87j9exR1AociehKUzxae4KCOWxCQ1PIKbYS0F8ovxaCrqRlkylGmbhywKxV/zbbrEhWa5NXg=="
+      },
       "Microsoft.NET.ILLink.Tasks": {
         "type": "Direct",
         "requested": "[10.0.14, )",
@@ -24,12 +30,26 @@
       "platform.core": {
         "type": "Project"
       },
+      "platform.migration": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Core": "[1.0.0, )",
+          "Platform.Persistence": "[1.0.0, )",
+          "Platform.Security": "[1.0.0, )"
+        }
+      },
       "platform.persistence": {
         "type": "Project",
         "dependencies": {
           "Npgsql": "[10.0.3, )",
           "Platform.Core": "[1.0.0, )",
           "Platform.Security": "[1.0.0, )"
+        }
+      },
+      "platform.security": {
+        "type": "Project",
+        "dependencies": {
+          "Platform.Core": "[1.0.0, )"
         }
       },
       "Npgsql": {
@@ -39,18 +59,6 @@
         "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
-        }
-      },
-      "Microsoft.DotNet.ILCompiler": {
-        "type": "Direct",
-        "requested": "[10.0.14, )",
-        "resolved": "10.0.14",
-        "contentHash": "CDQ/+XRT1JT/0u87j9exR1AociehKUzxae4KCOWxCQ1PIKbYS0F8ovxaCrqRlkylGmbhywKxV/zbbrEhWa5NXg=="
-      },
-      "platform.security": {
-        "type": "Project",
-        "dependencies": {
-          "Platform.Core": "[1.0.0, )"
         }
       }
     },

@@ -87,6 +87,7 @@ jobs:
             artifacts/acceptance/
             artifacts/migration/
             artifacts/contracts/
+            artifacts/native/SchemaRunner/Platform.SchemaRunner
             artifacts/test-results/
             **/packages.lock.json
           retention-days: 7

@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Platform.Persistence/Platform.Persistence.csproj" />
+    <ProjectReference Include="../Platform.Migration/Platform.Migration.csproj" />
   </ItemGroup>
 </Project>

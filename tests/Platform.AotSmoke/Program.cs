@@ -12,6 +12,8 @@ using Platform.Testing;
 using Platform.Telegram;
 
 if (args is ["--preorder-worker-probe"]) { await PreorderProcessQualification.ChildAsync(); return; }
+await SourceCopyQualification.RunAsync();
+Console.WriteLine("PASS: native read-only source copy, independent commitments and denied writes.");
 await MigrationQualification.RunAsync();
 await LegacyRecordQualification.RunAsync();
 Console.WriteLine("PASS: native protected legacy payment, coupon, catalog, free/partial/preorder records and reconciliation.");

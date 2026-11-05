@@ -1,5 +1,33 @@
 using Npgsql;
 using Platform.Persistence;
+using Platform.Migration;
+using Platform.SchemaRunner;
+
+string ReadProtectedFile(string path)
+{
+    if (!Path.IsPathFullyQualified(path) || !File.Exists(path) || new FileInfo(path).LinkTarget is not null)
+    {
+        throw new InvalidOperationException("A regular protected input file is required.");
+    }
+
+    if (OperatingSystem.IsLinux())
+    {
+        const UnixFileMode shared = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+        if ((File.GetUnixFileMode(path) & shared) != 0)
+        {
+            throw new InvalidOperationException("Input files must be private to their owner.");
+        }
+    }
+    return File.ReadAllText(path);
+}
+
+if (args is ["--inspect-source-copy", "--connection-file", var copyConnection, "--plan-file", var copyPlan, "--receipt", var copyReceipt])
+{
+    try { await SourceCopyInspection.RunAsync(ReadProtectedFile(copyConnection).Trim(), ReadProtectedFile(copyPlan), copyReceipt); Console.WriteLine("Read-only source copy verified; redacted receipt written."); return 0; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or MigrationRejectedException or NpgsqlException or Platform.Persistence.DbOperationException)
+    { Console.Error.WriteLine("Source copy inspection rejected; retain protected inputs for review."); return 78; }
+}
 
 if (args.Length == 0)
 {
@@ -18,25 +46,6 @@ try
     if (!OperatingSystem.IsLinux() || !Path.IsPathFullyQualified(receiptPath) || File.Exists(receiptPath))
     {
         throw new InvalidOperationException("A new absolute receipt file on Linux is required.");
-    }
-
-    string ReadProtectedFile(string path)
-    {
-        if (!Path.IsPathFullyQualified(path) || !File.Exists(path) || new FileInfo(path).LinkTarget is not null)
-        {
-            throw new InvalidOperationException("A regular protected input file is required.");
-        }
-
-        if (OperatingSystem.IsLinux())
-        {
-            const UnixFileMode shared = UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute |
-                UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
-            if ((File.GetUnixFileMode(path) & shared) != 0)
-            {
-                throw new InvalidOperationException("Input files must be private to their owner.");
-            }
-        }
-        return File.ReadAllText(path);
     }
 
     var manifest = SchemaManifest.Parse(ReadProtectedFile(manifestPath));

@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/SourceCopyQualification.cs" Link="Shared/SourceCopyQualification.cs" />
     <Compile Include="../Shared/PreorderProcessQualification.cs" Link="Shared/PreorderProcessQualification.cs" />
     <Compile Include="../Shared/LocalPreorderQualification.cs" Link="Shared/LocalPreorderQualification.cs" />
     <Compile Include="../Shared/ActivityMaintenanceQualification.cs" Link="Shared/ActivityMaintenanceQualification.cs" />
