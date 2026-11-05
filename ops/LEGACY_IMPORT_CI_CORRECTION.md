@@ -1,0 +1,4 @@
+# Legacy import CI correction
+2026-11-05. Prior run 41909132384 built successfully, then failed dotnet whitespace formatting in four new files; tests and Native AOT execution were skipped. Namespace spacing now follows the formatter.
+The source reader now materializes bounded typed history before checking its reviewed target identities. Unknown history identities raise MigrationRejectedException outside the database projection; they are not converted into a generic database failure. Caller target maps are copied before asynchronous reading. Added synthetic cases cover changed history identity, non-USD history, inactive/banned accounts and unsupported language, each requiring zero target users/mappings.
+Execution of this correction is pending CI. T063/T064/T066 remain open. Historical order/payment/coupon/delivery import is still unimplemented; this correction does not qualify it or source-data compatibility.

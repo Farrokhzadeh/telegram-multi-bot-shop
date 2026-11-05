@@ -4,6 +4,7 @@ using Platform.Migration;
 using Platform.Persistence;
 using Platform.Testing;
 namespace Platform.IntegrationTests;
+
 [Collection("PostgreSQL races")]
 public sealed class LegacySourceReaderTests
 {
@@ -16,6 +17,11 @@ public sealed class LegacySourceReaderTests
     [InlineData("endpoint")]
     [InlineData("constraint")]
     [InlineData("index")]
+    [InlineData("history_identity")]
+    [InlineData("history_currency")]
+    [InlineData("inactive")]
+    [InlineData("banned")]
+    [InlineData("language")]
     public async Task ApprovedCopyImportIsRepeatSafeAndRejectsChangedSourceBeforeTargetWrites(string fault)
     {
         var ct = TestContext.Current.CancellationToken;
@@ -37,6 +43,11 @@ public sealed class LegacySourceReaderTests
         var manifest = VerifiedImportManifest.Open("protected:synthetic/manifest", SHA256.HashData(body), body);
         string? mutation = fault switch
         {
+            "history_identity" => "UPDATE public.transactions SET id=\'unmapped-source-entry\' WHERE id=\'source-entry-1\'",
+            "history_currency" => "UPDATE public.transactions SET currency=\'IRR\'",
+            "inactive" => "UPDATE public.users SET is_active=false",
+            "banned" => "UPDATE public.users SET is_banned=true",
+            "language" => "UPDATE public.users SET lang=\'unsupported\'",
             "constraint" => "ALTER TABLE public.users ADD CONSTRAINT positive_balance CHECK(balance>=0)",
             "index" => "CREATE INDEX legacy_language_probe ON public.users(lang)",
             "balance" => "UPDATE public.users SET balance=13",

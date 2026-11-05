@@ -1,6 +1,7 @@
 using Platform.Persistence;
 using Platform.Security;
 namespace Platform.Migration;
+
 public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory destination)
 {
     public async Task<MigrationReconciliation> ImportWalletAsync(BrandContext context, VerifiedImportManifest manifest, long telegramId, Guid targetUser, Guid targetOpening, IReadOnlyDictionary<string, Guid> historyTargets, CancellationToken ct = default)

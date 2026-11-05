@@ -1,4 +1,5 @@
 namespace Platform.Migration;
+
 public sealed record LegacyAggregateExpectations(Guid Batch, string ManifestDigest, long PaidUnfulfilledOrders, long HeldCouponUnits, long TargetCiphertexts)
 {
     public override string ToString() => "LegacyAggregateExpectations [redacted]";
