@@ -88,11 +88,18 @@ class LegacyAssetsTests(unittest.TestCase):
       path.write_bytes(b'PUBLIC-SYNTHETIC-PHOTO')
       expected = hashlib.sha256(path.read_bytes()).hexdigest()
       self.assertEqual('verified_hash', MODULE.check_media(root, '/app/data/media/deposits/photo.jpg', expected, str(path.stat().st_size)))
+      self.assertEqual('verified_hash', MODULE.check_media(root, 'data/media/deposits/photo.jpg', expected, str(path.stat().st_size)))
+      self.assertEqual('missing', MODULE.check_media(root, 'data/media/deposits/missing.jpg'))
       self.assertEqual('present_without_hash', MODULE.check_media(root, 'deposits/photo.jpg'))
       self.assertEqual('hash_mismatch', MODULE.check_media(root, 'deposits/photo.jpg', '0' * 64))
       self.assertEqual('size_mismatch', MODULE.check_media(root, 'deposits/photo.jpg', expected, '1'))
       self.assertEqual('invalid_metadata', MODULE.check_media(root, 'deposits/photo.jpg', 'invalid'))
       self.assertEqual('missing', MODULE.check_media(root, 'deposits/missing.jpg'))
+      tables = {t: [] for t in MODULE.FIELDS}
+      tables.update(products=[], manual_deposits=[{'id': 'synthetic', 'proof_file_path': 'data/media/deposits/photo.jpg', 'proof_sha256': expected, 'proof_size_bytes': str(path.stat().st_size)}])
+      report, details = MODULE.verify(tables, {}, root)
+      self.assertEqual({'verified_hash': 1}, report['receipt_files'])
+      self.assertEqual([], details)
       self.assertEqual(expected, hashlib.sha256(path.read_bytes()).hexdigest())
   def test_media_traversal_absolute_paths_symlinks_and_special_files_are_rejected(self):
     with tempfile.TemporaryDirectory() as folder:
@@ -102,7 +109,7 @@ class LegacyAssetsTests(unittest.TestCase):
       (root / 'linked').symlink_to(root / 'real', target_is_directory=True)
       (root / 'photo-link').symlink_to(root / 'real/photo')
       os.mkfifo(root / 'pipe')
-      for reference in ('../private', '/etc/passwd', 'real/../private', 'real\\photo', 'real//photo'):
+      for reference in ('../private', '/etc/passwd', 'real/../private', 'real\\photo', 'real//photo', 'data/media/../private', 'data/media//real/photo', '/app/data/media/../private'):
         self.assertEqual('invalid_reference', MODULE.check_media(root, reference))
       self.assertEqual('unsafe_path', MODULE.check_media(root, 'linked/photo'))
       self.assertEqual('unsafe_path', MODULE.check_media(root, 'photo-link'))

@@ -111,8 +111,10 @@ def authenticate(value, prefix, keys):
 def relative_media(value):
   if not isinstance(value, str) or not value or '\x00' in value or '\\' in value:
     raise ValueError()
-  if value.startswith('/app/data/media/'):
-    value = value[len('/app/data/media/'):]
+  for prefix in ('/app/data/media/', 'data/media/'):
+    if value.startswith(prefix):
+      value = value[len(prefix):]
+      break
   parts = value.split('/')
   if any(part in ('', '.', '..') for part in parts) or pathlib.PurePosixPath(value).is_absolute():
     raise ValueError()
