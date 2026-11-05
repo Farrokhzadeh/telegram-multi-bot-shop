@@ -55,12 +55,17 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
         if (newUser) await session.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language,first_seen_at,last_seen_at) VALUES ($1,$2,$3,$4,$5,$6)", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId), DbValue.Text(row.Language), DbValue.Utc(row.FirstSeen), DbValue.Utc(row.LastSeen)), ct);
         await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 AND telegram_id=$3 FOR UPDATE", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId)), r => r.GetGuid(0), ct);
         bool first = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletSnapshot), ct);
+        if (first != newUser) throw new MigrationRejectedException();
+        if (row.BalanceUsd > 0)
+        {
+            bool opening = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletOpening), ct);
+            if (opening != first) throw new MigrationRejectedException();
+        }
         if (first)
         {
             await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1)", DbValue.Uuid(row.TargetUser)), ct);
             if (row.BalanceUsd > 0)
             {
-                await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletOpening), ct);
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=1 WHERE user_id=$2", DbValue.Numeric(row.BalanceUsd), DbValue.Uuid(row.TargetUser)), ct);
                 await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason) VALUES ($1,$2,$3,$3,1,'opening_balance',true,$4,$5,'Frozen authoritative USD opening; history is non-posting')",
                     DbValue.Uuid(row.TargetOpening), DbValue.Uuid(row.TargetUser), DbValue.Numeric(row.BalanceUsd), DbValue.Text("opening:" + row.TargetOpening.ToString("D")), DbValue.Uuid(manifest.Batch)), ct);
@@ -70,11 +75,21 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
         foreach (var history in row.History)
         {
             var proof = proofs.Single(p => p.Projection == LegacyProjection.Transaction && p.LegacyId == history.LegacyId);
-            if (!await LegacyMapStore.EnsureAsync(session, manifest, proof, ct)) continue;
-            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason,created_at) VALUES ($1,$2,$3,$4,'legacy_history',false,$5,$6,'Non-posting source evidence; see protected frozen snapshot',$7)",
-                DbValue.Uuid(history.TargetEntry), DbValue.Uuid(row.TargetUser), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlDbType.Numeric), DbValue.Text("history:" + history.TargetEntry.ToString("D")), DbValue.Uuid(manifest.Batch), DbValue.Utc(history.OccurredAt)), ct);
+            if (await LegacyMapStore.EnsureAsync(session, manifest, proof, ct))
+                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason,created_at) VALUES ($1,$2,$3,$4,'legacy_history',false,$5,$6,'Non-posting source evidence; see protected frozen snapshot',$7)",
+                    DbValue.Uuid(history.TargetEntry), DbValue.Uuid(row.TargetUser), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlDbType.Numeric), DbValue.Text("history:" + history.TargetEntry.ToString("D")), DbValue.Uuid(manifest.Batch), DbValue.Utc(history.OccurredAt)), ct);
+            if (!await MatchesHistoryAsync(session, manifest.Batch, row.TargetUser, history, ct)) throw new MigrationRejectedException();
         }
+        if (!await MatchesWalletAsync(session, manifest, row, ct)) throw new MigrationRejectedException();
         await session.CommitAsync(ct);
 
     }
+    internal static async Task<bool> MatchesWalletAsync(DbSession session, VerifiedImportManifest manifest, LegacyWalletSnapshot row, CancellationToken ct)
+    {
+        bool member = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.wallets w ON w.user_id=u.id WHERE u.id=$1 AND u.brand_id=$2 AND u.telegram_id=$3 AND u.language=$4 AND u.first_seen_at=$5 AND u.last_seen_at=$6 AND w.balance=$7 AND w.version=$8)", DbValue.Uuid(row.TargetUser), DbValue.Uuid(manifest.TargetBrand), DbValue.Bigint(row.TelegramId), DbValue.Text(row.Language), DbValue.Utc(row.FirstSeen), DbValue.Utc(row.LastSeen), DbValue.Numeric(row.BalanceUsd), DbValue.Bigint(row.BalanceUsd > 0 ? 1 : 0)), r => r.GetBoolean(0), ct);
+        if (!member || row.BalanceUsd == 0) return member;
+        return await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE id=$1 AND user_id=$2 AND signed_amount=$3 AND balance_after=$3 AND posting_version=1 AND movement_kind='opening_balance' AND is_posting AND legacy_import_batch=$4 AND idempotency_key=$5)", DbValue.Uuid(row.TargetOpening), DbValue.Uuid(row.TargetUser), DbValue.Numeric(row.BalanceUsd), DbValue.Uuid(manifest.Batch), DbValue.Text("opening:" + row.TargetOpening.ToString("D"))), r => r.GetBoolean(0), ct);
+    }
+    internal static Task<bool> MatchesHistoryAsync(DbSession session, Guid batch, Guid user, LegacyHistoryRow history, CancellationToken ct) =>
+        session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE id=$1 AND user_id=$2 AND signed_amount=$3 AND balance_after IS NOT DISTINCT FROM $4 AND movement_kind='legacy_history' AND NOT is_posting AND posting_version IS NULL AND legacy_import_batch=$5 AND created_at=$6 AND idempotency_key=$7)", DbValue.Uuid(history.TargetEntry), DbValue.Uuid(user), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlDbType.Numeric), DbValue.Uuid(batch), DbValue.Utc(history.OccurredAt), DbValue.Text("history:" + history.TargetEntry.ToString("D"))), r => r.GetBoolean(0), ct);
 }

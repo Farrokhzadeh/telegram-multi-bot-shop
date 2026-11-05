@@ -23,12 +23,10 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         long mismatch = 0, missingMaps = 0, mismatchedMaps = 0;
         foreach (var row in rows)
         {
-            bool member = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.wallets w ON w.user_id=u.id WHERE u.id=$1 AND u.brand_id=$2 AND u.telegram_id=$3 AND u.language=$4 AND u.first_seen_at=$5 AND u.last_seen_at=$6 AND w.balance=$7 AND w.version=$8)", DbValue.Uuid(row.TargetUser), DbValue.Uuid(manifest.TargetBrand), DbValue.Bigint(row.TelegramId), DbValue.Text(row.Language), DbValue.Utc(row.FirstSeen), DbValue.Utc(row.LastSeen), DbValue.Numeric(row.BalanceUsd), DbValue.Bigint(row.BalanceUsd > 0 ? 1 : 0)), r => r.GetBoolean(0), ct);
-            if (!member) mismatch++;
-            if (row.BalanceUsd > 0 && !await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE id=$1 AND user_id=$2 AND signed_amount=$3 AND balance_after=$3 AND posting_version=1 AND movement_kind='opening_balance' AND is_posting AND legacy_import_batch=$4)", DbValue.Uuid(row.TargetOpening), DbValue.Uuid(row.TargetUser), DbValue.Numeric(row.BalanceUsd), DbValue.Uuid(manifest.Batch)), r => r.GetBoolean(0), ct)) mismatch++;
+            if (!await OpeningBalanceImportWorkflow.MatchesWalletAsync(session, manifest, row, ct)) mismatch++;
             foreach (var history in row.History)
             {
-                bool found = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE id=$1 AND user_id=$2 AND signed_amount=$3 AND balance_after IS NOT DISTINCT FROM $4 AND movement_kind='legacy_history' AND NOT is_posting AND posting_version IS NULL AND legacy_import_batch=$5 AND created_at=$6)", DbValue.Uuid(history.TargetEntry), DbValue.Uuid(row.TargetUser), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Numeric), DbValue.Uuid(manifest.Batch), DbValue.Utc(history.OccurredAt)), r => r.GetBoolean(0), ct);
+                bool found = await OpeningBalanceImportWorkflow.MatchesHistoryAsync(session, manifest.Batch, row.TargetUser, history, ct);
                 if (!found) mismatch++;
             }
             foreach (var proof in row.Proofs(manifest.TargetBrand))

@@ -30,6 +30,7 @@ public sealed class OpeningBalanceMigrationTests
         await using (var change = f.Database.Data.CreateCommand("UPDATE shop.users SET language=CASE WHEN language='en' THEN 'fa' ELSE 'en' END")) await change.ExecuteNonQueryAsync(Ct);
         Assert.True((await reports.ReadAsync(manifest, Ct)).Complete);
         Assert.False((await reports.CompareWalletsAsync(manifest, [row], Ct)).Matched);
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => importer.ImportAsync(f.Context(0), manifest, row, Ct));
     }
     [Theory]
     [InlineData("0")]
