@@ -46,6 +46,11 @@ jobs:
           /tmp/gitleaks dir . --redact --config .gitleaks.toml
       - name: Validate secret mount contract (render only)
         run: python3 ops/ci/check-secret-compose.py
+      - name: Install offline verifier test dependencies
+        run: |
+          python3 -m venv /tmp/legacy-verifier-tests
+          /tmp/legacy-verifier-tests/bin/python -m pip install -r ops/ci/legacy-assets-requirements.txt
+          echo '/tmp/legacy-verifier-tests/bin' >> "$GITHUB_PATH"
       - name: Validate scenario mappings and evidence guards
         run: |
           python3 .specify/tests/test_linux_tooling.py
