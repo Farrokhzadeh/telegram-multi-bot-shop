@@ -20,7 +20,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         foreach (var row in rows) foreach (var proof in row.Proofs(manifest.TargetBrand)) manifest.Require(proof);
         await using var session = await sessions.BeginAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
-        long mismatch = 0, missingMaps = 0, mismatchedMaps = 0;
+        long mismatch = 0, missingMaps = 0, mismatchedMaps = 0, foundMaps = 0;
         foreach (var row in rows)
         {
             if (!await OpeningBalanceImportWorkflow.MatchesWalletAsync(session, manifest, row, ct)) mismatch++;
@@ -33,7 +33,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
             {
                 var maps = await session.QueryManyAsync(new DbStatement("SELECT target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind=$3 AND legacy_id=$4", DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId)), r => (Kind: r.GetString(0), Id: r.GetGuid(1), Brand: r.IsDBNull(2) ? Guid.Empty : r.GetGuid(2), Digest: r.GetBinary(3), Batch: r.GetGuid(4), Reference: r.GetString(5)), 1, ct);
                 if (maps.Count == 0) missingMaps++;
-                else { var value = maps[0]; if (value.Kind != proof.TargetKind || value.Id != proof.Target || value.Brand != proof.Brand || value.Batch != manifest.Batch || value.Reference != manifest.Reference || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(value.Digest, proof.Fingerprint.Span)) mismatchedMaps++; }
+                else { var value = maps[0]; if (value.Batch == manifest.Batch && value.Reference == manifest.Reference) foundMaps++; if (value.Kind != proof.TargetKind || value.Id != proof.Target || value.Brand != proof.Brand || value.Batch != manifest.Batch || value.Reference != manifest.Reference || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(value.Digest, proof.Fingerprint.Span)) mismatchedMaps++; }
             }
         }
         long expected = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.WalletSnapshot);
@@ -42,7 +42,8 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         long actualEntries = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries WHERE legacy_import_batch=$1 AND movement_kind IN ('opening_balance','legacy_history')", DbValue.Uuid(manifest.Batch)), r => r.GetInt64(0), ct);
         long expectedEntries = expectedHistory + expectedOpenings;
         long uncovered = Math.Abs(expectedHistory - rows.Sum(r => (long)r.History.Count)) + Math.Abs(expectedOpenings - rows.LongCount(r => r.BalanceUsd > 0)) + Math.Abs(expectedEntries - actualEntries);
-        return new(manifest.Batch, expected, rows.LongLength, mismatch, missingMaps, mismatchedMaps, uncovered);
+        long walletMaps = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2 AND source_table IN ('users','users.balance.snapshot','users.balance.opening','transactions')", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        return new(manifest.Batch, expected, rows.LongLength, mismatch, missingMaps, mismatchedMaps, uncovered, Math.Max(0, walletMaps - foundMaps));
     }
     public async Task<HistoricalOrderReconciliation> CompareOrdersAsync(VerifiedImportManifest manifest, IReadOnlyList<LegacyHistoricalOrder> source, CancellationToken ct = default)
     {
@@ -102,9 +103,9 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
 [JsonSerializable(typeof(HistoricalOrderReconciliation))]
 [JsonSerializable(typeof(WalletRecordReconciliation))]
 public sealed partial class MigrationReportJsonContext : JsonSerializerContext;
-public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets, long ComparedWallets, long MismatchedRecords, long MissingMappings, long MismatchedMappings, long UnmatchedEntries)
+public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets, long ComparedWallets, long MismatchedRecords, long MissingMappings, long MismatchedMappings, long UnmatchedEntries, long UnexpectedMappings)
 {
-    public bool Matched => ExpectedWallets == ComparedWallets && MismatchedRecords == 0 && MissingMappings == 0 && MismatchedMappings == 0 && UnmatchedEntries == 0;
+    public bool Matched => ExpectedWallets == ComparedWallets && MismatchedRecords == 0 && MissingMappings == 0 && MismatchedMappings == 0 && UnmatchedEntries == 0 && UnexpectedMappings == 0;
     public bool ReleaseReady => false;
     public string Scope => "source_bound_wallet_records_only";
     public override string ToString() => "WalletRecordReconciliation [redacted]";

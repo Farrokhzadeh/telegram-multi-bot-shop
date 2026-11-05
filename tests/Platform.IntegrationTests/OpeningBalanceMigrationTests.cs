@@ -32,6 +32,20 @@ public sealed class OpeningBalanceMigrationTests
         Assert.False((await reports.CompareWalletsAsync(manifest, [row], Ct)).Matched);
         await Assert.ThrowsAsync<MigrationRejectedException>(() => importer.ImportAsync(f.Context(0), manifest, row, Ct));
     }
+    [Fact]
+    public async Task RecordComparisonRejectsUnexpectedWalletMappings()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
+        await MigrationQualification.EnableRoleAsync(f, Ct);
+        var row = MigrationQualification.Wallet();
+        var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [row]);
+        await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, row, Ct);
+        var reports = new ReconciliationReport(f.Sessions);
+        Assert.True((await reports.CompareWalletsAsync(manifest, [row], Ct)).Matched);
+        await using (var extra = f.Database.Data.CreateCommand("INSERT INTO shop.legacy_id_map(source_brand,source_table,source_key_kind,legacy_id,target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref) SELECT source_brand,source_table,source_key_kind,'unexpected-user',target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref FROM shop.legacy_id_map WHERE source_table='users'")) await extra.ExecuteNonQueryAsync(Ct);
+        var result = await reports.CompareWalletsAsync(manifest, [row], Ct);
+        Assert.False(result.Matched); Assert.Equal(1, result.UnexpectedMappings);
+    }
     [Theory]
     [InlineData("0")]
     [InlineData("12.34")]
