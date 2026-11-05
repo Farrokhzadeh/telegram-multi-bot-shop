@@ -13,6 +13,20 @@ public sealed record MigrationReconciliation(Guid Batch, long ExpectedMappings, 
 }
 public sealed class ReconciliationReport(DbSessionFactory sessions)
 {
+    public async Task<HistoricalOrderReconciliation> CompareOrdersAsync(VerifiedImportManifest manifest, IReadOnlyList<LegacyHistoricalOrder> source, CancellationToken ct = default)
+    {
+        var rows = source.ToArray();
+        if (rows.Select(r => r.Target).Distinct().Count() != rows.Length) throw new MigrationRejectedException();
+        foreach (var row in rows) foreach (var proof in row.Proofs(manifest.TargetBrand)) manifest.Require(proof);
+        await using var session = await sessions.BeginAsync(ct);
+        await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
+        long mismatched = 0;
+        foreach (var row in rows) if (!await HistoricalOrderImportWorkflow.MatchesAsync(session, row, ct)) mismatched++;
+        long expected = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.HistoricalOrder);
+        long unmatched = expected - rows.LongLength;
+        var mappings = await ReadAsync(manifest, ct);
+        return new(manifest.Batch, expected, rows.LongLength, mismatched, unmatched, mappings.MissingMappings, mappings.MismatchedMappings);
+    }
     public async Task<LegacyAggregateReconciliation> CompareAsync(VerifiedImportManifest manifest, LegacyAggregateExpectations expected, CancellationToken ct = default) =>
         LegacyAggregateComparison.Compare(manifest, expected, await ReadAsync(manifest, ct));
     public async Task<MigrationReconciliation> ReadAsync(VerifiedImportManifest manifest, CancellationToken ct = default)
@@ -49,4 +63,12 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(MigrationReconciliation))]
 [JsonSerializable(typeof(LegacyAggregateReconciliation))]
+[JsonSerializable(typeof(HistoricalOrderReconciliation))]
 public sealed partial class MigrationReportJsonContext : JsonSerializerContext;
+public sealed record HistoricalOrderReconciliation(Guid Batch, long ExpectedOrders, long ComparedOrders, long MismatchedOrders, long UnmatchedOrders, long MissingMappings, long MismatchedMappings)
+{
+    public bool Matched => ExpectedOrders == ComparedOrders && MismatchedOrders == 0 && UnmatchedOrders == 0 && MissingMappings == 0 && MismatchedMappings == 0;
+    public bool ReleaseReady => false;
+    public string Scope => "source_bound_wallet_paid_order_snapshots";
+    public override string ToString() => "HistoricalOrderReconciliation [redacted]";
+}
