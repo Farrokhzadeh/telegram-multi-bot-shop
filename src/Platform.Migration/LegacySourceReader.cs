@@ -45,6 +45,19 @@ public sealed record LegacySourceDiscount(string Code, long? ProductId, long? As
     }
     public override string ToString() => "LegacySourceDiscount [redacted]";
 }
+public sealed record LegacySourceProduct(long Id, string Name, decimal Price, decimal PriceIrr, bool AutoPrice, string? Description, string? Rules, string? Icon, string? Guidance, string ProductType, bool Active, bool Removed, string? RateId, string? MediaType, string? MediaId, string? ExpectedDate, string? ServiceHours, int Stock)
+{
+    public LegacyMapProof Proof(Guid target, Guid brand)
+    {
+        if (Id <= 0 || string.IsNullOrWhiteSpace(Name) || Name.Length > 255 || Price < 0 || PriceIrr < 0 || Stock < 0 || ProductType is not ("credential" or "service" or "api" or "preorder") || !Active || Removed) throw new MigrationRejectedException();
+        using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
+        writer.Write("accabad-product-v1"); writer.Write(Id); writer.Write(Name); writer.Write(ExactDecimal.Format(Price)); writer.Write(ExactDecimal.Format(PriceIrr)); writer.Write(AutoPrice);
+        foreach (var value in new[] { Description, Rules, Icon, Guidance, RateId, MediaType, MediaId, ExpectedDate, ServiceHours }) { writer.Write(value is not null); if (value is not null) writer.Write(value); }
+        writer.Write(ProductType); writer.Write(Active); writer.Write(Removed); writer.Write(Stock); writer.Flush();
+        return new(LegacyProjection.Product, Id.ToString(CultureInfo.InvariantCulture), target, brand, SHA256.HashData(bytes.ToArray()));
+    }
+    public override string ToString() => "LegacySourceProduct [redacted]";
+}
 public sealed class LegacySourceReader
 {
     private readonly DbSessionFactory sessions;
@@ -90,6 +103,16 @@ public sealed class LegacySourceReader
         var row = await session.QuerySingleAsync(new DbStatement("SELECT code,product_id,assigned_user_id,pct_off::text,max_uses,current_uses,active FROM public.discounts WHERE code=$1", DbValue.Text(code)),
             r => new LegacySourceDiscount(r.GetString(0), r.IsDBNull(1) ? null : r.GetInt64(1), r.IsDBNull(2) ? null : r.GetInt64(2), ExactDecimal.Parse(r.GetString(3)), r.GetInt32(4), r.GetInt32(5), r.GetBoolean(6)), ct);
         manifest.Require(row.Proof(target, context, secrets));
+        return row;
+    }
+    public async Task<LegacySourceProduct> ReadProductAsync(VerifiedImportManifest manifest, long id, Guid target, CancellationToken ct = default)
+    {
+        if (id <= 0) throw new MigrationRejectedException();
+        await using var session = await OpenAsync(ct);
+        if (Convert.ToHexStringLower(await SchemaAsync(session, ct)) != manifest.SourceSchemaDigest) throw new MigrationRejectedException();
+        var row = await session.QuerySingleAsync(new DbStatement("SELECT id,name,price::text,price_irr::text,auto_price,description,rules,icon_custom_emoji_id,post_purchase,product_type,active,is_removed,pricing_rate_id::text,post_purchase_media_type,post_purchase_media_id,expected_availability_date::text,service_target_hours::text,stock FROM public.products WHERE id=$1", DbValue.Bigint(id)),
+            r => new LegacySourceProduct(r.GetInt64(0), r.GetString(1), ExactDecimal.Parse(r.GetString(2)), ExactDecimal.Parse(r.GetString(3)), r.GetBoolean(4), r.IsDBNull(5) ? null : r.GetString(5), r.IsDBNull(6) ? null : r.GetString(6), r.IsDBNull(7) ? null : r.GetString(7), r.IsDBNull(8) ? null : r.GetString(8), r.GetString(9), r.GetBoolean(10), r.GetBoolean(11), r.IsDBNull(12) ? null : r.GetString(12), r.IsDBNull(13) ? null : r.GetString(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : r.GetString(15), r.IsDBNull(16) ? null : r.GetString(16), r.GetInt32(17)), ct);
+        manifest.Require(row.Proof(target, manifest.TargetBrand));
         return row;
     }
     private static async Task<byte[]> SchemaAsync(DbSession session, CancellationToken ct)
