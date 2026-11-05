@@ -16,10 +16,13 @@ public sealed record LegacyHistoricalOrder(LegacySourceOrder Source, Guid Target
             using var document = JsonDocument.Parse(Source.CheckoutSnapshot);
             var root = document.RootElement;
             if (Target == Guid.Empty || User == Guid.Empty || string.IsNullOrWhiteSpace(HistoricalBrandName) || HistoricalBrandName.Length > 160 || Source.CheckoutSnapshot.Length > 16384 ||
+                string.IsNullOrEmpty(Source.Id) || Source.Id.Length != 16 || !Source.Id.StartsWith("ORD-", StringComparison.Ordinal) || Source.Id.Skip(4).Any(c => !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F'))) ||
                 Source.Currency != "USD" || Source.Total <= 0 || root.GetProperty("version").GetInt32() != 1 || root.GetProperty("product_id").GetInt64() != Source.ProductId ||
                 root.GetProperty("quantity").GetInt32() != Source.Quantity || root.GetProperty("currency").GetString() != "USD" || root.GetProperty("payment_method").GetString() != "wallet" ||
-                root.GetProperty("product_type").GetString() != "credential" || root.GetProperty("discount_code").ValueKind != JsonValueKind.Null || root.GetProperty("discount_quantity").GetInt32() != 0 ||
-                ExactDecimal.Parse(root.GetProperty("original_usd").GetString()!) != Source.Total || ExactDecimal.Parse(root.GetProperty("total_usd").GetString()!) != Source.Total) throw new MigrationRejectedException();
+                root.GetProperty("product_type").GetString() != "credential" || root.GetProperty("discount_code").ValueKind != JsonValueKind.Null || root.GetProperty("discount_pct").ValueKind != JsonValueKind.Null || root.GetProperty("discount_quantity").GetInt32() != 0 ||
+                ExactDecimal.Parse(root.GetProperty("original_usd").GetString()!) != Source.Total || ExactDecimal.Parse(root.GetProperty("total_usd").GetString()!) != Source.Total ||
+                ExactDecimal.Parse(root.GetProperty("savings_usd").GetString()!) != 0 || ExactDecimal.Parse(root.GetProperty("savings_toman").GetString()!) != 0 ||
+                ExactDecimal.Parse(root.GetProperty("original_toman").GetString()!) != ExactDecimal.Parse(root.GetProperty("total_toman").GetString()!)) throw new MigrationRejectedException();
             string title = root.GetProperty("product_name").GetString()!;
             decimal unit = Source.Total / Source.Quantity;
             if (string.IsNullOrWhiteSpace(title) || title.Length > 160 || unit * Source.Quantity != Source.Total) throw new MigrationRejectedException();

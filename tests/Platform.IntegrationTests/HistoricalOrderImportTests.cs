@@ -7,8 +7,8 @@ namespace Platform.IntegrationTests;
 [Collection("PostgreSQL races")]
 public sealed class HistoricalOrderImportTests
 {
-    private static LegacyHistoricalOrder Order(LegacyWalletSnapshot wallet) => new(new("ORD-SYNTHETIC", wallet.TelegramId, 456, 2, 12.50m, "USD", wallet.FirstSeen,
-        """{"version":1,"product_id":456,"product_name":"Original synthetic title","product_type":"credential","quantity":2,"original_usd":"12.50","total_usd":"12.50","currency":"USD","payment_method":"wallet","discount_code":null,"discount_quantity":0}"""), Guid.NewGuid(), wallet.TargetUser, "Historical synthetic brand");
+    private static LegacyHistoricalOrder Order(LegacyWalletSnapshot wallet) => new(new("ORD-ABC123ABC123", wallet.TelegramId, 456, 2, 12.50m, "USD", wallet.FirstSeen,
+        """{"version":1,"product_id":456,"product_name":"Original synthetic title","product_type":"credential","quantity":2,"original_usd":"12.50","total_usd":"12.50","original_toman":"500000","total_toman":"500000","savings_usd":"0.00","savings_toman":"0","currency":"USD","payment_method":"wallet","discount_code":null,"discount_pct":null,"discount_quantity":0}"""), Guid.NewGuid(), wallet.TargetUser, "Historical synthetic brand");
     private static VerifiedImportManifest Manifest(CheckoutFixture f, LegacyWalletSnapshot wallet, LegacyHistoricalOrder order)
     {
         byte[] body = VerifiedImportManifest.EncodePlan(SchemaManifest.ForQualification(f.Database.Data.ConnectionString), "public-a", f.Brands[0], "66371a23a1c8149dc5bdf89a0355aa689d454dba", SHA256.HashData("synthetic schema"u8), "protected:synthetic/source", SHA256.HashData("synthetic source"u8), Guid.NewGuid(), wallet.Proofs(f.Brands[0]).Concat(order.Proofs(f.Brands[0])), wallet.BalanceUsd);
@@ -27,7 +27,7 @@ public sealed class HistoricalOrderImportTests
         await importer.ImportAsync(f.Context(0), manifest, order, ct);
         await importer.ImportAsync(f.Context(0), manifest, order, ct);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE product_id IS NULL AND fulfillment_status='requires_admin' AND payment_status='paid' AND quantity=2 AND unit_price_usdt=6.25", ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map WHERE source_key_kind='public_order_reference' AND legacy_id='ORD-SYNTHETIC'", ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map WHERE source_key_kind='public_order_reference' AND legacy_id='ORD-ABC123ABC123'", ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting AND movement_kind='opening_balance'", ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items", ct));
@@ -54,6 +54,10 @@ public sealed class HistoricalOrderImportTests
     [InlineData("quantity")]
     [InlineData("total")]
     [InlineData("discount")]
+    [InlineData("percent")]
+    [InlineData("savings")]
+    [InlineData("toman")]
+    [InlineData("alias")]
     [InlineData("snapshot")]
     public void UnsupportedOrInconsistentSourceCannotProduceImportProof(string fault)
     {
@@ -65,6 +69,10 @@ public sealed class HistoricalOrderImportTests
             "quantity" => source with { Quantity = 3 },
             "total" => source with { Total = 10 },
             "discount" => source with { CheckoutSnapshot = source.CheckoutSnapshot.Replace("\"discount_code\":null", "\"discount_code\":\"SHARED\"", StringComparison.Ordinal) },
+            "percent" => source with { CheckoutSnapshot = source.CheckoutSnapshot.Replace("\"discount_pct\":null", "\"discount_pct\":\"5\"", StringComparison.Ordinal) },
+            "savings" => source with { CheckoutSnapshot = source.CheckoutSnapshot.Replace("\"savings_usd\":\"0.00\"", "\"savings_usd\":\"1.00\"", StringComparison.Ordinal) },
+            "toman" => source with { CheckoutSnapshot = source.CheckoutSnapshot.Replace("\"total_toman\":\"500000\"", "\"total_toman\":\"450000\"", StringComparison.Ordinal) },
+            "alias" => source with { Id = "ORD-SYNTHETIC" },
             _ => source with { CheckoutSnapshot = "{}" }
         };
         Assert.Throws<MigrationRejectedException>(() => (order with { Source = source }).Proofs(Guid.NewGuid()));
