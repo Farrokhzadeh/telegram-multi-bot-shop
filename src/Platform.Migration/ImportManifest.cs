@@ -8,7 +8,7 @@ public sealed class MigrationRejectedException : Exception
 {
     public MigrationRejectedException() : base("Migration evidence or target rejected; retain the source for review.") { }
 }
-public enum LegacyProjection { User, WalletSnapshot, WalletOpening, Transaction, Order, OrderAlias, HistoricalOrder }
+public enum LegacyProjection { User, WalletSnapshot, WalletOpening, Transaction, Order, OrderAlias, HistoricalOrder, Discount }
 public sealed class LegacyMapProof
 {
     private readonly byte[] fingerprint;
@@ -22,9 +22,9 @@ public sealed class LegacyMapProof
     public Guid Target { get; }
     public Guid Brand { get; }
     public ReadOnlyMemory<byte> Fingerprint => fingerprint;
-    public string SourceTable => Projection switch { LegacyProjection.User => "users", LegacyProjection.WalletSnapshot => "users.balance.snapshot", LegacyProjection.WalletOpening => "users.balance.opening", LegacyProjection.Transaction => "transactions", LegacyProjection.Order or LegacyProjection.OrderAlias => "orders", LegacyProjection.HistoricalOrder => "orders.target_snapshot", _ => throw new MigrationRejectedException() };
+    public string SourceTable => Projection switch { LegacyProjection.User => "users", LegacyProjection.WalletSnapshot => "users.balance.snapshot", LegacyProjection.WalletOpening => "users.balance.opening", LegacyProjection.Transaction => "transactions", LegacyProjection.Order or LegacyProjection.OrderAlias => "orders", LegacyProjection.HistoricalOrder => "orders.target_snapshot", LegacyProjection.Discount => "discounts", _ => throw new MigrationRejectedException() };
     public string KeyKind => Projection == LegacyProjection.OrderAlias ? "public_order_reference" : "primary";
-    public string TargetKind => Projection switch { LegacyProjection.User => "user", LegacyProjection.WalletSnapshot => "wallet", LegacyProjection.WalletOpening or LegacyProjection.Transaction => "wallet_entry", LegacyProjection.Order or LegacyProjection.OrderAlias or LegacyProjection.HistoricalOrder => "order", _ => throw new MigrationRejectedException() };
+    public string TargetKind => Projection switch { LegacyProjection.User => "user", LegacyProjection.WalletSnapshot => "wallet", LegacyProjection.WalletOpening or LegacyProjection.Transaction => "wallet_entry", LegacyProjection.Order or LegacyProjection.OrderAlias or LegacyProjection.HistoricalOrder => "order", LegacyProjection.Discount => "discount", _ => throw new MigrationRejectedException() };
     internal string Key => SourceTable + ":" + KeyKind + ":" + LegacyId;
     internal bool Same(LegacyMapProof other) => Projection == other.Projection && LegacyId == other.LegacyId && Target == other.Target && Brand == other.Brand && CryptographicOperations.FixedTimeEquals(fingerprint, other.fingerprint);
     public override string ToString() => "LegacyMapProof [redacted]";

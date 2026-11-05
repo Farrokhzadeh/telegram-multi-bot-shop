@@ -5,6 +5,7 @@ using System.Text;
 using Npgsql;
 using Platform.Core;
 using Platform.Persistence;
+using Platform.Security;
 namespace Platform.Migration;
 
 public sealed record LegacySourceEndpoint(string Host, int Port, string Database, string Username)
@@ -21,6 +22,28 @@ public sealed record LegacySourceOrder(string Id, long UserId, long ProductId, i
         return new(LegacyProjection.Order, Id, target, brand, SHA256.HashData(bytes.ToArray()));
     }
     public override string ToString() => "LegacySourceOrder [redacted]";
+}
+public sealed record LegacySourceDiscount(string Code, long? ProductId, long? AssignedUserId, decimal Percent, int MaximumUses, int CurrentUses, bool Active)
+{
+    public LegacyMapProof Proof(Guid target, BrandContext context, SecretSnapshot secrets)
+    {
+        if (string.IsNullOrWhiteSpace(Code) || Code.Length > 64 || Code.Any(char.IsControl) || ProductId <= 0 || AssignedUserId <= 0 || Percent <= 0 || Percent > 100 || MaximumUses <= 0 || CurrentUses < 0 || CurrentUses > MaximumUses) throw new MigrationRejectedException();
+        using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
+        writer.Write("accabad-discount-v1"); writer.Write(Code); writer.Write(ProductId.HasValue); if (ProductId is long product) writer.Write(product);
+        writer.Write(AssignedUserId.HasValue); if (AssignedUserId is long user) writer.Write(user);
+        writer.Write(ExactDecimal.Format(Percent)); writer.Write(MaximumUses); writer.Write(CurrentUses); writer.Write(Active); writer.Flush();
+        string key = secrets.CurrentBrandKeyId(context);
+        byte[] identity = Encoding.UTF8.GetBytes("legacy-discount-identity-v1:" + context.BrandId.ToString("D") + ":" + Code);
+        byte[] canonical = bytes.ToArray();
+        try
+        {
+            byte[] digest = secrets.UseBrandKey(context, key, secret => HMACSHA256.HashData(secret, identity));
+            byte[] fingerprint = secrets.UseBrandKey(context, key, secret => HMACSHA256.HashData(secret, canonical));
+            return new(LegacyProjection.Discount, Convert.ToHexStringLower(digest), target, context.BrandId, fingerprint);
+        }
+        finally { CryptographicOperations.ZeroMemory(identity); CryptographicOperations.ZeroMemory(canonical); }
+    }
+    public override string ToString() => "LegacySourceDiscount [redacted]";
 }
 public sealed class LegacySourceReader
 {
@@ -57,6 +80,16 @@ public sealed class LegacySourceReader
         var row = await session.QuerySingleAsync(new DbStatement("SELECT id,user_id,product_id,qty,total::text,currency,created_at,checkout_snapshot::text FROM public.orders WHERE id=$1", DbValue.Text(id)),
             r => new LegacySourceOrder(r.GetString(0), r.GetInt64(1), r.GetInt64(2), r.GetInt32(3), ExactDecimal.Parse(r.GetString(4)), r.GetString(5), r.GetUtc(6), r.GetString(7)), ct);
         manifest.Require(row.Proof(target, manifest.TargetBrand));
+        return row;
+    }
+    public async Task<LegacySourceDiscount> ReadDiscountAsync(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest manifest, string code, Guid target, CancellationToken ct = default)
+    {
+        if (context.BrandId != manifest.TargetBrand || string.IsNullOrWhiteSpace(code) || code.Length > 64 || code.Any(char.IsControl)) throw new MigrationRejectedException();
+        await using var session = await OpenAsync(ct);
+        if (Convert.ToHexStringLower(await SchemaAsync(session, ct)) != manifest.SourceSchemaDigest) throw new MigrationRejectedException();
+        var row = await session.QuerySingleAsync(new DbStatement("SELECT code,product_id,assigned_user_id,pct_off::text,max_uses,current_uses,active FROM public.discounts WHERE code=$1", DbValue.Text(code)),
+            r => new LegacySourceDiscount(r.GetString(0), r.IsDBNull(1) ? null : r.GetInt64(1), r.IsDBNull(2) ? null : r.GetInt64(2), ExactDecimal.Parse(r.GetString(3)), r.GetInt32(4), r.GetInt32(5), r.GetBoolean(6)), ct);
+        manifest.Require(row.Proof(target, context, secrets));
         return row;
     }
     private static async Task<byte[]> SchemaAsync(DbSession session, CancellationToken ct)
