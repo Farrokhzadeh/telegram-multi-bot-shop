@@ -11,6 +11,17 @@ public sealed record LegacySourceEndpoint(string Host, int Port, string Database
 {
     public override string ToString() => "LegacySourceEndpoint [redacted]";
 }
+public sealed record LegacySourceOrder(string Id, long UserId, long ProductId, int Quantity, decimal Total, string Currency, DateTime CreatedAt, string CheckoutSnapshot)
+{
+    public LegacyMapProof Proof(Guid target, Guid brand)
+    {
+        if (string.IsNullOrWhiteSpace(Id) || UserId <= 0 || ProductId <= 0 || Quantity <= 0 || Total < 0 || Currency is not ("USD" or "IRR") || CreatedAt.Kind != DateTimeKind.Utc || CheckoutSnapshot is null) throw new MigrationRejectedException();
+        using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
+        writer.Write("accabad-order-v1"); writer.Write(Id); writer.Write(UserId); writer.Write(ProductId); writer.Write(Quantity); writer.Write(ExactDecimal.Format(Total)); writer.Write(Currency); writer.Write(CreatedAt.Ticks); writer.Write(CheckoutSnapshot); writer.Flush();
+        return new(LegacyProjection.Order, Id, target, brand, SHA256.HashData(bytes.ToArray()));
+    }
+    public override string ToString() => "LegacySourceOrder [redacted]";
+}
 public sealed class LegacySourceReader
 {
     private readonly DbSessionFactory sessions;
@@ -36,6 +47,17 @@ public sealed class LegacySourceReader
     {
         await using var session = await OpenAsync(ct);
         return await SchemaAsync(session, ct);
+    }
+    public async Task<LegacySourceOrder> ReadOrderAsync(VerifiedImportManifest manifest, string id, Guid target, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(id) || id.Length > 64 || id.Any(char.IsControl)) throw new MigrationRejectedException();
+        await using var session = await OpenAsync(ct);
+        if (Convert.ToHexStringLower(await SchemaAsync(session, ct)) != manifest.SourceSchemaDigest ||
+            await session.QuerySingleAsync(new DbStatement("SELECT to_regclass('public.order_items') IS NOT NULL"), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
+        var row = await session.QuerySingleAsync(new DbStatement("SELECT id,user_id,product_id,qty,total::text,currency,created_at,checkout_snapshot::text FROM public.orders WHERE id=$1", DbValue.Text(id)),
+            r => new LegacySourceOrder(r.GetString(0), r.GetInt64(1), r.GetInt64(2), r.GetInt32(3), ExactDecimal.Parse(r.GetString(4)), r.GetString(5), r.GetUtc(6), r.GetString(7)), ct);
+        manifest.Require(row.Proof(target, manifest.TargetBrand));
+        return row;
     }
     private static async Task<byte[]> SchemaAsync(DbSession session, CancellationToken ct)
     {
@@ -76,3 +98,4 @@ public sealed class LegacySourceReader
         return result;
     }
 }
+
