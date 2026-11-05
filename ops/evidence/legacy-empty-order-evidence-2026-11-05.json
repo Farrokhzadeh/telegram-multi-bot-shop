@@ -1,0 +1,48 @@
+{
+  "release_ready": false,
+  "scope": "empty_order_snapshot_source_evidence_only",
+  "sources": [
+    {
+      "archive_sha256": "0e86433927fa420ad3e13bbff2098119d47dfbaa0b626573c552999902703667",
+      "empty": 3325,
+      "inventory_complete": 3299,
+      "inventory_exceeds": 0,
+      "inventory_none": 26,
+      "inventory_partial": 0,
+      "linked_different_user": 0,
+      "linked_payment": 124,
+      "linked_same_user": 124,
+      "linked_snapshot_same_user": 114,
+      "transaction_exact": 3211,
+      "transaction_same_id": 3211
+    },
+    {
+      "archive_sha256": "a61aaddbbd76a10aa6894aa02cffe861cb44a9602b1d085eecc981f822656071",
+      "empty": 0,
+      "inventory_complete": 0,
+      "inventory_exceeds": 0,
+      "inventory_none": 0,
+      "inventory_partial": 0,
+      "linked_different_user": 0,
+      "linked_payment": 0,
+      "linked_same_user": 0,
+      "linked_snapshot_same_user": 0,
+      "transaction_exact": 0,
+      "transaction_same_id": 0
+    },
+    {
+      "archive_sha256": "4481980586074034e84ff11d867621a1aa847c18589576ab7dd89155a21d6245",
+      "empty": 494,
+      "inventory_complete": 494,
+      "inventory_exceeds": 0,
+      "inventory_none": 0,
+      "inventory_partial": 0,
+      "linked_different_user": 0,
+      "linked_payment": 41,
+      "linked_same_user": 41,
+      "linked_snapshot_same_user": 40,
+      "transaction_exact": 453,
+      "transaction_same_id": 453
+    }
+  ]
+}
