@@ -13,6 +13,8 @@ using Platform.Telegram;
 
 if (args is ["--preorder-worker-probe"]) { await PreorderProcessQualification.ChildAsync(); return; }
 await MigrationQualification.RunAsync();
+await LegacyRecordQualification.RunAsync();
+Console.WriteLine("PASS: native protected legacy payment, coupon, catalog, free/partial/preorder records and reconciliation.");
 Console.WriteLine("PASS: native pinned migration manifest, atomic mappings, frozen USD opening and non-posting history.");
 await LocalPreorderQualification.RunAsync();
 Console.WriteLine("PASS: native shared-product FIFO, whole local allocation and private complete manifests.");

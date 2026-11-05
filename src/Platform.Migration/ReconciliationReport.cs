@@ -69,6 +69,10 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
     public async Task<MigrationReconciliation> ReadAsync(VerifiedImportManifest manifest, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
+        return await ReadAsync(session, manifest, ct);
+    }
+    internal static async Task<MigrationReconciliation> ReadAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct)
+    {
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         long committed = 0, missing = 0, mismatch = 0;
         foreach (var proof in manifest.Proofs)
@@ -102,6 +106,8 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
 [JsonSerializable(typeof(LegacyAggregateReconciliation))]
 [JsonSerializable(typeof(HistoricalOrderReconciliation))]
 [JsonSerializable(typeof(WalletRecordReconciliation))]
+[JsonSerializable(typeof(LegacyRecordReconciliation))]
+[JsonSerializable(typeof(ProtectedLegacyEvidence))]
 public sealed partial class MigrationReportJsonContext : JsonSerializerContext;
 public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets, long ComparedWallets, long MismatchedRecords, long MissingMappings, long MismatchedMappings, long UnmatchedEntries, long UnexpectedMappings)
 {

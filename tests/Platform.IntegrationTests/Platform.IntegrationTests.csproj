@@ -26,6 +26,7 @@
     <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
     <None Include="../fixtures/legacy-fernet-synthetic.json" Link="fixtures/legacy-fernet-synthetic.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../Shared/MigrationQualification.cs" Link="Shared/MigrationQualification.cs" />
+    <Compile Include="../Shared/LegacyRecordQualification.cs" Link="Shared/LegacyRecordQualification.cs" />
     <Compile Include="../Shared/SupplierQualification.cs" Link="Shared/SupplierQualification.cs" />
     <Compile Include="../Shared/SupplierSourceSelectionQualification.cs" Link="Shared/SupplierSourceSelectionQualification.cs" />
     <Compile Include="../Shared/SupplierCredentialQualification.cs" Link="Shared/SupplierCredentialQualification.cs" />

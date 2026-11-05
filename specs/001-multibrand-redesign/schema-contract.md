@@ -1,5 +1,7 @@
 # Canonical schema contract — 28-table forward design
 
+Offline legacy-import extension, 2026-11-05: no table or column is added. A manifest-mapped legacy `manual_deposit` may retain a missing historical bank destination under the existing restricted import-role guard; ordinary bank rows still require the complete destination. Null original coupon issuer provenance is permitted only on restricted mapped import insertion. Imported revision zero additionally requires mapped discount/revision targets and a same-brand system `legacy_import` audit bound to the batch and protected artifact. Historical effective use is an initial `usage_adjustment_units` baseline, with no fabricated administrator or redemption rows. Normal issuance/edit constraints remain enforced. See [record import contract](../../ops/LEGACY_RECORD_IMPORT.md). This changes only the fresh disposable baseline; it applies no staging/production migration and closes no protected-copy gate.
+
 **Reviewed baseline:** 2026-10-30. **Updated:** 2026-10-31 for the owner-approved FR-015 saved-message recovery contract. **Original input:** main at 350a4d90ebfe6e4082d94820910806bb96c2484e.
 **Status:** selected documentation design, not executable DDL or implementation approval. The business baseline remains FR-001–084 / SC-001–053. E1 governance alignment is complete; E2–E6 in [consistency-review.md](consistency-review.md) retain their proof requirements. No implementation/release readiness is implied.
 

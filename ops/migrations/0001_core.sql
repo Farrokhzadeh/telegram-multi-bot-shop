@@ -382,7 +382,7 @@ id uuid PRIMARY KEY,
     CHECK (num_nonnulls(review_admin_id,reviewed_at,review_reason) IN (0,3)),
     CHECK (provider_payment_ref IS NULL OR provider_code IS NOT NULL),
     CHECK ((payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination_ciphertext IS NULL) OR
-           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND bank_destination_ciphertext IS NOT NULL AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)),
+           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination_ciphertext IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)),
     CHECK (topup_user_id IS NULL OR payment_method='crypto'),
     CHECK (status <> 'settled' OR confirmed_at IS NOT NULL),
     CHECK (num_nonnulls(ipn_key_id,ipn_signature,ipn_payload_sha256,ipn_verified_at) IN (0,4)),
@@ -670,7 +670,6 @@ id uuid PRIMARY KEY,
     CHECK (ends_at IS NULL OR starts_at IS NULL OR ends_at > starts_at),
     CHECK ((kind='prepaid_entitlement' AND product_id IS NOT NULL AND eligible_user_id IS NOT NULL AND source_order_id IS NOT NULL) OR
            (kind <> 'prepaid_entitlement' AND source_order_id IS NULL)),
-    CHECK (created_by_admin_id IS NOT NULL OR kind='prepaid_entitlement'),
     CHECK (isfinite(starts_at)),
     CHECK (isfinite(ends_at)),
     CHECK (isfinite(created_at))
@@ -1477,6 +1476,9 @@ CREATE FUNCTION guard_discounts() RETURNS trigger
 LANGUAGE plpgsql SET search_path=shop,pg_catalog AS $$
 DECLARE source_order orders;
 BEGIN
+    IF TG_OP='INSERT' AND NEW.created_by_admin_id IS NULL AND NEW.kind<>'prepaid_entitlement' THEN
+        PERFORM require_true(legacy_allowed('discount',NEW.id),'legacy_coupon_provenance');
+    END IF;
     IF NEW.eligible_user_id IS NOT NULL THEN PERFORM require_true(member_brand(NEW.eligible_user_id)=NEW.brand_id,'coupon_member_brand'); END IF;
     IF NEW.product_id IS NOT NULL THEN
         PERFORM require_true(EXISTS(SELECT 1 FROM brand_products WHERE brand_id=NEW.brand_id AND product_id=NEW.product_id),'coupon_listing');
@@ -1790,7 +1792,11 @@ BEGIN
                 AND a.correlation_id=o.id AND a.reason='paid_source_entitlement' AND o.order_kind='prepaid_units' AND o.payment_status='paid'
                 AND o.user_id=d.eligible_user_id AND o.product_id=d.product_id AND d.max_total_uses=o.quantity
                 AND (EXISTS(SELECT 1 FROM wallet_entries w WHERE w.order_id=o.id AND w.user_id=o.user_id AND w.movement_kind='purchase_debit' AND w.is_posting AND w.signed_amount<0)
-                    OR EXISTS(SELECT 1 FROM payments p WHERE p.order_id=o.id AND p.status='settled' AND p.confirmed_at IS NOT NULL AND p.amount_received>=p.amount_due)))),'revision_audit');
+                    OR EXISTS(SELECT 1 FROM payments p WHERE p.order_id=o.id AND p.status='settled' AND p.confirmed_at IS NOT NULL AND p.amount_received>=p.amount_due))))
+        OR (NEW.revision_no=0 AND d.revision=0 AND d.created_by_admin_id IS NULL AND legacy_allowed('discount',d.id) AND legacy_allowed('discount_revision',NEW.id)
+            AND EXISTS(SELECT 1 FROM audit_events a JOIN legacy_id_map m ON m.target_kind='discount' AND m.target_id=d.id AND m.import_batch=a.correlation_id
+                WHERE a.id=NEW.audit_event_id AND a.actor_kind='system' AND a.action='legacy_import' AND a.entity_kind='discount' AND a.entity_id=d.id
+                    AND a.brand_id=d.brand_id AND a.new_revision=0 AND a.reason LIKE 'protected:%' AND a.command_sha256 IS NOT NULL)),'revision_audit');
     RETURN NEW;
 END $$;
 CREATE TRIGGER coupon_revision_guard BEFORE INSERT ON discount_revisions FOR EACH ROW EXECUTE FUNCTION guard_coupon_revision();
