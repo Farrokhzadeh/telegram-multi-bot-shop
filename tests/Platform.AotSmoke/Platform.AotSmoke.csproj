@@ -26,6 +26,7 @@
     <Compile Include="../Shared/LegacyRecordQualification.cs" Link="Shared/LegacyRecordQualification.cs" />
     <Compile Include="../Shared/LegacyWalletRetentionQualification.cs" Link="Shared/LegacyWalletRetentionQualification.cs" />
     <Compile Include="../Shared/LegacyOrderSnapshotQualification.cs" Link="Shared/LegacyOrderSnapshotQualification.cs" />
+    <Compile Include="../Shared/LegacyReadOnlyOrderQualification.cs" Link="Shared/LegacyReadOnlyOrderQualification.cs" />
     <Compile Include="../Shared/SupplierQualification.cs" Link="Shared/SupplierQualification.cs" />
     <Compile Include="../Shared/SupplierSourceSelectionQualification.cs" Link="Shared/SupplierSourceSelectionQualification.cs" />
     <Compile Include="../Shared/SupplierCredentialQualification.cs" Link="Shared/SupplierCredentialQualification.cs" />

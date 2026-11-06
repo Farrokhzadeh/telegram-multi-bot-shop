@@ -63,7 +63,7 @@ public static class CipherQualification
         finally { CryptographicOperations.ZeroMemory(plain); }
     }
 
-    private static BrandContext Context(Guid brand)
+    public static BrandContext Context(Guid brand)
     {
         var registry = new BotBrandRegistry([new("test-bot", "a", brand, 101, SyntheticSecretFiles.Deployment, 7, true)]);
         if (!registry.TryResolveAuthenticated("test-bot", new ClaimsPrincipal(new ClaimsIdentity(

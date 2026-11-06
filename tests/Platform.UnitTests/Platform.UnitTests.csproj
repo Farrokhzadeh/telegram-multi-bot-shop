@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../Shared/CipherQualification.cs" Link="Shared/CipherQualification.cs" />
+    <Compile Include="../Shared/LegacyReadOnlyOrderQualification.cs" Link="Shared/LegacyReadOnlyOrderQualification.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
     <Compile Include="../Shared/SupplierCredentialQualification.cs" Link="Shared/SupplierCredentialQualification.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
