@@ -6,7 +6,7 @@ namespace Platform.SchemaRunner;
 
 internal static class SourceCopyInspection
 {
-    internal static async Task RunAsync(string connection, string plan, string receipt, CancellationToken ct = default)
+    internal static async Task RunAsync(string connection, string plan, string receipt, CancellationToken ct = default, bool inspectOrders = false)
     {
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_SOURCE_INSPECTION") != "1" || !Path.IsPathFullyQualified(receipt) || File.Exists(receipt) || plan.Length > 1048576) throw new MigrationRejectedException();
         using var document = JsonDocument.Parse(plan); var root = document.RootElement;
@@ -28,12 +28,18 @@ internal static class SourceCopyInspection
             var expected = root.GetProperty("tables").EnumerateArray().Select(t => new LegacySourceTableExpectation(t.GetProperty("table").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("key").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("count").GetInt64(), Convert.FromHexString(t.GetProperty("commitment").GetString() ?? throw new MigrationRejectedException()))).ToArray();
             var reader = new LegacySourceReader(data, new(host, 5432, database, "teleg_source_reader"));
             var counts = await reader.VerifyCopyAsync(schema, expected, key, ct);
+            var orders = inspectOrders ? await reader.InspectOrderSnapshotsAsync(schema, ct) : null;
             using var body = new MemoryStream();
             using (var writer = new Utf8JsonWriter(body))
             {
                 writer.WriteStartObject(); writer.WriteString("scope", "native_read_only_source_copy_validation"); writer.WriteString("archive_sha256", archive); writer.WriteString("schema_sha256", Convert.ToHexStringLower(schema)); writer.WriteNumber("server_version", root.GetProperty("server_version").GetInt32()); writer.WriteBoolean("release_ready", false); writer.WriteBoolean("source_unchanged", true); writer.WriteStartObject("table_rows");
                 foreach (var row in counts) writer.WriteNumber(row.Key, row.Value);
-                writer.WriteEndObject(); writer.WriteEndObject();
+                writer.WriteEndObject();
+                if (orders is not null)
+                {
+                    writer.WriteStartObject("order_snapshots"); writer.WriteString("scope", orders.Scope); writer.WriteNumber("orders", orders.Orders); writer.WriteNumber("empty_snapshots", orders.EmptySnapshots); writer.WriteNumber("accepted_terms", orders.AcceptedTerms); writer.WriteNumber("rejected_terms", orders.RejectedTerms); writer.WriteNumber("missing_members", orders.MissingMembers); writer.WriteNumber("missing_products", orders.MissingProducts); writer.WriteBoolean("import_approved", false); writer.WriteEndObject();
+                }
+                writer.WriteEndObject();
             }
             var file = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite };
             await using var output = new FileStream(receipt, file); await output.WriteAsync(body.ToArray(), ct);

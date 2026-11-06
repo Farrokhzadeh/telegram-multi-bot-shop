@@ -38,14 +38,19 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
     internal LegacyOrderTerms Terms()
     {
         if (Record.Source.Projection != LegacyProjection.OrderRecord || Member == Guid.Empty || string.IsNullOrWhiteSpace(HistoricalBrandName) || HistoricalBrandName.Length > 160) throw new MigrationRejectedException();
+        return ReadTerms(Record.Source);
+    }
+    internal static LegacyOrderTerms ReadTerms(LegacySourceRecord source)
+    {
+        if (source.Projection != LegacyProjection.OrderRecord) throw new MigrationRejectedException();
         try
         {
-            using var document = Record.Source.Open(); var row = document.RootElement; var snapshot = row.GetProperty("checkout_snapshot");
+            using var document = source.Open(); var row = document.RootElement; var snapshot = row.GetProperty("checkout_snapshot");
             int quantity = row.GetProperty("qty").GetInt32(); long product = row.GetProperty("product_id").GetInt64(); decimal total = LegacyValues.Number(row, "total");
             string currency = LegacyValues.Text(row, "currency"), method = LegacyValues.Text(snapshot, "payment_method"), type = LegacyValues.Text(snapshot, "product_type"), title = LegacyValues.Text(snapshot, "product_name");
             decimal original = LegacyValues.Number(snapshot, "original_usd"), net = LegacyValues.Number(snapshot, "total_usd"), originalToman = LegacyValues.Number(snapshot, "original_toman"), netToman = LegacyValues.Number(snapshot, "total_toman");
             int discounted = snapshot.GetProperty("discount_quantity").GetInt32(); string? code = LegacyValues.Optional(snapshot, "discount_code"), percent = LegacyValues.Optional(snapshot, "discount_pct");
-            if (Record.Source.Id.Length != 16 || !Record.Source.Id.StartsWith("ORD-", StringComparison.Ordinal) || Record.Source.Id.Skip(4).Any(c => !char.IsAsciiHexDigitUpper(c)) ||
+            if (source.Id.Length != 16 || !source.Id.StartsWith("ORD-", StringComparison.Ordinal) || source.Id.Skip(4).Any(c => !char.IsAsciiHexDigitUpper(c)) ||
                 quantity <= 0 || product <= 0 || snapshot.GetProperty("version").GetInt32() != 1 || snapshot.GetProperty("product_id").GetInt64() != product || snapshot.GetProperty("quantity").GetInt32() != quantity ||
                 LegacyValues.Text(snapshot, "currency") != currency || string.IsNullOrWhiteSpace(title) || title.Length > 160 || original <= 0 || net < 0 || net > original || originalToman < 0 || netToman < 0 || netToman > originalToman ||
                 LegacyValues.Number(snapshot, "savings_usd") != ExactDecimal.Subtract(original, net) || LegacyValues.Number(snapshot, "savings_toman") != ExactDecimal.Subtract(originalToman, netToman) || ExactDecimal.Multiply(ExactDecimal.Divide(original, quantity), quantity) != original ||

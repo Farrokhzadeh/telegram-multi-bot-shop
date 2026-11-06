@@ -34,9 +34,9 @@ if (args is ["--inspect-wallet-register", "--register-file", var registerFile, "
     { Console.Error.WriteLine("Wallet register inspection rejected; retain protected inputs for review."); return 78; }
 }
 
-if (args is ["--inspect-source-copy", "--connection-file", var copyConnection, "--plan-file", var copyPlan, "--receipt", var copyReceipt])
+if (args is [var inspectMode, "--connection-file", var copyConnection, "--plan-file", var copyPlan, "--receipt", var copyReceipt] && inspectMode is "--inspect-source-copy" or "--inspect-source-orders")
 {
-    try { await SourceCopyInspection.RunAsync(ReadProtectedFile(copyConnection).Trim(), ReadProtectedFile(copyPlan), copyReceipt); Console.WriteLine("Read-only source copy verified; redacted receipt written."); return 0; }
+    try { await SourceCopyInspection.RunAsync(ReadProtectedFile(copyConnection).Trim(), ReadProtectedFile(copyPlan), copyReceipt, inspectOrders: inspectMode == "--inspect-source-orders"); Console.WriteLine("Read-only source copy verified; redacted receipt written."); return 0; }
     catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or MigrationRejectedException or NpgsqlException or Platform.Persistence.DbOperationException)
     { Console.Error.WriteLine("Source copy inspection rejected; retain protected inputs for review."); return 78; }
 }
