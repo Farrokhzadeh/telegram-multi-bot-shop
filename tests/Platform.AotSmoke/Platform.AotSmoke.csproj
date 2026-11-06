@@ -23,6 +23,7 @@
     <Compile Include="../Shared/AiHttpQualification.cs" Link="Shared/AiHttpQualification.cs" />
 
     <Compile Include="../Shared/MigrationQualification.cs" Link="Shared/MigrationQualification.cs" />
+    <Compile Include="../Shared/LegacyArchiveFilesQualification.cs" Link="Shared/LegacyArchiveFilesQualification.cs" />
     <Compile Include="../Shared/LegacyRecordQualification.cs" Link="Shared/LegacyRecordQualification.cs" />
     <Compile Include="../Shared/LegacyWalletRetentionQualification.cs" Link="Shared/LegacyWalletRetentionQualification.cs" />
     <Compile Include="../Shared/WalletBatchQualification.cs" Link="Shared/WalletBatchQualification.cs" />

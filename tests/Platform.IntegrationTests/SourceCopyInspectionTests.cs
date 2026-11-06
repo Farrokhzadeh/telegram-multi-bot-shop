@@ -6,6 +6,7 @@ public sealed class SourceCopyInspectionTests
 {
     [Theory]
     [InlineData("valid")]
+    [InlineData("visitor")]
     [InlineData("row")]
     [InlineData("missing")]
     [InlineData("extra")]

@@ -20,6 +20,8 @@ await LegacyWalletRetentionQualification.RunAsync();
 await WalletBatchQualification.RunAsync("clock");
 await LegacyOrderSnapshotQualification.RunAsync();
 await LegacyReadOnlyOrderQualification.RunAsync();
+await LegacyArchiveFilesQualification.RunAsync();
+await LegacyArchiveFilesQualification.RunAsync("race");
 Console.WriteLine("PASS: native protected legacy payment, coupon, catalog, free/partial/preorder records and reconciliation.");
 Console.WriteLine("PASS: native pinned migration manifest, atomic mappings, frozen USD opening and non-posting history.");
 await LocalPreorderQualification.RunAsync();

@@ -7,7 +7,15 @@ namespace Platform.Migration;
 
 public sealed record LegacySourceRecord(LegacyProjection Projection, string Id, string Body)
 {
-    internal static IReadOnlyList<LegacyProjection> Projections { get; } = Array.AsReadOnly<LegacyProjection>([LegacyProjection.OrderRecord, LegacyProjection.ProductRecord, LegacyProjection.DiscountRecord, LegacyProjection.PaymentAttempt, LegacyProjection.ManualDeposit, LegacyProjection.InventoryUnit, LegacyProjection.Delivery, LegacyProjection.DeliveryPart, LegacyProjection.PreorderBatch, LegacyProjection.PreorderPart, LegacyProjection.PreorderItem, LegacyProjection.SupplierFulfillment, LegacyProjection.SupplierItem, LegacyProjection.SupplierAttempt, LegacyProjection.SupplierRefundArchive, LegacyProjection.PreorderState, LegacyProjection.PreorderRefundArchive, LegacyProjection.ServiceJob, LegacyProjection.ZeroTransaction, LegacyProjection.DeliveryAttempt]);
+    public static IReadOnlyList<LegacyProjection> Projections { get; } = Array.AsReadOnly<LegacyProjection>([LegacyProjection.OrderRecord, LegacyProjection.ProductRecord, LegacyProjection.DiscountRecord, LegacyProjection.PaymentAttempt, LegacyProjection.ManualDeposit, LegacyProjection.InventoryUnit, LegacyProjection.Delivery, LegacyProjection.DeliveryPart, LegacyProjection.PreorderBatch, LegacyProjection.PreorderPart, LegacyProjection.PreorderItem, LegacyProjection.SupplierFulfillment, LegacyProjection.SupplierItem, LegacyProjection.SupplierAttempt, LegacyProjection.SupplierRefundArchive, LegacyProjection.PreorderState, LegacyProjection.PreorderRefundArchive, LegacyProjection.ServiceJob, LegacyProjection.ZeroTransaction, LegacyProjection.DeliveryAttempt]);
+    public static LegacySourceRecord? CopyCandidate(string table, string id, string body)
+    {
+        var projection = Projections.Where(p => Table(p) == table).Select(p => (LegacyProjection?)p).SingleOrDefault();
+        if (projection is null) return null;
+        using var document = JsonDocument.Parse(body); var value = document.RootElement;
+        if (projection == LegacyProjection.InventoryUnit && (!value.TryGetProperty("order_id", out var order) || order.ValueKind == JsonValueKind.Null) || projection == LegacyProjection.ProductRecord && (!value.GetProperty("active").GetBoolean() || value.GetProperty("is_removed").GetBoolean()) || projection == LegacyProjection.ZeroTransaction && LegacyValues.Number(value, "amount") != 0) return null;
+        var row = new LegacySourceRecord(projection.Value, id, body); using var validated = row.Open(); return row;
+    }
     internal static string Table(LegacyProjection projection) => projection switch
     {
         LegacyProjection.SupplierFulfillment => "supplier_fulfillments",
@@ -168,7 +176,8 @@ public sealed class LegacyRecordArchive(SecretSnapshot secrets)
         try
         {
             plain = new BrandCipher(secrets).Decrypt(context, "legacy_id_map", row.Target, LegacySourceRecord.Table(row.Source.Projection), archived.KeyId, archived.Ciphertext.Span);
-            if (!CryptographicOperations.FixedTimeEquals(expected, plain) || EncryptedFields(row.Source).Count != (archived.ReencryptedFields?.Count ?? 0)) return false;
+            var sourceFields = EncryptedFields(row.Source); var targetFields = archived.ReencryptedFields ?? [];
+            if (!CryptographicOperations.FixedTimeEquals(expected, plain) || sourceFields.Count != targetFields.Count || targetFields.Select(f => f.Field).Distinct(StringComparer.Ordinal).Count() != targetFields.Count || sourceFields.Any(f => !targetFields.Any(t => t.Field == f.Field))) return false;
             foreach (var field in archived.ReencryptedFields ?? [])
             {
                 byte[] recovered = new BrandCipher(secrets).Decrypt(context, "legacy_id_map", row.Target, FieldLocation(row.Source, field.Field), field.KeyId, field.Ciphertext.Span);
@@ -192,6 +201,26 @@ public sealed class LegacyRecordArchive(SecretSnapshot secrets)
         if (field.Item1.Length == 0) return [];
         using var document = source.Open(); string? value = LegacyValues.Optional(document.RootElement, field.Item1);
         return value is null ? [] : [(field.Item1, value, field.Item2)];
+    }
+    public bool MatchesRecovered(BrandContext context, ArchivedLegacyRecord row, IEnumerable<string> legacyKeys)
+    {
+        if (!Matches(context, row, row.Evidence)) return false;
+        var expected = EncryptedFields(row.Source); var fields = row.Evidence.ReencryptedFields ?? [];
+        if (fields.Count != expected.Count || fields.Select(f => f.Field).Distinct(StringComparer.Ordinal).Count() != fields.Count) return false;
+        foreach (var source in expected)
+        {
+            var field = fields.SingleOrDefault(f => f.Field == source.Field); if (field is null) return false;
+            byte[] plain = [], recovered = [];
+            try
+            {
+                plain = Encoding.UTF8.GetBytes(LegacyFernetReader.Decrypt(source.Value, source.Kind, legacyKeys));
+                recovered = new BrandCipher(secrets).Decrypt(context, "legacy_id_map", row.Target, FieldLocation(row.Source, source.Field), field.KeyId, field.Ciphertext.Span);
+                if (!CryptographicOperations.FixedTimeEquals(plain, recovered)) return false;
+            }
+            catch (Exception error) when (error is CryptographicException or CipherRejectedException) { return false; }
+            finally { CryptographicOperations.ZeroMemory(plain); CryptographicOperations.ZeroMemory(recovered); }
+        }
+        return true;
     }
     private static string FieldLocation(LegacySourceRecord source, string field) => "recovered_" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(source.Projection + ":" + source.Id + ":" + field)))[..16];
     internal static byte[] Digest(ProtectedLegacyEvidence evidence)

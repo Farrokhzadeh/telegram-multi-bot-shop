@@ -6,7 +6,7 @@ namespace Platform.Migration;
 public sealed record LegacySourceTableExpectation(string Table, string Key, long Count, ReadOnlyMemory<byte> Commitment);
 public sealed partial class LegacySourceReader
 {
-    public async Task<IReadOnlyDictionary<string, long>> VerifyCopyAsync(ReadOnlyMemory<byte> schema, IReadOnlyList<LegacySourceTableExpectation> expected, ReadOnlyMemory<byte> commitmentKey, CancellationToken ct = default)
+    public async Task<IReadOnlyDictionary<string, long>> VerifyCopyAsync(ReadOnlyMemory<byte> schema, IReadOnlyList<LegacySourceTableExpectation> expected, ReadOnlyMemory<byte> commitmentKey, CancellationToken ct = default, Func<string, string, string, CancellationToken, ValueTask>? visit = null)
     {
         if (schema.Length != 32 || commitmentKey.Length != 32 || expected.Count is < 1 or > 1000 || expected.Select(x => x.Table).Distinct(StringComparer.Ordinal).Count() != expected.Count || expected.Any(x => !Identifier(x.Table) || !Identifier(x.Key) || x.Count is < 0 or > 1000000 || x.Commitment.Length != 32)) throw new MigrationRejectedException();
         expected = expected.Select(x => x with { Commitment = x.Commitment.ToArray() }).ToArray();
@@ -33,6 +33,7 @@ public sealed partial class LegacySourceReader
                 {
                     if (row.Key.Length > 1024 || row.Body.Length > 1048576 || ++seen > table.Count) throw new MigrationRejectedException();
                     Append(hash, row.Key); Append(hash, row.Body);
+                    if (visit is not null) await visit(table.Table, row.Key, row.Body, ct);
                 }
                 last = rows[^1].Key;
             }

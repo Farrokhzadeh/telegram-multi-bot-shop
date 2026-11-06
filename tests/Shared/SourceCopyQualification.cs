@@ -27,7 +27,15 @@ public static class SourceCopyQualification
             bool rejected = false;
             try
             {
-                var result = await reader.VerifyCopyAsync(schema, expected, key, ct);
+                var visited = new HashSet<string>(StringComparer.Ordinal);
+                ValueTask Visit(string table, string id, string body, CancellationToken token)
+                {
+                    if (fault == "visitor") throw new MigrationRejectedException();
+                    if (!visited.Add(table + ":" + id) || !body.Contains("\"id\": 1", StringComparison.Ordinal)) throw new InvalidOperationException("Source stream changed its committed identity.");
+                    return ValueTask.CompletedTask;
+                }
+                var result = await reader.VerifyCopyAsync(schema, expected, key, ct, Visit);
+                if (visited.Count != 2) throw new InvalidOperationException("Source archive stream omitted a committed row.");
                 if (result.Count != 2 || result["users"] != 1 || result["django_migrations"] != 1) throw new InvalidOperationException("Source copy count mismatch.");
                 var again = await reader.VerifyCopyAsync(schema, expected, key, ct);
                 if (again.Count != result.Count) throw new InvalidOperationException("Source inspection replay mismatch.");

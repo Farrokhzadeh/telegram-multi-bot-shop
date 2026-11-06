@@ -17,6 +17,7 @@ internal static class WalletCopyQualification
         ["teleg_source_prod2"] = ("kuala", "a61aaddbbd76a10aa6894aa02cffe861cb44a9602b1d085eecc981f822656071"),
         ["teleg_source_prod3"] = ("zikotech", "4481980586074034e84ff11d867621a1aa847c18589576ab7dd89155a21d6245")
     };
+    internal static string SourceBrand(string database, string archive) => Sources.TryGetValue(database, out var source) && source.Archive == archive ? source.Brand : throw new MigrationRejectedException();
     internal static async Task RunAsync(string job, string receipt, Func<string, string> read, CancellationToken ct = default)
     {
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_WALLET_QUALIFICATION") != "1" || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_SOURCE_INSPECTION") != "1" || job.Length > 16384) throw new MigrationRejectedException();
@@ -97,9 +98,9 @@ internal static class WalletCopyQualification
         }
         finally { CryptographicOperations.ZeroMemory(register); }
     }
-    private static byte[] JsonBody(Action<Utf8JsonWriter> body)
+    internal static byte[] JsonBody(Action<Utf8JsonWriter> body)
     { using var stream = new MemoryStream(); using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); body(writer); writer.WriteEndObject(); } return stream.ToArray(); }
-    private static async Task WriteAsync(string path, byte[] bytes, CancellationToken ct)
+    internal static async Task WriteAsync(string path, byte[] bytes, CancellationToken ct)
     {
         if (!OperatingSystem.IsLinux()) throw new MigrationRejectedException();
         await using var stream = new FileStream(path, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite });

@@ -6,7 +6,7 @@ namespace Platform.SchemaRunner;
 
 internal static class SourceCopyInspection
 {
-    internal static async Task RunAsync(string connection, string plan, string receipt, CancellationToken ct = default, bool inspectOrders = false)
+    internal static async Task RunAsync(string connection, string plan, string receipt, CancellationToken ct = default, bool inspectOrders = false, Func<string, string, string, CancellationToken, ValueTask>? visit = null)
     {
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_SOURCE_INSPECTION") != "1" || !Path.IsPathFullyQualified(receipt) || File.Exists(receipt) || plan.Length > 1048576) throw new MigrationRejectedException();
         using var document = JsonDocument.Parse(plan); var root = document.RootElement;
@@ -27,7 +27,7 @@ internal static class SourceCopyInspection
             }
             var expected = root.GetProperty("tables").EnumerateArray().Select(t => new LegacySourceTableExpectation(t.GetProperty("table").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("key").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("count").GetInt64(), Convert.FromHexString(t.GetProperty("commitment").GetString() ?? throw new MigrationRejectedException()))).ToArray();
             var reader = new LegacySourceReader(data, new(host, 5432, database, "teleg_source_reader"));
-            var counts = await reader.VerifyCopyAsync(schema, expected, key, ct);
+            var counts = await reader.VerifyCopyAsync(schema, expected, key, ct, visit);
             var orders = inspectOrders ? await reader.InspectOrderSnapshotsAsync(schema, ct, expected.Single(t => t.Table == "orders"), key) : null;
             using var body = new MemoryStream();
             using (var writer = new Utf8JsonWriter(body))
