@@ -22,6 +22,13 @@ string ReadProtectedFile(string path)
     return File.ReadAllText(path);
 }
 
+if (args is ["--qualify-wallet-copy", "--job-file", var walletJob, "--receipt", var walletReceipt])
+{
+    try { await WalletCopyQualification.RunAsync(ReadProtectedFile(walletJob), walletReceipt, ReadProtectedFile); Console.WriteLine("Protected copy wallet qualification passed; redacted receipt written."); return 0; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or ArithmeticException or MigrationRejectedException or NpgsqlException or Platform.Persistence.DbOperationException)
+    { Console.Error.WriteLine("Protected wallet qualification rejected; retain private evidence for review."); return 78; }
+}
+
 if (args is ["--inspect-wallet-register", "--register-file", var registerFile, "--receipt", var registerReceipt])
 {
     try

@@ -35,6 +35,27 @@ public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory d
         var result = await reconciliation.CompareAsync(context, manifest, set, readArchive, ct, readRetention);
         if (!result.Matched) throw new MigrationRejectedException(); return result;
     }
+    public async Task<WalletRecordReconciliation> ImportWalletsAsync(BrandContext context, VerifiedImportManifest manifest, IReadOnlyList<LegacyWalletSnapshot> input, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>> readRetention, CancellationToken ct = default)
+    {
+        var rows = input.Select(r => r with { History = Array.AsReadOnly(r.History.ToArray()) }).ToArray();
+        if (manifest.TargetBrand != context.BrandId || rows.Length == 0 || rows.Select(r => r.LegacyUser).Distinct(StringComparer.Ordinal).Count() != rows.Length || rows.Select(r => r.TargetUser).Distinct().Count() != rows.Length || rows.Length != manifest.Proofs.Count(p => p.Projection == LegacyProjection.User) || rows.Sum(r => r.BalanceUsd) != manifest.ExpectedOpeningUsd || manifest.Proofs.Any(p => p.Projection is not (LegacyProjection.User or LegacyProjection.WalletSnapshot or LegacyProjection.WalletOpening or LegacyProjection.Transaction))) throw new MigrationRejectedException();
+        foreach (var row in rows)
+        {
+            row.Validate(); row.Retention?.Require(manifest);
+            if (row.Retention is null || !await row.Retention.MatchesAsync(readRetention, ct)) throw new MigrationRejectedException();
+            foreach (var proof in row.Proofs(context.BrandId)) manifest.Require(proof);
+        }
+        if (rows.Sum(r => r.Proofs(context.BrandId).Count) != manifest.Proofs.Count) throw new MigrationRejectedException();
+        var clocks = rows.Select(r => r.State?.ObservedAt).Distinct().ToArray();
+        if (clocks.Length != 1 || clocks[0] is not DateTime observed) throw new MigrationRejectedException();
+        var verified = await source.PlanWalletsAsync(Convert.FromHexString(manifest.SourceSchemaDigest), manifest.Batch, context.BrandId, rows.ToDictionary(r => r.LegacyUser, r => r.Retention!, StringComparer.Ordinal), observed, ct);
+        if (verified.Count != rows.Length) throw new MigrationRejectedException();
+        foreach (var row in verified) foreach (var proof in row.Proofs(context.BrandId)) manifest.Require(proof);
+        var writer = new OpeningBalanceImportWorkflow(destination);
+        foreach (var row in verified) await writer.ImportAsync(context, manifest, row, ct, readRetention);
+        var report = await new ReconciliationReport(destination).CompareWalletsAsync(manifest, rows, ct, readRetention);
+        if (!report.Matched) throw new MigrationRejectedException(); return report;
+    }
     public async Task ImportOrderAsync(BrandContext context, VerifiedImportManifest manifest, string legacyId, Guid target, Guid user, string historicalBrandName, CancellationToken ct = default)
     {
         if (context.BrandId != manifest.TargetBrand) throw new MigrationRejectedException();

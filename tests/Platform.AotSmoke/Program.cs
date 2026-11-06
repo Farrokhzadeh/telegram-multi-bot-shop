@@ -17,6 +17,7 @@ Console.WriteLine("PASS: native read-only source copy, independent commitments a
 await MigrationQualification.RunAsync();
 await LegacyRecordQualification.RunAsync();
 await LegacyWalletRetentionQualification.RunAsync();
+await WalletBatchQualification.RunAsync();
 await LegacyOrderSnapshotQualification.RunAsync();
 await LegacyReadOnlyOrderQualification.RunAsync();
 Console.WriteLine("PASS: native protected legacy payment, coupon, catalog, free/partial/preorder records and reconciliation.");
