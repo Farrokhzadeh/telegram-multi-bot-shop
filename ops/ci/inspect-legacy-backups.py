@@ -25,7 +25,7 @@ def decode(value):
     raise ValueError()
   return re.sub(r'\\([0-7]{1,3}|x[0-9a-fA-F]{1,2}|.)', escaped, value)
 
-def copy_tables(sql):
+def copy_tables(sql, retained=TABLES):
   tables, counts, current = {}, {}, None
   for line in sql.split('\n'):
     if current is not None:
@@ -36,7 +36,7 @@ def copy_tables(sql):
       if len(values) != len(columns):
         raise ValueError()
       counts[current] += 1
-      if current in TABLES:
+      if current in retained:
         tables[current].append(dict(zip(columns, map(decode, values), strict=True)))
       continue
     match = re.fullmatch(r'COPY public\.([a-z_]+) \((.+)\) FROM stdin;', line)

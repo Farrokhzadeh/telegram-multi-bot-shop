@@ -13,11 +13,13 @@ public sealed record MigrationReconciliation(Guid Batch, long ExpectedMappings, 
 }
 public sealed class ReconciliationReport(DbSessionFactory sessions)
 {
-    public async Task<WalletRecordReconciliation> CompareWalletsAsync(VerifiedImportManifest manifest, IReadOnlyList<LegacyWalletSnapshot> source, CancellationToken ct = default)
+    public async Task<WalletRecordReconciliation> CompareWalletsAsync(VerifiedImportManifest manifest, IReadOnlyList<LegacyWalletSnapshot> source, CancellationToken ct = default, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? readRetention = null)
     {
         var rows = source.Select(r => r with { History = Array.AsReadOnly(r.History.ToArray()) }).ToArray();
         if (rows.Select(r => r.TargetUser).Distinct().Count() != rows.Length) throw new MigrationRejectedException();
         foreach (var row in rows) foreach (var proof in row.Proofs(manifest.TargetBrand)) manifest.Require(proof);
+        long invalidRetentions = 0;
+        foreach (var row in rows.Where(r => r.Retention is not null)) { row.Retention!.Require(manifest); if (!await row.Retention.MatchesAsync(readRetention, ct)) invalidRetentions++; }
         await using var session = await sessions.BeginReadOnlyAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         long mismatch = 0, missingMaps = 0, mismatchedMaps = 0, foundMaps = 0;
@@ -43,7 +45,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         long expectedEntries = expectedHistory + expectedOpenings;
         long uncovered = Math.Abs(expectedHistory - rows.Sum(r => (long)r.History.Count)) + Math.Abs(expectedOpenings - rows.LongCount(r => r.BalanceUsd > 0)) + Math.Abs(expectedEntries - actualEntries);
         long walletMaps = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2 AND source_table IN ('users','users.balance.snapshot','users.balance.opening','transactions')", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
-        return new(manifest.Batch, expected, rows.LongLength, mismatch, missingMaps, mismatchedMaps, uncovered, Math.Max(0, walletMaps - foundMaps));
+        return new(manifest.Batch, expected, rows.LongLength, mismatch, missingMaps, mismatchedMaps, uncovered, Math.Max(0, walletMaps - foundMaps), invalidRetentions, rows.LongCount(r => r.Retention?.ManualIrrBalance == true), rows.Sum(r => r.Retention?.HistoryRows ?? 0), rows.Sum(r => r.Retention?.IrrHistoryRows ?? 0), rows.Sum(r => r.Retention?.ZeroHistoryRows ?? 0));
     }
     public async Task<HistoricalOrderReconciliation> CompareOrdersAsync(VerifiedImportManifest manifest, IReadOnlyList<LegacyHistoricalOrder> source, CancellationToken ct = default)
     {
@@ -109,9 +111,9 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
 [JsonSerializable(typeof(LegacyRecordReconciliation))]
 [JsonSerializable(typeof(ProtectedLegacyEvidence))]
 public sealed partial class MigrationReportJsonContext : JsonSerializerContext;
-public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets, long ComparedWallets, long MismatchedRecords, long MissingMappings, long MismatchedMappings, long UnmatchedEntries, long UnexpectedMappings)
+public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets, long ComparedWallets, long MismatchedRecords, long MissingMappings, long MismatchedMappings, long UnmatchedEntries, long UnexpectedMappings, long InvalidRetentions = 0, long ManualIrrAccounts = 0, long RetainedHistoryRows = 0, long RetainedIrrHistory = 0, long RetainedZeroHistory = 0)
 {
-    public bool Matched => ExpectedWallets == ComparedWallets && MismatchedRecords == 0 && MissingMappings == 0 && MismatchedMappings == 0 && UnmatchedEntries == 0 && UnexpectedMappings == 0;
+    public bool Matched => ExpectedWallets == ComparedWallets && MismatchedRecords == 0 && MissingMappings == 0 && MismatchedMappings == 0 && UnmatchedEntries == 0 && UnexpectedMappings == 0 && InvalidRetentions == 0;
     public bool ReleaseReady => false;
     public string Scope => "source_bound_wallet_records_only";
     public override string ToString() => "WalletRecordReconciliation [redacted]";

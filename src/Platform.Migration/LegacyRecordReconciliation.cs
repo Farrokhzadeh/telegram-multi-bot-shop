@@ -8,9 +8,9 @@ public sealed record LegacyImportSet(IReadOnlyList<LegacyWalletSnapshot> Wallets
 {
     public override string ToString() => "LegacyImportSet [redacted]";
 }
-public sealed record LegacyRecordReconciliation(Guid Batch, long ExpectedRecords, long ComparedRecords, long MismatchedRecords, long InvalidArchives, long MissingMappings, long MismatchedMappings, long UnexpectedMappings, bool WalletMatched, long SaleableInventory, long ExpectedEncryptedFields, long ReencryptedFields)
+public sealed record LegacyRecordReconciliation(Guid Batch, long ExpectedRecords, long ComparedRecords, long MismatchedRecords, long InvalidArchives, long MissingMappings, long MismatchedMappings, long UnexpectedMappings, bool WalletMatched, long SaleableInventory, long ExpectedEncryptedFields, long ReencryptedFields, long InvalidRetentions = 0, long ManualIrrAccounts = 0, long RetainedHistoryRows = 0, long RetainedIrrHistory = 0, long RetainedZeroHistory = 0)
 {
-    public bool Matched => ExpectedRecords == ComparedRecords && MismatchedRecords == 0 && InvalidArchives == 0 && MissingMappings == 0 && MismatchedMappings == 0 && UnexpectedMappings == 0 && WalletMatched && SaleableInventory == 0 && ExpectedEncryptedFields == ReencryptedFields;
+    public bool Matched => ExpectedRecords == ComparedRecords && MismatchedRecords == 0 && InvalidArchives == 0 && MissingMappings == 0 && MismatchedMappings == 0 && UnexpectedMappings == 0 && WalletMatched && SaleableInventory == 0 && ExpectedEncryptedFields == ReencryptedFields && InvalidRetentions == 0;
     public bool ReleaseReady => false;
     public string Scope => "source_bound_legacy_projections_and_protected_records";
     public override string ToString() => "LegacyRecordReconciliation [redacted]";
@@ -18,7 +18,7 @@ public sealed record LegacyRecordReconciliation(Guid Batch, long ExpectedRecords
 public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destination, SecretSnapshot secrets)
 {
     private readonly DbSessionFactory sessions = new(destination, new DbSessionOptions { ReadOnly = true, Isolation = IsolationLevel.RepeatableRead });
-    public async Task<LegacyRecordReconciliation> CompareAsync(BrandContext context, VerifiedImportManifest manifest, LegacyImportSet source, Func<string, CancellationToken, Task<ProtectedLegacyEvidence>> readArchive, CancellationToken ct = default)
+    public async Task<LegacyRecordReconciliation> CompareAsync(BrandContext context, VerifiedImportManifest manifest, LegacyImportSet source, Func<string, CancellationToken, Task<ProtectedLegacyEvidence>> readArchive, CancellationToken ct = default, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? readRetention = null)
     {
         if (manifest.TargetBrand != context.BrandId) throw new MigrationRejectedException();
         var orders = source.Orders.ToArray(); var payments = source.Payments.ToArray(); var coupons = source.Coupons.ToArray(); var catalog = source.Catalog.ToArray(); var delivery = source.Delivery.ToArray();
@@ -29,6 +29,8 @@ public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destinatio
         foreach (var row in orders) foreach (var proof in row.Proofs(context, secrets)) manifest.Require(proof);
         foreach (var row in coupons) foreach (var proof in row.Proofs(context, secrets)) manifest.Require(proof);
         foreach (var row in wallets) foreach (var proof in row.Proofs(context.BrandId)) manifest.Require(proof);
+        long invalidRetentions = 0;
+        foreach (var wallet in wallets.Where(w => w.Retention is not null)) { wallet.Retention!.Require(manifest); if (!await wallet.Retention.MatchesAsync(readRetention, ct)) invalidRetentions++; }
         long invalidArchives = 0, reencrypted = 0; var archive = new LegacyRecordArchive(secrets);
         foreach (var row in records)
         {
@@ -68,6 +70,6 @@ public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destinatio
         foreach (var proof in manifest.Proofs)
             if (await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind=$3 AND legacy_id=$4 AND import_batch=$5 AND import_manifest_ref=$6)", DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetBoolean(0), ct)) knownMaps++;
         long expected = manifest.Proofs.LongCount(p => p.Projection is LegacyProjection.WalletSnapshot or LegacyProjection.OrderRecord or LegacyProjection.PaymentAttempt or LegacyProjection.ManualDeposit or LegacyProjection.InventoryUnit or LegacyProjection.Delivery or LegacyProjection.DeliveryPart or LegacyProjection.PreorderBatch or LegacyProjection.PreorderPart or LegacyProjection.PreorderItem or LegacyProjection.DiscountRecord or LegacyProjection.ProductRecord or LegacyProjection.SupplierFulfillment or LegacyProjection.SupplierItem or LegacyProjection.SupplierAttempt or LegacyProjection.SupplierRefundArchive or LegacyProjection.PreorderState or LegacyProjection.PreorderRefundArchive or LegacyProjection.ServiceJob or LegacyProjection.ZeroTransaction or LegacyProjection.DeliveryAttempt);
-        return new(manifest.Batch, expected, records.LongLength + wallets.LongLength, mismatched, invalidArchives, mapping.MissingMappings, mapping.MismatchedMappings, Math.Max(0, batchMaps - knownMaps), walletMatched, mapping.SaleableInventory, records.Sum(r => (long)LegacyRecordArchive.EncryptedFields(r.Source).Count), reencrypted);
+        return new(manifest.Batch, expected, records.LongLength + wallets.LongLength, mismatched, invalidArchives, mapping.MissingMappings, mapping.MismatchedMappings, Math.Max(0, batchMaps - knownMaps), walletMatched, mapping.SaleableInventory, records.Sum(r => (long)LegacyRecordArchive.EncryptedFields(r.Source).Count), reencrypted, invalidRetentions, wallets.LongCount(w => w.Retention?.ManualIrrBalance == true), wallets.Sum(w => w.Retention?.HistoryRows ?? 0), wallets.Sum(w => w.Retention?.IrrHistoryRows ?? 0), wallets.Sum(w => w.Retention?.ZeroHistoryRows ?? 0));
     }
 }

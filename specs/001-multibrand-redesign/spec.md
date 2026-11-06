@@ -409,3 +409,6 @@ These decisions settle the feature-spec questions but do **not** constitute proo
 **Included**: Multi-brand backend, customer bots, secure central administrative APIs, catalogs and inheritance, money, local/API/manual fulfillment, administrator-selected multiple supplier mappings, automatic paid local-preorder FIFO, campaigns, brand isolation, historical migration, independent optional AI integration.
 
 **Not authorized**: Graphical admin/dashboard UI or frontend, production cutover, deletion of source databases, importing live customer secrets into an unapproved environment, automatic cross-brand wallet sharing, auto-merging other legacy product catalogs, or rebuilding the full AI provider implementation inside the commerce host.
+
+## Owner-approved retained-wallet continuation — 2026-11-06
+Owner clarification for FR-035: legacy IRR balances are excluded from operational USD postings only under exact private per-account retention/manual handling. Preserve all original native-currency and zero history; convert or waive nothing. Incomplete old orders must remain read-only, with missing terms unknown and new fulfillment blocked. Imported legacy discounts remain inactive while original state and obligations are preserved.

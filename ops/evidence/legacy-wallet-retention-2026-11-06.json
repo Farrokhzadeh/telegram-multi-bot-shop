@@ -1,0 +1,47 @@
+{
+  "actual_target_import_executed": false,
+  "actual_target_reencryption_executed": false,
+  "native_register_validation_executed": false,
+  "operational_postings": 0,
+  "parent_permission": "0o700",
+  "policy": "manual_irr_and_original_nonposting_history_v2",
+  "production_database_connected": false,
+  "production_services_modified": false,
+  "read_only_order_import_executed": false,
+  "register_permission": "0o600",
+  "register_replay_identical": true,
+  "release_ready": false,
+  "scope": "private_wallet_history_preservation_only",
+  "sources": [
+    {
+      "archive_sha256": "0e86433927fa420ad3e13bbff2098119d47dfbaa0b626573c552999902703667",
+      "brand": "acc-abad",
+      "preserved_history": 6572,
+      "preserved_irr_history": 6455,
+      "preserved_nonzero_irr_balances": 34,
+      "preserved_zero_history": 348,
+      "source": "prod1",
+      "source_users": 9277
+    },
+    {
+      "archive_sha256": "a61aaddbbd76a10aa6894aa02cffe861cb44a9602b1d085eecc981f822656071",
+      "brand": "kuala",
+      "preserved_history": 0,
+      "preserved_irr_history": 0,
+      "preserved_nonzero_irr_balances": 0,
+      "preserved_zero_history": 0,
+      "source": "prod2",
+      "source_users": 12
+    },
+    {
+      "archive_sha256": "4481980586074034e84ff11d867621a1aa847c18589576ab7dd89155a21d6245",
+      "brand": "zikotech",
+      "preserved_history": 930,
+      "preserved_irr_history": 920,
+      "preserved_nonzero_irr_balances": 6,
+      "preserved_zero_history": 58,
+      "source": "prod3",
+      "source_users": 2993
+    }
+  ]
+}

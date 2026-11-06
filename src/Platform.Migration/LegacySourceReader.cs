@@ -160,7 +160,7 @@ public sealed partial class LegacySourceReader
         }
         return SHA256.HashData(bytes.ToArray());
     }
-    public async Task<LegacyWalletSnapshot> ReadWalletAsync(VerifiedImportManifest manifest, long telegramId, Guid targetUser, Guid targetOpening, IReadOnlyDictionary<string, Guid> historyTargets, CancellationToken ct = default, DateTime? observedAt = null)
+    public async Task<LegacyWalletSnapshot> ReadWalletAsync(VerifiedImportManifest manifest, long telegramId, Guid targetUser, Guid targetOpening, IReadOnlyDictionary<string, Guid> historyTargets, CancellationToken ct = default, DateTime? observedAt = null, LegacyWalletRetention? retention = null)
     {
         if (telegramId <= 0 || historyTargets.Count > 1000) throw new MigrationRejectedException();
         historyTargets = new Dictionary<string, Guid>(historyTargets, StringComparer.Ordinal);
@@ -170,13 +170,17 @@ public sealed partial class LegacySourceReader
             r => (Balance: ExactDecimal.Parse(r.GetString(0)), Other: ExactDecimal.Parse(r.GetString(1)), Language: r.GetString(2), First: r.GetUtc(3), Last: r.GetUtc(4), Active: r.GetBoolean(5), Banned: r.GetBoolean(6), Username: r.IsDBNull(7) ? null : r.GetString(7), FirstName: r.IsDBNull(8) ? null : r.GetString(8), LastName: r.IsDBNull(9) ? null : r.GetString(9), BannedAt: r.IsDBNull(10) ? (DateTime?)null : r.GetUtc(10)), ct);
         bool profile = !user.Active || user.Banned || !string.IsNullOrEmpty(user.Username) || !string.IsNullOrEmpty(user.FirstName) || !string.IsNullOrEmpty(user.LastName);
         if (profile && observedAt is null) throw new MigrationRejectedException();
-        var zeros = await session.QueryManyAsync(new DbStatement("SELECT id FROM public.transactions WHERE user_id=$1 AND amount=0 ORDER BY id", DbValue.Bigint(telegramId)), r => r.GetString(0), 1000, ct);
-        foreach (string id in zeros) if (!manifest.Proofs.Any(p => p.Projection == LegacyProjection.ZeroTransaction && p.LegacyId == id)) throw new MigrationRejectedException();
-        var historyRows = await session.QueryManyAsync(new DbStatement("SELECT id,amount::text,currency,created_at FROM public.transactions WHERE user_id=$1 AND amount<>0 ORDER BY created_at,id", DbValue.Bigint(telegramId)),
-            r => (Id: r.GetString(0), Amount: r.GetString(1), Currency: r.GetString(2), Created: r.GetUtc(3)), 1000, ct);
-        if (historyRows.Count != historyTargets.Count || historyRows.Any(h => !historyTargets.ContainsKey(h.Id))) throw new MigrationRejectedException();
-        var history = historyRows.Select(h => new LegacyHistoryRow(h.Id, historyTargets[h.Id], ExactDecimal.Parse(h.Amount), h.Currency, h.Created, null)).ToArray();
-        var result = new LegacyWalletSnapshot(telegramId.ToString(CultureInfo.InvariantCulture), targetUser, targetOpening, telegramId, user.Language, user.First, user.Last, user.Balance, "USD", user.Other, history, observedAt is DateTime observed ? new LegacyMemberState(string.IsNullOrEmpty(user.Username) ? null : user.Username, string.IsNullOrEmpty(user.FirstName) ? null : user.FirstName, string.IsNullOrEmpty(user.LastName) ? null : user.LastName, user.Active, user.Banned, observed, user.BannedAt) : null);
+        var original = await session.QueryManyAsync(new DbStatement("SELECT id,amount::text,currency,created_at FROM public.transactions WHERE user_id=$1 ORDER BY created_at,id", DbValue.Bigint(telegramId)),
+            r => new LegacyRetainedTransaction(r.GetString(0), ExactDecimal.Parse(r.GetString(1)), r.GetString(2), r.GetUtc(3)), 10000, ct);
+        if (retention is null)
+        {
+            foreach (var row in original.Where(r => r.Amount == 0)) if (!manifest.Proofs.Any(p => p.Projection == LegacyProjection.ZeroTransaction && p.LegacyId == row.Id)) throw new MigrationRejectedException();
+        }
+        else { retention.Require(manifest); retention.RequireHistory(original); }
+        var historyRows = original.Where(r => r.Amount != 0 && (retention is null || r.Currency == "USD")).ToArray();
+        if (historyRows.Length != historyTargets.Count || historyRows.Any(h => !historyTargets.ContainsKey(h.Id))) throw new MigrationRejectedException();
+        var history = historyRows.Select(h => new LegacyHistoryRow(h.Id, historyTargets[h.Id], h.Amount, h.Currency, h.Created, null)).ToArray();
+        var result = new LegacyWalletSnapshot(telegramId.ToString(CultureInfo.InvariantCulture), targetUser, targetOpening, telegramId, user.Language, user.First, user.Last, user.Balance, "USD", user.Other, history, observedAt is DateTime observed ? new LegacyMemberState(string.IsNullOrEmpty(user.Username) ? null : user.Username, string.IsNullOrEmpty(user.FirstName) ? null : user.FirstName, string.IsNullOrEmpty(user.LastName) ? null : user.LastName, user.Active, user.Banned, observed, user.BannedAt) : null, retention);
         result.Validate();
         foreach (var proof in result.Proofs(manifest.TargetBrand)) manifest.Require(proof);
         return result;

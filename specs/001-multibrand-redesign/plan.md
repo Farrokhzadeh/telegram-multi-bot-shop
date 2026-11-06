@@ -250,3 +250,6 @@ Example: an order for five units with three eligible local units requires verifi
 - Retain closed restock records 180 elapsed days from closed_at; retain cutoff equality and all active subscriptions. Coordinate only expired terminal restock evidence, with no financial/domain cascade or paid-preorder expiry (FR-084).
 
 Review mixed-allocation snapshots, hold/concurrency state, typed resolution-ledger origin, staff/contact linkage, staff-recipient XOR and scoped cleanup before DDL. The approved count remains 28. No code, migration, live notification or money action is authorized.
+
+## Owner-approved retained-wallet continuation — 2026-11-06
+T064/T066 continuation uses the protected register contract in [wallet qualification](../../ops/LEGACY_WALLET_RETENTION_QUALIFICATION.md). Freeze original IRR/native history into verified evidence, recheck it against the source snapshot before target writes, post one authoritative USD opening and retain nonzero USD history without posting. Reconciliation verifies the external artifact and target audit binding. Actual target execution and complete read-only order/payment/obligation representation remain pending; no task or release completion follows.

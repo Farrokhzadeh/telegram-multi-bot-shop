@@ -22,6 +22,18 @@ string ReadProtectedFile(string path)
     return File.ReadAllText(path);
 }
 
+if (args is ["--inspect-wallet-register", "--register-file", var registerFile, "--receipt", var registerReceipt])
+{
+    try
+    {
+        string? root = Path.GetDirectoryName(registerFile);
+        if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_WALLET_RETENTION_INSPECTION") != "1" || !Path.IsPathFullyQualified(registerFile) || root is null || Path.GetFileName(root).StartsWith("teleg-history-qualification-", StringComparison.Ordinal) != true || new DirectoryInfo(root).LinkTarget is not null || (File.GetUnixFileMode(root) & (UnixFileMode)63) != 0 || new FileInfo(registerFile).Length > 67108864 || !Path.IsPathFullyQualified(registerReceipt) || Path.GetDirectoryName(registerReceipt) != root || File.Exists(registerReceipt)) throw new MigrationRejectedException();
+        await WalletRetentionInspection.RunAsync(ReadProtectedFile(registerFile), registerReceipt); Console.WriteLine("Protected wallet register verified; redacted receipt written."); return 0;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or MigrationRejectedException)
+    { Console.Error.WriteLine("Wallet register inspection rejected; retain protected inputs for review."); return 78; }
+}
+
 if (args is ["--inspect-source-copy", "--connection-file", var copyConnection, "--plan-file", var copyPlan, "--receipt", var copyReceipt])
 {
     try { await SourceCopyInspection.RunAsync(ReadProtectedFile(copyConnection).Trim(), ReadProtectedFile(copyPlan), copyReceipt); Console.WriteLine("Read-only source copy verified; redacted receipt written."); return 0; }
