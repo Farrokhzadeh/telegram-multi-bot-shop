@@ -17,8 +17,8 @@ public sealed class DbSessionTests
         await using (var setup = await factory.BeginAsync(Ct)) { await setup.ExecuteAsync(Product(id, "public original"), Ct); await setup.CommitAsync(Ct); }
         await using var snapshot = await factory.BeginReadOnlyAsync(Ct);
         var query = new DbStatement("SELECT title::text FROM shop.products WHERE id=$1", DbValue.Uuid(id));
-        Assert.Equal("repeatable read", await snapshot.QuerySingleAsync(new DbStatement("SHOW transaction_isolation"), r => r.GetString(0), Ct));
-        Assert.Equal("on", await snapshot.QuerySingleAsync(new DbStatement("SHOW transaction_read_only"), r => r.GetString(0), Ct));
+        Assert.Equal("repeatable read", await snapshot.QuerySingleAsync(new DbStatement("SELECT current_setting('transaction_isolation')"), r => r.GetString(0), Ct));
+        Assert.Equal("on", await snapshot.QuerySingleAsync(new DbStatement("SELECT current_setting('transaction_read_only')"), r => r.GetString(0), Ct));
         Assert.Equal("public original", await snapshot.QuerySingleAsync(query, r => r.GetString(0), Ct));
         await using (var change = await factory.BeginAsync(Ct)) { await change.ExecuteAsync(new DbStatement("UPDATE shop.products SET title='public changed' WHERE id=$1", DbValue.Uuid(id)), Ct); await change.CommitAsync(Ct); }
         Assert.Equal("public original", await snapshot.QuerySingleAsync(query, r => r.GetString(0), Ct));
