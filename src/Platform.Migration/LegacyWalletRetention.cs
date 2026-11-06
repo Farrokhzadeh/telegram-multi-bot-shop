@@ -94,3 +94,17 @@ internal sealed record LegacyRetainedTransaction(string Id, decimal Amount, stri
 {
     public override string ToString() => "LegacyRetainedTransaction [redacted]";
 }
+
+internal sealed class WalletRetentionVerification
+{
+    private readonly HashSet<(string Reference, string Digest)> valid = [];
+    private WalletRetentionVerification() { }
+    private static (string, string) Key(LegacyWalletRetention row) => (row.Reference, Convert.ToHexStringLower(row.Digest.Span));
+    internal bool Matches(LegacyWalletRetention row) => valid.Contains(Key(row));
+    internal static async Task<WalletRetentionVerification> ReadAsync(IEnumerable<LegacyWalletRetention> rows, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? read, CancellationToken ct)
+    {
+        var result = new WalletRetentionVerification(); var seen = new HashSet<(string, string)>();
+        foreach (var row in rows) if (seen.Add(Key(row)) && await row.MatchesAsync(read, ct)) result.valid.Add(Key(row));
+        return result;
+    }
+}

@@ -52,12 +52,14 @@ public sealed record LegacyWalletSnapshot(string LegacyUser, Guid TargetUser, Gu
 }
 public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
 {
-    public async Task ImportAsync(BrandContext context, VerifiedImportManifest manifest, LegacyWalletSnapshot row, CancellationToken ct = default, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? readRetention = null)
+    public Task ImportAsync(BrandContext context, VerifiedImportManifest manifest, LegacyWalletSnapshot row, CancellationToken ct = default, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? readRetention = null) => ImportCoreAsync(context, manifest, row, readRetention, null, ct);
+    internal Task ImportVerifiedAsync(BrandContext context, VerifiedImportManifest manifest, LegacyWalletSnapshot row, WalletRetentionVerification retention, CancellationToken ct) => ImportCoreAsync(context, manifest, row, null, retention, ct);
+    private async Task ImportCoreAsync(BrandContext context, VerifiedImportManifest manifest, LegacyWalletSnapshot row, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? readRetention, WalletRetentionVerification? retention, CancellationToken ct)
     {
         row = row with { History = Array.AsReadOnly(row.History.ToArray()) };
         row.Validate();
         row.Retention?.Require(manifest);
-        if (row.Retention is not null && !await row.Retention.MatchesAsync(readRetention, ct)) throw new MigrationRejectedException();
+        if (row.Retention is not null && !(retention is null ? await row.Retention.MatchesAsync(readRetention, ct) : retention.Matches(row.Retention))) throw new MigrationRejectedException();
         if (manifest.TargetBrand != context.BrandId) throw new MigrationRejectedException();
         var proofs = row.Proofs(context.BrandId); foreach (var proof in proofs) manifest.Require(proof);
         await using var session = await sessions.BeginAsync(ct);

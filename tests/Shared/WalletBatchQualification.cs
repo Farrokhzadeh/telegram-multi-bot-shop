@@ -17,7 +17,9 @@ public static class WalletBatchQualification
             await using (var add = f.Database.Data.CreateCommand("INSERT INTO public.users VALUES(99001235,5.25,0,'fa','2024-01-01 00:00Z','2024-01-02 00:00Z',true,false)")) await add.ExecuteNonQueryAsync(ct);
             var json = JsonNode.Parse(register)!; json["sources"]![0]!["source_users"] = 2; json["sources"]![0]!["wallets"]!.AsArray().Add((JsonNode)new JsonObject { ["legacy_user_id"] = "99001235", ["original_irr_amount"] = "0" }); register = Encoding.UTF8.GetBytes(json.ToJsonString());
         }
-        Task<ReadOnlyMemory<byte>> Read(string reference, CancellationToken token) => reference == "protected:synthetic/manual-wallet-history" ? Task.FromResult<ReadOnlyMemory<byte>>(register) : throw new KeyNotFoundException();
+        int reads = 0;
+        Task<ReadOnlyMemory<byte>> Read(string reference, CancellationToken token) { reads++; return ReadBody(reference, token); }
+        Task<ReadOnlyMemory<byte>> ReadBody(string reference, CancellationToken token) => reference == "protected:synthetic/manual-wallet-history" ? Task.FromResult<ReadOnlyMemory<byte>>(register) : throw new KeyNotFoundException();
         byte[] schema = await world.Source.InspectSchemaAsync(ct); Guid batch = Guid.NewGuid(); DateTime observed = new(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc);
         var retained = LegacyWalletRetention.OpenAll("protected:synthetic/manual-wallet-history", SHA256.HashData(register), register, "acc-abad", LegacyWalletRetentionFixture.Archive);
         if (fault is "schema" or "missing")
@@ -54,8 +56,15 @@ public static class WalletBatchQualification
             catch (DbOperationException) { if (await f.CountAsync("SELECT count(*) FROM shop.users", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) != 2) throw new InvalidOperationException("Wallet batch failed outside its membership transaction."); }
             await using var repair = f.Database.Data.CreateCommand("DROP TRIGGER reject_wallet_batch ON shop.wallet_entries"); await repair.ExecuteNonQueryAsync(ct);
         }
+        if (fault == "retention-boundary")
+        {
+            int boundaryReads = 0;
+            try { await workflow.ImportWalletsAsync(f.Context(0), manifest, rows, (_, _) => Task.FromResult<ReadOnlyMemory<byte>>(++boundaryReads == 1 ? register : new byte[128]), ct); throw new InvalidOperationException("Changed retention at reconciliation accepted."); }
+            catch (MigrationRejectedException) { if (boundaryReads != 2 || await f.CountAsync("SELECT count(*) FROM shop.users", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) != 2) throw new InvalidOperationException("Retention boundary failure lost replayable committed evidence."); }
+        }
         var first = await workflow.ImportWalletsAsync(f.Context(0), manifest, rows, Read, ct);
         var replay = await workflow.ImportWalletsAsync(f.Context(0), manifest, rows, Read, ct);
+        if (reads != (fault == "rollback" ? 5 : 4)) throw new InvalidOperationException("Shared retention verification scales with memberships rather than batch boundaries.");
         if (!first.Matched || first != replay || first.ComparedWallets != rows.Count || first.ManualIrrAccounts != 1 || first.RetainedHistoryRows != 3 || await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) != (fault == "rollback" ? 3 : 2)) throw new InvalidOperationException("Bulk wallet import or reconciliation failed.");
     }
 }

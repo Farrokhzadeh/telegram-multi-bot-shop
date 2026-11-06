@@ -18,8 +18,10 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         var rows = source.Select(r => r with { History = Array.AsReadOnly(r.History.ToArray()) }).ToArray();
         if (rows.Select(r => r.TargetUser).Distinct().Count() != rows.Length) throw new MigrationRejectedException();
         foreach (var row in rows) foreach (var proof in row.Proofs(manifest.TargetBrand)) manifest.Require(proof);
-        long invalidRetentions = 0;
-        foreach (var row in rows.Where(r => r.Retention is not null)) { row.Retention!.Require(manifest); if (!await row.Retention.MatchesAsync(readRetention, ct)) invalidRetentions++; }
+        var retained = rows.Where(r => r.Retention is not null).Select(r => r.Retention!).ToArray();
+        foreach (var retention in retained) retention.Require(manifest);
+        var verification = await WalletRetentionVerification.ReadAsync(retained, readRetention, ct);
+        long invalidRetentions = retained.LongCount(r => !verification.Matches(r));
         await using var session = await sessions.BeginReadOnlyAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         long mismatch = 0, missingMaps = 0, mismatchedMaps = 0, foundMaps = 0;

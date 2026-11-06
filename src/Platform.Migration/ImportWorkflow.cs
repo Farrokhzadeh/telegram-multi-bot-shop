@@ -42,17 +42,18 @@ public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory d
         foreach (var row in rows)
         {
             row.Validate(); row.Retention?.Require(manifest);
-            if (row.Retention is null || !await row.Retention.MatchesAsync(readRetention, ct)) throw new MigrationRejectedException();
+            if (row.Retention is null) throw new MigrationRejectedException();
             foreach (var proof in row.Proofs(context.BrandId)) manifest.Require(proof);
         }
-        if (rows.Sum(r => r.Proofs(context.BrandId).Count) != manifest.Proofs.Count) throw new MigrationRejectedException();
+        var retention = await WalletRetentionVerification.ReadAsync(rows.Select(r => r.Retention!), readRetention, ct);
+        if (rows.Any(r => !retention.Matches(r.Retention!)) || rows.Sum(r => r.Proofs(context.BrandId).Count) != manifest.Proofs.Count) throw new MigrationRejectedException();
         var clocks = rows.Select(r => r.State?.ObservedAt).Distinct().ToArray();
         if (clocks.Length != 1 || clocks[0] is not DateTime observed) throw new MigrationRejectedException();
         var verified = await source.PlanWalletsAsync(Convert.FromHexString(manifest.SourceSchemaDigest), manifest.Batch, context.BrandId, rows.ToDictionary(r => r.LegacyUser, r => r.Retention!, StringComparer.Ordinal), observed, ct);
         if (verified.Count != rows.Length) throw new MigrationRejectedException();
         foreach (var row in verified) foreach (var proof in row.Proofs(context.BrandId)) manifest.Require(proof);
         var writer = new OpeningBalanceImportWorkflow(destination);
-        foreach (var row in verified) await writer.ImportAsync(context, manifest, row, ct, readRetention);
+        foreach (var row in verified) await writer.ImportVerifiedAsync(context, manifest, row, retention, ct);
         var report = await new ReconciliationReport(destination).CompareWalletsAsync(manifest, rows, ct, readRetention);
         if (!report.Matched) throw new MigrationRejectedException(); return report;
     }
