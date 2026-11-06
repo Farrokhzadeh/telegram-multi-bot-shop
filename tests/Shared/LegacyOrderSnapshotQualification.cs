@@ -1,4 +1,6 @@
 using Npgsql;
+using System.Security.Cryptography;
+using System.Text;
 using Platform.Migration;
 namespace Platform.Testing;
 
@@ -26,7 +28,18 @@ public static class LegacyOrderSnapshotQualification
         {
             await using var links = f.Database.Data.CreateCommand("UPDATE public.orders SET user_id=99009999,product_id=999 WHERE id='ORD-ABC123ABC123'"); await links.ExecuteNonQueryAsync(ct);
         }
-        var report = await reader.InspectOrderSnapshotsAsync(schema, ct);
-        if (report != await reader.InspectOrderSnapshotsAsync(schema, ct) || report.Orders != 3 || report.EmptySnapshots != 1 || report.RejectedTerms != (fault == "links" ? 2 : 1) || report.AcceptedTerms != (fault == "links" ? 0 : 1) || report.MissingMembers != (fault == "links" ? 1 : 0) || report.MissingProducts != (fault == "links" ? 1 : 0) || report.ImportApproved || report.ReleaseReady) throw new InvalidOperationException("Source order snapshot classification failed.");
+        byte[] key = Enumerable.Range(0, 32).Select(v => (byte)v).ToArray(); using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
+        void Append(string value) { byte[] data = Encoding.UTF8.GetBytes(value); writer.Write(data.Length); writer.Write(data); }
+        Append("accabad-source-table-v1"); Append("orders"); Append("id");
+        await using (var rows = f.Database.Data.CreateCommand("SELECT id::text,to_jsonb(s)::text FROM public.orders s ORDER BY id::text COLLATE \"C\""))
+        { await using var values = await rows.ExecuteReaderAsync(ct); while (await values.ReadAsync(ct)) { Append(values.GetString(0)); Append(values.GetString(1)); } }
+        writer.Flush(); var expected = new LegacySourceTableExpectation("orders", "id", 3, HMACSHA256.HashData(key, bytes.ToArray()));
+        if (fault == "commitment") expected = expected with { Commitment = new byte[32] };
+        if (fault == "count") expected = expected with { Count = 2 };
+        if (fault == "data") { await using var change = f.Database.Data.CreateCommand("UPDATE public.orders SET total=total+1 WHERE id='ORD-000000000001'"); await change.ExecuteNonQueryAsync(ct); }
+        if (fault is "commitment" or "count" or "data")
+        { try { await reader.InspectOrderSnapshotsAsync(schema, ct, expected, key); throw new InvalidOperationException("Changed source commitment accepted."); } catch (MigrationRejectedException) { return; } }
+        var report = await reader.InspectOrderSnapshotsAsync(schema, ct, expected, key);
+        if (report != await reader.InspectOrderSnapshotsAsync(schema, ct, expected, key) || report.Orders != 3 || report.EmptySnapshots != 1 || report.RejectedTerms != (fault == "links" ? 2 : 1) || report.AcceptedTerms != (fault == "links" ? 0 : 1) || report.MissingMembers != (fault == "links" ? 1 : 0) || report.MissingProducts != (fault == "links" ? 1 : 0) || report.ImportApproved || report.ReleaseReady) throw new InvalidOperationException("Source order snapshot classification failed.");
     }
 }

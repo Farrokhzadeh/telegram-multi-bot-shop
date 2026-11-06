@@ -9,5 +9,8 @@ public sealed class LegacyOrderSnapshotInspectionTests
     [InlineData("links")]
     [InlineData("schema")]
     [InlineData("lines")]
+    [InlineData("commitment")]
+    [InlineData("count")]
+    [InlineData("data")]
     public Task SnapshotInspectionPreservesSourceAndReportsOnlyQualifiedTerms(string fault) => LegacyOrderSnapshotQualification.RunAsync(fault, TestContext.Current.CancellationToken);
 }

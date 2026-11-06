@@ -28,7 +28,7 @@ internal static class SourceCopyInspection
             var expected = root.GetProperty("tables").EnumerateArray().Select(t => new LegacySourceTableExpectation(t.GetProperty("table").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("key").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("count").GetInt64(), Convert.FromHexString(t.GetProperty("commitment").GetString() ?? throw new MigrationRejectedException()))).ToArray();
             var reader = new LegacySourceReader(data, new(host, 5432, database, "teleg_source_reader"));
             var counts = await reader.VerifyCopyAsync(schema, expected, key, ct);
-            var orders = inspectOrders ? await reader.InspectOrderSnapshotsAsync(schema, ct) : null;
+            var orders = inspectOrders ? await reader.InspectOrderSnapshotsAsync(schema, ct, expected.Single(t => t.Table == "orders"), key) : null;
             using var body = new MemoryStream();
             using (var writer = new Utf8JsonWriter(body))
             {
