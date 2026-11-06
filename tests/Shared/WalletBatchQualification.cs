@@ -11,6 +11,7 @@ public static class WalletBatchQualification
     {
         await using var world = await LegacyWalletRetentionFixture.CreateAsync(ct); var f = world.Fixture;
         byte[] register = world.Register;
+        if (fault is "clock" or "clock-source") { await using var change = f.Database.Data.CreateCommand("UPDATE public.users SET joined_at='2024-01-02 00:00Z',last_seen_at='2024-01-01 00:00Z'"); await change.ExecuteNonQueryAsync(ct); }
         if (fault == "rollback")
         {
             await using (var add = f.Database.Data.CreateCommand("INSERT INTO public.users VALUES(99001235,5.25,0,'fa','2024-01-01 00:00Z','2024-01-02 00:00Z',true,false)")) await add.ExecuteNonQueryAsync(ct);
@@ -25,14 +26,22 @@ public static class WalletBatchQualification
             catch (MigrationRejectedException) { return; }
         }
         var rows = await world.Source.PlanWalletsAsync(schema, batch, f.Brands[0], retained, observed, ct);
+        if (fault is "clock" or "clock-source")
+        {
+            var row = rows.Single();
+            if (row.FirstSeen != new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) || row.LastSeen != observed || row.SourceClock != new LegacyMembershipClock(observed, row.FirstSeen)) throw new InvalidOperationException("Original reversed membership clocks were not preserved.");
+            var changed = row with { SourceClock = row.SourceClock with { JoinedAt = observed.AddTicks(10) } };
+            try { changed.Validate(); throw new InvalidOperationException("Unbound membership clock was accepted."); } catch (MigrationRejectedException) { }
+        }
         var second = await world.Source.PlanWalletsAsync(schema, batch, f.Brands[0], retained, observed, ct);
         byte[] Encode(IReadOnlyList<LegacyWalletSnapshot> source) => VerifiedImportManifest.EncodePlan(SchemaManifest.ForQualification(f.Database.Data.ConnectionString), "acc-abad", f.Brands[0], world.Manifest.SourceRevision, schema, world.Manifest.SnapshotReference, Convert.FromHexString(LegacyWalletRetentionFixture.Archive), batch, source.SelectMany(r => r.Proofs(f.Brands[0])), source.Sum(r => r.BalanceUsd));
         byte[] body = Encode(rows); if (!body.AsSpan().SequenceEqual(Encode(second))) throw new InvalidOperationException("Frozen wallet plan changed on replay.");
         var manifest = VerifiedImportManifest.Open("protected:synthetic/bulk-wallet-plan", SHA256.HashData(body), body);
+        if (fault == "clock-source") { await using var change = f.Database.Data.CreateCommand("UPDATE public.users SET last_seen_at=last_seen_at+interval '1 second'"); await change.ExecuteNonQueryAsync(ct); }
         if (fault == "source") { await using var change = f.Database.Data.CreateCommand("UPDATE public.users SET balance=balance+1"); await change.ExecuteNonQueryAsync(ct); }
         if (fault == "namespace") rows = await world.Source.PlanWalletsAsync(schema, Guid.NewGuid(), f.Brands[0], retained, observed, ct);
         var workflow = new ImportWorkflow(world.Source, f.Sessions);
-        if (fault is "source" or "namespace" or "register")
+        if (fault is "source" or "namespace" or "register" or "clock-source")
         {
             try { await workflow.ImportWalletsAsync(f.Context(0), manifest, rows, fault == "register" ? (_, _) => Task.FromResult<ReadOnlyMemory<byte>>(new byte[128]) : Read, ct); throw new InvalidOperationException("Changed wallet batch accepted."); }
             catch (MigrationRejectedException) { if (await f.CountAsync("SELECT count(*) FROM shop.users", ct) != 0 || await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) != 0) throw new InvalidOperationException("Rejected wallet batch wrote money."); return; }

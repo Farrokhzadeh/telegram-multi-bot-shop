@@ -188,7 +188,7 @@ public sealed partial class LegacySourceReader
         var historyRows = original.Where(r => r.Amount != 0 && (retention is null || r.Currency == "USD")).ToArray();
         if (historyRows.Length != historyTargets.Count || historyRows.Any(h => !historyTargets.ContainsKey(h.Id))) throw new MigrationRejectedException();
         var history = historyRows.Select(h => new LegacyHistoryRow(h.Id, historyTargets[h.Id], h.Amount, h.Currency, h.Created, null)).ToArray();
-        var result = new LegacyWalletSnapshot(telegramId.ToString(CultureInfo.InvariantCulture), targetUser, targetOpening, telegramId, user.Language, user.First, user.Last, user.Balance, "USD", user.Other, history, observedAt is DateTime observed ? MemberState(user, observed) : null, retention);
+        var result = new LegacyWalletSnapshot(telegramId.ToString(CultureInfo.InvariantCulture), targetUser, targetOpening, telegramId, user.Language, user.First <= user.Last ? user.First : user.Last, user.First <= user.Last ? user.Last : user.First, user.Balance, "USD", user.Other, history, observedAt is DateTime observed ? MemberState(user, observed) : null, retention, SourceClock(user));
         result.Validate();
         foreach (var proof in result.Proofs(manifest.TargetBrand)) manifest.Require(proof);
         return result;

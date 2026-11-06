@@ -14,6 +14,7 @@ public sealed partial class LegacySourceReader
     }
     private static WalletProfile ReadWalletProfile(DbRow r, int n) => new(ExactDecimal.Parse(r.GetString(n)), ExactDecimal.Parse(r.GetString(n + 1)), r.GetString(n + 2), r.GetUtc(n + 3), r.GetUtc(n + 4), r.GetBoolean(n + 5), r.GetBoolean(n + 6), r.IsDBNull(n + 7) ? null : r.GetString(n + 7), r.IsDBNull(n + 8) ? null : r.GetString(n + 8), r.IsDBNull(n + 9) ? null : r.GetString(n + 9), r.IsDBNull(n + 10) ? null : r.GetUtc(n + 10));
     private static LegacyMemberState MemberState(WalletProfile user, DateTime observed) => new(string.IsNullOrEmpty(user.Username) ? null : user.Username, string.IsNullOrEmpty(user.FirstName) ? null : user.FirstName, string.IsNullOrEmpty(user.LastName) ? null : user.LastName, user.Active, user.Banned, observed, user.BannedAt);
+    private static LegacyMembershipClock? SourceClock(WalletProfile user) => user.First > user.Last ? new(user.First, user.Last) : null;
     private static Guid WalletIdentity(Guid batch, Guid brand, string kind, string id) => new(SHA256.HashData(Encoding.UTF8.GetBytes("legacy-wallet-plan-v1:" + batch.ToString("N") + ":" + brand.ToString("N") + ":" + kind + ":" + id)).AsSpan(0, 16));
     public async Task<IReadOnlyList<LegacyWalletSnapshot>> PlanWalletsAsync(ReadOnlyMemory<byte> expectedSchema, Guid batch, Guid brand, IReadOnlyDictionary<string, LegacyWalletRetention> retained, DateTime observed, CancellationToken ct = default)
     {
@@ -53,7 +54,7 @@ public sealed partial class LegacySourceReader
             retained[id].RequireHistory(history[row.Key]);
             var usd = history[row.Key].Where(h => h.Currency == "USD" && h.Amount != 0).Select(h => new LegacyHistoryRow(h.Id, WalletIdentity(batch, brand, "history", h.Id), h.Amount, "USD", h.Created, null)).ToArray();
             if (usd.Length > 1000) throw new MigrationRejectedException();
-            var wallet = new LegacyWalletSnapshot(id, WalletIdentity(batch, brand, "user", id), WalletIdentity(batch, brand, "opening", id), row.Key, user.Language, user.First, user.Last, user.Balance, "USD", user.Other, Array.AsReadOnly(usd), MemberState(user, observed), retained[id]);
+            var wallet = new LegacyWalletSnapshot(id, WalletIdentity(batch, brand, "user", id), WalletIdentity(batch, brand, "opening", id), row.Key, user.Language, user.First <= user.Last ? user.First : user.Last, user.First <= user.Last ? user.Last : user.First, user.Balance, "USD", user.Other, Array.AsReadOnly(usd), MemberState(user, observed), retained[id], SourceClock(user));
             wallet.Validate(); result.Add(wallet);
         }
         return result.AsReadOnly();

@@ -15,13 +15,17 @@ public sealed record LegacyMemberState(string? Username, string? FirstName, stri
 {
     public override string ToString() => "LegacyMemberState [redacted]";
 }
+public sealed record LegacyMembershipClock(DateTime JoinedAt, DateTime LastSeenAt)
+{
+    public override string ToString() => "LegacyMembershipClock [redacted]";
+}
 public sealed record LegacyWalletSnapshot(string LegacyUser, Guid TargetUser, Guid TargetOpening, long TelegramId, string Language, DateTime FirstSeen, DateTime LastSeen,
-    decimal BalanceUsd, string Currency, decimal OtherBalance, IReadOnlyList<LegacyHistoryRow> History, LegacyMemberState? State = null, LegacyWalletRetention? Retention = null)
+    decimal BalanceUsd, string Currency, decimal OtherBalance, IReadOnlyList<LegacyHistoryRow> History, LegacyMemberState? State = null, LegacyWalletRetention? Retention = null, LegacyMembershipClock? SourceClock = null)
 {
     public IReadOnlyList<LegacyMapProof> Proofs(Guid brand)
     {
         Validate();
-        byte[] member = Hash(w => { w.Write(LegacyUser); w.Write(TargetUser.ToByteArray()); w.Write(TelegramId); w.Write(Language); w.Write(FirstSeen.Ticks); w.Write(LastSeen.Ticks); if (State is not null) { w.Write("legacy-member-state-v1"); foreach (string? value in new[] { State.Username, State.FirstName, State.LastName }) { w.Write(value is not null); if (value is not null) w.Write(value); } w.Write(State.Active); w.Write(State.Banned); w.Write(State.ObservedAt.Ticks); if (State.BannedAt is DateTime banned) { w.Write("legacy-ban-time-v1"); w.Write(banned.Ticks); } } });
+        byte[] member = Hash(w => { w.Write(LegacyUser); w.Write(TargetUser.ToByteArray()); w.Write(TelegramId); w.Write(Language); w.Write(FirstSeen.Ticks); w.Write(LastSeen.Ticks); if (SourceClock is not null) { w.Write("legacy-membership-clock-v1"); w.Write(SourceClock.JoinedAt.Ticks); w.Write(SourceClock.LastSeenAt.Ticks); } if (State is not null) { w.Write("legacy-member-state-v1"); foreach (string? value in new[] { State.Username, State.FirstName, State.LastName }) { w.Write(value is not null); if (value is not null) w.Write(value); } w.Write(State.Active); w.Write(State.Banned); w.Write(State.ObservedAt.Ticks); if (State.BannedAt is DateTime banned) { w.Write("legacy-ban-time-v1"); w.Write(banned.Ticks); } } });
         byte[] wallet = Hash(w => { w.Write(member); w.Write(TargetOpening.ToByteArray()); w.Write(ExactDecimal.Format(BalanceUsd)); w.Write(Currency); w.Write(ExactDecimal.Format(OtherBalance)); if (Retention is not null) { w.Write("legacy-wallet-retention-v2"); w.Write(Retention.Reference); w.Write(Retention.Digest.Span); } });
         var proofs = new List<LegacyMapProof> { new(LegacyProjection.User, LegacyUser, TargetUser, brand, member), new(LegacyProjection.WalletSnapshot, LegacyUser, TargetUser, brand, wallet) };
         if (BalanceUsd > 0) proofs.Add(new(LegacyProjection.WalletOpening, LegacyUser, TargetOpening, brand, wallet));
@@ -35,6 +39,7 @@ public sealed record LegacyWalletSnapshot(string LegacyUser, Guid TargetUser, Gu
     public void Validate()
     {
         Retention?.RequireRow(LegacyUser, OtherBalance, History);
+        if (SourceClock is not null && (SourceClock.JoinedAt.Kind != DateTimeKind.Utc || SourceClock.LastSeenAt.Kind != DateTimeKind.Utc || SourceClock.JoinedAt.Ticks % 10 != 0 || SourceClock.LastSeenAt.Ticks % 10 != 0 || SourceClock.JoinedAt <= SourceClock.LastSeenAt || FirstSeen != SourceClock.LastSeenAt || LastSeen != SourceClock.JoinedAt)) throw new MigrationRejectedException();
         if (State is not null && (State.ObservedAt.Kind != DateTimeKind.Utc || State.ObservedAt < LastSeen || State.ObservedAt == DateTime.MaxValue || State.ObservedAt.Ticks % 10 != 0 || (State.BannedAt is DateTime banned && (!State.Banned || banned.Kind != DateTimeKind.Utc || banned < FirstSeen || banned > State.ObservedAt || banned.Ticks % 10 != 0)) || new[] { State.Username, State.FirstName, State.LastName }.Any(v => v is not null && (string.IsNullOrWhiteSpace(v) || v.Length > 160)))) throw new MigrationRejectedException();
         if (string.IsNullOrWhiteSpace(LegacyUser) || LegacyUser.Length > 256 || TargetUser == Guid.Empty || TargetOpening == Guid.Empty || TelegramId <= 0 || Language is not ("en" or "fa") ||
             FirstSeen.Kind != DateTimeKind.Utc || LastSeen.Kind != DateTimeKind.Utc || FirstSeen == DateTime.MinValue || LastSeen == DateTime.MaxValue || LastSeen < FirstSeen || FirstSeen.Ticks % 10 != 0 || LastSeen.Ticks % 10 != 0 || BalanceUsd < 0 || (OtherBalance != 0 && Retention is null) || Currency != "USD" || History.Count > 10000 ||

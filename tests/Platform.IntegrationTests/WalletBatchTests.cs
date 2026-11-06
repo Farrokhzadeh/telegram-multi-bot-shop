@@ -6,6 +6,8 @@ public sealed class WalletBatchTests
 {
     [Theory]
     [InlineData("valid")]
+    [InlineData("clock")]
+    [InlineData("clock-source")]
     [InlineData("schema")]
     [InlineData("missing")]
     [InlineData("source")]
