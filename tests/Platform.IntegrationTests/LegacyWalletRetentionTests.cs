@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Platform.Migration;
 using Platform.Persistence;
 using Platform.Testing;
@@ -66,4 +67,22 @@ public sealed class LegacyWalletRetentionTests
         string text = Encoding.UTF8.GetString(body).Replace("\"" + field + "\":\"" + original + "\"", "\"" + field + "\":\"" + changed + "\"", StringComparison.Ordinal); byte[] invalid = Encoding.UTF8.GetBytes(text);
         Assert.Throws<MigrationRejectedException>(() => LegacyWalletRetention.Open("protected:synthetic/manual-wallet-history", SHA256.HashData(invalid), invalid, "acc-abad", LegacyWalletRetentionFixture.Archive, "99001234"));
     }
+    [Fact]
+    public async Task NativeHistoryCrossesPageBoundariesWithoutPostingRetainedZeroOrIrrRows()
+    {
+        await using var world = await LegacyWalletRetentionFixture.CreateAsync(Ct); var f = world.Fixture;
+        await using (var add = f.Database.Data.CreateCommand("INSERT INTO public.transactions SELECT 'bulk-'||lpad(n::text,4,'0'),99001234,0,'IRR','2024-01-01 02:00Z'::timestamptz FROM generate_series(1,1003) n")) await add.ExecuteNonQueryAsync(Ct);
+        var json = JsonNode.Parse(world.Register)!; var history = json["sources"]![0]!["history"]!.AsArray();
+        for (int i = 1; i <= 1003; i++) history.Add(new JsonObject { ["id"] = "bulk-" + i.ToString("D4", System.Globalization.CultureInfo.InvariantCulture), ["user_id"] = "99001234", ["amount"] = "0", ["currency"] = "IRR", ["created_at"] = "2024-01-01T02:00:00Z" });
+        byte[] bytes = Encoding.UTF8.GetBytes(json.ToJsonString());
+        var retention = LegacyWalletRetention.Open("protected:synthetic/paginated-history", SHA256.HashData(bytes), bytes, "acc-abad", LegacyWalletRetentionFixture.Archive, "99001234"); var row = world.Wallet with { Retention = retention };
+        byte[] plan = VerifiedImportManifest.EncodePlan(SchemaManifest.ForQualification(f.Database.Data.ConnectionString), "acc-abad", f.Brands[0], world.Manifest.SourceRevision, Convert.FromHexString(world.Manifest.SourceSchemaDigest), world.Manifest.SnapshotReference, Convert.FromHexString(LegacyWalletRetentionFixture.Archive), Guid.NewGuid(), row.Proofs(f.Brands[0]), row.BalanceUsd);
+        var manifest = VerifiedImportManifest.Open("protected:synthetic/paginated-wallet-plan", SHA256.HashData(plan), plan);
+        Task<ReadOnlyMemory<byte>> Read(string reference, CancellationToken ct) => reference == retention.Reference ? Task.FromResult<ReadOnlyMemory<byte>>(bytes) : throw new KeyNotFoundException();
+        var workflow = new ImportWorkflow(world.Source, f.Sessions);
+        for (int pass = 0; pass < 2; pass++) Assert.True((await workflow.ImportWalletAsync(f.Context(0), manifest, row.TelegramId, row.TargetUser, row.TargetOpening, row.History.ToDictionary(h => h.LegacyId, h => h.TargetEntry), Ct, retention: retention, readRetention: Read)).Complete);
+        var report = await new ReconciliationReport(f.Sessions).CompareWalletsAsync(manifest, [row], Ct, Read);
+        Assert.True(report.Matched); Assert.Equal(1006L, report.RetainedHistoryRows); Assert.Equal(1004L, report.RetainedIrrHistory); Assert.Equal(1004L, report.RetainedZeroHistory); Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+    }
+
 }

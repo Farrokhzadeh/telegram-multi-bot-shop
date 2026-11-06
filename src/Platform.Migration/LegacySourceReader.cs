@@ -170,8 +170,17 @@ public sealed partial class LegacySourceReader
             r => (Balance: ExactDecimal.Parse(r.GetString(0)), Other: ExactDecimal.Parse(r.GetString(1)), Language: r.GetString(2), First: r.GetUtc(3), Last: r.GetUtc(4), Active: r.GetBoolean(5), Banned: r.GetBoolean(6), Username: r.IsDBNull(7) ? null : r.GetString(7), FirstName: r.IsDBNull(8) ? null : r.GetString(8), LastName: r.IsDBNull(9) ? null : r.GetString(9), BannedAt: r.IsDBNull(10) ? (DateTime?)null : r.GetUtc(10)), ct);
         bool profile = !user.Active || user.Banned || !string.IsNullOrEmpty(user.Username) || !string.IsNullOrEmpty(user.FirstName) || !string.IsNullOrEmpty(user.LastName);
         if (profile && observedAt is null) throw new MigrationRejectedException();
-        var original = await session.QueryManyAsync(new DbStatement("SELECT id,amount::text,currency,created_at FROM public.transactions WHERE user_id=$1 ORDER BY created_at,id", DbValue.Bigint(telegramId)),
-            r => new LegacyRetainedTransaction(r.GetString(0), ExactDecimal.Parse(r.GetString(1)), r.GetString(2), r.GetUtc(3)), 10000, ct);
+        long expectedHistory = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM public.transactions WHERE user_id=$1", DbValue.Bigint(telegramId)), r => r.GetInt64(0), ct);
+        if (expectedHistory > 10000) throw new MigrationRejectedException();
+        var original = new List<LegacyRetainedTransaction>(); string lastHistory = "";
+        while (true)
+        {
+            var page = await session.QueryManyAsync(new DbStatement("SELECT id,amount::text,currency,created_at FROM public.transactions WHERE user_id=$1 AND id COLLATE \"C\" > $2 COLLATE \"C\" ORDER BY id COLLATE \"C\" LIMIT 1000", DbValue.Bigint(telegramId), DbValue.Text(lastHistory)),
+                r => new LegacyRetainedTransaction(r.GetString(0), ExactDecimal.Parse(r.GetString(1)), r.GetString(2), r.GetUtc(3)), 1000, ct);
+            if (page.Count == 0) break;
+            original.AddRange(page); if (original.Count > expectedHistory) throw new MigrationRejectedException(); lastHistory = page[^1].Id;
+        }
+        if (original.Count != expectedHistory) throw new MigrationRejectedException();
         if (retention is null)
         {
             foreach (var row in original.Where(r => r.Amount == 0)) if (!manifest.Proofs.Any(p => p.Projection == LegacyProjection.ZeroTransaction && p.LegacyId == row.Id)) throw new MigrationRejectedException();
