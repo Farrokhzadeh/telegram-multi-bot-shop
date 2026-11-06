@@ -78,7 +78,9 @@ public sealed class LegacyRecordImportTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items", Ct)); Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs", Ct)); Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts WHERE max_total_uses=10 AND redeemed_count=0 AND usage_adjustment_units=3 AND created_by_admin_id IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts WHERE max_total_uses=10 AND redeemed_count=0 AND usage_adjustment_units=3 AND created_by_admin_id IS NULL AND NOT active", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_revisions WHERE max_total_uses=10 AND usage_adjustment_units=3 AND NOT active", Ct));
+        using (var originalCoupon = JsonDocument.Parse(set.Coupons[0].Record.Source.Body)) Assert.True(originalCoupon.RootElement.GetProperty("active").GetBoolean());
         Assert.False((await reports.CompareAsync(f.Context(0), manifest, set with { Delivery = [] }, Read, Ct)).Matched);
         var original = protectedFiles[historical.Record.Reference]; byte[] damaged = original.Ciphertext.ToArray(); damaged[^1] ^= 1; protectedFiles[historical.Record.Reference] = original with { Ciphertext = damaged };
         Assert.Equal(1L, (await reports.CompareAsync(f.Context(0), manifest, set, Read, Ct)).InvalidArchives); protectedFiles[historical.Record.Reference] = original;
@@ -146,6 +148,46 @@ public sealed class LegacyRecordImportTests
         var coupon = new LegacyCouponRecord(archive, Guid.NewGuid(), world.Set.Catalog[0].Target, null, "prepaid_entitlement", world.Set.Orders[0].Record.Target);
         Assert.Throws<MigrationRejectedException>(() => coupon.Proofs(f.Context(0), f.Secrets));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts", Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", Ct));
+    }
+    [Fact]
+    public async Task DisabledCouponHistoryRollsBackTogetherAndReplayPreservesOriginalCounters()
+    {
+        await using var world = await LegacyRecordFixture.CreateAsync("bank", Ct); var f = world.Fixture;
+        var source = new LegacySourceRecord(LegacyProjection.DiscountRecord, "PRIVATE-SECOND", """{"code":"PRIVATE-SECOND","product_id":456,"assigned_user_id":99001234,"pct_off":"25","max_uses":9,"current_uses":4,"active":true}""");
+        Guid target = Guid.NewGuid(); var draft = Manifest(f, world.Manifest.Batch, world.Manifest.Proofs.Append(source.Proof(target, f.Context(0), f.Secrets)));
+        var archived = await new LegacyRecordArchive(f.Secrets).WriteAsync(f.Context(0), draft, source, target, (_, _) => Task.FromResult("protected:synthetic/second-coupon"), Ct);
+        var coupon = new LegacyCouponRecord(archived, Guid.NewGuid(), world.Set.Catalog[0].Target, world.Set.Wallets[0].TargetUser, "promotion");
+        var manifest = Manifest(f, world.Manifest.Batch, world.Manifest.Proofs.Concat(coupon.Proofs(f.Context(0), f.Secrets)));
+        var store = new LegacyCouponImportWorkflow(f.Sessions, f.Secrets);
+        await using (var fault = f.Database.Data.CreateCommand("CREATE FUNCTION shop.reject_legacy_coupon() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Public synthetic coupon commit failure' USING ERRCODE='23514'; END $$; CREATE CONSTRAINT TRIGGER reject_legacy_coupon AFTER INSERT ON shop.discount_revisions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION shop.reject_legacy_coupon()")) await fault.ExecuteNonQueryAsync(Ct);
+        long maps = await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map", Ct), audits = await f.CountAsync("SELECT count(*) FROM shop.audit_events", Ct);
+        await Assert.ThrowsAsync<DbOperationException>(() => store.ImportAsync(f.Context(0), manifest, coupon, Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts", Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_revisions", Ct));
+        Assert.Equal(maps, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map", Ct)); Assert.Equal(audits, await f.CountAsync("SELECT count(*) FROM shop.audit_events", Ct));
+        await using (var repair = f.Database.Data.CreateCommand("DROP TRIGGER reject_legacy_coupon ON shop.discount_revisions")) await repair.ExecuteNonQueryAsync(Ct);
+        await store.ImportAsync(f.Context(0), manifest, coupon, Ct); await store.ImportAsync(f.Context(0), manifest, coupon, Ct);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts WHERE max_total_uses=9 AND usage_adjustment_units=4 AND redeemed_count=0 AND NOT active", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.discount_revisions WHERE NOT active", Ct));
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => store.ImportAsync(f.Context(0), manifest, coupon with { Member = Guid.NewGuid() }, Ct));
+    }
+    [Theory]
+    [InlineData("user_id", "99009999")]
+    [InlineData("expected_currency", "IRR")]
+    [InlineData("expected_amount", "21")]
+    public async Task PaymentAssociationRejectsMismatchedOwnerCurrencyAndAmountWithoutPartialWrites(string field, string value)
+    {
+        await using var world = await LegacyRecordFixture.CreateAsync("crypto", Ct); var f = world.Fixture;
+        var original = world.Set.Payments[0].Record.Source;
+        var body = System.Text.Json.Nodes.JsonNode.Parse(original.Body)!.AsObject(); body["id"] = "different-payment";
+        if (field == "user_id") body[field] = long.Parse(value, System.Globalization.CultureInfo.InvariantCulture); else body[field] = value;
+        var source = new LegacySourceRecord(LegacyProjection.PaymentAttempt, "different-payment", body.ToJsonString()); Guid target = Guid.NewGuid();
+        var manifest = Manifest(f, world.Manifest.Batch, world.Manifest.Proofs.Append(source.Proof(target, f.Context(0), f.Secrets)));
+        var archived = await new LegacyRecordArchive(f.Secrets).WriteAsync(f.Context(0), manifest, source, target, (_, _) => Task.FromResult("protected:synthetic/mismatched-payment"), Ct);
+        var payment = new LegacyPaymentRecord(archived, world.Set.Wallets[0].TargetUser, world.Set.Orders[0].Record.Target);
+        long maps = await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map", Ct), audits = await f.CountAsync("SELECT count(*) FROM shop.audit_events", Ct);
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => new LegacyPaymentImportWorkflow(f.Sessions, f.Secrets).ImportAsync(f.Context(0), manifest, payment, Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments", Ct)); Assert.Equal(maps, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map", Ct)); Assert.Equal(audits, await f.CountAsync("SELECT count(*) FROM shop.audit_events", Ct));
+        Assert.True((await world.Reports.CompareAsync(f.Context(0), world.Manifest, world.Set, world.Read, Ct)).Matched);
     }
     [Fact]
     public async Task SameLegacyPaymentIdAcrossBrandsRetainsSeparateRepeatSafeOrigins()

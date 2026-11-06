@@ -23,7 +23,7 @@ public sealed record LegacyCouponRecord(ArchivedLegacyRecord Record, Guid Revisi
     {
         _ = Terms(); var source = Record.Source.Proof(Record.Target, context, secrets);
         using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
-        writer.Write("legacy-coupon-target-v1"); writer.Write(source.Fingerprint.Span); writer.Write(Revision.ToByteArray()); writer.Write(Product?.ToByteArray() ?? new byte[16]); writer.Write(Member?.ToByteArray() ?? new byte[16]);
+        writer.Write("legacy-coupon-target-v2-disabled"); writer.Write(source.Fingerprint.Span); writer.Write(Revision.ToByteArray()); writer.Write(Product?.ToByteArray() ?? new byte[16]); writer.Write(Member?.ToByteArray() ?? new byte[16]);
         writer.Write(Kind); writer.Write(PaidSourceOrder?.ToByteArray() ?? new byte[16]); writer.Write(Record.Reference); writer.Write(Record.Digest); writer.Flush(); byte[] digest = SHA256.HashData(bytes.ToArray());
         return [source, new(LegacyProjection.DiscountSnapshot, Record.Source.Id, Record.Target, context.BrandId, digest), new(LegacyProjection.DiscountRevision, Record.Source.Id, Revision, context.BrandId, digest)];
     }
@@ -58,12 +58,12 @@ public sealed class LegacyCouponImportWorkflow(DbSessionFactory sessions, Secret
                 INSERT INTO shop.discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,display_prefix,issuance_batch_id,kind,percent_off,product_id,eligible_user_id,source_order_id,max_total_uses,usage_adjustment_units,active)
                 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
                 """, DbValue.Uuid(row.Record.Target), DbValue.Uuid(context.BrandId), DbValue.Binary(Digest(context, key, terms.Code)), DbValue.Binary(encrypted), DbValue.Text(key), DbValue.Text(terms.Code[..Math.Min(3, terms.Code.Length)]), DbValue.Uuid(manifest.Batch), DbValue.Text(row.Kind),
-                DbValue.Numeric(terms.Percent), LegacyValues.Uuid(row.Product), LegacyValues.Uuid(row.Member), LegacyValues.Uuid(row.PaidSourceOrder), DbValue.Bigint(terms.Maximum), DbValue.Bigint(terms.Used), DbValue.Boolean(terms.Active)), ct);
+                DbValue.Numeric(terms.Percent), LegacyValues.Uuid(row.Product), LegacyValues.Uuid(row.Member), LegacyValues.Uuid(row.PaidSourceOrder), DbValue.Bigint(terms.Maximum), DbValue.Bigint(terms.Used), DbValue.Boolean(false)), ct);
             await session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id,new_revision) VALUES($1,'system',$2,'legacy_import','discount',$3,$4,$5,$6,0)", DbValue.Uuid(LegacyValues.AuditId(manifest, row.Record)), DbValue.Uuid(context.BrandId), DbValue.Uuid(row.Record.Target), DbValue.Text(row.Record.Reference), DbValue.Binary(row.Record.Digest), DbValue.Uuid(manifest.Batch)), ct);
             await session.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,max_total_uses,usage_adjustment_units,redeemed_count_at_revision,held_units_at_revision,active,product_id,eligible_user_id)
                 VALUES($1,$2,0,$3,$4,$5,$6,0,0,$7,$8,$9)
-                """, DbValue.Uuid(row.Revision), DbValue.Uuid(row.Record.Target), DbValue.Uuid(LegacyValues.AuditId(manifest, row.Record)), DbValue.Numeric(terms.Percent), DbValue.Bigint(terms.Maximum), DbValue.Bigint(terms.Used), DbValue.Boolean(terms.Active), LegacyValues.Uuid(row.Product), LegacyValues.Uuid(row.Member)), ct);
+                """, DbValue.Uuid(row.Revision), DbValue.Uuid(row.Record.Target), DbValue.Uuid(LegacyValues.AuditId(manifest, row.Record)), DbValue.Numeric(terms.Percent), DbValue.Bigint(terms.Maximum), DbValue.Bigint(terms.Used), DbValue.Boolean(false), LegacyValues.Uuid(row.Product), LegacyValues.Uuid(row.Member)), ct);
         }
         if (!await MatchesAsync(session, context, manifest, row, ct) || !await LegacyValues.MatchesAuditAsync(session, manifest, row.Record, "discount", ct)) throw new MigrationRejectedException();
         await session.CommitAsync(ct);
@@ -84,7 +84,7 @@ public sealed class LegacyCouponImportWorkflow(DbSessionFactory sessions, Secret
                 AND d.starts_at IS NULL AND d.ends_at IS NULL AND r.id=$14 AND r.revision_no=0 AND r.audit_event_id=$15 AND r.percent_off=d.percent_off AND r.max_total_uses=d.max_total_uses
                 AND r.usage_adjustment_units=d.usage_adjustment_units AND r.redeemed_count_at_revision=0 AND r.held_units_at_revision=0 AND r.active=d.active AND r.product_id IS NOT DISTINCT FROM d.product_id
                 AND r.eligible_user_id IS NOT DISTINCT FROM d.eligible_user_id AND NOT EXISTS(SELECT 1 FROM shop.discount_uses WHERE discount_id=d.id))
-            """, DbValue.Uuid(row.Record.Target), DbValue.Uuid(context.BrandId), DbValue.Binary(Digest(context, row.Record.Evidence.KeyId, t.Code)), DbValue.Text(row.Record.Evidence.KeyId), DbValue.Uuid(manifest.Batch), DbValue.Text(row.Kind), DbValue.Numeric(t.Percent), LegacyValues.Uuid(row.Product), LegacyValues.Uuid(row.Member), LegacyValues.Uuid(row.PaidSourceOrder), DbValue.Bigint(t.Maximum), DbValue.Bigint(t.Used), DbValue.Boolean(t.Active), DbValue.Uuid(row.Revision), DbValue.Uuid(LegacyValues.AuditId(manifest, row.Record))), r => r.GetBoolean(0), ct);
+            """, DbValue.Uuid(row.Record.Target), DbValue.Uuid(context.BrandId), DbValue.Binary(Digest(context, row.Record.Evidence.KeyId, t.Code)), DbValue.Text(row.Record.Evidence.KeyId), DbValue.Uuid(manifest.Batch), DbValue.Text(row.Kind), DbValue.Numeric(t.Percent), LegacyValues.Uuid(row.Product), LegacyValues.Uuid(row.Member), LegacyValues.Uuid(row.PaidSourceOrder), DbValue.Bigint(t.Maximum), DbValue.Bigint(t.Used), DbValue.Boolean(false), DbValue.Uuid(row.Revision), DbValue.Uuid(LegacyValues.AuditId(manifest, row.Record))), r => r.GetBoolean(0), ct);
         if (!fields) return false;
         byte[] encrypted = await session.QuerySingleAsync(new DbStatement("SELECT code_ciphertext FROM shop.discounts WHERE id=$1", DbValue.Uuid(row.Record.Target)), r => r.GetBinary(0), ct);
         byte[] plain = new BrandCipher(secrets).Decrypt(context, "discounts", row.Record.Target, "code_ciphertext", row.Record.Evidence.KeyId, encrypted), expected = Encoding.UTF8.GetBytes(t.Code);

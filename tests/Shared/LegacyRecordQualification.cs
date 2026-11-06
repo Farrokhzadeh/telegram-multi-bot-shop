@@ -102,7 +102,9 @@ public static class LegacyRecordQualification
             var report = await world.Reports.CompareAsync(world.Fixture.Context(0), world.Manifest, world.Set, world.Read, ct);
             if (!report.Matched || report.ReleaseReady || await world.Fixture.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", ct) != 1 ||
                 await world.Fixture.CountAsync("SELECT count(*) FROM shop.inventory_items", ct) != 0 || await world.Fixture.CountAsync("SELECT count(*) FROM shop.jobs", ct) != 0 ||
-                await world.Fixture.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", ct) != 0) throw new InvalidOperationException("Native protected legacy record qualification failed.");
+                await world.Fixture.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", ct) != 0 ||
+                await world.Fixture.CountAsync("SELECT count(*) FROM shop.discounts WHERE active", ct) != 0 ||
+                await world.Fixture.CountAsync("SELECT count(*) FROM shop.discount_revisions WHERE active", ct) != 0) throw new InvalidOperationException("Native protected legacy record qualification failed.");
         }
     }
 }

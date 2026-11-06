@@ -44,6 +44,7 @@ public sealed class DbSessionFactory
         this.data = data; // Caller owns the shared data source/pool.
     }
 
+    public Task<DbSession> BeginReadOnlyAsync(CancellationToken cancellationToken = default) => new DbSessionFactory(data, options with { ReadOnly = true, Isolation = IsolationLevel.RepeatableRead }).BeginAsync(cancellationToken);
     public async Task<DbSession> BeginAsync(CancellationToken cancellationToken = default)
     {
         if (System.Transactions.Transaction.Current is not null)

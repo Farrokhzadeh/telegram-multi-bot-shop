@@ -18,7 +18,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         var rows = source.Select(r => r with { History = Array.AsReadOnly(r.History.ToArray()) }).ToArray();
         if (rows.Select(r => r.TargetUser).Distinct().Count() != rows.Length) throw new MigrationRejectedException();
         foreach (var row in rows) foreach (var proof in row.Proofs(manifest.TargetBrand)) manifest.Require(proof);
-        await using var session = await sessions.BeginAsync(ct);
+        await using var session = await sessions.BeginReadOnlyAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         long mismatch = 0, missingMaps = 0, mismatchedMaps = 0, foundMaps = 0;
         foreach (var row in rows)
@@ -50,13 +50,13 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         var rows = source.ToArray();
         if (rows.Select(r => r.Target).Distinct().Count() != rows.Length) throw new MigrationRejectedException();
         foreach (var row in rows) foreach (var proof in row.Proofs(manifest.TargetBrand)) manifest.Require(proof);
-        await using var session = await sessions.BeginAsync(ct);
+        await using var session = await sessions.BeginReadOnlyAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         long mismatched = 0;
         foreach (var row in rows) if (!await HistoricalOrderImportWorkflow.MatchesAsync(session, row, ct)) mismatched++;
         long expected = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.HistoricalOrder);
         long unmatched = expected - rows.LongLength;
-        var mappings = await ReadAsync(manifest, ct);
+        var mappings = await ReadAsync(session, manifest, ct);
         long batchMappings = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
         long expectedKeysInBatch = 0;
         foreach (var proof in manifest.Proofs)
@@ -68,7 +68,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         LegacyAggregateComparison.Compare(manifest, expected, await ReadAsync(manifest, ct));
     public async Task<MigrationReconciliation> ReadAsync(VerifiedImportManifest manifest, CancellationToken ct = default)
     {
-        await using var session = await sessions.BeginAsync(ct);
+        await using var session = await sessions.BeginReadOnlyAsync(ct);
         return await ReadAsync(session, manifest, ct);
     }
     internal static async Task<MigrationReconciliation> ReadAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct)
