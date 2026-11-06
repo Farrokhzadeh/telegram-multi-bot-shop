@@ -13,4 +13,26 @@ The source reader's optional row visitor receives rows during the single read-on
 
 Every selected record is source-proof/coverage checked, archived, replayed, reloaded and decrypted with only the new target keys. Original supported encrypted fields additionally roundtrip with original source keys. Archived orders are projected only through the existing member/brand-bound read-only history reader; absent or rejected terms stay unknown. Complete original payment, coupon, delivery, supplier, service and refund fields remain protected evidence without new financial or operational assertions. All source commitments are checked again afterward. The frozen aggregate archive digest rejects changed record sets or ciphertext on a later run.
 
-Managed and shared native fixtures exercise file replay/reload, new-key-only reads, original-field comparison, wrong owner/keys/source/manifest, changed ciphertext/field/shape, missing files, shared permissions and symlinks. Source-copy fixtures check complete streaming and visitor rejection; candidate tests protect the stock/ledger/catalog boundaries. Actual protected archive creation and field counts remain unexecuted until the exact new CI-built operator passes on all three copies. Native results must distinguish archive fidelity from canonical commerce/paid-obligation parity. T064/T066 stay open; T068 and release remain unexecuted and separately gated.
+Managed and shared native fixtures exercise file replay/reload, new-key-only reads, original-field comparison, wrong owner/keys/source/manifest, changed ciphertext/field/shape, missing files, shared permissions and symlinks. Source-copy fixtures check complete streaming and visitor rejection; candidate tests protect the stock/ledger/catalog boundaries. Actual protected archive creation and field comparison passed on all three copies; see the execution checkpoint below. Native results must distinguish archive fidelity from canonical commerce/paid-obligation parity. T064/T066 stay open; T068 and release remain unexecuted and separately gated.
+
+## Actual protected archive execution — 2026-11-06
+The exact CI-built `d176f0a5349af338475f250dc1ddb6b4bebee4db` passed on all three pinned copies. [CI 42288804225](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/42288804225) passed 1012 .NET tests (183 unit, 709 integration, 120 contract), 55 Python/15 Spec Kit checks and five native executables with zero failures/skips or build warnings/errors. Native binary SHA-256: `f71441b01fdf6af01c76efb3f751561007949c82aa5cca540af5b7cb79e1d9cb`.
+
+| Source | Encrypted records | Re-encrypted original fields | Read-only orders | Incomplete terms |
+|---|---:|---:|---:|---:|
+| acc-abad | 15244 | 4428 | 4167 | 3476 |
+| kuala | 3 | 0 | 0 | 0 |
+| zikotech | 2984 | 784 | 749 | 519 |
+| Total | 18231 | 5212 | 4916 | 3995 |
+
+Every selected record passed exclusive publication, replay, reload and target-key-only decryption. Every selected original encrypted field additionally roundtripped with original current/previous legacy keys. Independent Python AES-GCM/Fernet verification matched exact source-record and recovered-field bytes and record-file coverage. No key, plaintext source row, customer identifier, name, monetary amount or credential was emitted or published.
+
+The twenty-family archive retains 4916 orders, 15 active nonremoved product records, 123 coupons, 122 payment attempts, 4725 manual deposits, 5179 linked historical inventory rows, 899 delivery headers, 899 parts, 901 attempts, 46 service jobs and 406 zero transactions. Absent preorder/supplier/refund families remain covered synthetically only. Excluded saleable stock/inactive catalog/configuration remain in the complete original backup. No active stock or canonical commerce row was created.
+
+All 56 source-table commitments per source matched before/after, covering 219909 rows with byte-identical source receipts. External restart produced byte-identical kuala receipts. Changed source keys and replaced qualification target keys rejected with unchanged archives. Initial writable-secret and socket-access setup failures stopped before any archive write; only temporary setup was corrected, without weakening security checks.
+
+Six qualifier containers and the source-copy container/database/socket were removed. All 13 existing containers retained their images and remained running; original archive hashes, keys and media are unchanged. Private encrypted archives, plans/indexes, receipts and separate qualification keyrings remain protected on the owner server and must not be published or deleted. See the associated redacted execution evidence.
+
+This proves archive fidelity/re-encryption and protected read-only history, not canonical financial settlement or delivery. All 3995 missing/rejected term sets remain unknown; 921 parser-accepted orders are not automatically payment/delivery approvals. T064/T066 remain unchecked for typed historical commerce import and full paid-obligation/ownership/exception parity. T068 remains unexecuted/separately gated; total stays 79/96 and release readiness is false. No currency conversion, ownership guess, discount activation, stock admission or liability waiver is inferred.
+
+[Redacted execution evidence](evidence/legacy-history-archive-validation-2026-11-06.json).
