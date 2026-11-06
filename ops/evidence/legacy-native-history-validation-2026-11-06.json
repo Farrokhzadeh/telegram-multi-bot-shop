@@ -1,0 +1,113 @@
+{
+  "actual_history_archive_import_executed": false,
+  "actual_target_import_executed": false,
+  "actual_target_reencryption_executed": false,
+  "artifact_sha256": "15adbeb1218ffb5e5b03002eac3db913d9cdc6e985d9e0b2438a11d0d137ca20",
+  "ci_run": 42237488539,
+  "native_binary_sha256": "ebec57ca1e5d7b1f04f79446e2f015cbfe7211cff038b94e439a2988c9277424",
+  "release_ready": false,
+  "scope": "native_source_order_terms_and_retained_wallet_validation_only",
+  "source_commit": "3895dce1262836034b577fcbdde648e95e700b87",
+  "sources": [
+    {
+      "accounts": 9277,
+      "archive_sha256": "0e86433927fa420ad3e13bbff2098119d47dfbaa0b626573c552999902703667",
+      "archive_unchanged": true,
+      "brand": "acc-abad",
+      "manual_irr_accounts": 34,
+      "nonzero_usd_history": 55,
+      "order_snapshots": {
+        "accepted_terms": 691,
+        "empty_snapshots": 3325,
+        "import_approved": false,
+        "missing_members": 0,
+        "missing_products": 0,
+        "orders": 4167,
+        "rejected_terms": 151,
+        "scope": "source_order_terms_only_not_payment_or_delivery_reconciliation"
+      },
+      "replay_identical": true,
+      "retained_history": 6572,
+      "retained_irr_history": 6455,
+      "retained_zero_history": 348,
+      "schema_sha256": "09e224cec08eb3a33ad0cfe4cd591efcf25e7bbbe1a240fe761c500387aacc8c",
+      "server_version": 160014,
+      "source": "prod1",
+      "source_rows_verified": 180751,
+      "tables_verified": 56
+    },
+    {
+      "accounts": 12,
+      "archive_sha256": "a61aaddbbd76a10aa6894aa02cffe861cb44a9602b1d085eecc981f822656071",
+      "archive_unchanged": true,
+      "brand": "kuala",
+      "manual_irr_accounts": 0,
+      "nonzero_usd_history": 0,
+      "order_snapshots": {
+        "accepted_terms": 0,
+        "empty_snapshots": 0,
+        "import_approved": false,
+        "missing_members": 0,
+        "missing_products": 0,
+        "orders": 0,
+        "rejected_terms": 0,
+        "scope": "source_order_terms_only_not_payment_or_delivery_reconciliation"
+      },
+      "replay_identical": true,
+      "retained_history": 0,
+      "retained_irr_history": 0,
+      "retained_zero_history": 0,
+      "schema_sha256": "09e224cec08eb3a33ad0cfe4cd591efcf25e7bbbe1a240fe761c500387aacc8c",
+      "server_version": 160014,
+      "source": "prod2",
+      "source_rows_verified": 2015,
+      "tables_verified": 56
+    },
+    {
+      "accounts": 2993,
+      "archive_sha256": "4481980586074034e84ff11d867621a1aa847c18589576ab7dd89155a21d6245",
+      "archive_unchanged": true,
+      "brand": "zikotech",
+      "manual_irr_accounts": 6,
+      "nonzero_usd_history": 2,
+      "order_snapshots": {
+        "accepted_terms": 230,
+        "empty_snapshots": 494,
+        "import_approved": false,
+        "missing_members": 0,
+        "missing_products": 0,
+        "orders": 749,
+        "rejected_terms": 25,
+        "scope": "source_order_terms_only_not_payment_or_delivery_reconciliation"
+      },
+      "replay_identical": true,
+      "retained_history": 930,
+      "retained_irr_history": 920,
+      "retained_zero_history": 58,
+      "schema_sha256": "09e224cec08eb3a33ad0cfe4cd591efcf25e7bbbe1a240fe761c500387aacc8c",
+      "server_version": 160014,
+      "source": "prod3",
+      "source_rows_verified": 37143,
+      "tables_verified": 56
+    }
+  ],
+  "total_source_rows_verified": 219909,
+  "cleanup": {
+    "disposable_container_removed": true,
+    "disposable_database_files_removed": true,
+    "production_database_connected": false,
+    "production_services_modified": false,
+    "production_web_bot_containers_running": 6
+  },
+  "qualification": {
+    "dotnet_tests": 988,
+    "unit_tests": 170,
+    "integration_tests": 698,
+    "contract_tests": 120,
+    "python_checks": 55,
+    "spec_kit_checks": 15,
+    "native_executables": 5,
+    "failed_tests": 0,
+    "skipped_tests": 0
+  }
+}
