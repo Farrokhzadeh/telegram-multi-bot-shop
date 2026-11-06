@@ -1,9 +1,11 @@
+import copy
+import json
 import hashlib
 import hmac
 import importlib.util
 import pathlib
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 SPEC = importlib.util.spec_from_file_location('source_copy',pathlib.Path(__file__).parents[1]/'prepare-legacy-source-copy.py')
 MODULE = importlib.util.module_from_spec(SPEC)
@@ -22,6 +24,18 @@ class LegacySourceCopyTests(unittest.TestCase):
     with patch.object(MODULE,'run',return_value='{"c0":"one","c1":"two"}\n') as run:
       self.assertEqual([['one','two']],MODULE.rows('owned','copy','SELECT 1,2',2))
       self.assertIn('q(c0,c1)',run.call_args.args[0][-1])
+  def test_unowned_networked_or_unbounded_containers_reject_before_database_mutations(self):
+    root=pathlib.Path('/tmp/teleg-source-qualification-synthetic');archive=MagicMock();archive.stat.return_value.st_size=MODULE.ASSETS.BRANDS['prod1'][3]
+    info={'Image':MODULE.IMAGE,'Config':{'Labels':{'teleg.purpose':'source-copy-inspection'},'User':'70:70'},'Mounts':[{'Type':'bind','Destination':'/q','Source':str(root/'socket')},{'Type':'bind','Destination':'/var/lib/postgresql/data','Source':str(root/'data')}],'HostConfig':{'NetworkMode':'none','PortBindings':{},'Memory':201326592,'MemorySwap':201326592,'NanoCpus':500000000,'PidsLimit':64,'ReadonlyRootfs':True,'Privileged':False,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges']}}
+    for field,value in (('NetworkMode','host'),('Memory',0),('MemorySwap',-1),('NanoCpus',0),('PidsLimit',0),('ReadonlyRootfs',False),('Privileged',True),('CapDrop',[]),('SecurityOpt',[])):
+      changed=copy.deepcopy(info);changed['HostConfig'][field]=value
+      with self.subTest(field=field),patch.object(MODULE.ASSETS,'digest',return_value=MODULE.ASSETS.BRANDS['prod1'][2]),patch.object(MODULE,'run',return_value=json.dumps([changed])) as run:
+        with self.assertRaises(ValueError):MODULE.prepare(root,'teleg-source-copy-synthetic','prod1',archive)
+        self.assertEqual(1,run.call_count);self.assertEqual(['docker','inspect','teleg-source-copy-synthetic'],run.call_args.args[0])
+    for identity in ([],[['1','prod2','production']],[['1','prod1','staging']]):
+      with self.subTest(identity=identity),patch.object(MODULE.ASSETS,'digest',return_value=MODULE.ASSETS.BRANDS['prod1'][2]),patch.object(MODULE,'run',side_effect=[json.dumps([info]),b'',b'',b'']) as run,patch.object(MODULE,'rows',return_value=identity):
+        with self.assertRaises(ValueError):MODULE.prepare(root,'teleg-source-copy-synthetic','prod1',archive)
+        self.assertEqual(4,run.call_count)
   def test_identifier_injection_is_rejected_before_any_process_starts(self):
     with patch.object(MODULE.subprocess,'Popen') as process:
       with self.assertRaises(ValueError):

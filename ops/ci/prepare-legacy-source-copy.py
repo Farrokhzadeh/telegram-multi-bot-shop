@@ -82,14 +82,15 @@ def prepare(root, container, instance, archive):
     raise ValueError()
   info = json.loads(run(['docker','inspect',container], text=True))[0]
   mounts = {item['Destination']:item['Source'] for item in info['Mounts'] if item['Type'] == 'bind'}
-  if info['Config']['Labels'].get('teleg.purpose') != 'source-copy-inspection' or info['HostConfig']['NetworkMode'] != 'none' or info['Image'] != IMAGE or info['HostConfig']['PortBindings'] or mounts != {'/q':str(root/'socket'),'/var/lib/postgresql/data':str(root/'data')}:
+  host = info['HostConfig']
+  if info['Config']['Labels'].get('teleg.purpose') != 'source-copy-inspection' or info['Config']['User'] != '70:70' or host['NetworkMode'] != 'none' or info['Image'] != IMAGE or host['PortBindings'] or mounts != {'/q':str(root/'socket'),'/var/lib/postgresql/data':str(root/'data')} or host['Memory'] != 201326592 or host['MemorySwap'] != 201326592 or host['NanoCpus'] != 500000000 or host['PidsLimit'] != 64 or not host['ReadonlyRootfs'] or host['Privileged'] or set(host['CapDrop'] or []) != {'ALL'} or 'no-new-privileges' not in (host['SecurityOpt'] or []):
     raise ValueError()
   database = 'teleg_source_' + instance
   run(['docker','exec',container,'dropdb','--if-exists','-h','/q','-U','teleg_source_owner',database])
   run(['docker','exec',container,'createdb','-h','/q','-U','teleg_source_owner',database])
   with archive.open('rb') as stream:
     run(['docker','exec','-i',container,'pg_restore','--exit-on-error','--single-transaction','--no-owner','--no-privileges','-h','/q','-U','teleg_source_owner','-d',database], stdin=stream)
-  if ASSETS.digest(archive) != digest:
+  if ASSETS.digest(archive) != digest or rows(container,database,"SELECT id::text,instance_id,deployment_stage FROM public.deployment_identity ORDER BY id") != [['1',instance,'production']]:
     raise ValueError()
   setup = f"DO $x$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='teleg_source_reader') THEN CREATE ROLE teleg_source_reader LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS; END IF; END $x$; REVOKE ALL ON DATABASE {database} FROM PUBLIC; GRANT CONNECT ON DATABASE {database} TO teleg_source_reader; REVOKE ALL ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA public TO teleg_source_reader; GRANT SELECT ON ALL TABLES IN SCHEMA public TO teleg_source_reader; COMMENT ON DATABASE {database} IS 'teleg-offline-copy:{digest}'; ALTER DATABASE {database} SET default_transaction_read_only=on;"
   run(['docker','exec',container,'psql','-Xq','-v','ON_ERROR_STOP=1','-h','/q','-U','teleg_source_owner','-d',database,'-c',setup])
