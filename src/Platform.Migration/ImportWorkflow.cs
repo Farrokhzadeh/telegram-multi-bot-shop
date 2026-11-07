@@ -7,13 +7,19 @@ public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory d
     public async Task<LegacyRecordReconciliation> ImportWalletOrdersAsync(BrandContext context, SecretSnapshot secrets, LegacyWalletOrderPlan plan, Func<string, CancellationToken, Task<ProtectedLegacyEvidence>> readArchive, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>> readRetention, LegacyRecordReconciliationReport reconciliation, CancellationToken ct = default)
     {
         var manifest = plan.Manifest; var rows = plan.Set.Wallets;
-        if (context.BrandId != manifest.TargetBrand || plan.Set.Orders.Count + plan.Review.Count != plan.Records.Count) throw new MigrationRejectedException();
+        if (context.BrandId != manifest.TargetBrand || plan.Set.Orders.Count + plan.Set.Delivery.Count + plan.Review.Count != plan.Records.Count) throw new MigrationRejectedException();
         await source.VerifyWalletCoverageAsync(manifest, ct);
         foreach (var projection in LegacySourceRecord.Projections) await source.VerifyRecordCoverageAsync(context, secrets, plan.Archive, projection, ct);
         var protector = new LegacyRecordArchive(secrets);
         foreach (var row in plan.Records)
         {
             plan.Archive.Require(row.Source.Proof(row.Target, context, secrets));
+            if (!protector.Matches(context, row, await readArchive(row.Reference, ct))) throw new MigrationRejectedException();
+        }
+        foreach (var row in plan.Set.Delivery)
+        {
+            if (row.Source.Projection != LegacyProjection.ZeroTransaction || !plan.Records.Any(r => r.Source == row.Source) || !plan.Set.Orders.Any(o => o.Record.Target == row.Target && o.NativeZeroSource == row.Source)) throw new MigrationRejectedException();
+            manifest.Require(row.Source.Proof(row.Target, context, secrets));
             if (!protector.Matches(context, row, await readArchive(row.Reference, ct))) throw new MigrationRejectedException();
         }
         var retention = await WalletRetentionVerification.ReadAsync(rows.Select(r => r.Retention!), readRetention, ct);
@@ -28,6 +34,8 @@ public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory d
         foreach (var row in verified) await wallets.ImportVerifiedAsync(context, manifest, row, retention, ct);
         var orders = new LegacyOrderRecordImportWorkflow(destination, secrets);
         foreach (var row in plan.Set.Orders) await orders.ImportAsync(context, manifest, row, ct);
+        var delivery = new LegacyDeliveryImportWorkflow(destination, secrets);
+        foreach (var row in plan.Set.Delivery) await delivery.ImportAsync(context, manifest, row, ct);
         var report = await reconciliation.CompareAsync(context, manifest, plan.Set, readArchive, ct, readRetention);
         if (!report.Matched) throw new MigrationRejectedException(); return report;
     }

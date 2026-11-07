@@ -81,6 +81,11 @@ public sealed class LegacyWalletRetention
     {
         if (rows.Count != history.Count || rows.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count() != rows.Count || rows.Any(r => !history.TryGetValue(r.Id, out var expected) || expected != r)) throw new MigrationRejectedException();
     }
+    internal void RequireZero(LegacySourceRecord source)
+    {
+        using var document = source.Open(); var row = document.RootElement;
+        if (source.Projection != LegacyProjection.ZeroTransaction || row.GetProperty("user_id").GetInt64().ToString(CultureInfo.InvariantCulture) != LegacyUser || LegacyValues.Text(row, "currency") != "USD" || !history.TryGetValue(source.Id, out var retained) || retained != new LegacyRetainedTransaction(source.Id, 0, "USD", LegacyValues.Time(row, "created_at"))) throw new MigrationRejectedException();
+    }
     public bool Matches(ReadOnlySpan<byte> body) => CryptographicOperations.FixedTimeEquals(digest, SHA256.HashData(body));
     internal async Task<bool> MatchesAsync(Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? read, CancellationToken ct)
     {

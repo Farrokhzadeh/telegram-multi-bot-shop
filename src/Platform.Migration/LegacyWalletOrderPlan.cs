@@ -19,7 +19,19 @@ public sealed class LegacyWalletOrderPlan
     public IReadOnlyList<ArchivedLegacyRecord> Records { get; }
     public IReadOnlyList<LegacyRecordReview> Review { get; }
     public bool ReleaseReady => false;
-    public static LegacyWalletOrderPlan Create(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived)
+    public static LegacyWalletOrderPlan Create(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived) => Build(context, secrets, archive, walletManifest, destination, reference, historicalBrandName, input, archived, false);
+    public static async Task<LegacyWalletOrderPlan> CreateWithZeroOrdersAsync(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived, Func<VerifiedImportManifest, LegacySourceRecord, Guid, CancellationToken, Task<ArchivedLegacyRecord>> archiveZero, CancellationToken ct = default)
+    {
+        var plan = Build(context, secrets, archive, walletManifest, destination, reference, historicalBrandName, input, archived, true); var zeroRows = new List<ArchivedLegacyRecord>(); var protector = new LegacyRecordArchive(secrets);
+        foreach (var order in plan.Set.Orders.Where(o => o.NativeZeroSource is not null))
+        {
+            var row = await archiveZero(plan.Manifest, order.NativeZeroSource!, order.Record.Target, ct);
+            if (row.Source != order.NativeZeroSource || row.Target != order.Record.Target || !protector.Matches(context, row, row.Evidence)) throw new MigrationRejectedException();
+            plan.Manifest.Require(row.Source.Proof(row.Target, context, secrets)); zeroRows.Add(row);
+        }
+        return new(plan.Archive, plan.Manifest, plan.Set with { Delivery = zeroRows.AsReadOnly() }, plan.Records.ToArray(), plan.Review.ToArray());
+    }
+    private static LegacyWalletOrderPlan Build(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived, bool zeroOrders)
     {
         if (context.BrandId != archive.TargetBrand || archive.TargetBrand != walletManifest.TargetBrand || archive.SourceBrand != walletManifest.SourceBrand || archive.SourceRevision != walletManifest.SourceRevision || archive.SourceSchemaDigest != walletManifest.SourceSchemaDigest || archive.SnapshotDigest != walletManifest.SnapshotDigest || archive.SnapshotReference != walletManifest.SnapshotReference || string.IsNullOrWhiteSpace(historicalBrandName) || historicalBrandName.Length > 160 || historicalBrandName.Any(char.IsControl)) throw new MigrationRejectedException();
         var wallets = input.Select(w => w with { History = Array.AsReadOnly(w.History.ToArray()) }).ToArray();
@@ -38,8 +50,10 @@ public sealed class LegacyWalletOrderPlan
             if (!protector.Matches(context, row, row.Evidence)) throw new MigrationRejectedException();
         }
         var owners = wallets.ToDictionary(w => w.TelegramId); var orders = new List<LegacyHistoricalRecord>(); var review = new List<LegacyRecordReview>();
+        var zeros = records.Where(r => r.Source.Projection == LegacyProjection.ZeroTransaction).ToDictionary(r => r.Source.Id, r => r.Source, StringComparer.Ordinal); var selectedZeros = new HashSet<string>(StringComparer.Ordinal);
         foreach (var row in records.OrderBy(r => r.Source.Projection).ThenBy(r => r.Source.Id, StringComparer.Ordinal))
         {
+            if (row.Source.Projection == LegacyProjection.ZeroTransaction && selectedZeros.Contains(row.Source.Id)) continue;
             string reason = "outside_wallet_order_scope";
             if (row.Source.Projection == LegacyProjection.OrderRecord)
             {
@@ -50,7 +64,15 @@ public sealed class LegacyWalletOrderPlan
                 if (terms is not null)
                 {
                     if (!owners.TryGetValue(terms.Telegram, out var owner)) throw new MigrationRejectedException();
-                    if (terms.Free) reason = "zero_order_requires_separate_proof";
+                    if (terms.Free)
+                    {
+                        reason = zeroOrders ? "missing_exact_native_zero_transaction" : "zero_order_requires_separate_proof";
+                        if (zeroOrders && zeros.TryGetValue(row.Source.Id, out var zero))
+                        {
+                            try { owner.Retention!.RequireZero(zero); var order = new LegacyHistoricalRecord(row, owner.TargetUser, historicalBrandName, NativeZeroSource: zero); _ = order.Terms(); orders.Add(order); selectedZeros.Add(zero.Id); continue; }
+                            catch (MigrationRejectedException) { }
+                        }
+                    }
                     else if (terms.Method == "wallet" && terms.Currency == "USDT")
                     {
                         decimal amount = ExactDecimal.Multiply(terms.UnitUsd, terms.Quantity);
@@ -62,7 +84,7 @@ public sealed class LegacyWalletOrderPlan
             }
             review.Add(new(row.Source.Projection, row.Source.Id, row.Target, reason));
         }
-        var proofs = wallets.SelectMany(w => w.Proofs(context.BrandId)).Concat(orders.SelectMany(o => o.Proofs(context, secrets)));
+        var proofs = wallets.SelectMany(w => w.Proofs(context.BrandId)).Concat(orders.SelectMany(o => o.Proofs(context, secrets))).Concat(orders.Where(o => o.NativeZeroSource is not null).Select(o => o.NativeZeroSource!.Proof(o.Record.Target, context, secrets)));
         byte[] body = VerifiedImportManifest.EncodePlan(destination, walletManifest.SourceBrand, context.BrandId, walletManifest.SourceRevision, Convert.FromHexString(walletManifest.SourceSchemaDigest), walletManifest.SnapshotReference, Convert.FromHexString(walletManifest.SnapshotDigest), walletManifest.Batch, proofs, walletManifest.ExpectedOpeningUsd);
         var manifest = VerifiedImportManifest.Open(reference, SHA256.HashData(body), body);
         return new(archive, manifest, new(Array.AsReadOnly(wallets), orders.AsReadOnly(), [], [], [], []), records, review.ToArray());

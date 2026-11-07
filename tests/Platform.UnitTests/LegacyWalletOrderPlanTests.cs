@@ -4,6 +4,12 @@ namespace Platform.UnitTests;
 public sealed class LegacyWalletOrderPlanTests
 {
     [Theory]
+    [InlineData("zero_valid")]
+    [InlineData("zero_missing")]
+    [InlineData("zero_owner")]
+    [InlineData("zero_currency")]
+    [InlineData("zero_clock")]
+    [InlineData("zero_prepared")]
     [InlineData("valid")]
     [InlineData("terms")]
     [InlineData("owner")]

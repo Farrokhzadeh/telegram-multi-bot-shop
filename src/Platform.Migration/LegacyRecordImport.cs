@@ -33,15 +33,23 @@ internal static class LegacyValues
     internal static Task AuditAsync(DbSession session, VerifiedImportManifest manifest, ArchivedLegacyRecord row, string kind, CancellationToken ct) => session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id) VALUES($1,'system',$2,'legacy_import',$3,$4,$5,$6,$7)", DbValue.Uuid(AuditId(manifest, row)), DbValue.Uuid(manifest.TargetBrand), DbValue.Text(kind), DbValue.Uuid(row.Target), DbValue.Text(row.Reference), DbValue.Binary(row.Digest), DbValue.Uuid(manifest.Batch)), ct);
     internal static Task<bool> MatchesAuditAsync(DbSession session, VerifiedImportManifest manifest, ArchivedLegacyRecord row, string kind, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.audit_events WHERE id=$1 AND actor_kind='system' AND brand_id=$2 AND action='legacy_import' AND entity_kind=$3 AND entity_id=$4 AND reason=$5 AND command_sha256=$6 AND correlation_id=$7)", DbValue.Uuid(AuditId(manifest, row)), DbValue.Uuid(manifest.TargetBrand), DbValue.Text(kind), DbValue.Uuid(row.Target), DbValue.Text(row.Reference), DbValue.Binary(row.Digest), DbValue.Uuid(manifest.Batch)), r => r.GetBoolean(0), ct);
 }
-public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Member, string HistoricalBrandName, DateTime? NativeWalletDebitAt = null)
+public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Member, string HistoricalBrandName, DateTime? NativeWalletDebitAt = null, LegacySourceRecord? NativeZeroSource = null)
 {
     internal LegacyOrderTerms Terms()
     {
         if (Record.Source.Projection != LegacyProjection.OrderRecord || Member == Guid.Empty || string.IsNullOrWhiteSpace(HistoricalBrandName) || HistoricalBrandName.Length > 160) throw new MigrationRejectedException();
         var terms = ReadTerms(Record.Source);
         if (NativeWalletDebitAt is DateTime clock && (terms.Method != "wallet" || terms.Free || clock.Kind != DateTimeKind.Utc || clock == DateTime.MinValue || clock == DateTime.MaxValue || clock.Ticks % 10 != 0)) throw new MigrationRejectedException();
+        if (NativeZeroSource is not null)
+        {
+            using var zero = NativeZeroSource.Open(); var original = zero.RootElement;
+            if (!terms.Free || NativeWalletDebitAt is not null || NativeZeroSource.Projection != LegacyProjection.ZeroTransaction || NativeZeroSource.Id != Record.Source.Id || original.GetProperty("user_id").GetInt64() != terms.Telegram || LegacyValues.Text(original, "currency") != "USD") throw new MigrationRejectedException();
+            _ = LegacyValues.Time(original, "created_at");
+        }
         return terms;
     }
+    internal DateTime AcceptanceClock(LegacyOrderTerms terms)
+    { if (NativeZeroSource is null) return NativeWalletDebitAt ?? terms.Created; using var zero = NativeZeroSource.Open(); return LegacyValues.Time(zero.RootElement, "created_at"); }
     internal static LegacyOrderTerms ReadTerms(LegacySourceRecord source)
     {
         if (source.Projection != LegacyProjection.OrderRecord) throw new MigrationRejectedException();
@@ -75,6 +83,7 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
         _ = Terms(); var proof = Record.Source.Proof(Record.Target, context, secrets);
         using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
         writer.Write("legacy-record-order-v1"); writer.Write(proof.Fingerprint.Span); writer.Write(Member.ToByteArray()); writer.Write(HistoricalBrandName); writer.Write(Record.Reference); writer.Write(Record.Digest); if (NativeWalletDebitAt is DateTime clock) { writer.Write("native-wallet-debit-clock-v1"); writer.Write(clock.Ticks); }
+        if (NativeZeroSource is not null) { writer.Write("native-zero-acceptance-v1"); writer.Write(NativeZeroSource.Proof(Record.Target, context, secrets).Fingerprint.Span); }
         writer.Flush();
         return [proof, new(LegacyProjection.HistoricalOrder, Record.Source.Id, Record.Target, context.BrandId, SHA256.HashData(bytes.ToArray())), new(LegacyProjection.OrderAlias, Record.Source.Id, Record.Target, context.BrandId, proof.Fingerprint.Span)];
     }
@@ -88,6 +97,7 @@ public sealed class LegacyOrderRecordImportWorkflow(DbSessionFactory sessions, S
         var terms = row.Terms(); var proofs = row.Proofs(context, secrets);
         if (context.BrandId != manifest.TargetBrand || !new LegacyRecordArchive(secrets).Matches(context, row.Record, row.Record.Evidence)) throw new MigrationRejectedException();
         foreach (var proof in proofs) manifest.Require(proof);
+        if (row.NativeZeroSource is not null) manifest.Require(row.NativeZeroSource.Proof(row.Record.Target, context, secrets));
         await using var session = await sessions.BeginAsync(ct); await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         await LegacyValues.RequireMemberAsync(session, context, manifest, row.Member, terms.Telegram, ct);
         if (terms.Method == "wallet" && !await LegacyValues.HasHistoricalDebitAsync(session, manifest, row.Record.Source.Id, row.Member, ExactDecimal.Multiply(terms.UnitUsd, terms.Quantity), ct, row.NativeWalletDebitAt)) throw new MigrationRejectedException();
@@ -103,7 +113,7 @@ public sealed class LegacyOrderRecordImportWorkflow(DbSessionFactory sessions, S
                 VALUES($1,$2,$3,'product_purchase',$4,'requires_admin',$5,$6,$7,$8,false,5000,'legacy-net-v1',$9,$10,$17,$12,$13,$14,$15,false,$16,'credential_recovery',$11,$11)
                 """, DbValue.Uuid(row.Record.Target), DbValue.Uuid(row.Member), DbValue.Integer(terms.Quantity), DbValue.Text(terms.Free ? "not_required" : "paid"), DbValue.Text(terms.Currency), DbValue.Text(terms.Method), DbValue.Numeric(terms.UnitUsd),
                 terms.UnitToman is decimal toman ? DbValue.Numeric(toman) : DbValue.Null(NpgsqlDbType.Numeric), terms.Free ? DbValue.Numeric(100) : DbValue.Null(NpgsqlDbType.Numeric), terms.Free ? DbValue.Integer(terms.Quantity) : DbValue.Null(NpgsqlDbType.Integer),
-                DbValue.Utc(terms.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(terms.Title), DbValue.Text(row.Record.Reference), DbValue.Text(terms.Kind), DbValue.Boolean(terms.Preorder), DbValue.Utc(row.NativeWalletDebitAt ?? terms.Created)), ct);
+                DbValue.Utc(terms.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(terms.Title), DbValue.Text(row.Record.Reference), DbValue.Text(terms.Kind), DbValue.Boolean(terms.Preorder), DbValue.Utc(row.AcceptanceClock(terms))), ct);
             await LegacyValues.AuditAsync(session, manifest, row.Record, "order", ct);
         }
         if (!await MatchesAsync(session, row, ct) || !await LegacyValues.MatchesAuditAsync(session, manifest, row.Record, "order", ct)) throw new MigrationRejectedException();
@@ -123,6 +133,6 @@ public sealed class LegacyOrderRecordImportWorkflow(DbSessionFactory sessions, S
                 AND NOT EXISTS(SELECT 1 FROM shop.supplier_requests WHERE order_id=$1) AND NOT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE order_id=$1))
             """, DbValue.Uuid(row.Record.Target), DbValue.Uuid(row.Member), DbValue.Integer(t.Quantity), DbValue.Text(t.Free ? "not_required" : "paid"), DbValue.Text(t.Currency), DbValue.Text(t.Method), DbValue.Numeric(t.UnitUsd),
             t.UnitToman is decimal toman ? DbValue.Numeric(toman) : DbValue.Null(NpgsqlDbType.Numeric), t.Free ? DbValue.Numeric(100) : DbValue.Null(NpgsqlDbType.Numeric), t.Free ? DbValue.Integer(t.Quantity) : DbValue.Null(NpgsqlDbType.Integer),
-            DbValue.Utc(t.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(t.Title), DbValue.Text(row.Record.Reference), DbValue.Text(t.Kind), DbValue.Boolean(t.Preorder), DbValue.Utc(row.NativeWalletDebitAt ?? t.Created)), r => r.GetBoolean(0), ct);
+            DbValue.Utc(t.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(t.Title), DbValue.Text(row.Record.Reference), DbValue.Text(t.Kind), DbValue.Boolean(t.Preorder), DbValue.Utc(row.AcceptanceClock(t))), r => r.GetBoolean(0), ct);
     }
 }
