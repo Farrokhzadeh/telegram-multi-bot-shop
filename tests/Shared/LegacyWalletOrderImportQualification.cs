@@ -35,13 +35,17 @@ public static class LegacyWalletOrderImportQualification
         }
         var walletManifest = Manifest(wallets.SelectMany(w => w.Proofs(context.BrandId)), batch); string body;
         await using (var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.orders s")) body = (string)(await read.ExecuteScalarAsync(ct))!;
-        var source = new LegacySourceRecord(LegacyProjection.OrderRecord, reference, body); Guid target = Guid.NewGuid();
-        var archive = Manifest(walletManifest.Proofs.Where(p => p.Projection == LegacyProjection.User).Append(source.Proof(target, context, f.Secrets)), Guid.NewGuid());
+        var source = new LegacySourceRecord(LegacyProjection.OrderRecord, reference, body); Guid target = Guid.NewGuid(), zeroTarget = Guid.NewGuid();
+        await using (var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.transactions s WHERE amount=0")) body = (string)(await read.ExecuteScalarAsync(ct))!;
+        var zero = new LegacySourceRecord(LegacyProjection.ZeroTransaction, "zero-original", body);
+        var archive = Manifest(walletManifest.Proofs.Where(p => p.Projection == LegacyProjection.User).Append(source.Proof(target, context, f.Secrets)).Append(zero.Proof(zeroTarget, context, f.Secrets)), Guid.NewGuid());
         ProtectedLegacyEvidence? evidence = null;
         var row = await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, source, target, (value, _) => { evidence = value; return Task.FromResult("protected:synthetic/wallet-order-evidence"); }, ct);
-        var plan = LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, [row]);
-        if (plan.Set.Orders.Count != 1 || plan.Review.Count != 0) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
-        Task<ProtectedLegacyEvidence> ReadArchive(string _, CancellationToken token) => Task.FromResult(evidence!);
+        ProtectedLegacyEvidence? zeroEvidence = null;
+        var zeroRow = await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, zero, zeroTarget, (value, _) => { zeroEvidence = value; return Task.FromResult("protected:synthetic/zero-evidence"); }, ct);
+        var plan = LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, [row, zeroRow]);
+        if (plan.Set.Orders.Count != 1 || plan.Review.Count != 1) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
+        Task<ProtectedLegacyEvidence> ReadArchive(string _, CancellationToken token) => Task.FromResult(_ == row.Reference ? evidence! : zeroEvidence!);
         var workflow = new ImportWorkflow(world.Source, f.Sessions); var reports = new LegacyRecordReconciliationReport(f.Database.Data, f.Secrets);
         Task<LegacyRecordReconciliation> Import() => workflow.ImportWalletOrdersAsync(context, f.Secrets, plan, ReadArchive, ReadRetention, reports, ct);
         if (fault == "source") { await using var change = f.Database.Data.CreateCommand("UPDATE public.orders SET total=21"); await change.ExecuteNonQueryAsync(ct); }
