@@ -29,16 +29,18 @@ internal static class LegacyValues
         if (!manifest.Proofs.Any(p => p.Projection == LegacyProjection.User && p.Target == member && p.LegacyId == telegram.ToString(CultureInfo.InvariantCulture)) ||
             !await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=$1 AND u.telegram_id=$2 AND b.id=$3 AND b.bot_id=$4)", DbValue.Uuid(member), DbValue.Bigint(telegram), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
     }
-    internal static Task<bool> HasHistoricalDebitAsync(DbSession session, VerifiedImportManifest manifest, string legacyOrder, Guid member, decimal amount, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries w JOIN shop.legacy_id_map m ON m.target_kind='wallet_entry' AND m.target_id=w.id WHERE m.source_brand=$1 AND m.source_table='transactions' AND m.legacy_id=$2 AND m.import_batch=$3 AND m.import_manifest_ref=$4 AND w.user_id=$5 AND NOT w.is_posting AND w.movement_kind='legacy_history' AND w.signed_amount=$6)", DbValue.Text(manifest.SourceBrand), DbValue.Text(legacyOrder), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference), DbValue.Uuid(member), DbValue.Numeric(-amount)), r => r.GetBoolean(0), ct);
+    internal static Task<bool> HasHistoricalDebitAsync(DbSession session, VerifiedImportManifest manifest, string legacyOrder, Guid member, decimal amount, CancellationToken ct, DateTime? occurred = null) => session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries w JOIN shop.legacy_id_map m ON m.target_kind='wallet_entry' AND m.target_id=w.id WHERE m.source_brand=$1 AND m.source_table='transactions' AND m.legacy_id=$2 AND m.import_batch=$3 AND m.import_manifest_ref=$4 AND w.user_id=$5 AND NOT w.is_posting AND w.movement_kind='legacy_history' AND w.signed_amount=$6 AND ($7::timestamptz IS NULL OR w.created_at=$7))", DbValue.Text(manifest.SourceBrand), DbValue.Text(legacyOrder), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference), DbValue.Uuid(member), DbValue.Numeric(-amount), Date(occurred)), r => r.GetBoolean(0), ct);
     internal static Task AuditAsync(DbSession session, VerifiedImportManifest manifest, ArchivedLegacyRecord row, string kind, CancellationToken ct) => session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id) VALUES($1,'system',$2,'legacy_import',$3,$4,$5,$6,$7)", DbValue.Uuid(AuditId(manifest, row)), DbValue.Uuid(manifest.TargetBrand), DbValue.Text(kind), DbValue.Uuid(row.Target), DbValue.Text(row.Reference), DbValue.Binary(row.Digest), DbValue.Uuid(manifest.Batch)), ct);
     internal static Task<bool> MatchesAuditAsync(DbSession session, VerifiedImportManifest manifest, ArchivedLegacyRecord row, string kind, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.audit_events WHERE id=$1 AND actor_kind='system' AND brand_id=$2 AND action='legacy_import' AND entity_kind=$3 AND entity_id=$4 AND reason=$5 AND command_sha256=$6 AND correlation_id=$7)", DbValue.Uuid(AuditId(manifest, row)), DbValue.Uuid(manifest.TargetBrand), DbValue.Text(kind), DbValue.Uuid(row.Target), DbValue.Text(row.Reference), DbValue.Binary(row.Digest), DbValue.Uuid(manifest.Batch)), r => r.GetBoolean(0), ct);
 }
-public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Member, string HistoricalBrandName)
+public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Member, string HistoricalBrandName, DateTime? NativeWalletDebitAt = null)
 {
     internal LegacyOrderTerms Terms()
     {
         if (Record.Source.Projection != LegacyProjection.OrderRecord || Member == Guid.Empty || string.IsNullOrWhiteSpace(HistoricalBrandName) || HistoricalBrandName.Length > 160) throw new MigrationRejectedException();
-        return ReadTerms(Record.Source);
+        var terms = ReadTerms(Record.Source);
+        if (NativeWalletDebitAt is DateTime clock && (terms.Method != "wallet" || terms.Free || clock.Kind != DateTimeKind.Utc || clock == DateTime.MinValue || clock == DateTime.MaxValue || clock.Ticks % 10 != 0)) throw new MigrationRejectedException();
+        return terms;
     }
     internal static LegacyOrderTerms ReadTerms(LegacySourceRecord source)
     {
@@ -72,7 +74,8 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
     {
         _ = Terms(); var proof = Record.Source.Proof(Record.Target, context, secrets);
         using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
-        writer.Write("legacy-record-order-v1"); writer.Write(proof.Fingerprint.Span); writer.Write(Member.ToByteArray()); writer.Write(HistoricalBrandName); writer.Write(Record.Reference); writer.Write(Record.Digest); writer.Flush();
+        writer.Write("legacy-record-order-v1"); writer.Write(proof.Fingerprint.Span); writer.Write(Member.ToByteArray()); writer.Write(HistoricalBrandName); writer.Write(Record.Reference); writer.Write(Record.Digest); if (NativeWalletDebitAt is DateTime clock) { writer.Write("native-wallet-debit-clock-v1"); writer.Write(clock.Ticks); }
+        writer.Flush();
         return [proof, new(LegacyProjection.HistoricalOrder, Record.Source.Id, Record.Target, context.BrandId, SHA256.HashData(bytes.ToArray())), new(LegacyProjection.OrderAlias, Record.Source.Id, Record.Target, context.BrandId, proof.Fingerprint.Span)];
     }
     public override string ToString() => "LegacyHistoricalRecord [redacted]";
@@ -87,7 +90,7 @@ public sealed class LegacyOrderRecordImportWorkflow(DbSessionFactory sessions, S
         foreach (var proof in proofs) manifest.Require(proof);
         await using var session = await sessions.BeginAsync(ct); await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
         await LegacyValues.RequireMemberAsync(session, context, manifest, row.Member, terms.Telegram, ct);
-        if (terms.Method == "wallet" && !await LegacyValues.HasHistoricalDebitAsync(session, manifest, row.Record.Source.Id, row.Member, ExactDecimal.Multiply(terms.UnitUsd, terms.Quantity), ct)) throw new MigrationRejectedException();
+        if (terms.Method == "wallet" && !await LegacyValues.HasHistoricalDebitAsync(session, manifest, row.Record.Source.Id, row.Member, ExactDecimal.Multiply(terms.UnitUsd, terms.Quantity), ct, row.NativeWalletDebitAt)) throw new MigrationRejectedException();
         if (terms.Free && !manifest.Proofs.Any(p => p.Projection == LegacyProjection.ZeroTransaction && p.LegacyId == row.Record.Source.Id && p.Target == row.Record.Target)) throw new MigrationRejectedException();
         bool first = await LegacyMapStore.EnsureAsync(session, manifest, proofs[0], ct);
         foreach (var proof in proofs.Skip(1)) if (await LegacyMapStore.EnsureAsync(session, manifest, proof, ct) != first) throw new MigrationRejectedException();
@@ -97,10 +100,10 @@ public sealed class LegacyOrderRecordImportWorkflow(DbSessionFactory sessions, S
                 INSERT INTO shop.orders(id,user_id,quantity,order_kind,payment_status,fulfillment_status,currency,payment_method,unit_price_usdt,unit_price_toman,
                     auto_price_toman_snapshot,pricing_rounding_step_snapshot,price_calculation_version,discount_pct_snapshot,discount_units_snapshot,payment_confirmed_at,
                     brand_public_name_snapshot,product_title_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,review_code,created_at,updated_at)
-                VALUES($1,$2,$3,'product_purchase',$4,'requires_admin',$5,$6,$7,$8,false,5000,'legacy-net-v1',$9,$10,$11,$12,$13,$14,$15,false,$16,'credential_recovery',$11,$11)
+                VALUES($1,$2,$3,'product_purchase',$4,'requires_admin',$5,$6,$7,$8,false,5000,'legacy-net-v1',$9,$10,$17,$12,$13,$14,$15,false,$16,'credential_recovery',$11,$11)
                 """, DbValue.Uuid(row.Record.Target), DbValue.Uuid(row.Member), DbValue.Integer(terms.Quantity), DbValue.Text(terms.Free ? "not_required" : "paid"), DbValue.Text(terms.Currency), DbValue.Text(terms.Method), DbValue.Numeric(terms.UnitUsd),
                 terms.UnitToman is decimal toman ? DbValue.Numeric(toman) : DbValue.Null(NpgsqlDbType.Numeric), terms.Free ? DbValue.Numeric(100) : DbValue.Null(NpgsqlDbType.Numeric), terms.Free ? DbValue.Integer(terms.Quantity) : DbValue.Null(NpgsqlDbType.Integer),
-                DbValue.Utc(terms.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(terms.Title), DbValue.Text(row.Record.Reference), DbValue.Text(terms.Kind), DbValue.Boolean(terms.Preorder)), ct);
+                DbValue.Utc(terms.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(terms.Title), DbValue.Text(row.Record.Reference), DbValue.Text(terms.Kind), DbValue.Boolean(terms.Preorder), DbValue.Utc(row.NativeWalletDebitAt ?? terms.Created)), ct);
             await LegacyValues.AuditAsync(session, manifest, row.Record, "order", ct);
         }
         if (!await MatchesAsync(session, row, ct) || !await LegacyValues.MatchesAuditAsync(session, manifest, row.Record, "order", ct)) throw new MigrationRejectedException();
@@ -113,13 +116,13 @@ public sealed class LegacyOrderRecordImportWorkflow(DbSessionFactory sessions, S
             SELECT EXISTS(SELECT 1 FROM shop.orders WHERE id=$1 AND user_id=$2 AND quantity=$3 AND product_id IS NULL AND order_kind='product_purchase'
                 AND payment_status=$4 AND fulfillment_status='requires_admin' AND currency=$5 AND payment_method=$6 AND unit_price_usdt=$7 AND unit_price_toman IS NOT DISTINCT FROM $8
                 AND NOT auto_price_toman_snapshot AND pricing_rounding_step_snapshot=5000 AND price_calculation_version='legacy-net-v1'
-                AND discount_pct_snapshot IS NOT DISTINCT FROM $9 AND discount_units_snapshot IS NOT DISTINCT FROM $10 AND payment_confirmed_at=$11 AND created_at=$11 AND updated_at=$11
+                AND discount_pct_snapshot IS NOT DISTINCT FROM $9 AND discount_units_snapshot IS NOT DISTINCT FROM $10 AND payment_confirmed_at=$17 AND created_at=$11 AND updated_at=$11
                 AND brand_public_name_snapshot=$12 AND product_title_snapshot=$13 AND payment_terms_snapshot=$14 AND fulfillment_kind_snapshot=$15 AND NOT local_first_snapshot AND is_preorder=$16
                 AND review_code='credential_recovery' AND release_authorized_at IS NULL AND delivery_generation IS NULL AND resolution_kind IS NULL
                 AND fx_rate_snapshot IS NULL AND payment_due_at IS NULL AND hold_at IS NULL AND product_description_snapshot IS NULL AND product_icon_snapshot IS NULL AND product_guidance_snapshot IS NULL AND NOT EXISTS(SELECT 1 FROM shop.fulfillments WHERE order_id=$1)
                 AND NOT EXISTS(SELECT 1 FROM shop.supplier_requests WHERE order_id=$1) AND NOT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE order_id=$1))
             """, DbValue.Uuid(row.Record.Target), DbValue.Uuid(row.Member), DbValue.Integer(t.Quantity), DbValue.Text(t.Free ? "not_required" : "paid"), DbValue.Text(t.Currency), DbValue.Text(t.Method), DbValue.Numeric(t.UnitUsd),
             t.UnitToman is decimal toman ? DbValue.Numeric(toman) : DbValue.Null(NpgsqlDbType.Numeric), t.Free ? DbValue.Numeric(100) : DbValue.Null(NpgsqlDbType.Numeric), t.Free ? DbValue.Integer(t.Quantity) : DbValue.Null(NpgsqlDbType.Integer),
-            DbValue.Utc(t.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(t.Title), DbValue.Text(row.Record.Reference), DbValue.Text(t.Kind), DbValue.Boolean(t.Preorder)), r => r.GetBoolean(0), ct);
+            DbValue.Utc(t.Created), DbValue.Text(row.HistoricalBrandName), DbValue.Text(t.Title), DbValue.Text(row.Record.Reference), DbValue.Text(t.Kind), DbValue.Boolean(t.Preorder), DbValue.Utc(row.NativeWalletDebitAt ?? t.Created)), r => r.GetBoolean(0), ct);
     }
 }

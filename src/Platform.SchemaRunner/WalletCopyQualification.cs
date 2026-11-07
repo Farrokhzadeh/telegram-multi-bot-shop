@@ -67,17 +67,7 @@ internal static class WalletCopyQualification
             await Platform.Persistence.SchemaRunner.ApplyAsync(targetData, destination, ct);
             await using (var role = targetData.CreateCommand("DO $$ BEGIN CREATE ROLE shop_legacy_import NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$; GRANT shop_legacy_import TO shop_test_runner")) await role.ExecuteNonQueryAsync(ct);
             var sessions = new DbSessionFactory(targetData);
-            await using (var seed = await sessions.BeginAsync(ct))
-            {
-                long existing = await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brands"), r => r.GetInt64(0), ct);
-                if (existing == 0)
-                {
-                    foreach (string table in new[] { "users", "wallets", "wallet_entries", "legacy_id_map", "audit_events" }) if (await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
-                    await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active) VALUES($1,$2,$2,$2,'international','en',$2,101,$3,'qualification-unusable',false)", DbValue.Uuid(brand), DbValue.Text("qual-" + identity.Brand), DbValue.Binary([1])), ct);
-                }
-                else if (existing != 1 || !await seed.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND code=$2 AND bot_id=101 AND NOT active AND bot_token_key_id='qualification-unusable' AND bot_token_ciphertext=$3)", DbValue.Uuid(brand), DbValue.Text("qual-" + identity.Brand), DbValue.Binary([1])), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
-                await seed.CommitAsync(ct);
-            }
+            await SeedAsync(sessions, brand, identity.Brand, ct);
             async Task<ReadOnlyMemory<byte>> ReadRetention(string reference, CancellationToken token)
             { if (!OperatingSystem.IsLinux() || reference != "protected:wallet-copy/original-native-history" || new FileInfo(registerPath).LinkTarget is not null || (File.GetUnixFileMode(registerPath) & (UnixFileMode)63) != 0) throw new MigrationRejectedException(); return await File.ReadAllBytesAsync(registerPath, token); }
             var workflow = new ImportWorkflow(source, sessions);
@@ -97,6 +87,20 @@ internal static class WalletCopyQualification
             await WriteAsync(receipt, JsonBody(w => { w.WriteString("scope", "protected_copy_wallet_projection_only"); w.WriteString("source_brand", identity.Brand); w.WriteString("archive_sha256", identity.Archive); w.WriteNumber("accounts", rows.Count); w.WriteNumber("retained_reversed_membership_clocks", rows.Count(r => r.SourceClock is not null)); w.WriteNumber("opening_postings", aggregate.OpeningPostings); w.WriteNumber("nonposting_usd_history", aggregate.NonPostingHistory); w.WriteNumber("manual_irr_accounts", first.ManualIrrAccounts); w.WriteNumber("retained_history", first.RetainedHistoryRows); w.WriteNumber("retained_irr_history", first.RetainedIrrHistory); w.WriteNumber("retained_zero_history", first.RetainedZeroHistory); w.WriteBoolean("matched", true); w.WriteBoolean("replay_identical", true); w.WriteBoolean("source_unchanged", true); w.WriteBoolean("release_ready", false); w.WriteBoolean("history_orders_imported", false); w.WriteBoolean("target_reencryption_executed", false); }), ct);
         }
         finally { CryptographicOperations.ZeroMemory(register); }
+    }
+    internal static async Task SeedAsync(DbSessionFactory sessions, Guid brand, string brandName, CancellationToken ct)
+    {
+        await using (var seed = await sessions.BeginAsync(ct))
+        {
+            long existing = await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brands"), r => r.GetInt64(0), ct);
+            if (existing == 0)
+            {
+                foreach (string table in new[] { "users", "wallets", "wallet_entries", "legacy_id_map", "audit_events" }) if (await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
+                await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active) VALUES($1,$2,$2,$2,'international','en',$2,101,$3,'qualification-unusable',false)", DbValue.Uuid(brand), DbValue.Text("qual-" + brandName), DbValue.Binary([1])), ct);
+            }
+            else if (existing != 1 || !await seed.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND code=$2 AND bot_id=101 AND NOT active AND bot_token_key_id='qualification-unusable' AND bot_token_ciphertext=$3)", DbValue.Uuid(brand), DbValue.Text("qual-" + brandName), DbValue.Binary([1])), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
+            await seed.CommitAsync(ct);
+        }
     }
     internal static byte[] JsonBody(Action<Utf8JsonWriter> body)
     { using var stream = new MemoryStream(); using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); body(writer); writer.WriteEndObject(); } return stream.ToArray(); }

@@ -10,9 +10,10 @@ namespace Platform.SchemaRunner;
 
 internal static class ArchiveCopyQualification
 {
-    internal static async Task RunAsync(string job, string receipt, Func<string, string> read, CancellationToken ct = default)
+    internal static async Task RunAsync(string job, string receipt, Func<string, string> read, CancellationToken ct = default, string? targetConnectionFile = null)
     {
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_ARCHIVE_QUALIFICATION") != "1" || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_SOURCE_INSPECTION") != "1" || job.Length > 16384) throw new MigrationRejectedException();
+        if (targetConnectionFile is not null && Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_WALLET_ORDER_QUALIFICATION") != "1") throw new MigrationRejectedException();
         using var document = JsonDocument.Parse(job); var root = document.RootElement;
         string[] names = ["version", "source_connection_file", "source_plan_file", "wallet_plan_file", "wallet_state_file", "register_file", "legacy_keys_file", "secrets_directory", "secrets_manifest", "work_directory"];
         if (root.EnumerateObject().Count() != names.Length || root.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != names.Length || names.Any(n => !root.TryGetProperty(n, out _)) || root.GetProperty("version").GetInt32() != 1) throw new MigrationRejectedException();
@@ -77,6 +78,7 @@ internal static class ArchiveCopyQualification
             else await WalletCopyQualification.WriteAsync(manifestPath, body, ct);
             var manifest = VerifiedImportManifest.Open("protected:history-archive/" + batch.ToString("N"), SHA256.HashData(body), body);
             foreach (var projection in LegacySourceRecord.Projections) await source.VerifyRecordCoverageAsync(context!, secrets, manifest, projection, ct);
+            var loadedRecords = new List<ArchivedLegacyRecord>();
             var files = new LegacyArchiveFiles(directory, secrets); long fields = 0, orders = 0, incomplete = 0; var reader = new LegacyReadOnlyOrderHistory(secrets);
             var owners = manifest.Proofs.Where(p => p.Projection == LegacyProjection.User).ToDictionary(p => p.LegacyId, p => p.Target, StringComparer.Ordinal);
             using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -86,6 +88,7 @@ internal static class ArchiveCopyQualification
                 var replay = await files.WriteAsync(context!, manifest, row, target, legacyKeys, ct); var loaded = await new LegacyArchiveFiles(directory, secrets).ReadAsync(context!, manifest, target, legacyKeys, ct);
                 var targetOnly = await files.ReadAsync(context!, manifest, target, ct);
                 if (!CryptographicOperations.FixedTimeEquals(first.Digest, targetOnly.Digest) || !CryptographicOperations.FixedTimeEquals(first.Digest, replay.Digest) || !CryptographicOperations.FixedTimeEquals(first.Digest, loaded.Digest) || loaded.Source != row) throw new MigrationRejectedException();
+                loadedRecords.Add(loaded);
                 digest.AppendData(first.Digest); fields += first.Evidence.ReencryptedFields?.Count ?? 0;
                 if (row.Projection == LegacyProjection.OrderRecord)
                 {
@@ -99,12 +102,14 @@ internal static class ArchiveCopyQualification
             byte[] archiveDigest = digest.GetHashAndReset(); string index = Path.Combine(directory, "archive-index.sha256");
             if (File.Exists(index)) { if (read(index) != Convert.ToHexStringLower(archiveDigest)) throw new MigrationRejectedException(); }
             else await WalletCopyQualification.WriteAsync(index, Encoding.UTF8.GetBytes(Convert.ToHexStringLower(archiveDigest)), ct);
+            var typed = targetConnectionFile is null ? null : await WalletOrderCopyQualification.RunAsync(read(targetConnectionFile).Trim(), directory, context!, secrets, source, manifest, wallet, wallets, loadedRecords, Value("register_file"), read, ct);
             await SourceCopyInspection.RunAsync(connection, plan, Path.Combine(directory, "source-end-" + Guid.NewGuid().ToString("N") + ".json"), ct);
             await WalletCopyQualification.WriteAsync(receipt, WalletCopyQualification.JsonBody(w =>
             {
-                w.WriteString("scope", "protected_source_history_archive_only"); w.WriteString("source_brand", brandName); w.WriteString("archive_sha256", archiveHash); w.WriteNumber("memberships", wallets.Count); w.WriteNumber("archived_records", records.Count); w.WriteNumber("reencrypted_fields", fields); w.WriteNumber("read_only_orders", orders); w.WriteNumber("incomplete_order_terms", incomplete); w.WriteBoolean("replay_identical", true); w.WriteBoolean("source_unchanged", true); w.WriteBoolean("canonical_commerce_imported", false); w.WriteBoolean("paid_obligations_verified", false); w.WriteBoolean("release_ready", false); w.WriteStartObject("record_counts");
+                w.WriteString("scope", typed is null ? "protected_source_history_archive_only" : "protected_wallet_orders_with_complete_archive_review"); w.WriteString("source_brand", brandName); w.WriteString("archive_sha256", archiveHash); w.WriteNumber("memberships", wallets.Count); w.WriteNumber("archived_records", records.Count); w.WriteNumber("reencrypted_fields", fields); w.WriteNumber("read_only_orders", orders); w.WriteNumber("incomplete_order_terms", incomplete); w.WriteBoolean("replay_identical", true); w.WriteBoolean("source_unchanged", true); w.WriteBoolean("canonical_commerce_imported", typed is not null && typed.Imported > 0); w.WriteBoolean("paid_obligations_verified", false); w.WriteBoolean("release_ready", false); w.WriteStartObject("record_counts");
                 foreach (var projection in LegacySourceRecord.Projections) w.WriteNumber(projection.ToString(), records.Count(r => r.Projection == projection));
                 w.WriteEndObject();
+                if (typed is not null) { w.WriteNumber("typed_wallet_orders", typed.Imported); w.WriteNumber("review_records", typed.Review); w.WriteBoolean("typed_wallet_order_parity", true); }
             }), ct);
         }
         finally { CryptographicOperations.ZeroMemory(walletBytes); CryptographicOperations.ZeroMemory(register); }

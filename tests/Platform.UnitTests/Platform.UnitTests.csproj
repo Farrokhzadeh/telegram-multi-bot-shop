@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/LegacyWalletOrderPlanQualification.cs" Link="Shared/LegacyWalletOrderPlanQualification.cs" />
     <Compile Include="../Shared/LegacyArchiveFilesQualification.cs" Link="Shared/LegacyArchiveFilesQualification.cs" />
     <Compile Include="../Shared/CipherQualification.cs" Link="Shared/CipherQualification.cs" />
     <Compile Include="../Shared/LegacyReadOnlyOrderQualification.cs" Link="Shared/LegacyReadOnlyOrderQualification.cs" />

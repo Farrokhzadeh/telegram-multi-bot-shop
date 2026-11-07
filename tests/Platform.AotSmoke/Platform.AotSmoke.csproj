@@ -5,6 +5,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/LegacyWalletOrderImportQualification.cs" Link="Shared/LegacyWalletOrderImportQualification.cs" />
     <Compile Include="../Shared/SourceCopyQualification.cs" Link="Shared/SourceCopyQualification.cs" />
     <Compile Include="../Shared/PreorderProcessQualification.cs" Link="Shared/PreorderProcessQualification.cs" />
     <Compile Include="../Shared/LocalPreorderQualification.cs" Link="Shared/LocalPreorderQualification.cs" />
@@ -23,6 +24,7 @@
     <Compile Include="../Shared/AiHttpQualification.cs" Link="Shared/AiHttpQualification.cs" />
 
     <Compile Include="../Shared/MigrationQualification.cs" Link="Shared/MigrationQualification.cs" />
+    <Compile Include="../Shared/LegacyWalletOrderPlanQualification.cs" Link="Shared/LegacyWalletOrderPlanQualification.cs" />
     <Compile Include="../Shared/LegacyArchiveFilesQualification.cs" Link="Shared/LegacyArchiveFilesQualification.cs" />
     <Compile Include="../Shared/LegacyRecordQualification.cs" Link="Shared/LegacyRecordQualification.cs" />
     <Compile Include="../Shared/LegacyWalletRetentionQualification.cs" Link="Shared/LegacyWalletRetentionQualification.cs" />

@@ -30,7 +30,8 @@ public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destinatio
         foreach (var row in coupons) foreach (var proof in row.Proofs(context, secrets)) manifest.Require(proof);
         foreach (var row in wallets) foreach (var proof in row.Proofs(context.BrandId)) manifest.Require(proof);
         long invalidRetentions = 0;
-        foreach (var wallet in wallets.Where(w => w.Retention is not null)) { wallet.Retention!.Require(manifest); if (!await wallet.Retention.MatchesAsync(readRetention, ct)) invalidRetentions++; }
+        var retentions = await WalletRetentionVerification.ReadAsync(wallets.Where(w => w.Retention is not null).Select(w => w.Retention!), readRetention, ct);
+        foreach (var wallet in wallets.Where(w => w.Retention is not null)) { wallet.Retention!.Require(manifest); if (!retentions.Matches(wallet.Retention)) invalidRetentions++; }
         long invalidArchives = 0, reencrypted = 0; var archive = new LegacyRecordArchive(secrets);
         foreach (var row in records)
         {
