@@ -33,13 +33,14 @@ internal static class LegacyValues
     internal static Task AuditAsync(DbSession session, VerifiedImportManifest manifest, ArchivedLegacyRecord row, string kind, CancellationToken ct) => session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id) VALUES($1,'system',$2,'legacy_import',$3,$4,$5,$6,$7)", DbValue.Uuid(AuditId(manifest, row)), DbValue.Uuid(manifest.TargetBrand), DbValue.Text(kind), DbValue.Uuid(row.Target), DbValue.Text(row.Reference), DbValue.Binary(row.Digest), DbValue.Uuid(manifest.Batch)), ct);
     internal static Task<bool> MatchesAuditAsync(DbSession session, VerifiedImportManifest manifest, ArchivedLegacyRecord row, string kind, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.audit_events WHERE id=$1 AND actor_kind='system' AND brand_id=$2 AND action='legacy_import' AND entity_kind=$3 AND entity_id=$4 AND reason=$5 AND command_sha256=$6 AND correlation_id=$7)", DbValue.Uuid(AuditId(manifest, row)), DbValue.Uuid(manifest.TargetBrand), DbValue.Text(kind), DbValue.Uuid(row.Target), DbValue.Text(row.Reference), DbValue.Binary(row.Digest), DbValue.Uuid(manifest.Batch)), r => r.GetBoolean(0), ct);
 }
-public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Member, string HistoricalBrandName, DateTime? NativeWalletDebitAt = null, LegacySourceRecord? NativeZeroSource = null)
+public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Member, string HistoricalBrandName, DateTime? NativeWalletDebitAt = null, LegacySourceRecord? NativeZeroSource = null, DateTime? NativePaymentSettledAt = null)
 {
     internal LegacyOrderTerms Terms()
     {
         if (Record.Source.Projection != LegacyProjection.OrderRecord || Member == Guid.Empty || string.IsNullOrWhiteSpace(HistoricalBrandName) || HistoricalBrandName.Length > 160) throw new MigrationRejectedException();
         var terms = ReadTerms(Record.Source);
         if (NativeWalletDebitAt is DateTime clock && (terms.Method != "wallet" || terms.Free || clock.Kind != DateTimeKind.Utc || clock == DateTime.MinValue || clock == DateTime.MaxValue || clock.Ticks % 10 != 0)) throw new MigrationRejectedException();
+        if (NativePaymentSettledAt is DateTime paid && (terms.Free || terms.Method is not ("bank" or "crypto") || NativeWalletDebitAt is not null || NativeZeroSource is not null || paid.Kind != DateTimeKind.Utc || paid == DateTime.MinValue || paid == DateTime.MaxValue || paid.Ticks % 10 != 0 || paid < terms.Created)) throw new MigrationRejectedException();
         if (NativeZeroSource is not null)
         {
             using var zero = NativeZeroSource.Open(); var original = zero.RootElement;
@@ -49,7 +50,7 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
         return terms;
     }
     internal DateTime AcceptanceClock(LegacyOrderTerms terms)
-    { if (NativeZeroSource is null) return NativeWalletDebitAt ?? terms.Created; using var zero = NativeZeroSource.Open(); return LegacyValues.Time(zero.RootElement, "created_at"); }
+    { if (NativeZeroSource is null) return NativePaymentSettledAt ?? NativeWalletDebitAt ?? terms.Created; using var zero = NativeZeroSource.Open(); return LegacyValues.Time(zero.RootElement, "created_at"); }
     internal static LegacyOrderTerms ReadTerms(LegacySourceRecord source)
     {
         if (source.Projection != LegacyProjection.OrderRecord) throw new MigrationRejectedException();
@@ -82,7 +83,7 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
     {
         _ = Terms(); var proof = Record.Source.Proof(Record.Target, context, secrets);
         using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
-        writer.Write("legacy-record-order-v1"); writer.Write(proof.Fingerprint.Span); writer.Write(Member.ToByteArray()); writer.Write(HistoricalBrandName); writer.Write(Record.Reference); writer.Write(Record.Digest); if (NativeWalletDebitAt is DateTime clock) { writer.Write("native-wallet-debit-clock-v1"); writer.Write(clock.Ticks); }
+        writer.Write("legacy-record-order-v1"); writer.Write(proof.Fingerprint.Span); writer.Write(Member.ToByteArray()); writer.Write(HistoricalBrandName); writer.Write(Record.Reference); writer.Write(Record.Digest); if (NativeWalletDebitAt is DateTime clock) { writer.Write("native-wallet-debit-clock-v1"); writer.Write(clock.Ticks); } if (NativePaymentSettledAt is DateTime paid) { writer.Write("native-settled-payment-clock-v1"); writer.Write(paid.Ticks); }
         if (NativeZeroSource is not null) { writer.Write("native-zero-acceptance-v1"); writer.Write(NativeZeroSource.Proof(Record.Target, context, secrets).Fingerprint.Span); }
         writer.Flush();
         return [proof, new(LegacyProjection.HistoricalOrder, Record.Source.Id, Record.Target, context.BrandId, SHA256.HashData(bytes.ToArray())), new(LegacyProjection.OrderAlias, Record.Source.Id, Record.Target, context.BrandId, proof.Fingerprint.Span)];
