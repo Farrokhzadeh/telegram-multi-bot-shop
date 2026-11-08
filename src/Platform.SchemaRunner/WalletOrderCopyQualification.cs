@@ -65,13 +65,13 @@ internal static class WalletOrderCopyQualification
             {
                 var brand = DbValue.Uuid(context.BrandId);
                 var sourceBrand = DbValue.Text(archive.SourceBrand);
-                long Count(string sql) => scope.QuerySingleAsync(new DbStatement(sql, brand), r => r.GetInt64(0), ct).GetAwaiter().GetResult();
-                if (Count("SELECT count(*) FROM shop.users WHERE brand_id=$1") != wallets.Count ||
-                    Count("SELECT count(*) FROM shop.wallets w JOIN shop.users u ON u.id=w.user_id WHERE u.brand_id=$1") != wallets.Count ||
-                    Count("SELECT count(*) FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1") != plan.Set.Orders.Count ||
-                    Count("SELECT count(*) FROM shop.payments p WHERE EXISTS(SELECT 1 FROM shop.users u WHERE u.brand_id=$1 AND (u.id=p.topup_user_id OR EXISTS(SELECT 1 FROM shop.orders o WHERE o.id=p.order_id AND o.user_id=u.id)))") != plan.Set.Payments.Count ||
-                    Count("SELECT count(*) FROM shop.wallet_entries e JOIN shop.users u ON u.id=e.user_id WHERE u.brand_id=$1 AND e.is_posting") != plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) ||
-                    Count("SELECT count(*) FROM shop.brand_products WHERE brand_id=$1") != plan.Set.Catalog.Count ||
+                Task<long> Count(string sql) => scope.QuerySingleAsync(new DbStatement(sql, brand), r => r.GetInt64(0), ct);
+                if (await Count("SELECT count(*) FROM shop.users WHERE brand_id=$1") != wallets.Count ||
+                    await Count("SELECT count(*) FROM shop.wallets w JOIN shop.users u ON u.id=w.user_id WHERE u.brand_id=$1") != wallets.Count ||
+                    await Count("SELECT count(*) FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1") != plan.Set.Orders.Count ||
+                    await Count("SELECT count(*) FROM shop.payments p WHERE EXISTS(SELECT 1 FROM shop.users u WHERE u.brand_id=$1 AND (u.id=p.topup_user_id OR EXISTS(SELECT 1 FROM shop.orders o WHERE o.id=p.order_id AND o.user_id=u.id)))") != plan.Set.Payments.Count ||
+                    await Count("SELECT count(*) FROM shop.wallet_entries e JOIN shop.users u ON u.id=e.user_id WHERE u.brand_id=$1 AND e.is_posting") != plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) ||
+                    await Count("SELECT count(*) FROM shop.brand_products WHERE brand_id=$1") != plan.Set.Catalog.Count ||
                     await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE source_brand=$1", sourceBrand), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count ||
                     await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products WHERE active OR id NOT IN (SELECT product_id FROM shop.brand_products)"), r => r.GetInt64(0), ct) != 0 ||
                     await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brand_products WHERE visible"), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
