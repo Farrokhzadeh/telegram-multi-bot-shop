@@ -95,8 +95,8 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
                 else _ = ExactDecimal.Divide(LegacyValues.Number(snapshot, "total_usd"), quantity);
             }
         }
-        catch (ArithmeticException) { return "nonterminating_unit_terms"; }
-        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException) { }
+        catch (ArithmeticException error) when (error is not OverflowException) { return "nonterminating_unit_terms"; }
+        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException or OverflowException or MigrationRejectedException) { }
         return "incomplete_order_terms";
     }
     public IReadOnlyList<LegacyMapProof> Proofs(BrandContext context, SecretSnapshot secrets)
