@@ -4,6 +4,8 @@ namespace Platform.IntegrationTests;
 public sealed class LegacyWalletOrderImportTests
 {
     [Theory]
+    [InlineData("catalog_valid")]
+    [InlineData("catalog_invalid")]
     [InlineData("direct_bank_valid")]
     [InlineData("direct_crypto_valid")]
     [InlineData("direct_bank_owner")]
