@@ -1,10 +1,11 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Platform.Security;
 namespace Platform.Migration;
 
-public sealed class LegacyArchiveFiles
+public sealed partial class LegacyArchiveFiles
 {
     private readonly string directory;
     private readonly SecretSnapshot secrets;
@@ -40,7 +41,7 @@ public sealed class LegacyArchiveFiles
                         if (!OperatingSystem.IsLinux()) throw new MigrationRejectedException();
                         await using (var stream = new FileStream(pending, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite }))
                         { await stream.WriteAsync(body, token); await stream.FlushAsync(token); stream.Flush(true); }
-                        File.Move(pending, path, false); return Reference(manifest, target, zero);
+                        if (Link(pending, path) != 0) throw new IOException("Atomic protected archive publication rejected."); return Reference(manifest, target, zero);
                     }
                     finally { CryptographicOperations.ZeroMemory(body); if (File.Exists(pending)) File.Delete(pending); }
                 }, ct, keys);
@@ -87,6 +88,8 @@ public sealed class LegacyArchiveFiles
     }
     private static void RequireFields(JsonElement value, string[] names)
     { if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != names.Length || value.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != names.Length || names.Any(n => !value.TryGetProperty(n, out _))) throw new MigrationRejectedException(); }
+    [LibraryImport("libc", EntryPoint = "link", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Link(string existing, string destination);
     private static byte[] Encode(VerifiedImportManifest manifest, ProtectedLegacyEvidence evidence)
     {
         using var buffer = new MemoryStream();
