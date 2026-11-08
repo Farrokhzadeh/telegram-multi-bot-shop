@@ -73,6 +73,11 @@ public static class LegacyWalletOrderImportQualification
                 """;
             await using var add = f.Database.Data.CreateCommand(sql); await add.ExecuteNonQueryAsync(ct);
             string table = bank ? "manual_deposits" : "payment_attempts";
+            if (fault == "before_order")
+            {
+                await using var change = f.Database.Data.CreateCommand("UPDATE public." + table + " SET created_at='2024-01-31 23:59:58Z'," + (bank ? "reviewed_at" : "paid_at") + "='2024-01-31 23:59:59Z'");
+                await change.ExecuteNonQueryAsync(ct);
+            }
             if (fault is "owner" or "amount" or "status")
             {
                 string value = fault switch { "owner" => "user_id=99001235", "amount" => (bank ? "amount=600001" : "expected_amount=21"), _ => bank ? "status='denied'" : "status='failed'" };
@@ -130,7 +135,7 @@ public static class LegacyWalletOrderImportQualification
         if (catalogSource is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, catalogSource, catalogTarget, (value, _) => { protectedFiles["protected:synthetic/catalog"] = value; return Task.FromResult("protected:synthetic/catalog"); }, ct));
         Task<ArchivedLegacyRecord> Prepare(VerifiedImportManifest manifest, LegacySourceRecord original, Guid identity, CancellationToken token) => new LegacyRecordArchive(f.Secrets).WriteAsync(context, manifest, original, identity, (value, _) => { protectedFiles["protected:synthetic/rebound-zero"] = value; return Task.FromResult("protected:synthetic/rebound-zero"); }, token);
         var plan = zeroOrder || topup || direct || catalog ? await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/zero-orders", "Original synthetic brand", wallets, originals, Prepare, ct, topup, direct, catalog) : LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, originals);
-        bool heldDirect = direct && fault is "owner" or "amount" or "status";
+        bool heldDirect = direct && fault is "owner" or "amount" or "status" or "before_order";
         if (plan.Set.Orders.Count != (heldDirect ? 0 : 1) || plan.Review.Count != (heldDirect ? 4 : direct ? 2 : catalog && fault == "invalid" ? 2 : 1) || plan.Set.Delivery.Count != (zeroOrder ? 1 : 0) || plan.Set.Payments.Count != (topup || direct && !heldDirect ? 1 : 0) || plan.Set.Catalog.Count != (catalog && fault == "valid" ? 1 : 0)) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
         var disposition = LegacyRecordDispositionReport.Verify(plan);
         if (!disposition.Accounted || disposition.Archived != originals.Count || disposition.Reviewed != plan.Review.Count) throw new InvalidOperationException("Direct-payment source disposition incomplete.");
