@@ -23,6 +23,7 @@ internal static class WalletOrderCopyQualification
         string zeroDirectory = Path.Combine(directory, "teleg-history-archive-topups"); Directory.CreateDirectory(zeroDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var zeroFiles = new LegacyArchiveFiles(zeroDirectory, secrets);
         var plan = await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, secrets, archive, wallet, destination, "protected:wallet-orders/" + wallet.Batch.ToString("N"), "Legacy source " + archive.SourceBrand + " (historical public name unknown)", wallets, records, (manifest, zero, target, token) => zeroFiles.WriteZeroAsync(context, manifest, zero, target, token), ct, true);
+        var disposition = LegacyRecordDispositionReport.Verify(plan);
         async Task Freeze(string name, byte[] body)
         {
             string path = Path.Combine(directory, name);
@@ -33,7 +34,7 @@ internal static class WalletOrderCopyQualification
         await Freeze("wallet-zero-topup-target.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(connection)))));
         await Freeze("wallet-zero-topup-review.json", WalletCopyQualification.JsonBody(w =>
         {
-            w.WriteString("archive_manifest_sha256", Convert.ToHexStringLower(archive.Digest.Span)); w.WriteString("typed_manifest_sha256", Convert.ToHexStringLower(plan.Manifest.Digest.Span)); w.WriteStartArray("review");
+            w.WriteString("archive_manifest_sha256", Convert.ToHexStringLower(archive.Digest.Span)); w.WriteString("typed_manifest_sha256", Convert.ToHexStringLower(plan.Manifest.Digest.Span)); w.WriteNumber("original_records", disposition.Archived); w.WriteNumber("typed_orders", disposition.Orders); w.WriteNumber("typed_payments", disposition.Payments); w.WriteNumber("native_zero_proofs", disposition.NativeZero); w.WriteNumber("reviewed_records", disposition.Reviewed); w.WriteStartObject("review_reason_counts"); foreach (var reason in disposition.ReviewReasons.OrderBy(r => r.Key, StringComparer.Ordinal)) w.WriteNumber(reason.Key, reason.Value); w.WriteEndObject(); w.WriteStartArray("review");
             foreach (var row in plan.Review) { w.WriteStartObject(); w.WriteString("projection", row.Projection.ToString()); w.WriteString("legacy_id", row.LegacyId); w.WriteString("target", row.Target); w.WriteString("reason", row.Reason); w.WriteEndObject(); }
             w.WriteEndArray();
         }));
