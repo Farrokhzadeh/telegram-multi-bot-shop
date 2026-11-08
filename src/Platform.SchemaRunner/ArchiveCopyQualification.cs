@@ -10,10 +10,11 @@ namespace Platform.SchemaRunner;
 
 internal static class ArchiveCopyQualification
 {
-    internal static async Task RunAsync(string job, string receipt, Func<string, string> read, CancellationToken ct = default, string? targetConnectionFile = null)
+    internal static async Task RunAsync(string job, string receipt, Func<string, string> read, CancellationToken ct = default, string? targetConnectionFile = null, bool shared = false)
     {
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_ARCHIVE_QUALIFICATION") != "1" || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_SOURCE_INSPECTION") != "1" || job.Length > 16384) throw new MigrationRejectedException();
         if (targetConnectionFile is not null && Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_WALLET_ORDER_QUALIFICATION") != "1") throw new MigrationRejectedException();
+        if (shared && (targetConnectionFile is null || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_SHARED_WALLET_ORDER_QUALIFICATION") != "1")) throw new MigrationRejectedException();
         using var document = JsonDocument.Parse(job); var root = document.RootElement;
         string[] names = ["version", "source_connection_file", "source_plan_file", "wallet_plan_file", "wallet_state_file", "register_file", "legacy_keys_file", "secrets_directory", "secrets_manifest", "work_directory"];
         if (root.EnumerateObject().Count() != names.Length || root.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != names.Length || names.Any(n => !root.TryGetProperty(n, out _)) || root.GetProperty("version").GetInt32() != 1) throw new MigrationRejectedException();
@@ -49,7 +50,7 @@ internal static class ArchiveCopyQualification
         }
         if (batch == Guid.Empty) throw new MigrationRejectedException();
         using var secrets = SecretFiles.Load(Value("secrets_directory"), Value("secrets_manifest"), new SecretLoadGrant(SecretService.JobHost, batch, 1, [brand], false));
-        var registry = new BotBrandRegistry([new("protected-archive-copy", "qualification", brand, 101, batch, 1, true)]);
+        var registry = new BotBrandRegistry([new("protected-archive-copy", "qualification", brand, shared ? WalletOrderCopyQualification.SharedBotId(brandName) : 101, batch, 1, true)]);
         if (!registry.TryResolveAuthenticated("protected-archive-copy", new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "qualification")], "protected-archive-copy")), out var context)) throw new MigrationRejectedException();
         string keyState = Path.Combine(directory, "target-keys.sha256");
         string keyHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(read(Path.Combine(Value("secrets_directory"), Value("secrets_manifest"))) + ":" + secrets.CurrentBrandKeyId(context!) + ":" + secrets.UseBrandKey(context!, secrets.CurrentBrandKeyId(context!), key => Convert.ToHexStringLower(SHA256.HashData(key))))));
@@ -102,7 +103,7 @@ internal static class ArchiveCopyQualification
             byte[] archiveDigest = digest.GetHashAndReset(); string index = Path.Combine(directory, "archive-index.sha256");
             if (File.Exists(index)) { if (read(index) != Convert.ToHexStringLower(archiveDigest)) throw new MigrationRejectedException(); }
             else await WalletCopyQualification.WriteAsync(index, Encoding.UTF8.GetBytes(Convert.ToHexStringLower(archiveDigest)), ct);
-            var typed = targetConnectionFile is null ? null : await WalletOrderCopyQualification.RunAsync(read(targetConnectionFile).Trim(), directory, context!, secrets, source, manifest, wallet, wallets, loadedRecords, Value("register_file"), read, ct);
+            var typed = targetConnectionFile is null ? null : await WalletOrderCopyQualification.RunAsync(read(targetConnectionFile).Trim(), directory, context!, secrets, source, manifest, wallet, wallets, loadedRecords, Value("register_file"), read, ct, shared);
             await SourceCopyInspection.RunAsync(connection, plan, Path.Combine(directory, "source-end-" + Guid.NewGuid().ToString("N") + ".json"), ct);
             await WalletCopyQualification.WriteAsync(receipt, WalletCopyQualification.JsonBody(w =>
             {
