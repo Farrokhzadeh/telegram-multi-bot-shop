@@ -19,6 +19,7 @@ internal static class WalletOrderCopyQualification
         { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue("teleg-wallet-order-qualification:" + archive.SnapshotDigest); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
         var files = new LegacyArchiveFiles(directory, secrets);
         if (!OperatingSystem.IsLinux()) throw new MigrationRejectedException();
+        if (!OperatingSystem.IsLinux()) throw new MigrationRejectedException();
         string zeroDirectory = Path.Combine(directory, "teleg-history-archive-topups"); Directory.CreateDirectory(zeroDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var zeroFiles = new LegacyArchiveFiles(zeroDirectory, secrets);
         var plan = await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, secrets, archive, wallet, destination, "protected:wallet-orders/" + wallet.Batch.ToString("N"), "Legacy source " + archive.SourceBrand + " (historical public name unknown)", wallets, records, (manifest, zero, target, token) => zeroFiles.WriteZeroAsync(context, manifest, zero, target, token), ct, true);
