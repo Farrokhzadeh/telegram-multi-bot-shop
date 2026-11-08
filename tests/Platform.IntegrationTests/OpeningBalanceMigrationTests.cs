@@ -65,6 +65,38 @@ public sealed class OpeningBalanceMigrationTests
         Assert.Equal(1005L, result.UnexpectedMappings);
         Assert.False(result.ReleaseReady);
     }
+    [Fact]
+    public async Task IdenticalLegacyMembersInSeparateBrandsImportAndReplayOnOneSharedTarget()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
+        await MigrationQualification.EnableRoleAsync(f, Ct);
+        var first = MigrationQualification.Wallet();
+        var second = MigrationQualification.Wallet();
+        var firstManifest = MigrationQualification.Manifest(f, "legacy-one", f.Brands[0], [first]);
+        var secondManifest = MigrationQualification.Manifest(f, "legacy-two", f.Brands[1], [second]);
+        var importer = new OpeningBalanceImportWorkflow(f.Sessions);
+        await importer.ImportAsync(f.Context(0), firstManifest, first, Ct);
+        await importer.ImportAsync(f.Context(1), secondManifest, second, Ct);
+        await importer.ImportAsync(f.Context(1), secondManifest, second, Ct);
+        await importer.ImportAsync(f.Context(0), firstManifest, first, Ct);
+        var report = new ReconciliationReport(f.Sessions);
+        var a = await report.ReadAsync(firstManifest, Ct);
+        var b = await report.ReadAsync(secondManifest, Ct);
+        Assert.True(a.Complete); Assert.True(b.Complete);
+        Assert.False(a.ReleaseReady); Assert.False(b.ReleaseReady);
+        Assert.Equal(firstManifest.Proofs.Count, a.CommittedMappings);
+        Assert.Equal(secondManifest.Proofs.Count, b.CommittedMappings);
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.users", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallets", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting AND movement_kind='opening_balance'", Ct));
+        Assert.Equal(4L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE NOT is_posting AND movement_kind='legacy_history'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.users WHERE telegram_id=99001234", Ct));
+        await Assert.ThrowsAsync<MigrationRejectedException>(() => importer.ImportAsync(f.Context(1), firstManifest, first, Ct));
+        Assert.True((await report.ReadAsync(firstManifest, Ct)).Complete);
+        Assert.True((await report.ReadAsync(secondManifest, Ct)).Complete);
+    }
     [Theory]
     [InlineData("0")]
     [InlineData("12.34")]
