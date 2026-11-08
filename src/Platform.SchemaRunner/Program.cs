@@ -22,6 +22,13 @@ string ReadProtectedFile(string path)
     return File.ReadAllText(path);
 }
 
+if (args is ["--qualify-wallet-orders-shared", "--job-prod1", var sharedOne, "--job-prod2", var sharedTwo, "--job-prod3", var sharedThree, "--target-connection-file", var sharedTarget, "--receipt", var sharedReceipt])
+{
+    try { await SharedWalletOrderQualification.RunAsync([sharedOne, sharedTwo, sharedThree], sharedTarget, sharedReceipt, ReadProtectedFile); Console.WriteLine("Canonical shared target qualification passed; redacted receipt written."); return 0; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or ArithmeticException or MigrationRejectedException or NpgsqlException or Platform.Persistence.DbOperationException or System.Security.Cryptography.CryptographicException or Platform.Security.CipherRejectedException or Platform.Security.SecretConfigurationException)
+    { Console.Error.WriteLine("Canonical shared target qualification rejected; retain private evidence for review."); return 78; }
+}
+
 if (args is ["--qualify-wallet-orders", "--job-file", var orderJob, "--target-connection-file", var orderTarget, "--receipt", var orderReceipt])
 {
     try { await ArchiveCopyQualification.RunAsync(ReadProtectedFile(orderJob), orderReceipt, ReadProtectedFile, targetConnectionFile: orderTarget); Console.WriteLine("Protected wallet order qualification passed; redacted receipt written."); return 0; }
