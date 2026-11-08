@@ -15,6 +15,40 @@ public static class LegacyMapStore
             DbValue.Text(manifest.Destination.Database), DbValue.Text(manifest.Destination.Username), DbValue.Integer(manifest.Destination.ServerVersion)), r => r.GetBoolean(0), ct);
         if (!valid) throw new MigrationRejectedException();
     }
+
+    internal sealed record Coverage(long Committed, long Missing, long Mismatched, long Unexpected, long BatchCount);
+    internal static async Task<Coverage> ReadCoverageAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct = default)
+    {
+        await RequireDestinationAsync(session, manifest, ct);
+        var expected = manifest.Proofs.ToDictionary(p => (p.SourceTable, p.KeyKind, p.LegacyId)); var seen = new HashSet<(string, string, string)>();
+        (string Table, string Kind, string Id)? cursor = null;
+        long committed = 0, mismatched = 0, inBatch = 0;
+        while (true)
+        {
+            var rows = await session.QueryManyAsync(new DbStatement("""
+                SELECT source_table,source_key_kind,legacy_id,target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref
+                FROM shop.legacy_id_map WHERE source_brand=$1 AND ($2='' OR (source_table,source_key_kind,legacy_id)>($2,$3,$4))
+                ORDER BY source_table,source_key_kind,legacy_id LIMIT 1000
+                """, DbValue.Text(manifest.SourceBrand), DbValue.Text(cursor?.Table ?? ""), DbValue.Text(cursor?.Kind ?? ""), DbValue.Text(cursor?.Id ?? "")),
+                r => (Table: r.GetString(0), Kind: r.GetString(1), Id: r.GetString(2), TargetKind: r.GetString(3), Target: r.GetGuid(4),
+                    Brand: r.IsDBNull(5) ? Guid.Empty : r.GetGuid(5), Digest: r.GetBinary(6), Batch: r.GetGuid(7), Reference: r.GetString(8)), 1000, ct);
+            foreach (var row in rows)
+            {
+                var key = (row.Table, row.Kind, row.Id); cursor = key;
+                if (row.Batch == manifest.Batch && row.Reference == manifest.Reference) inBatch++;
+                if (!expected.TryGetValue(key, out var proof)) continue;
+                if (!seen.Add(key)) throw new MigrationRejectedException();
+                committed++;
+                if (row.TargetKind != proof.TargetKind || row.Target != proof.Target || row.Brand != proof.Brand || row.Batch != manifest.Batch || row.Reference != manifest.Reference ||
+                    !CryptographicOperations.FixedTimeEquals(row.Digest, proof.Fingerprint.Span)) mismatched++;
+            }
+            if (rows.Count < 1000) break;
+        }
+        long batchCount = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2",
+            DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        if (batchCount < inBatch) throw new MigrationRejectedException();
+        return new(committed, expected.Count - committed, mismatched, batchCount - (committed - mismatched), batchCount);
+    }
     public static async Task<bool> EnsureAsync(DbSession session, VerifiedImportManifest manifest, LegacyMapProof proof, CancellationToken ct = default)
     {
         manifest.Require(proof);
