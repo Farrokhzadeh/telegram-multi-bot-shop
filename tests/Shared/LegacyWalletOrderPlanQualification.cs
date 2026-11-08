@@ -25,6 +25,7 @@ public static class LegacyWalletOrderPlanQualification
             snapshot["total_usd"] = "0"; snapshot["total_toman"] = "0"; snapshot["savings_usd"] = "20"; snapshot["savings_toman"] = "600000"; snapshot["discount_code"] = "SYNTHETIC-FREE"; snapshot["discount_pct"] = "100"; snapshot["discount_quantity"] = 2; body = original.ToJsonString();
         }
         if (fault == "terms") body = body.Replace("\"quantity\":2", "\"quantity\":3", StringComparison.Ordinal);
+        if (fault == "malformed") { var value = JsonNode.Parse(body)!; value["checkout_snapshot"]!["payment_method"] = null; body = value.ToJsonString(); }
         if (fault is "missing_snapshot" or "wallet_irr" or "nonterminating")
         {
             var original = JsonNode.Parse(body)!; var snapshot = original["checkout_snapshot"]!;
@@ -102,7 +103,7 @@ public static class LegacyWalletOrderPlanQualification
         }
         int expected = fault == "valid" ? 1 : 0;
         if (plan.ReleaseReady || plan.Set.Orders.Count != expected || plan.Review.Count != 1 - expected || plan.Set.Orders.Count + plan.Review.Count != plan.Records.Count || plan.Manifest.Proofs.Count != walletManifest.Proofs.Count + 3 * expected || plan.Manifest.Batch != batch || plan.ToString().Contains(orderId, StringComparison.Ordinal)) throw new InvalidOperationException("Wallet order selection lost evidence or review accounting.");
-        string reason = fault switch { "terms" => "incomplete_order_terms", "missing_snapshot" => "missing_checkout_snapshot", "wallet_irr" => "original_wallet_irr_terms", "nonterminating" => "nonterminating_unit_terms", "debit" => "missing_exact_native_wallet_debit", "method" => "outside_wallet_order_scope", _ => "" };
+        string reason = fault switch { "terms" or "malformed" => "incomplete_order_terms", "missing_snapshot" => "missing_checkout_snapshot", "wallet_irr" => "original_wallet_irr_terms", "nonterminating" => "nonterminating_unit_terms", "debit" => "missing_exact_native_wallet_debit", "method" => "outside_wallet_order_scope", _ => "" };
         if (expected == 0 && plan.Review[0].Reason != reason) throw new InvalidOperationException("Wallet order review reason changed.");
         if (expected == 1)
         {
