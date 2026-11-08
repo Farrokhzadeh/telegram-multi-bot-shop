@@ -12,6 +12,7 @@ public sealed class LegacyWalletOrderPlanTests
     [InlineData("zero_prepared")]
     [InlineData("valid")]
     [InlineData("terms")]
+    [InlineData("malformed")]
     [InlineData("missing_snapshot")]
     [InlineData("wallet_irr")]
     [InlineData("nonterminating")]
