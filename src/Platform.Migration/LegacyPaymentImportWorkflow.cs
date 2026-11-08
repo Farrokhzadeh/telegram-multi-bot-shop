@@ -5,7 +5,8 @@ namespace Platform.Migration;
 
 public sealed record LegacyPaymentRecord(ArchivedLegacyRecord Record, Guid Member, Guid? Order)
 {
-    internal LegacyPaymentTerms Terms(VerifiedImportManifest manifest)
+    internal LegacyPaymentTerms Terms(VerifiedImportManifest manifest) => Terms(manifest.Proofs);
+    internal LegacyPaymentTerms Terms(IReadOnlyList<LegacyMapProof> proofs)
     {
         if (Member == Guid.Empty || Order == Guid.Empty || Record.Source.Projection is not (LegacyProjection.PaymentAttempt or LegacyProjection.ManualDeposit)) throw new MigrationRejectedException();
         try
@@ -13,7 +14,7 @@ public sealed record LegacyPaymentRecord(ArchivedLegacyRecord Record, Guid Membe
             using var document = Record.Source.Open(); var row = document.RootElement;
             bool bank = Record.Source.Projection == LegacyProjection.ManualDeposit;
             string? sourceOrder = LegacyValues.Optional(row, "fulfilled_order_id");
-            if ((Order is null) != (sourceOrder is null) || (sourceOrder is not null && !manifest.Proofs.Any(p => p.Projection is LegacyProjection.Order or LegacyProjection.OrderRecord && p.LegacyId == sourceOrder && p.Target == Order)) ||
+            if ((Order is null) != (sourceOrder is null) || (sourceOrder is not null && !proofs.Any(p => p.Projection is LegacyProjection.Order or LegacyProjection.OrderRecord && p.LegacyId == sourceOrder && p.Target == Order)) ||
                 (!bank && (LegacyValues.Text(row, "expected_currency") != "USD" || (Order is null ? LegacyValues.Text(row, "kind") != "wallet_topup" : LegacyValues.Text(row, "kind") != "direct_checkout"))) || (bank && Order is null)) throw new MigrationRejectedException();
             decimal due = LegacyValues.Number(row, bank ? "amount" : "expected_amount"); string status = LegacyValues.Text(row, "status");
             DateTime? confirmed = null; string targetStatus;
