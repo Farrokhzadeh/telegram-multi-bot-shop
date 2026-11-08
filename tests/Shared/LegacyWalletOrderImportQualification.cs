@@ -13,6 +13,7 @@ public static class LegacyWalletOrderImportQualification
         bool zeroOrder = fault.StartsWith("zero_", StringComparison.Ordinal); if (zeroOrder) fault = fault[5..];
         bool topup = fault.StartsWith("topup_", StringComparison.Ordinal); if (topup) fault = fault[6..];
         bool paidTopup = topup && fault == "paid"; if (paidTopup) fault = "valid";
+        bool recentTopup = topup && fault == "recent"; if (recentTopup) fault = "valid";
         bool direct = fault.StartsWith("direct_", StringComparison.Ordinal); if (direct) fault = fault[7..];
         bool bank = direct && fault.StartsWith("bank_", StringComparison.Ordinal); if (bank) fault = fault[5..];
         if (direct && !bank) { if (!fault.StartsWith("crypto_", StringComparison.Ordinal)) throw new InvalidOperationException("Unknown direct-payment fixture."); fault = fault[7..]; }
@@ -57,6 +58,7 @@ public static class LegacyWalletOrderImportQualification
                 """);
             await add.ExecuteNonQueryAsync(ct);
             if (paidTopup) { await using var paid = f.Database.Data.CreateCommand("UPDATE public.payment_attempts SET status='fulfilled',provider_payment_id='synthetic-original-provider',paid_at='2024-02-01 00:00:03Z'"); await paid.ExecuteNonQueryAsync(ct); }
+            if (recentTopup) { await using var current = f.Database.Data.CreateCommand("UPDATE public.payment_attempts SET created_at=CURRENT_TIMESTAMP-INTERVAL '2 minutes'"); await current.ExecuteNonQueryAsync(ct); }
         }
         if (direct)
         {
@@ -162,6 +164,7 @@ public static class LegacyWalletOrderImportQualification
         var first = await Import(); var replay = await Import();
         string paidClock = direct ? "2024-02-01 00:00:03Z" : "2024-02-01 00:00:01Z";
         if (!first.Matched || first != replay || first.ReleaseReady || first.ComparedRecords != (zeroOrder ? 3 : 2) + (topup || direct ? 1 : 0) + (catalog ? 1 : 0) || await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='" + (zeroOrder ? "not_required" : "paid") + "' AND fulfillment_status='requires_admin' AND review_code='credential_recovery' AND payment_confirmed_at='" + paidClock + "' AND created_at='2024-02-01 00:00Z'", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", ct) != (zeroOrder || direct ? 2 : 3) || await f.CountAsync("SELECT count(*) FROM shop.jobs", ct) != 0 || await f.CountAsync("SELECT count(*) FROM shop.payments WHERE legacy_kind='payment_attempt' AND status='" + (paidTopup || direct ? "settled" : "awaiting") + "'", ct) != (topup || direct && !bank ? 1 : 0)) throw new InvalidOperationException("Typed wallet order import or replay changed financial state.");
+        if (await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) != (recentTopup ? 1 : 0) || first.UnexpectedActivityEvents != 0) throw new InvalidOperationException("Historic migration activity was not source-bound or expected.");
         if (catalog && (await f.CountAsync("SELECT count(*) FROM shop.products WHERE NOT active", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.brand_products WHERE NOT visible", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.inventory_items", ct) != 0)) throw new InvalidOperationException("Legacy master catalog unexpectedly activated or stocked.");
         if (direct && (await f.CountAsync("SELECT count(*) FROM shop.payments WHERE legacy_kind='" + (bank ? "manual_deposit" : "payment_attempt") + "' AND status='settled' AND confirmed_at='2024-02-01 00:00:03Z' AND amount_due=" + (bank ? "600000" : "20") + " AND order_id IS NOT NULL AND topup_user_id IS NULL AND payment_method='" + (bank ? "bank" : "crypto") + "' AND quote_currency='" + (bank ? "TOMAN" : "USD") + "'", ct) != 1 || await f.CountAsync("SELECT count(*) FROM shop.fulfillments", ct) != 0)) throw new InvalidOperationException("Original direct payment terms or no-fulfillment gate changed.");
     }
