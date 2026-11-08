@@ -92,7 +92,14 @@ public static class LegacyWalletOrderImportQualification
         if (topup) { await using var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.payment_attempts s"); topupSource = new(LegacyProjection.PaymentAttempt, "SYNTHETIC-TOPUP", (string)(await read.ExecuteScalarAsync(ct))!); }
         var originalProofs = walletManifest.Proofs.Where(p => p.Projection == LegacyProjection.User).Append(source.Proof(target, context, f.Secrets)).Append(zero.Proof(zeroTarget, context, f.Secrets));
         var proofs = acceptance is null ? originalProofs : originalProofs.Append(acceptance.Proof(acceptanceTarget, context, f.Secrets));
-        var archive = Manifest(topupSource is null ? proofs : proofs.Append(topupSource.Proof(topupTarget, context, f.Secrets)), Guid.NewGuid());
+        LegacySourceRecord? directSource = null; Guid directTarget = Guid.NewGuid();
+        if (direct)
+        {
+            await using var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public." + (bank ? "manual_deposits" : "payment_attempts") + " s");
+            directSource = new(bank ? LegacyProjection.ManualDeposit : LegacyProjection.PaymentAttempt, "SYNTHETIC-DIRECT", (string)(await read.ExecuteScalarAsync(ct))!);
+        }
+        var covered = topupSource is null ? proofs : proofs.Append(topupSource.Proof(topupTarget, context, f.Secrets));
+        var archive = Manifest(directSource is null ? covered : covered.Append(directSource.Proof(directTarget, context, f.Secrets)), Guid.NewGuid());
         ProtectedLegacyEvidence? evidence = null;
         var row = await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, source, target, (value, _) => { evidence = value; return Task.FromResult("protected:synthetic/wallet-order-evidence"); }, ct);
         ProtectedLegacyEvidence? zeroEvidence = null;
@@ -100,9 +107,18 @@ public static class LegacyWalletOrderImportQualification
         var protectedFiles = new Dictionary<string, ProtectedLegacyEvidence>(StringComparer.Ordinal) { [row.Reference] = evidence!, [zeroRow.Reference] = zeroEvidence! }; var originals = new List<ArchivedLegacyRecord> { row, zeroRow };
         if (acceptance is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, acceptance, acceptanceTarget, (value, _) => { protectedFiles["protected:synthetic/native-zero"] = value; return Task.FromResult("protected:synthetic/native-zero"); }, ct));
         if (topupSource is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, topupSource, topupTarget, (value, _) => { protectedFiles["protected:synthetic/topup"] = value; return Task.FromResult("protected:synthetic/topup"); }, ct));
+        if (directSource is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, directSource, directTarget, (value, _) => { protectedFiles["protected:synthetic/direct-payment"] = value; return Task.FromResult("protected:synthetic/direct-payment"); }, ct));
         Task<ArchivedLegacyRecord> Prepare(VerifiedImportManifest manifest, LegacySourceRecord original, Guid identity, CancellationToken token) => new LegacyRecordArchive(f.Secrets).WriteAsync(context, manifest, original, identity, (value, _) => { protectedFiles["protected:synthetic/rebound-zero"] = value; return Task.FromResult("protected:synthetic/rebound-zero"); }, token);
-        var plan = zeroOrder || topup ? await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/zero-orders", "Original synthetic brand", wallets, originals, Prepare, ct, topup) : LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, originals);
-        if (plan.Set.Orders.Count != 1 || plan.Review.Count != 1 || plan.Set.Delivery.Count != (zeroOrder ? 1 : 0) || plan.Set.Payments.Count != (topup ? 1 : 0)) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
+        var plan = zeroOrder || topup || direct ? await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/zero-orders", "Original synthetic brand", wallets, originals, Prepare, ct, topup, direct) : LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, originals);
+        bool heldDirect = direct && fault is "owner" or "amount" or "status";
+        if (plan.Set.Orders.Count != (heldDirect ? 0 : 1) || plan.Review.Count != (heldDirect ? 3 : 1) || plan.Set.Delivery.Count != (zeroOrder ? 1 : 0) || plan.Set.Payments.Count != (topup || direct && !heldDirect ? 1 : 0)) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
+        var disposition = LegacyRecordDispositionReport.Verify(plan);
+        if (!disposition.Accounted || disposition.Archived != originals.Count || disposition.Reviewed != plan.Review.Count) throw new InvalidOperationException("Direct-payment source disposition incomplete.");
+        if (heldDirect)
+        {
+            var held = await new ImportWorkflow(world.Source, f.Sessions).ImportWalletOrdersAsync(context, f.Secrets, plan, (reference, _) => Task.FromResult(protectedFiles[reference]), ReadRetention, new LegacyRecordReconciliationReport(f.Database.Data, f.Secrets), ct);
+            if (!held.Matched || await f.CountAsync("SELECT count(*) FROM shop.orders", ct) != 0 || await f.CountAsync("SELECT count(*) FROM shop.payments", ct) != 0) throw new InvalidOperationException("Unproven direct payment was imported."); return;
+        }
         Task<ProtectedLegacyEvidence> ReadArchive(string reference, CancellationToken token) => Task.FromResult(protectedFiles[reference]);
         var workflow = new ImportWorkflow(world.Source, f.Sessions); var reports = new LegacyRecordReconciliationReport(f.Database.Data, f.Secrets);
         Task<LegacyRecordReconciliation> Import() => workflow.ImportWalletOrdersAsync(context, f.Secrets, plan, ReadArchive, ReadRetention, reports, ct);
@@ -111,6 +127,8 @@ public static class LegacyWalletOrderImportQualification
         if (fault == "wallet") { await using var change = f.Database.Data.CreateCommand("UPDATE public.users SET balance=balance+1"); await change.ExecuteNonQueryAsync(ct); }
         if (fault == "register") register[^1] ^= 1;
         if (fault == "archive") protectedFiles[row.Reference] = evidence! with { Ciphertext = new byte[evidence!.Ciphertext.Length] };
+        if (direct && fault == "source") { await using var changed = f.Database.Data.CreateCommand("UPDATE public." + (bank ? "manual_deposits" : "payment_attempts") + " SET " + (bank ? "amount=600001" : "expected_amount=21")); await changed.ExecuteNonQueryAsync(ct); }
+        if (direct && fault == "tampered") protectedFiles["protected:synthetic/direct-payment"] = protectedFiles["protected:synthetic/direct-payment"] with { Ciphertext = new byte[protectedFiles["protected:synthetic/direct-payment"].Ciphertext.Length] };
         if (fault == "payment") { await using var change = f.Database.Data.CreateCommand("UPDATE public.payment_attempts SET expected_amount=21"); await change.ExecuteNonQueryAsync(ct); }
         if (fault == "tampered") protectedFiles["protected:synthetic/topup"] = protectedFiles["protected:synthetic/topup"] with { Ciphertext = new byte[protectedFiles["protected:synthetic/topup"].Ciphertext.Length] };
         if (fault == "prepared") { var value = protectedFiles["protected:synthetic/rebound-zero"]; protectedFiles["protected:synthetic/rebound-zero"] = value with { Ciphertext = new byte[value.Ciphertext.Length] }; }
