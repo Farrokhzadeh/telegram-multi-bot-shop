@@ -14,6 +14,7 @@ public sealed class LegacyWalletOrderImportTests
     [InlineData("direct_crypto_status")]
     [InlineData("direct_bank_source")]
     [InlineData("direct_crypto_tampered")]
+    [InlineData("topup_recent")]
     [InlineData("topup_valid")]
     [InlineData("topup_paid")]
     [InlineData("topup_payment")]
