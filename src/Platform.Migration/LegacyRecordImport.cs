@@ -79,6 +79,26 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
         }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException or ArithmeticException) { throw new MigrationRejectedException(); }
     }
+    internal static string ReviewReason(LegacySourceRecord source)
+    {
+        using var document = source.Open(); var row = document.RootElement;
+        if (!row.TryGetProperty("checkout_snapshot", out var snapshot) || snapshot.ValueKind != JsonValueKind.Object || !snapshot.EnumerateObject().Any()) return "missing_checkout_snapshot";
+        try
+        {
+            string method = LegacyValues.Text(snapshot, "payment_method");
+            if (method == "wallet" && LegacyValues.Text(row, "currency") == "IRR") return "original_wallet_irr_terms";
+            int quantity = row.GetProperty("qty").GetInt32();
+            if (quantity > 0)
+            {
+                _ = ExactDecimal.Divide(LegacyValues.Number(snapshot, "original_usd"), quantity);
+                if (method == "bank") _ = ExactDecimal.Divide(LegacyValues.Number(snapshot, "total_toman"), quantity);
+                else _ = ExactDecimal.Divide(LegacyValues.Number(snapshot, "total_usd"), quantity);
+            }
+        }
+        catch (ArithmeticException) { return "nonterminating_unit_terms"; }
+        catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException) { }
+        return "incomplete_order_terms";
+    }
     public IReadOnlyList<LegacyMapProof> Proofs(BrandContext context, SecretSnapshot secrets)
     {
         _ = Terms(); var proof = Record.Source.Proof(Record.Target, context, secrets);
