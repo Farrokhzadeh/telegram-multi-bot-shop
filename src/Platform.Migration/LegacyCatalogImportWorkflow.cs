@@ -21,6 +21,7 @@ public sealed class LegacyCatalogImportWorkflow(DbSessionFactory sessions, Secre
         if (!await MatchesAsync(session, manifest, row, ct) || !await LegacyValues.MatchesAuditAsync(session, manifest, row, "product", ct)) throw new MigrationRejectedException();
         await session.CommitAsync(ct); return new(row.Target, terms.Review);
     }
+    internal static bool RequiresReview(ArchivedLegacyRecord row) => Terms(row).Review;
     private static CatalogTerms Terms(ArchivedLegacyRecord row)
     {
         using var document = row.Source.Open(); var s = document.RootElement;
