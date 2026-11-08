@@ -8,6 +8,8 @@ public sealed class LegacyWalletOrderImportTests
     [InlineData("catalog_invalid")]
     [InlineData("direct_bank_valid")]
     [InlineData("direct_crypto_valid")]
+    [InlineData("direct_bank_before_order")]
+    [InlineData("direct_crypto_before_order")]
     [InlineData("direct_bank_owner")]
     [InlineData("direct_bank_amount")]
     [InlineData("direct_bank_status")]
