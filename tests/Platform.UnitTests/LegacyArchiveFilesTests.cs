@@ -7,6 +7,7 @@ public sealed class LegacyArchiveFilesTests
     [Theory]
     [InlineData("valid")]
     [InlineData("race")]
+    [InlineData("zero")]
     [InlineData("missing")]
     [InlineData("shared")]
     [InlineData("root")]
