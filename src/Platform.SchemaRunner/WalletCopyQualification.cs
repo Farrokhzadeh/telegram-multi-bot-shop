@@ -102,6 +102,27 @@ internal static class WalletCopyQualification
             await seed.CommitAsync(ct);
         }
     }
+    internal static async Task SeedSharedAsync(DbSessionFactory sessions, Guid brand, string brandName, CancellationToken ct)
+    {
+        string[] names = ["acc-abad", "kuala", "zikotech"]; int position = Array.IndexOf(names, brandName);
+        if (position < 0 || brand != new Guid(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + brandName)).AsSpan(0, 16))) throw new MigrationRejectedException();
+        await using var seed = await sessions.BeginAsync(ct);
+        long existing = await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brands"), r => r.GetInt64(0), ct);
+        if (existing != position && existing != names.Length) throw new MigrationRejectedException();
+        foreach (string name in existing == names.Length ? names : names.Take(position))
+        {
+            Guid known = new(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + name)).AsSpan(0, 16));
+            long bot = 1101 + Array.IndexOf(names, name);
+            if (!await seed.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND code=$2 AND bot_id=$3 AND NOT active AND bot_token_key_id='qualification-unusable' AND bot_token_ciphertext=$4)", DbValue.Uuid(known), DbValue.Text("qual-" + name), DbValue.Bigint(bot), DbValue.Binary([1])), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
+        }
+        if (existing == position)
+        {
+            if (existing == 0) foreach (string table in new[] { "users", "wallets", "wallet_entries", "legacy_id_map", "audit_events", "orders", "payments", "products", "brand_products" })
+                if (await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active) VALUES($1,$2,$2,$2,'international','en',$2,$3,$4,'qualification-unusable',false)", DbValue.Uuid(brand), DbValue.Text("qual-" + brandName), DbValue.Bigint(1101 + position), DbValue.Binary([1])), ct);
+        }
+        await seed.CommitAsync(ct);
+    }
     internal static byte[] JsonBody(Action<Utf8JsonWriter> body)
     { using var stream = new MemoryStream(); using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); body(writer); writer.WriteEndObject(); } return stream.ToArray(); }
     internal static async Task WriteAsync(string path, byte[] bytes, CancellationToken ct)
