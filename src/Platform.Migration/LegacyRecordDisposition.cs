@@ -8,10 +8,11 @@ public sealed record LegacyRecordDisposition(int Archived, int Orders, int Payme
 }
 public static class LegacyRecordDispositionReport
 {
-    public static LegacyRecordDisposition Verify(LegacyWalletOrderPlan plan)
+    public static LegacyRecordDisposition Verify(LegacyWalletOrderPlan plan) => Verify(plan.Records, plan.Set.Orders, plan.Set.Payments, plan.Set.Delivery, plan.Review);
+    public static LegacyRecordDisposition Verify(IReadOnlyList<ArchivedLegacyRecord> records, IReadOnlyList<LegacyHistoricalRecord> orders, IReadOnlyList<LegacyPaymentRecord> payments, IReadOnlyList<ArchivedLegacyRecord> delivery, IReadOnlyList<LegacyRecordReview> review)
     {
         var originals = new Dictionary<(LegacyProjection Projection, string Id), ArchivedLegacyRecord>();
-        foreach (var row in plan.Records)
+        foreach (var row in records)
             if (!originals.TryAdd((row.Source.Projection, row.Source.Id), row)) throw new MigrationRejectedException();
         var selected = new HashSet<(LegacyProjection Projection, string Id)>();
         void Select(LegacyProjection projection, ArchivedLegacyRecord row)
@@ -19,21 +20,25 @@ public static class LegacyRecordDispositionReport
             var key = (projection, row.Source.Id);
             if (row.Source.Projection != projection || !originals.TryGetValue(key, out var original) || original != row || !selected.Add(key)) throw new MigrationRejectedException();
         }
-        foreach (var order in plan.Set.Orders) Select(LegacyProjection.OrderRecord, order.Record);
-        foreach (var payment in plan.Set.Payments) Select(payment.Record.Source.Projection, payment.Record);
-        foreach (var zero in plan.Set.Delivery)
+        foreach (var order in orders) Select(LegacyProjection.OrderRecord, order.Record);
+        foreach (var payment in payments)
+        {
+            if (payment.Record.Source.Projection is not (LegacyProjection.PaymentAttempt or LegacyProjection.ManualDeposit)) throw new MigrationRejectedException();
+            Select(payment.Record.Source.Projection, payment.Record);
+        }
+        foreach (var zero in delivery)
         {
             var key = (LegacyProjection.ZeroTransaction, zero.Source.Id);
-            if (zero.Source.Projection != LegacyProjection.ZeroTransaction || !originals.TryGetValue(key, out var original) || original.Source != zero.Source || zero.Target != plan.Set.Orders.SingleOrDefault(o => o.Record.Source.Id == zero.Source.Id && o.NativeZeroSource == zero.Source)?.Record.Target || !selected.Add(key)) throw new MigrationRejectedException();
+            if (zero.Source.Projection != LegacyProjection.ZeroTransaction || !originals.TryGetValue(key, out var original) || original.Source != zero.Source || !orders.Any(o => o.Record.Source.Id == zero.Source.Id && o.NativeZeroSource == zero.Source && o.Record.Target == zero.Target) || !selected.Add(key)) throw new MigrationRejectedException();
         }
         var reasons = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var review in plan.Review)
+        foreach (var item in review)
         {
-            var key = (review.Projection, review.LegacyId);
-            if (!originals.TryGetValue(key, out var original) || original.Target != review.Target || !selected.Add(key) || string.IsNullOrWhiteSpace(review.Reason) || review.Reason.Length > 80 || review.Reason.Any(c => !char.IsAsciiLetterLower(c) && c != '_')) throw new MigrationRejectedException();
-            reasons[review.Reason] = reasons.GetValueOrDefault(review.Reason) + 1;
+            var key = (item.Projection, item.LegacyId);
+            if (!originals.TryGetValue(key, out var original) || original.Target != item.Target || !selected.Add(key) || string.IsNullOrWhiteSpace(item.Reason) || item.Reason.Length > 80 || item.Reason.Any(c => !char.IsAsciiLetterLower(c) && c != '_')) throw new MigrationRejectedException();
+            reasons[item.Reason] = reasons.GetValueOrDefault(item.Reason) + 1;
         }
-        var result = new LegacyRecordDisposition(originals.Count, plan.Set.Orders.Count, plan.Set.Payments.Count, plan.Set.Delivery.Count, plan.Review.Count, new System.Collections.ObjectModel.ReadOnlyDictionary<string, int>(reasons));
+        var result = new LegacyRecordDisposition(originals.Count, orders.Count, payments.Count, delivery.Count, review.Count, new System.Collections.ObjectModel.ReadOnlyDictionary<string, int>(reasons));
         if (selected.Count != originals.Count || !result.Accounted) throw new MigrationRejectedException();
         return result;
     }
