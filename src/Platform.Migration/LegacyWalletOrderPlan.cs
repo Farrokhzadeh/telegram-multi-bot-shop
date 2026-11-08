@@ -19,10 +19,10 @@ public sealed class LegacyWalletOrderPlan
     public IReadOnlyList<ArchivedLegacyRecord> Records { get; }
     public IReadOnlyList<LegacyRecordReview> Review { get; }
     public bool ReleaseReady => false;
-    public static LegacyWalletOrderPlan Create(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived) => Build(context, secrets, archive, walletManifest, destination, reference, historicalBrandName, input, archived, false, false, false);
-    public static async Task<LegacyWalletOrderPlan> CreateWithZeroOrdersAsync(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived, Func<VerifiedImportManifest, LegacySourceRecord, Guid, CancellationToken, Task<ArchivedLegacyRecord>> archiveZero, CancellationToken ct = default, bool walletTopups = false, bool directPayments = false)
+    public static LegacyWalletOrderPlan Create(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived) => Build(context, secrets, archive, walletManifest, destination, reference, historicalBrandName, input, archived, false, false, false, false);
+    public static async Task<LegacyWalletOrderPlan> CreateWithZeroOrdersAsync(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived, Func<VerifiedImportManifest, LegacySourceRecord, Guid, CancellationToken, Task<ArchivedLegacyRecord>> archiveZero, CancellationToken ct = default, bool walletTopups = false, bool directPayments = false, bool masterCatalog = false)
     {
-        var plan = Build(context, secrets, archive, walletManifest, destination, reference, historicalBrandName, input, archived, true, walletTopups, directPayments); var zeroRows = new List<ArchivedLegacyRecord>(); var protector = new LegacyRecordArchive(secrets);
+        var plan = Build(context, secrets, archive, walletManifest, destination, reference, historicalBrandName, input, archived, true, walletTopups, directPayments, masterCatalog); var zeroRows = new List<ArchivedLegacyRecord>(); var protector = new LegacyRecordArchive(secrets);
         foreach (var order in plan.Set.Orders.Where(o => o.NativeZeroSource is not null))
         {
             var row = await archiveZero(plan.Manifest, order.NativeZeroSource!, order.Record.Target, ct);
@@ -31,7 +31,7 @@ public sealed class LegacyWalletOrderPlan
         }
         return new(plan.Archive, plan.Manifest, plan.Set with { Delivery = zeroRows.AsReadOnly() }, plan.Records.ToArray(), plan.Review.ToArray());
     }
-    private static LegacyWalletOrderPlan Build(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived, bool zeroOrders, bool walletTopups, bool directPayments)
+    private static LegacyWalletOrderPlan Build(BrandContext context, SecretSnapshot secrets, VerifiedImportManifest archive, VerifiedImportManifest walletManifest, SchemaManifest destination, string reference, string historicalBrandName, IReadOnlyList<LegacyWalletSnapshot> input, IReadOnlyList<ArchivedLegacyRecord> archived, bool zeroOrders, bool walletTopups, bool directPayments, bool masterCatalog)
     {
         if (context.BrandId != archive.TargetBrand || archive.TargetBrand != walletManifest.TargetBrand || archive.SourceBrand != walletManifest.SourceBrand || archive.SourceRevision != walletManifest.SourceRevision || archive.SourceSchemaDigest != walletManifest.SourceSchemaDigest || archive.SnapshotDigest != walletManifest.SnapshotDigest || archive.SnapshotReference != walletManifest.SnapshotReference || string.IsNullOrWhiteSpace(historicalBrandName) || historicalBrandName.Length > 160 || historicalBrandName.Any(char.IsControl)) throw new MigrationRejectedException();
         var wallets = input.Select(w => w with { History = Array.AsReadOnly(w.History.ToArray()) }).ToArray();
@@ -49,7 +49,7 @@ public sealed class LegacyWalletOrderPlan
             archive.Require(row.Source.Proof(row.Target, context, secrets));
             if (!protector.Matches(context, row, row.Evidence)) throw new MigrationRejectedException();
         }
-        var owners = wallets.ToDictionary(w => w.TelegramId); var orders = new List<LegacyHistoricalRecord>(); var payments = new List<LegacyPaymentRecord>(); var review = new List<LegacyRecordReview>();
+        var owners = wallets.ToDictionary(w => w.TelegramId); var orders = new List<LegacyHistoricalRecord>(); var payments = new List<LegacyPaymentRecord>(); var catalog = new List<ArchivedLegacyRecord>(); var review = new List<LegacyRecordReview>();
         var selectedPayments = new HashSet<(LegacyProjection, string)>(); var linked = new Dictionary<string, List<ArchivedLegacyRecord>>(StringComparer.Ordinal);
         if (directPayments) foreach (var payment in records.Where(r => r.Source.Projection is LegacyProjection.PaymentAttempt or LegacyProjection.ManualDeposit))
         {
@@ -109,6 +109,12 @@ public sealed class LegacyWalletOrderPlan
                     }
                 }
             }
+            if (masterCatalog && archive.SourceBrand == "acc-abad" && row.Source.Projection == LegacyProjection.ProductRecord)
+            {
+                try { if (LegacyCatalogImportWorkflow.RequiresReview(row)) { catalog.Add(row); continue; } }
+                catch (MigrationRejectedException) { }
+                reason = "catalog_requires_review";
+            }
             if (walletTopups && row.Source.Projection == LegacyProjection.PaymentAttempt)
             {
                 using var original = row.Source.Open();
@@ -120,10 +126,10 @@ public sealed class LegacyWalletOrderPlan
             review.Add(new(row.Source.Projection, row.Source.Id, row.Target, reason));
         }
         review.RemoveAll(r => selectedPayments.Contains((r.Projection, r.LegacyId)));
-        var proofs = wallets.SelectMany(w => w.Proofs(context.BrandId)).Concat(orders.SelectMany(o => o.Proofs(context, secrets))).Concat(orders.Where(o => o.NativeZeroSource is not null).Select(o => o.NativeZeroSource!.Proof(o.Record.Target, context, secrets))).Concat(payments.Select(p => p.Record.Source.Proof(p.Record.Target, context, secrets)));
+        var proofs = wallets.SelectMany(w => w.Proofs(context.BrandId)).Concat(orders.SelectMany(o => o.Proofs(context, secrets))).Concat(orders.Where(o => o.NativeZeroSource is not null).Select(o => o.NativeZeroSource!.Proof(o.Record.Target, context, secrets))).Concat(payments.Select(p => p.Record.Source.Proof(p.Record.Target, context, secrets))).Concat(catalog.Select(r => r.Source.Proof(r.Target, context, secrets)));
         byte[] body = VerifiedImportManifest.EncodePlan(destination, walletManifest.SourceBrand, context.BrandId, walletManifest.SourceRevision, Convert.FromHexString(walletManifest.SourceSchemaDigest), walletManifest.SnapshotReference, Convert.FromHexString(walletManifest.SnapshotDigest), walletManifest.Batch, proofs, walletManifest.ExpectedOpeningUsd);
         var manifest = VerifiedImportManifest.Open(reference, SHA256.HashData(body), body);
-        return new(archive, manifest, new(Array.AsReadOnly(wallets), orders.AsReadOnly(), payments.AsReadOnly(), [], [], []), records, review.ToArray());
+        return new(archive, manifest, new(Array.AsReadOnly(wallets), orders.AsReadOnly(), payments.AsReadOnly(), [], catalog.AsReadOnly(), []), records, review.ToArray());
     }
     public override string ToString() => "LegacyWalletOrderPlan [redacted]";
 }
