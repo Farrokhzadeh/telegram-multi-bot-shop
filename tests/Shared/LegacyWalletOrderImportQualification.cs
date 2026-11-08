@@ -9,6 +9,7 @@ public static class LegacyWalletOrderImportQualification
 {
     public static async Task RunAsync(string fault = "valid", CancellationToken ct = default)
     {
+        bool catalog = fault.StartsWith("catalog_", StringComparison.Ordinal); if (catalog) fault = fault[8..];
         bool zeroOrder = fault.StartsWith("zero_", StringComparison.Ordinal); if (zeroOrder) fault = fault[5..];
         bool topup = fault.StartsWith("topup_", StringComparison.Ordinal); if (topup) fault = fault[6..];
         bool paidTopup = topup && fault == "paid"; if (paidTopup) fault = "valid";
@@ -36,6 +37,15 @@ public static class LegacyWalletOrderImportQualification
         }
         foreach (string table in new[] { "payment_attempts", "manual_deposits", "common_orderdelivery", "common_orderdeliverypart", "common_preorderdeliverybatch", "common_preorderdeliverybatchpart", "common_preorderdeliverybatch_items", "supplier_fulfillments", "supplier_fulfillment_items", "supplier_procurement_attempts", "supplier_refund_records", "preorder_order_states", "preorder_refund_records", "service_jobs", "common_deliveryattempt" })
         { await using var tableCommand = f.Database.Data.CreateCommand("CREATE TABLE public." + table + "(id text PRIMARY KEY)"); await tableCommand.ExecuteNonQueryAsync(ct); }
+        if (catalog)
+        {
+            await using var add = f.Database.Data.CreateCommand("""
+                ALTER TABLE public.products ADD COLUMN name text, ADD COLUMN product_type text, ADD COLUMN price numeric, ADD COLUMN price_irr numeric, ADD COLUMN description text, ADD COLUMN post_purchase text, ADD COLUMN icon_custom_emoji_id text, ADD COLUMN rules text, ADD COLUMN post_purchase_media_id text, ADD COLUMN auto_price boolean;
+                INSERT INTO public.products VALUES(456,true,false,'Original synthetic title','credential',20,600000,NULL,NULL,NULL,'original-review-rule',NULL,false);
+                """);
+            await add.ExecuteNonQueryAsync(ct);
+            if (fault == "invalid") { await using var change = f.Database.Data.CreateCommand("UPDATE public.products SET price=0"); await change.ExecuteNonQueryAsync(ct); }
+        }
         if (topup)
         {
             await using var add = f.Database.Data.CreateCommand("""
@@ -99,7 +109,14 @@ public static class LegacyWalletOrderImportQualification
             directSource = new(bank ? LegacyProjection.ManualDeposit : LegacyProjection.PaymentAttempt, "SYNTHETIC-DIRECT", (string)(await read.ExecuteScalarAsync(ct))!);
         }
         var covered = topupSource is null ? proofs : proofs.Append(topupSource.Proof(topupTarget, context, f.Secrets));
-        var archive = Manifest(directSource is null ? covered : covered.Append(directSource.Proof(directTarget, context, f.Secrets)), Guid.NewGuid());
+        var prepared = directSource is null ? covered : covered.Append(directSource.Proof(directTarget, context, f.Secrets));
+        LegacySourceRecord? catalogSource = null; Guid catalogTarget = Guid.NewGuid();
+        if (catalog)
+        {
+            await using var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.products s");
+            catalogSource = new(LegacyProjection.ProductRecord, "456", (string)(await read.ExecuteScalarAsync(ct))!);
+        }
+        var archive = Manifest(catalogSource is null ? prepared : prepared.Append(catalogSource.Proof(catalogTarget, context, f.Secrets)), Guid.NewGuid());
         ProtectedLegacyEvidence? evidence = null;
         var row = await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, source, target, (value, _) => { evidence = value; return Task.FromResult("protected:synthetic/wallet-order-evidence"); }, ct);
         ProtectedLegacyEvidence? zeroEvidence = null;
@@ -108,10 +125,11 @@ public static class LegacyWalletOrderImportQualification
         if (acceptance is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, acceptance, acceptanceTarget, (value, _) => { protectedFiles["protected:synthetic/native-zero"] = value; return Task.FromResult("protected:synthetic/native-zero"); }, ct));
         if (topupSource is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, topupSource, topupTarget, (value, _) => { protectedFiles["protected:synthetic/topup"] = value; return Task.FromResult("protected:synthetic/topup"); }, ct));
         if (directSource is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, directSource, directTarget, (value, _) => { protectedFiles["protected:synthetic/direct-payment"] = value; return Task.FromResult("protected:synthetic/direct-payment"); }, ct));
+        if (catalogSource is not null) originals.Add(await new LegacyRecordArchive(f.Secrets).WriteAsync(context, archive, catalogSource, catalogTarget, (value, _) => { protectedFiles["protected:synthetic/catalog"] = value; return Task.FromResult("protected:synthetic/catalog"); }, ct));
         Task<ArchivedLegacyRecord> Prepare(VerifiedImportManifest manifest, LegacySourceRecord original, Guid identity, CancellationToken token) => new LegacyRecordArchive(f.Secrets).WriteAsync(context, manifest, original, identity, (value, _) => { protectedFiles["protected:synthetic/rebound-zero"] = value; return Task.FromResult("protected:synthetic/rebound-zero"); }, token);
-        var plan = zeroOrder || topup || direct ? await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/zero-orders", "Original synthetic brand", wallets, originals, Prepare, ct, topup, direct) : LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, originals);
+        var plan = zeroOrder || topup || direct || catalog ? await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/zero-orders", "Original synthetic brand", wallets, originals, Prepare, ct, topup, direct, catalog) : LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, originals);
         bool heldDirect = direct && fault is "owner" or "amount" or "status";
-        if (plan.Set.Orders.Count != (heldDirect ? 0 : 1) || plan.Review.Count != (heldDirect ? 4 : direct ? 2 : 1) || plan.Set.Delivery.Count != (zeroOrder ? 1 : 0) || plan.Set.Payments.Count != (topup || direct && !heldDirect ? 1 : 0)) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
+        if (plan.Set.Orders.Count != (heldDirect ? 0 : 1) || plan.Review.Count != (heldDirect ? 4 : direct ? 2 : 1) || plan.Set.Delivery.Count != (zeroOrder ? 1 : 0) || plan.Set.Payments.Count != (topup || direct && !heldDirect ? 1 : 0) || plan.Set.Catalog.Count != (catalog && fault == "valid" ? 1 : 0) || plan.Review.Count != (heldDirect ? 4 : direct ? 2 : catalog && fault == "invalid" ? 2 : 1)) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
         var disposition = LegacyRecordDispositionReport.Verify(plan);
         if (!disposition.Accounted || disposition.Archived != originals.Count || disposition.Reviewed != plan.Review.Count) throw new InvalidOperationException("Direct-payment source disposition incomplete.");
         if (heldDirect)
