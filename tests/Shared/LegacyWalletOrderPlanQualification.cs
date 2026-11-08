@@ -31,7 +31,7 @@ public static class LegacyWalletOrderPlanQualification
             var original = JsonNode.Parse(body)!; var snapshot = original["checkout_snapshot"]!;
             if (fault == "missing_snapshot") original["checkout_snapshot"] = new JsonObject();
             else if (fault == "wallet_irr") { original["currency"] = "IRR"; original["total"] = "600000"; snapshot["currency"] = "IRR"; }
-            else { original["currency"] = "IRR"; original["total"] = "600000"; original["qty"] = 3; snapshot["quantity"] = 3; snapshot["currency"] = "IRR"; snapshot["payment_method"] = "bank"; }
+            else { original["currency"] = "IRR"; original["total"] = "600001"; original["qty"] = 3; snapshot["quantity"] = 3; snapshot["currency"] = "IRR"; snapshot["payment_method"] = "bank"; snapshot["original_usd"] = "21"; snapshot["total_usd"] = "21"; snapshot["original_toman"] = "600001"; snapshot["total_toman"] = "600001"; }
             body = original.ToJsonString();
         }
         if (fault == "owner") body = body.Replace("\"user_id\":101", "\"user_id\":102", StringComparison.Ordinal);
