@@ -46,6 +46,25 @@ public sealed class OpeningBalanceMigrationTests
         var result = await reports.CompareWalletsAsync(manifest, [row], Ct);
         Assert.False(result.Matched); Assert.Equal(1, result.UnexpectedMappings);
     }
+    [Fact]
+    public async Task MappingComparisonPagesPastOneThousandAndCountsEveryUnexpectedOriginalKey()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct);
+        await MigrationQualification.EnableRoleAsync(f, Ct);
+        var wallet = MigrationQualification.Wallet();
+        var manifest = MigrationQualification.Manifest(f, "public-a", f.Brands[0], [wallet]);
+        await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, wallet, Ct);
+        await using (var extras = f.Database.Data.CreateCommand("""
+            INSERT INTO shop.legacy_id_map(source_brand,source_table,source_key_kind,legacy_id,target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref)
+            SELECT m.source_brand,m.source_table,m.source_key_kind,'unexpected-'||n::text,m.target_kind,m.target_id,m.target_brand_id,m.source_fingerprint,m.import_batch,m.import_manifest_ref
+            FROM shop.legacy_id_map m CROSS JOIN generate_series(1,1005) AS n WHERE m.source_table='users'
+            """)) await extras.ExecuteNonQueryAsync(Ct);
+        var result = await new ReconciliationReport(f.Sessions).ReadAsync(manifest, Ct);
+        Assert.False(result.Complete);
+        Assert.Equal(manifest.Proofs.Count, result.CommittedMappings);
+        Assert.Equal(1005L, result.UnexpectedMappings);
+        Assert.False(result.ReleaseReady);
+    }
     [Theory]
     [InlineData("0")]
     [InlineData("12.34")]
