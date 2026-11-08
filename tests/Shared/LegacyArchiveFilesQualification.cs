@@ -69,6 +69,23 @@ public static class LegacyArchiveFilesQualification
             var orderStore = new LegacyArchiveFiles(orderRoot, secrets); await orderStore.WriteAsync(context, orderPlan, order, target, [], ct);
             var history = await new LegacyArchiveFiles(orderRoot, secrets).ReadAsync(context, orderPlan, target, [], ct); var view = new LegacyReadOnlyOrderHistory(secrets).Read(context, orderPlan, member, history, history.Evidence);
             if (!view.ReadOnly || !view.IncompleteTerms || view.ImportApproved || view.OriginalCurrency != "IRR" || view.OriginalTotal != 600000) throw new InvalidOperationException("Persisted incomplete history lost original facts.");
+            if (fault == "zero")
+            {
+                var zero = new LegacySourceRecord(LegacyProjection.ZeroTransaction, "PRIVATE-ARCHIVE-ORDER", "{\"id\":\"PRIVATE-ARCHIVE-ORDER\",\"user_id\":99001234,\"amount\":0,\"currency\":\"USD\",\"created_at\":\"2024-02-01T00:00:01Z\"}");
+                byte[] body = VerifiedImportManifest.EncodePlan(orderPlan.Destination, orderPlan.SourceBrand, context.BrandId, orderPlan.SourceRevision, Convert.FromHexString(orderPlan.SourceSchemaDigest), orderPlan.SnapshotReference, Convert.FromHexString(orderPlan.SnapshotDigest), orderPlan.Batch, [zero.Proof(target, context, secrets)]);
+                var zeroPlan = VerifiedImportManifest.Open("protected:synthetic/derived-zero", SHA256.HashData(body), body);
+                string orderPath = Path.Combine(orderRoot, target.ToString("N") + ".archive.json"), zeroPath = Path.Combine(orderRoot, target.ToString("N") + ".zero.archive.json");
+                byte[] originalOrder = await File.ReadAllBytesAsync(orderPath, ct);
+                var firstZero = await orderStore.WriteZeroAsync(context, zeroPlan, zero, target, ct);
+                byte[] originalZero = await File.ReadAllBytesAsync(zeroPath, ct);
+                var replayZero = await orderStore.WriteZeroAsync(context, zeroPlan, zero, target, ct);
+                var restoredZero = await new LegacyArchiveFiles(orderRoot, secrets).ReadZeroAsync(context, zeroPlan, target, ct);
+                if (firstZero.Source != zero || !firstZero.Digest.AsSpan().SequenceEqual(replayZero.Digest) || !firstZero.Digest.AsSpan().SequenceEqual(restoredZero.Digest) || !restoredZero.Reference.EndsWith("/native-zero", StringComparison.Ordinal) || !(await File.ReadAllBytesAsync(orderPath, ct)).AsSpan().SequenceEqual(originalOrder) || !(await File.ReadAllBytesAsync(zeroPath, ct)).AsSpan().SequenceEqual(originalZero)) throw new InvalidOperationException("Derived zero archive changed original evidence or replay.");
+                await Reject(async () => { await orderStore.ReadZeroAsync(context, orderPlan, target, ct); });
+                await Reject(async () => { await orderStore.WriteZeroAsync(context, zeroPlan, zero with { Body = zero.Body.Replace("99001234", "99001235", StringComparison.Ordinal) }, target, ct); });
+                await Reject(async () => { await orderStore.WriteZeroAsync(context, zeroPlan, order, target, ct); });
+                if (!(await File.ReadAllBytesAsync(orderPath, ct)).AsSpan().SequenceEqual(originalOrder) || !(await File.ReadAllBytesAsync(zeroPath, ct)).AsSpan().SequenceEqual(originalZero)) throw new InvalidOperationException("Rejected derived zero changed retained evidence.");
+            }
         }
         finally { Directory.Delete(root, true); }
     }
