@@ -7,7 +7,7 @@ public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory d
     public async Task<LegacyRecordReconciliation> ImportWalletOrdersAsync(BrandContext context, SecretSnapshot secrets, LegacyWalletOrderPlan plan, Func<string, CancellationToken, Task<ProtectedLegacyEvidence>> readArchive, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>> readRetention, LegacyRecordReconciliationReport reconciliation, CancellationToken ct = default)
     {
         var manifest = plan.Manifest; var rows = plan.Set.Wallets;
-        if (context.BrandId != manifest.TargetBrand || plan.Set.Orders.Count + plan.Set.Delivery.Count + plan.Review.Count != plan.Records.Count) throw new MigrationRejectedException();
+        if (context.BrandId != manifest.TargetBrand || plan.Set.Orders.Count + plan.Set.Payments.Count + plan.Set.Delivery.Count + plan.Review.Count != plan.Records.Count) throw new MigrationRejectedException();
         await source.VerifyWalletCoverageAsync(manifest, ct);
         foreach (var projection in LegacySourceRecord.Projections) await source.VerifyRecordCoverageAsync(context, secrets, plan.Archive, projection, ct);
         var protector = new LegacyRecordArchive(secrets);
@@ -30,10 +30,13 @@ public sealed class ImportWorkflow(LegacySourceReader source, DbSessionFactory d
         if (verified.Count != rows.Count) throw new MigrationRejectedException();
         foreach (var row in verified) foreach (var proof in row.Proofs(context.BrandId)) manifest.Require(proof);
         foreach (var order in plan.Set.Orders) foreach (var proof in order.Proofs(context, secrets)) manifest.Require(proof);
+        foreach (var payment in plan.Set.Payments) { _ = payment.Terms(manifest); manifest.Require(payment.Record.Source.Proof(payment.Record.Target, context, secrets)); }
         var wallets = new OpeningBalanceImportWorkflow(destination);
         foreach (var row in verified) await wallets.ImportVerifiedAsync(context, manifest, row, retention, ct);
         var orders = new LegacyOrderRecordImportWorkflow(destination, secrets);
         foreach (var row in plan.Set.Orders) await orders.ImportAsync(context, manifest, row, ct);
+        var payments = new LegacyPaymentImportWorkflow(destination, secrets);
+        foreach (var row in plan.Set.Payments) await payments.ImportAsync(context, manifest, row, ct);
         var delivery = new LegacyDeliveryImportWorkflow(destination, secrets);
         foreach (var row in plan.Set.Delivery) await delivery.ImportAsync(context, manifest, row, ct);
         var report = await reconciliation.CompareAsync(context, manifest, plan.Set, readArchive, ct, readRetention);
