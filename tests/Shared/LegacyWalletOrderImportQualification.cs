@@ -87,7 +87,7 @@ public static class LegacyWalletOrderImportQualification
         await using (var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.transactions s WHERE id='zero-original'")) body = (string)(await read.ExecuteScalarAsync(ct))!;
         var zero = new LegacySourceRecord(LegacyProjection.ZeroTransaction, "zero-original", body);
         LegacySourceRecord? acceptance = null; Guid acceptanceTarget = Guid.NewGuid();
-        if (zeroOrder) { await using var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.transactions s WHERE id='ORD-ABC123ABC123'"); acceptance = new(LegacyProjection.ZeroTransaction, reference, (string)(await read.ExecuteScalarAsync(ct))!); }
+        if (zeroOrder || direct) { await using var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.transactions s WHERE id='ORD-ABC123ABC123'"); acceptance = new(LegacyProjection.ZeroTransaction, reference, (string)(await read.ExecuteScalarAsync(ct))!); }
         LegacySourceRecord? topupSource = null; Guid topupTarget = Guid.NewGuid();
         if (topup) { await using var read = f.Database.Data.CreateCommand("SELECT to_jsonb(s)::text FROM public.payment_attempts s"); topupSource = new(LegacyProjection.PaymentAttempt, "SYNTHETIC-TOPUP", (string)(await read.ExecuteScalarAsync(ct))!); }
         var originalProofs = walletManifest.Proofs.Where(p => p.Projection == LegacyProjection.User).Append(source.Proof(target, context, f.Secrets)).Append(zero.Proof(zeroTarget, context, f.Secrets));
@@ -111,7 +111,7 @@ public static class LegacyWalletOrderImportQualification
         Task<ArchivedLegacyRecord> Prepare(VerifiedImportManifest manifest, LegacySourceRecord original, Guid identity, CancellationToken token) => new LegacyRecordArchive(f.Secrets).WriteAsync(context, manifest, original, identity, (value, _) => { protectedFiles["protected:synthetic/rebound-zero"] = value; return Task.FromResult("protected:synthetic/rebound-zero"); }, token);
         var plan = zeroOrder || topup || direct ? await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/zero-orders", "Original synthetic brand", wallets, originals, Prepare, ct, topup, direct) : LegacyWalletOrderPlan.Create(context, f.Secrets, archive, walletManifest, destination, "protected:synthetic/wallet-orders", "Original synthetic brand", wallets, originals);
         bool heldDirect = direct && fault is "owner" or "amount" or "status";
-        if (plan.Set.Orders.Count != (heldDirect ? 0 : 1) || plan.Review.Count != (heldDirect ? 3 : 1) || plan.Set.Delivery.Count != (zeroOrder ? 1 : 0) || plan.Set.Payments.Count != (topup || direct && !heldDirect ? 1 : 0)) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
+        if (plan.Set.Orders.Count != (heldDirect ? 0 : 1) || plan.Review.Count != (heldDirect ? 4 : direct ? 2 : 1) || plan.Set.Delivery.Count != (zeroOrder ? 1 : 0) || plan.Set.Payments.Count != (topup || direct && !heldDirect ? 1 : 0)) throw new InvalidOperationException("Typed wallet order fixture was not selected.");
         var disposition = LegacyRecordDispositionReport.Verify(plan);
         if (!disposition.Accounted || disposition.Archived != originals.Count || disposition.Reviewed != plan.Review.Count) throw new InvalidOperationException("Direct-payment source disposition incomplete.");
         if (heldDirect)
@@ -130,7 +130,7 @@ public static class LegacyWalletOrderImportQualification
         if (direct && fault == "source") { await using var changed = f.Database.Data.CreateCommand("UPDATE public." + (bank ? "manual_deposits" : "payment_attempts") + " SET " + (bank ? "amount=600001" : "expected_amount=21")); await changed.ExecuteNonQueryAsync(ct); }
         if (direct && fault == "tampered") protectedFiles["protected:synthetic/direct-payment"] = protectedFiles["protected:synthetic/direct-payment"] with { Ciphertext = new byte[protectedFiles["protected:synthetic/direct-payment"].Ciphertext.Length] };
         if (fault == "payment") { await using var change = f.Database.Data.CreateCommand("UPDATE public.payment_attempts SET expected_amount=21"); await change.ExecuteNonQueryAsync(ct); }
-        if (fault == "tampered") protectedFiles["protected:synthetic/topup"] = protectedFiles["protected:synthetic/topup"] with { Ciphertext = new byte[protectedFiles["protected:synthetic/topup"].Ciphertext.Length] };
+        if (topup && fault == "tampered") protectedFiles["protected:synthetic/topup"] = protectedFiles["protected:synthetic/topup"] with { Ciphertext = new byte[protectedFiles["protected:synthetic/topup"].Ciphertext.Length] };
         if (fault == "prepared") { var value = protectedFiles["protected:synthetic/rebound-zero"]; protectedFiles["protected:synthetic/rebound-zero"] = value with { Ciphertext = new byte[value.Ciphertext.Length] }; }
         if (fault != "valid")
         {
