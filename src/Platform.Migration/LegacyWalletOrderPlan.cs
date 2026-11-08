@@ -68,7 +68,7 @@ public sealed class LegacyWalletOrderPlan
                 using var original = row.Source.Open();
                 if (!owners.ContainsKey(original.RootElement.GetProperty("user_id").GetInt64())) throw new MigrationRejectedException();
                 LegacyOrderTerms? terms = null;
-                try { terms = LegacyHistoricalRecord.ReadTerms(row.Source); } catch (MigrationRejectedException) { reason = "incomplete_order_terms"; }
+                try { terms = LegacyHistoricalRecord.ReadTerms(row.Source); } catch (MigrationRejectedException) { reason = LegacyHistoricalRecord.ReviewReason(row.Source); }
                 if (terms is not null)
                 {
                     if (!owners.TryGetValue(terms.Telegram, out var owner)) throw new MigrationRejectedException();
