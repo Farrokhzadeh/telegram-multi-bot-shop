@@ -1,15 +1,15 @@
 namespace Platform.Migration;
 
-public sealed record LegacyRecordDisposition(int Archived, int Orders, int Payments, int NativeZero, int Reviewed, IReadOnlyDictionary<string, int> ReviewReasons)
+public sealed record LegacyRecordDisposition(int Archived, int Orders, int Payments, int NativeZero, int Reviewed, IReadOnlyDictionary<string, int> ReviewReasons, int Catalog = 0)
 {
-    public bool Accounted => Archived == Orders + Payments + NativeZero + Reviewed;
+    public bool Accounted => Archived == Orders + Payments + NativeZero + Catalog + Reviewed;
     public bool ReleaseReady => false;
     public override string ToString() => "LegacyRecordDisposition [redacted]";
 }
 public static class LegacyRecordDispositionReport
 {
-    public static LegacyRecordDisposition Verify(LegacyWalletOrderPlan plan) => Verify(plan.Records, plan.Set.Orders, plan.Set.Payments, plan.Set.Delivery, plan.Review);
-    public static LegacyRecordDisposition Verify(IReadOnlyList<ArchivedLegacyRecord> records, IReadOnlyList<LegacyHistoricalRecord> orders, IReadOnlyList<LegacyPaymentRecord> payments, IReadOnlyList<ArchivedLegacyRecord> delivery, IReadOnlyList<LegacyRecordReview> review)
+    public static LegacyRecordDisposition Verify(LegacyWalletOrderPlan plan) => Verify(plan.Records, plan.Set.Orders, plan.Set.Payments, plan.Set.Delivery, plan.Review, plan.Set.Catalog);
+    public static LegacyRecordDisposition Verify(IReadOnlyList<ArchivedLegacyRecord> records, IReadOnlyList<LegacyHistoricalRecord> orders, IReadOnlyList<LegacyPaymentRecord> payments, IReadOnlyList<ArchivedLegacyRecord> delivery, IReadOnlyList<LegacyRecordReview> review, IReadOnlyList<ArchivedLegacyRecord>? catalog = null)
     {
         var originals = new Dictionary<(LegacyProjection Projection, string Id), ArchivedLegacyRecord>();
         foreach (var row in records)
@@ -26,6 +26,7 @@ public static class LegacyRecordDispositionReport
             if (payment.Record.Source.Projection is not (LegacyProjection.PaymentAttempt or LegacyProjection.ManualDeposit)) throw new MigrationRejectedException();
             Select(payment.Record.Source.Projection, payment.Record);
         }
+        foreach (var product in catalog ?? []) Select(LegacyProjection.ProductRecord, product);
         foreach (var zero in delivery)
         {
             var key = (LegacyProjection.ZeroTransaction, zero.Source.Id);
@@ -38,7 +39,7 @@ public static class LegacyRecordDispositionReport
             if (!originals.TryGetValue(key, out var original) || original.Target != item.Target || !selected.Add(key) || string.IsNullOrWhiteSpace(item.Reason) || item.Reason.Length > 80 || item.Reason.Any(c => !char.IsAsciiLetterLower(c) && c != '_')) throw new MigrationRejectedException();
             reasons[item.Reason] = reasons.GetValueOrDefault(item.Reason) + 1;
         }
-        var result = new LegacyRecordDisposition(originals.Count, orders.Count, payments.Count, delivery.Count, review.Count, new System.Collections.ObjectModel.ReadOnlyDictionary<string, int>(reasons));
+        var result = new LegacyRecordDisposition(originals.Count, orders.Count, payments.Count, delivery.Count, review.Count, new System.Collections.ObjectModel.ReadOnlyDictionary<string, int>(reasons), catalog?.Count ?? 0);
         if (selected.Count != originals.Count || !result.Accounted) throw new MigrationRejectedException();
         return result;
     }
