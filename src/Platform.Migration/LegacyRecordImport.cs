@@ -83,7 +83,8 @@ public sealed record LegacyHistoricalRecord(ArchivedLegacyRecord Record, Guid Me
     {
         _ = Terms(); var proof = Record.Source.Proof(Record.Target, context, secrets);
         using var bytes = new MemoryStream(); using var writer = new BinaryWriter(bytes, Encoding.UTF8, true);
-        writer.Write("legacy-record-order-v1"); writer.Write(proof.Fingerprint.Span); writer.Write(Member.ToByteArray()); writer.Write(HistoricalBrandName); writer.Write(Record.Reference); writer.Write(Record.Digest); if (NativeWalletDebitAt is DateTime clock) { writer.Write("native-wallet-debit-clock-v1"); writer.Write(clock.Ticks); } if (NativePaymentSettledAt is DateTime paid) { writer.Write("native-settled-payment-clock-v1"); writer.Write(paid.Ticks); }
+        writer.Write("legacy-record-order-v1"); writer.Write(proof.Fingerprint.Span); writer.Write(Member.ToByteArray()); writer.Write(HistoricalBrandName); writer.Write(Record.Reference); writer.Write(Record.Digest); if (NativeWalletDebitAt is DateTime clock) { writer.Write("native-wallet-debit-clock-v1"); writer.Write(clock.Ticks); }
+        if (NativePaymentSettledAt is DateTime paid) { writer.Write("native-settled-payment-clock-v1"); writer.Write(paid.Ticks); }
         if (NativeZeroSource is not null) { writer.Write("native-zero-acceptance-v1"); writer.Write(NativeZeroSource.Proof(Record.Target, context, secrets).Fingerprint.Span); }
         writer.Flush();
         return [proof, new(LegacyProjection.HistoricalOrder, Record.Source.Id, Record.Target, context.BrandId, SHA256.HashData(bytes.ToArray())), new(LegacyProjection.OrderAlias, Record.Source.Id, Record.Target, context.BrandId, proof.Fingerprint.Span)];
