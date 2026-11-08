@@ -10,16 +10,18 @@ namespace Platform.SchemaRunner;
 internal sealed record WalletOrderCopyResult(int Imported, int Review, int Topups, int Direct, int Catalog);
 internal static class WalletOrderCopyQualification
 {
-    internal static async Task<WalletOrderCopyResult> RunAsync(string connection, string directory, BrandContext context, SecretSnapshot secrets, LegacySourceReader source, VerifiedImportManifest archive, VerifiedImportManifest wallet, IReadOnlyList<LegacyWalletSnapshot> wallets, IReadOnlyList<ArchivedLegacyRecord> records, string registerPath, Func<string, string> read, CancellationToken ct)
+    internal const string SharedMarker = "teleg-wallet-order-shared-qualification:v1";
+    internal static long SharedBotId(string source) => source switch { "acc-abad" => 1101, "kuala" => 1102, "zikotech" => 1103, _ => throw new MigrationRejectedException() };
+    internal static async Task<WalletOrderCopyResult> RunAsync(string connection, string directory, BrandContext context, SecretSnapshot secrets, LegacySourceReader source, VerifiedImportManifest archive, VerifiedImportManifest wallet, IReadOnlyList<LegacyWalletSnapshot> wallets, IReadOnlyList<ArchivedLegacyRecord> records, string registerPath, Func<string, string> read, CancellationToken ct, bool shared = false)
     {
         var options = new NpgsqlConnectionStringBuilder(connection); var destination = SchemaManifest.ForQualification(connection);
         if (options.IncludeErrorDetail || options.LogParameters || options.Enlist || options.Multiplexing) throw new MigrationRejectedException();
         await using var data = new NpgsqlSlimDataSourceBuilder(connection).Build();
         await using (var check = data.CreateCommand("SELECT current_database()=$1 AND current_user='shop_test_runner' AND current_setting('server_version_num')::integer=180006 AND pg_get_userbyid(datdba)='shop_test_runner' AND shobj_description(oid,'pg_database')=$2 FROM pg_database WHERE datname=current_database()"))
-        { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue("teleg-wallet-order-qualification:" + archive.SnapshotDigest); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
+        { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue(shared ? SharedMarker : "teleg-wallet-order-qualification:" + archive.SnapshotDigest); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
         var files = new LegacyArchiveFiles(directory, secrets);
         if (!OperatingSystem.IsLinux()) throw new MigrationRejectedException();
-        string zeroDirectory = Path.Combine(directory, "teleg-history-archive-direct-catalog"); Directory.CreateDirectory(zeroDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        string zeroDirectory = Path.Combine(directory, shared ? "teleg-history-archive-shared-catalog" : "teleg-history-archive-direct-catalog"); Directory.CreateDirectory(zeroDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var zeroFiles = new LegacyArchiveFiles(zeroDirectory, secrets);
         var plan = await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, secrets, archive, wallet, destination, "protected:wallet-orders/" + wallet.Batch.ToString("N"), "Legacy source " + archive.SourceBrand + " (historical public name unknown)", wallets, records, (manifest, zero, target, token) => zeroFiles.WriteZeroAsync(context, manifest, zero, target, token), ct, true, true, true);
         var disposition = LegacyRecordDispositionReport.Verify(plan);
@@ -29,9 +31,9 @@ internal static class WalletOrderCopyQualification
             if (File.Exists(path)) { if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(read(path))), SHA256.HashData(body))) throw new MigrationRejectedException(); }
             else await WalletCopyQualification.WriteAsync(path, body, ct);
         }
-        await Freeze("wallet-zero-topup-direct-catalog-plan.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(plan.Manifest.Encode()))));
-        await Freeze("wallet-zero-topup-direct-catalog-target.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(connection)))));
-        await Freeze("wallet-zero-topup-direct-catalog-review.json", WalletCopyQualification.JsonBody(w =>
+        await Freeze(shared ? "wallet-shared-direct-catalog-plan.sha256" : "wallet-zero-topup-direct-catalog-plan.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(plan.Manifest.Encode()))));
+        await Freeze(shared ? "wallet-shared-direct-catalog-target.sha256" : "wallet-zero-topup-direct-catalog-target.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(connection)))));
+        await Freeze(shared ? "wallet-shared-direct-catalog-review.json" : "wallet-zero-topup-direct-catalog-review.json", WalletCopyQualification.JsonBody(w =>
         {
             w.WriteString("archive_manifest_sha256", Convert.ToHexStringLower(archive.Digest.Span)); w.WriteString("typed_manifest_sha256", Convert.ToHexStringLower(plan.Manifest.Digest.Span)); w.WriteNumber("original_records", disposition.Archived); w.WriteNumber("typed_orders", disposition.Orders); w.WriteNumber("typed_payments", disposition.Payments); w.WriteNumber("native_zero_proofs", disposition.NativeZero); w.WriteNumber("inactive_master_catalog", disposition.Catalog); w.WriteNumber("reviewed_records", disposition.Reviewed); w.WriteStartObject("review_reason_counts"); foreach (var reason in disposition.ReviewReasons.OrderBy(r => r.Key, StringComparer.Ordinal)) w.WriteNumber(reason.Key, reason.Value); w.WriteEndObject(); w.WriteStartArray("review");
             foreach (var row in plan.Review) { w.WriteStartObject(); w.WriteString("projection", row.Projection.ToString()); w.WriteString("legacy_id", row.LegacyId); w.WriteString("target", row.Target); w.WriteString("reason", row.Reason); w.WriteEndObject(); }
@@ -39,7 +41,8 @@ internal static class WalletOrderCopyQualification
         }));
         await Platform.Persistence.SchemaRunner.ApplyAsync(data, destination, ct);
         await using (var role = data.CreateCommand("DO $$ BEGIN CREATE ROLE shop_legacy_import NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$; GRANT shop_legacy_import TO shop_test_runner")) await role.ExecuteNonQueryAsync(ct);
-        var sessions = new DbSessionFactory(data); await WalletCopyQualification.SeedAsync(sessions, context.BrandId, archive.SourceBrand, ct);
+        var sessions = new DbSessionFactory(data); if (shared) await WalletCopyQualification.SeedSharedAsync(sessions, context.BrandId, archive.SourceBrand, ct);
+        else await WalletCopyQualification.SeedAsync(sessions, context.BrandId, archive.SourceBrand, ct);
         var byReference = records.ToDictionary(r => r.Reference, StringComparer.Ordinal);
         var derived = plan.Set.Delivery.ToDictionary(r => r.Reference, StringComparer.Ordinal);
         async Task<ProtectedLegacyEvidence> ReadArchive(string reference, CancellationToken token)
