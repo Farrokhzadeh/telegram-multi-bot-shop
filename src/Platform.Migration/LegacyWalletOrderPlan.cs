@@ -100,7 +100,7 @@ public sealed class LegacyWalletOrderPlan
                                 decimal due = ExactDecimal.Multiply(terms.Method == "bank" ? terms.UnitToman!.Value : terms.UnitUsd, terms.Quantity);
                                 if (paid.Telegram == terms.Telegram && paid.Bank == (terms.Method == "bank") && paid.Due == due && paid.Status == "settled" && paid.Confirmed is DateTime confirmed && confirmed >= terms.Created)
                                 {
-                                    orders.Add(new(row, owner.TargetUser, historicalBrandName)); payments.Add(candidate);
+                                    orders.Add(new(row, owner.TargetUser, historicalBrandName, NativePaymentSettledAt: confirmed)); payments.Add(candidate);
                                     selectedPayments.Add((candidate.Record.Source.Projection, candidate.Record.Source.Id)); continue;
                                 }
                             }
