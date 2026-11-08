@@ -12,6 +12,9 @@ public static class LegacyWalletOrderImportQualification
         bool zeroOrder = fault.StartsWith("zero_", StringComparison.Ordinal); if (zeroOrder) fault = fault[5..];
         bool topup = fault.StartsWith("topup_", StringComparison.Ordinal); if (topup) fault = fault[6..];
         bool paidTopup = topup && fault == "paid"; if (paidTopup) fault = "valid";
+        bool direct = fault.StartsWith("direct_", StringComparison.Ordinal); if (direct) fault = fault[7..];
+        bool bank = direct && fault.StartsWith("bank_", StringComparison.Ordinal); if (bank) fault = fault[5..];
+        if (direct && !bank) { if (!fault.StartsWith("crypto_", StringComparison.Ordinal)) throw new InvalidOperationException("Unknown direct-payment fixture."); fault = fault[7..]; }
         await using var world = await LegacyWalletRetentionFixture.CreateAsync(ct); var f = world.Fixture; var context = f.Context(0); const string reference = "ORD-ABC123ABC123";
         await using (var setup = f.Database.Data.CreateCommand("""
             CREATE TABLE public.orders(id text PRIMARY KEY,user_id bigint,product_id bigint,qty integer,total numeric,currency text,created_at timestamptz,checkout_snapshot jsonb);
@@ -24,6 +27,12 @@ public static class LegacyWalletOrderImportQualification
         if (zeroOrder)
         {
             await using var change = f.Database.Data.CreateCommand("UPDATE public.orders SET total=0,checkout_snapshot=checkout_snapshot||'{\"total_usd\":\"0\",\"total_toman\":\"0\",\"savings_usd\":\"20\",\"savings_toman\":\"600000\",\"discount_code\":\"SYNTHETIC-FREE\",\"discount_pct\":\"100\",\"discount_quantity\":2}'::jsonb; UPDATE public.transactions SET amount=0 WHERE id='ORD-ABC123ABC123'"); await change.ExecuteNonQueryAsync(ct);
+        }
+        if (direct)
+        {
+            string currency = bank ? "IRR" : "USD", method = bank ? "bank" : "crypto";
+            await using var change = f.Database.Data.CreateCommand("UPDATE public.orders SET currency='" + currency + "',total=" + (bank ? "600000" : "20") + ",checkout_snapshot=checkout_snapshot||'{\"currency\":\"" + currency + "\",\"payment_method\":\"" + method + "\"}'::jsonb; UPDATE public.transactions SET amount=0 WHERE id='ORD-ABC123ABC123'");
+            await change.ExecuteNonQueryAsync(ct);
         }
         foreach (string table in new[] { "payment_attempts", "manual_deposits", "common_orderdelivery", "common_orderdeliverypart", "common_preorderdeliverybatch", "common_preorderdeliverybatchpart", "common_preorderdeliverybatch_items", "supplier_fulfillments", "supplier_fulfillment_items", "supplier_procurement_attempts", "supplier_refund_records", "preorder_order_states", "preorder_refund_records", "service_jobs", "common_deliveryattempt" })
         { await using var tableCommand = f.Database.Data.CreateCommand("CREATE TABLE public." + table + "(id text PRIMARY KEY)"); await tableCommand.ExecuteNonQueryAsync(ct); }
@@ -39,9 +48,28 @@ public static class LegacyWalletOrderImportQualification
             await add.ExecuteNonQueryAsync(ct);
             if (paidTopup) { await using var paid = f.Database.Data.CreateCommand("UPDATE public.payment_attempts SET status='fulfilled',provider_payment_id='synthetic-original-provider',paid_at='2024-02-01 00:00:03Z'"); await paid.ExecuteNonQueryAsync(ct); }
         }
+        if (direct)
+        {
+            string sql = bank ? """
+                ALTER TABLE public.manual_deposits ADD COLUMN user_id bigint, ADD COLUMN amount numeric, ADD COLUMN status text, ADD COLUMN reviewed_at timestamptz, ADD COLUMN created_at timestamptz, ADD COLUMN fulfilled_order_id text;
+                INSERT INTO public.manual_deposits VALUES('SYNTHETIC-DIRECT',99001234,600000,'approved','2024-02-01 00:00:03Z','2024-02-01 00:00:02Z','ORD-ABC123ABC123');
+                """ : """
+                ALTER TABLE public.payment_attempts ADD COLUMN user_id bigint, ADD COLUMN expected_amount numeric, ADD COLUMN expected_currency text, ADD COLUMN kind text,
+                    ADD COLUMN status text, ADD COLUMN pay_currency text, ADD COLUMN provider_payment_id text, ADD COLUMN provider_status text, ADD COLUMN paid_at timestamptz,
+                    ADD COLUMN created_at timestamptz, ADD COLUMN fulfilled_order_id text;
+                INSERT INTO public.payment_attempts VALUES('SYNTHETIC-DIRECT',99001234,20,'USD','direct_checkout','fulfilled','usdttrc20','synthetic-provider',NULL,'2024-02-01 00:00:03Z','2024-02-01 00:00:02Z','ORD-ABC123ABC123');
+                """;
+            await using var add = f.Database.Data.CreateCommand(sql); await add.ExecuteNonQueryAsync(ct);
+            string table = bank ? "manual_deposits" : "payment_attempts";
+            if (fault is "owner" or "amount" or "status")
+            {
+                string value = fault switch { "owner" => "user_id=99001235", "amount" => (bank ? "amount=600001" : "expected_amount=21"), _ => bank ? "status='denied'" : "status='failed'" };
+                await using var change = f.Database.Data.CreateCommand("UPDATE public." + table + " SET " + value); await change.ExecuteNonQueryAsync(ct);
+            }
+        }
         var json = JsonNode.Parse(world.Register)!;
         json["sources"]![0]!["history"]!.AsArray().Add(JsonNode.Parse("""{"id":"ORD-ABC123ABC123","user_id":"99001234","amount":"-20","currency":"USD","created_at":"2024-02-01T00:00:01Z"}""")!);
-        if (zeroOrder) json["sources"]![0]!["history"]!.AsArray()[^1]!["amount"] = "0";
+        if (zeroOrder || direct) json["sources"]![0]!["history"]!.AsArray()[^1]!["amount"] = "0";
         byte[] register = Encoding.UTF8.GetBytes(json.ToJsonString());
         Task<ReadOnlyMemory<byte>> ReadRetention(string _, CancellationToken token) => Task.FromResult<ReadOnlyMemory<byte>>(register);
         var retained = LegacyWalletRetention.OpenAll("protected:synthetic/manual-wallet-history", SHA256.HashData(register), register, "acc-abad", LegacyWalletRetentionFixture.Archive);
