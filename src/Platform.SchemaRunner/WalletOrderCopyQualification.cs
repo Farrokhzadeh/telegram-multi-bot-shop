@@ -7,7 +7,7 @@ using Platform.Persistence;
 using Platform.Security;
 namespace Platform.SchemaRunner;
 
-internal sealed record WalletOrderCopyResult(int Imported, int Review, int Topups, int Direct);
+internal sealed record WalletOrderCopyResult(int Imported, int Review, int Topups, int Direct, int Catalog);
 internal static class WalletOrderCopyQualification
 {
     internal static async Task<WalletOrderCopyResult> RunAsync(string connection, string directory, BrandContext context, SecretSnapshot secrets, LegacySourceReader source, VerifiedImportManifest archive, VerifiedImportManifest wallet, IReadOnlyList<LegacyWalletSnapshot> wallets, IReadOnlyList<ArchivedLegacyRecord> records, string registerPath, Func<string, string> read, CancellationToken ct)
@@ -19,9 +19,9 @@ internal static class WalletOrderCopyQualification
         { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue("teleg-wallet-order-qualification:" + archive.SnapshotDigest); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
         var files = new LegacyArchiveFiles(directory, secrets);
         if (!OperatingSystem.IsLinux()) throw new MigrationRejectedException();
-        string zeroDirectory = Path.Combine(directory, "teleg-history-archive-direct-payments"); Directory.CreateDirectory(zeroDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        string zeroDirectory = Path.Combine(directory, "teleg-history-archive-direct-catalog"); Directory.CreateDirectory(zeroDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var zeroFiles = new LegacyArchiveFiles(zeroDirectory, secrets);
-        var plan = await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, secrets, archive, wallet, destination, "protected:wallet-orders/" + wallet.Batch.ToString("N"), "Legacy source " + archive.SourceBrand + " (historical public name unknown)", wallets, records, (manifest, zero, target, token) => zeroFiles.WriteZeroAsync(context, manifest, zero, target, token), ct, true, true);
+        var plan = await LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, secrets, archive, wallet, destination, "protected:wallet-orders/" + wallet.Batch.ToString("N"), "Legacy source " + archive.SourceBrand + " (historical public name unknown)", wallets, records, (manifest, zero, target, token) => zeroFiles.WriteZeroAsync(context, manifest, zero, target, token), ct, true, true, true);
         var disposition = LegacyRecordDispositionReport.Verify(plan);
         async Task Freeze(string name, byte[] body)
         {
@@ -29,11 +29,11 @@ internal static class WalletOrderCopyQualification
             if (File.Exists(path)) { if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(Encoding.UTF8.GetBytes(read(path))), SHA256.HashData(body))) throw new MigrationRejectedException(); }
             else await WalletCopyQualification.WriteAsync(path, body, ct);
         }
-        await Freeze("wallet-zero-topup-direct-plan.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(plan.Manifest.Encode()))));
-        await Freeze("wallet-zero-topup-direct-target.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(connection)))));
-        await Freeze("wallet-zero-topup-direct-review.json", WalletCopyQualification.JsonBody(w =>
+        await Freeze("wallet-zero-topup-direct-catalog-plan.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(plan.Manifest.Encode()))));
+        await Freeze("wallet-zero-topup-direct-catalog-target.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(connection)))));
+        await Freeze("wallet-zero-topup-direct-catalog-review.json", WalletCopyQualification.JsonBody(w =>
         {
-            w.WriteString("archive_manifest_sha256", Convert.ToHexStringLower(archive.Digest.Span)); w.WriteString("typed_manifest_sha256", Convert.ToHexStringLower(plan.Manifest.Digest.Span)); w.WriteNumber("original_records", disposition.Archived); w.WriteNumber("typed_orders", disposition.Orders); w.WriteNumber("typed_payments", disposition.Payments); w.WriteNumber("native_zero_proofs", disposition.NativeZero); w.WriteNumber("reviewed_records", disposition.Reviewed); w.WriteStartObject("review_reason_counts"); foreach (var reason in disposition.ReviewReasons.OrderBy(r => r.Key, StringComparer.Ordinal)) w.WriteNumber(reason.Key, reason.Value); w.WriteEndObject(); w.WriteStartArray("review");
+            w.WriteString("archive_manifest_sha256", Convert.ToHexStringLower(archive.Digest.Span)); w.WriteString("typed_manifest_sha256", Convert.ToHexStringLower(plan.Manifest.Digest.Span)); w.WriteNumber("original_records", disposition.Archived); w.WriteNumber("typed_orders", disposition.Orders); w.WriteNumber("typed_payments", disposition.Payments); w.WriteNumber("native_zero_proofs", disposition.NativeZero); w.WriteNumber("inactive_master_catalog", disposition.Catalog); w.WriteNumber("reviewed_records", disposition.Reviewed); w.WriteStartObject("review_reason_counts"); foreach (var reason in disposition.ReviewReasons.OrderBy(r => r.Key, StringComparer.Ordinal)) w.WriteNumber(reason.Key, reason.Value); w.WriteEndObject(); w.WriteStartArray("review");
             foreach (var row in plan.Review) { w.WriteStartObject(); w.WriteString("projection", row.Projection.ToString()); w.WriteString("legacy_id", row.LegacyId); w.WriteString("target", row.Target); w.WriteString("reason", row.Reason); w.WriteEndObject(); }
             w.WriteEndArray();
         }));
@@ -53,15 +53,15 @@ internal static class WalletOrderCopyQualification
         var workflow = new ImportWorkflow(source, sessions); var report = new LegacyRecordReconciliationReport(data, secrets);
         var first = await workflow.ImportWalletOrdersAsync(context, secrets, plan, ReadArchive, ReadRetention, report, ct);
         var replay = await workflow.ImportWalletOrdersAsync(context, secrets, plan, ReadArchive, ReadRetention, report, ct);
-        if (!first.Matched || first != replay || first.ReleaseReady || first.ComparedRecords != wallets.Count + plan.Set.Orders.Count + plan.Set.Payments.Count + plan.Set.Delivery.Count || plan.Review.Count + plan.Set.Orders.Count + plan.Set.Payments.Count + plan.Set.Delivery.Count != records.Count) throw new MigrationRejectedException();
+        if (!first.Matched || first != replay || first.ReleaseReady || first.ComparedRecords != wallets.Count + plan.Set.Orders.Count + plan.Set.Payments.Count + plan.Set.Catalog.Count + plan.Set.Delivery.Count || plan.Review.Count + plan.Set.Orders.Count + plan.Set.Payments.Count + plan.Set.Catalog.Count + plan.Set.Delivery.Count != records.Count) throw new MigrationRejectedException();
         await using (var scope = await sessions.BeginReadOnlyAsync(ct))
         {
             var tables = await scope.QueryManyAsync(new DbStatement("SELECT tablename FROM pg_tables WHERE schemaname='shop' ORDER BY tablename"), r => r.GetString(0), 1000, ct);
-            foreach (string table in tables.Where(t => t is not ("brands" or "users" or "wallets" or "wallet_entries" or "legacy_id_map" or "audit_events" or "orders" or "payments"))) if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
-            if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), r => r.GetInt64(0), ct) != plan.Set.Orders.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries WHERE is_posting"), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.payments"), r => r.GetInt64(0), ct) != plan.Set.Payments.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map"), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count) throw new MigrationRejectedException();
+            foreach (string table in tables.Where(t => t is not ("brands" or "users" or "wallets" or "wallet_entries" or "legacy_id_map" or "audit_events" or "orders" or "payments" or "products" or "brand_products"))) if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
+            if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), r => r.GetInt64(0), ct) != plan.Set.Orders.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries WHERE is_posting"), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products WHERE active"), r => r.GetInt64(0), ct) != 0 || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brand_products WHERE visible"), r => r.GetInt64(0), ct) != 0 || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products"), r => r.GetInt64(0), ct) != plan.Set.Catalog.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brand_products"), r => r.GetInt64(0), ct) != plan.Set.Catalog.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.payments"), r => r.GetInt64(0), ct) != plan.Set.Payments.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map"), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count) throw new MigrationRejectedException();
         }
         int direct = plan.Set.Payments.Count(p => p.Order is not null);
         if (direct != plan.Set.Orders.Count(o => o.NativePaymentSettledAt is not null)) throw new MigrationRejectedException();
-        return new(plan.Set.Orders.Count, plan.Review.Count, plan.Set.Payments.Count - direct, direct);
+        return new(plan.Set.Orders.Count, plan.Review.Count, plan.Set.Payments.Count - direct, direct, plan.Set.Catalog.Count);
     }
 }
