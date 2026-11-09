@@ -69,9 +69,23 @@ internal static class CustomerHistoryCopyQualification
                 await storage.PublishAsync(context!, member.Key, member.Value, ct);
                 var reread = await storage.ReadAsync(context!, member.Key, ct);
                 if (!sealedReader.Open(context!, member.Key, reread.Span).SequenceEqual(original)) throw new MigrationRejectedException();
+                int offset = 0;
+                while (true)
+                {
+                    var page = sealedReader.Page(context!, member.Key, reread.Span, offset);
+                    if (page.Orders.Count > 20 || !page.Orders.SequenceEqual(original.Skip(offset).Take(20))) throw new MigrationRejectedException();
+                    offset = checked(offset + page.Orders.Count);
+                    if (page.NextOffset is null) break;
+                    if (page.Orders.Count != 20 || page.NextOffset != offset || offset > original.Count) throw new MigrationRejectedException();
+                }
+                if (offset != original.Count) throw new MigrationRejectedException();
                 count = checked(count + original.Count);
             }
-            if (count != expectedOrders) throw new MigrationRejectedException();
+            if (count != expectedOrders || memberSnapshots.Count < 2) throw new MigrationRejectedException();
+            var first = memberSnapshots.First();
+            Guid foreign = memberSnapshots.Keys.First(id => id != first.Key);
+            try { _ = sealedReader.Open(context!, foreign, first.Value); throw new MigrationRejectedException(); }
+            catch (UnauthorizedAccessException) { }
             await WalletCopyQualification.WriteAsync(receipt, WalletCopyQualification.JsonBody(w =>
             {
                 w.WriteString("scope", "protected_customer_visible_history_source_archive_only");
@@ -79,6 +93,8 @@ internal static class CustomerHistoryCopyQualification
                 w.WriteNumber("original_orders", count); w.WriteNumber("memberships", members);
                 w.WriteBoolean("all_original_orders_accounted", true);
                 w.WriteBoolean("per_member_brand_key_encrypted", true);
+                w.WriteBoolean("actual_source_history_pagination_verified", true);
+                w.WriteBoolean("foreign_member_decryption_rejected", true);
                 w.WriteBoolean("unchanged_private_archive", true);
                 w.WriteBoolean("source_copy_database_accessed", false);
                 w.WriteBoolean("runtime_customer_route_deployed", false);
