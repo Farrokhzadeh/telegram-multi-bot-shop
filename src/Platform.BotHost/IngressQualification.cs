@@ -21,7 +21,13 @@ internal static class IngressQualification
         try { verifier.Verify([header], System.Text.Encoding.UTF8.GetBytes(body.Replace("\"private\"", "\"supergroup\"", StringComparison.Ordinal))); }
         catch (TelegramIngressRejectedException) { rejected = true; }
         if (!rejected) return 1;
-        Console.WriteLine("PASS: native authenticated private Telegram ingress; group proof rejected; no network.");
+        var historical = new CustomerHistoricalPage([new("ORD-ABC123ABC123", new DateTime(2024, 2, 1, 12, 0, 0, DateTimeKind.Utc), 2, 600000m, "IRR", null, null, true)], null);
+        var outgoing = CustomerHistoryMessageRenderer.Render(new UpdateRouteResult(UpdateRouteCode.History, 0, History: historical));
+        if (outgoing.Count != 1 || outgoing[0].ParseMode is not null || outgoing[0].HasActionButtons ||
+            !outgoing[0].Text.Contains("600000 IRR", StringComparison.Ordinal) ||
+            !outgoing[0].Text.Contains("Payment status: Unknown", StringComparison.Ordinal) ||
+            !outgoing[0].Text.Contains("Delivery status: Unknown", StringComparison.Ordinal)) return 1;
+        Console.WriteLine("PASS: native authenticated private Telegram ingress and offline read-only history rendering; no network.");
         return 0;
     }
 }
