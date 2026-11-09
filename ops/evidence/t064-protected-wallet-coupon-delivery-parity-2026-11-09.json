@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "protected_source_only_irr_register_and_coupon_delivery_family_integrity_no_ci",
+  "ci_triggered_by_this_work": false,
+  "private_tests": {
+    "runner": "separate_detached_resource_limited_systemd_services",
+    "irr_register": {
+      "exit_code": 0,
+      "all_owner_currency_amount_links_matched": true,
+      "all_transaction_references_verified": true,
+      "register_raw_sha256_pre_post_identical": true,
+      "brands": {
+        "prod1": {
+          "members": 9277,
+          "irr_nonzero_balances": 34,
+          "history_records": 6572
+        },
+        "prod2": {
+          "members": 12,
+          "irr_nonzero_balances": 0,
+          "history_records": 0
+        },
+        "prod3": {
+          "members": 2993,
+          "irr_nonzero_balances": 6,
+          "history_records": 930
+        }
+      },
+      "private_receipt": "t064-irr-register-integrity-20261109/result.json"
+    },
+    "coupon_delivery": {
+      "exit_code": 0,
+      "original_review_commitment_and_case_uniqueness_verified": true,
+      "per_brand_source_projection_count_matches": true,
+      "private_receipt": "t064-coupon-delivery-source-parity-20261109/result.json"
+    },
+    "final_private_receipts_and_logs_mode": "0600",
+    "private_work_directories_mode": "0700"
+  },
+  "source_totals": {
+    "wallet_memberships": 12282,
+    "original_irr_balances": 40,
+    "original_wallet_history_rows": 7502,
+    "original_coupons": 123,
+    "unassigned_coupon_owner_records": 21,
+    "delivery_headers": 899,
+    "delivery_parts": 899,
+    "delivery_attempts": 901,
+    "historical_inventory_units": 5179,
+    "service_jobs": 46,
+    "held_original_order_exceptions": 3997
+  },
+  "guards": {
+    "source_database_connected": false,
+    "real_customer_history_runtime_enabled": false,
+    "production_payment_wallet_coupon_delivery_or_inventory_mutations": false,
+    "production_bot_images_or_containers_modified": false,
+    "original_irr_currency_converted": false,
+    "unassigned_coupon_ownership_inferred": false,
+    "legacy_sent_marker_as_customer_receipt": false,
+    "missing_media_liabilities_waived": false
+  },
+  "remaining": [
+    "case_specific_original_financial_liability_resolution",
+    "non_usd_balance_manual_disposition",
+    "unassigned_coupon_prepaid_ownership_adjudication",
+    "unproven_delivery_media_and_receipt_outcomes",
+    "isolated_real_customer_history_serving",
+    "full_final_source_target_reconciliation_and_approved_checks"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
