@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "actual_protected_source_archive_original_review_case_proof_and_customer_history_replay_no_new_ci",
+  "ci_policy": "owner_disallowed_all_new_ci_runs",
+  "new_ci_runs_started": 0,
+  "previously_started_workflow": {
+    "run_id": 42632304025,
+    "source_code_sha": "239955ef0abe507983c07424420cf894bd83642f",
+    "conclusion": "success",
+    "started_before_no_ci_request": true,
+    "artifact_id": 13681129881,
+    "artifact_zip_sha256": "fabcf46b15db319b93364ef70cae8d18fa818fdd6f8fb32a6f32c2cba671fb9a",
+    "native_schema_runner_sha256": "9d776cd0192b850f074c19545a4a9dc044b597f09dfefec011c71141d86752db",
+    "native_bytes": 7617392
+  },
+  "protected_owner_server_execution": {
+    "run_type": "detached_memory_cpu_io_limited_source_only",
+    "exit_code": 0,
+    "brands": [
+      {
+        "source": "prod1",
+        "original_orders": 4167,
+        "typed_orders": 689,
+        "retained_order_exceptions": 3478,
+        "all_original_review_rows_verified": 13832,
+        "members": 9277
+      },
+      {
+        "source": "prod2",
+        "original_orders": 0,
+        "typed_orders": 0,
+        "retained_order_exceptions": 0,
+        "all_original_review_rows_verified": 3,
+        "members": 12
+      },
+      {
+        "source": "prod3",
+        "original_orders": 749,
+        "typed_orders": 230,
+        "retained_order_exceptions": 519,
+        "all_original_review_rows_verified": 2513,
+        "members": 2993
+      }
+    ],
+    "totals": {
+      "source_original_orders": 4916,
+      "typed_historical_orders": 919,
+      "retained_unresolved_order_exceptions": 3997,
+      "all_original_review_rows_verified": 16348,
+      "encrypted_member_histories": 12282
+    },
+    "all_review_entries_frozen_original_proof_projection_key_target_matched": true,
+    "source_pagination_fully_verified": true,
+    "foreign_member_decrypt_rejected": true,
+    "pre_post_12282_ciphertext_commitments_equal": true,
+    "private_receipts_count": 3,
+    "private_receipts_unix_mode": "0600",
+    "private_receipt_suffix": "customer-review-proofs-4d084e.receipt.json",
+    "all_receipts_release_ready": false
+  },
+  "safety": {
+    "source_database_connected": false,
+    "target_database_connected": false,
+    "source_data_ciphertexts_changed": false,
+    "live_customer_history_enabled": false,
+    "production_bot_images_modified": false,
+    "telegram_messages_sent": 0,
+    "financial_stock_prepaid_or_delivery_mutations": false,
+    "production_bot_containers_running": 3,
+    "host_containers_running": 13
+  },
+  "still_outstanding": [
+    "real customer history runtime and independent delivery qualification",
+    "financial/liability disposition of 3997 incomplete orders and 40 IRR balances",
+    "authenticated ownership or quarantine of 21 unassigned coupons",
+    "899 historical sent markers and missing media recovery",
+    "full source-to-target financial reconciliation",
+    "separate T066 and T068 gates"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
