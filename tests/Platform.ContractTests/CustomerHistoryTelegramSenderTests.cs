@@ -27,7 +27,7 @@ public sealed class CustomerHistoryTelegramSenderTests
         var fake = new Stub("""{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""");
         using var http = new HttpClient(fake);
         var message = new CustomerHistoryMessage("Historical orders (read-only)\nOriginal total: 600000 IRR\nPayment status: Unknown");
-        var result = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, message);
+        var result = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, message, TestContext.Current.CancellationToken);
         Assert.Equal(CustomerHistorySendState.Confirmed, result.State);
         Assert.Equal(99L, result.MessageId);
         Assert.Equal(1, fake.Calls);
@@ -49,7 +49,7 @@ public sealed class CustomerHistoryTelegramSenderTests
     {
         var fake = new Stub(body);
         using var http = new HttpClient(fake);
-        var result = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, new("Preview"));
+        var result = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, new("Preview"), TestContext.Current.CancellationToken);
         Assert.Equal(CustomerHistorySendState.Unknown, result.State);
         Assert.Null(result.MessageId);
         Assert.Equal(1, fake.Calls);
@@ -62,7 +62,7 @@ public sealed class CustomerHistoryTelegramSenderTests
     {
         var fake = new Stub(body, (HttpStatusCode)status);
         using var http = new HttpClient(fake);
-        var outcome = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, new("Preview"));
+        var outcome = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, new("Preview"), TestContext.Current.CancellationToken);
         Assert.Equal(status >= 500 || status == 429 ? CustomerHistorySendState.Unknown : CustomerHistorySendState.Rejected, outcome.State);
         Assert.Equal(1, fake.Calls);
     }
@@ -71,7 +71,7 @@ public sealed class CustomerHistoryTelegramSenderTests
     {
         var fake = new Stub("", loseResult: true);
         using var http = new HttpClient(fake);
-        var result = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, new("Preview"));
+        var result = await new CustomerHistoryTelegramSender(http).SendAsync(StageOnlySyntheticToken, 7001, new("Preview"), TestContext.Current.CancellationToken);
         Assert.Equal(CustomerHistorySendState.Unknown, result.State);
         Assert.Equal(1, fake.Calls);
     }
@@ -81,9 +81,9 @@ public sealed class CustomerHistoryTelegramSenderTests
         var fake = new Stub("");
         using var http = new HttpClient(fake);
         var sender = new CustomerHistoryTelegramSender(http);
-        await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync(StageOnlySyntheticToken, -1001, new("Preview")));
-        await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync("not-a-bot-token", 7001, new("Preview")));
-        await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync(StageOnlySyntheticToken, 7001, new(new string('X', 3501))));
+        await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync(StageOnlySyntheticToken, -1001, new("Preview"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync("not-a-bot-token", 7001, new("Preview"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync(StageOnlySyntheticToken, 7001, new(new string('X', 3501)), TestContext.Current.CancellationToken));
         Assert.Equal(0, fake.Calls);
     }
 }
