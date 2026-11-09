@@ -79,6 +79,22 @@ public sealed class CustomerHistoryPrivateRoutingTests
                 await session.CommitAsync(ct);
             }
             await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.ReadAsync(Inbound(f.Context(3), CheckoutFixture.Actor(3), "/orders"), ct));
+            await using (var older = await f.Sessions.BeginReadOnlyAsync(ct))
+            {
+                var before = await BrandUserStore.RequireAsync(older, f.Context(5), CheckoutFixture.Actor(5), f.Users[5], ct);
+                Assert.False(before.Banned);
+                await using (var session = await f.Sessions.BeginAsync(ct))
+                {
+                    await session.ExecuteAsync(new DbStatement("UPDATE shop.users SET banned_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(f.Users[5])), ct);
+                    await session.CommitAsync(ct);
+                }
+                var stale = await BrandUserStore.RequireAsync(older, f.Context(5), CheckoutFixture.Actor(5), f.Users[5], ct);
+                Assert.False(stale.Banned);
+                await using var fresh = await f.Sessions.BeginReadOnlyAsync(ct);
+                var changed = await BrandUserStore.RequireAsync(fresh, f.Context(5), CheckoutFixture.Actor(5), f.Users[5], ct);
+                Assert.True(changed.Banned);
+            }
+            await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.ReadAsync(Inbound(f.Context(5), CheckoutFixture.Actor(5), "/orders"), ct));
         }
         finally { Directory.Delete(directory, true); }
     }
