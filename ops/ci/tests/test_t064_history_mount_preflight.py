@@ -68,6 +68,14 @@ class CustomerHistoryMountPreflightTests(unittest.TestCase):
 	def test_docker_socket_mount_rejected(self):
 		self.data[module.BOTS[0]]["mounts"].append({"Source":"/var/run/docker.sock","Destination":"/var/run/docker.sock"})
 		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_remapped_docker_socket_source_rejected(self):
+		self.data[module.BOTS[0]]["mounts"].append({"Source":"/var/run/docker.sock","Destination":"/app/hidden-socket"})
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_symlinked_docker_socket_source_rejected(self):
+		alias=pathlib.Path(self.temp.name)/"socket-alias"
+		alias.symlink_to("/var/run/docker.sock")
+		self.data[module.BOTS[0]]["mounts"].append({"Source":str(alias),"Destination":"/app/socket"})
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
 	def test_inactive_bot_rejected(self):
 		self.data[module.BOTS[2]]["running"]=False
 		with self.assertRaises(ValueError):module.verify(self.root,self.data)

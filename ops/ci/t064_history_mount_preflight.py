@@ -39,7 +39,7 @@ def verify(root,containers):
 			source=mount["Source"]
 			destination=mount["Destination"]
 			require(source.startswith("/") and destination.startswith("/"))
-			require(not overlaps(root,source) and destination!="/var/run/docker.sock" and destination!="/run/docker.sock")
+			require(not overlaps(root,source) and pathlib.Path(source).resolve() not in (pathlib.Path("/var/run/docker.sock").resolve(),pathlib.Path("/run/docker.sock").resolve()) and destination not in ("/var/run/docker.sock","/run/docker.sock"))
 			count+=1
 	return {"scope":"t064_owner_private_history_archive_live_bot_mount_isolation","bot_containers":len(containers),"inspected_mounts":count,
 		"protected_source_root_exposed_to_bots":False,"staging_synthetic_image_unchanged":True,
