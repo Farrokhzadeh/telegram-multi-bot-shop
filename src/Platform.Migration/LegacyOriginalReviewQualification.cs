@@ -48,7 +48,7 @@ public static class LegacyOriginalReviewQualification
             string reason = item.GetProperty("reason").GetString() ?? throw new MigrationRejectedException();
             Guid target = item.GetProperty("target").GetGuid();
             if (id.Length is < 1 or > 128 || id.Any(char.IsControl) || reason.Length is < 1 or > 80 ||
-                reason.Any(c => c is not (>= 'a' and <= 'z') and not '_' ) || target == Guid.Empty ||
+                reason.Any(c => c is not (>= 'a' and <= 'z') and not '_') || target == Guid.Empty ||
                 !seen.Add((projection, id)) || !original.TryGetValue((projection, id), out var proof) || proof.Target != target)
                 throw new MigrationRejectedException();
             actualReasons[reason] = actualReasons.GetValueOrDefault(reason) + 1;
