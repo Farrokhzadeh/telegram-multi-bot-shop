@@ -36,6 +36,7 @@ internal static class StagingHistoryBridge
     }
     private static string ReadPrivate(string path, int limit)
     {
+        if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException("Staging history bridge rejected.");
         var info = new FileInfo(path);
         if (!info.Exists || info.LinkTarget is not null || info.Length is < 1 or > 16384 ||
             info.Length > limit || (File.GetUnixFileMode(path) & (UnixFileMode)63) != 0)
@@ -44,6 +45,7 @@ internal static class StagingHistoryBridge
     }
     private static void WritePrivate(string path, ReadOnlySpan<byte> data)
     {
+        if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException("Staging history bridge rejected.");
         using var stream = new FileStream(path, new FileStreamOptions
         {
             Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None,
@@ -68,6 +70,7 @@ internal static class StagingHistoryBridge
 
     internal static async Task<int> InitializeAsync(string root, string actorText, string botText, CancellationToken ct = default)
     {
+        if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException("Staging history bridge rejected.");
         RequireRoot(root, false);
         if (Environment.GetEnvironmentVariable("SHOP_ALLOW_STAGING_HISTORY_FIXTURE") != "1" ||
             !long.TryParse(actorText, NumberStyles.None, CultureInfo.InvariantCulture, out long actor) || actor <= 0 ||
