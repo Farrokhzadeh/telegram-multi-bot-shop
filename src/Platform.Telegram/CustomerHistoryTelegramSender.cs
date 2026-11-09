@@ -11,6 +11,16 @@ public sealed record CustomerHistorySendOutcome(CustomerHistorySendState State, 
 }
 public sealed class CustomerHistoryTelegramSender(HttpClient http)
 {
+    public Task<CustomerHistorySendOutcome> SendAsync(string token, VerifiedTelegramUpdate update, CustomerHistoryMessage message, CancellationToken ct = default)
+    {
+        int separator = token?.IndexOf(':') ?? -1;
+        if (token is null || update is null || update.IsCallback || update.UpdateId <= 0 || update.MessageId <= 0 || update.ActorId <= 0 ||
+            !CustomerHistoryCommandRouter.TryParsePage(update.Value, out _) || separator <= 0 ||
+            !long.TryParse(token.AsSpan(0, separator), NumberStyles.None, CultureInfo.InvariantCulture, out long bot) ||
+            bot != update.Context.BotId || bot.ToString(CultureInfo.InvariantCulture) != token[..separator])
+            throw new TelegramIngressRejectedException();
+        return SendAsync(token, update.ActorId, message, ct);
+    }
     public async Task<CustomerHistorySendOutcome> SendAsync(string token, long privateChat, CustomerHistoryMessage message, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length is < 38 or > 128 || token.Count(c => c == ':') != 1 ||

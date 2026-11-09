@@ -1,4 +1,7 @@
 using System.Net;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using Platform.Security;
 using System.Text;
 using Platform.Telegram;
 
@@ -20,6 +23,32 @@ public sealed class CustomerHistoryTelegramSenderTests
             if (loseResult) throw new HttpRequestException("Synthetic lost confirmation.");
             return new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
         }
+    }
+    private static VerifiedTelegramUpdate PrivateHistory(long bot, string command)
+    {
+        var registry = new BotBrandRegistry([new("synthetic-history", "bound", Guid.NewGuid(), bot, Guid.NewGuid(), 1, true)]);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "bound")], "synthetic-history"));
+        if (!registry.TryResolveAuthenticated("synthetic-history", principal, out var context)) throw new InvalidOperationException();
+        byte[] secret = SHA256.HashData("synthetic verified history sender"u8);
+        using var verifier = new TelegramWebhookVerifier(context!, secret);
+        string header = Convert.ToBase64String(secret).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        string payload = "{\"update_id\":34,\"message\":{\"message_id\":77,\"from\":{\"id\":7001,\"is_bot\":false},\"chat\":{\"id\":7001,\"type\":\"private\"},\"text\":\"" + command + "\"}}";
+        return verifier.Verify([header], Encoding.UTF8.GetBytes(payload));
+    }
+    [Fact]
+    public async Task VerifiedHistorySenderBindsRecipientAndBotToAuthenticatedUpdate()
+    {
+        var stub = new Stub("""{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""");
+        using var http = new HttpClient(stub);
+        var sender = new CustomerHistoryTelegramSender(http);
+        var verified = PrivateHistory(12345, "/orders");
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => sender.SendAsync(StageOnlySyntheticToken, PrivateHistory(12346, "/orders"), new("Preview")));
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => sender.SendAsync(StageOnlySyntheticToken, PrivateHistory(12345, "/start"), new("Preview")));
+        Assert.Equal(0, stub.Calls);
+        var result = await sender.SendAsync(StageOnlySyntheticToken, verified, new("Historical orders (read-only)"), TestContext.Current.CancellationToken);
+        Assert.Equal(CustomerHistorySendState.Confirmed, result.State);
+        Assert.Equal(1, stub.Calls);
+        Assert.Contains("chat_id=7001", stub.Posted!, StringComparison.Ordinal);
     }
     [Fact]
     public async Task SendsOneScopedPlaintextMessageAndRequiresExactPrivateChatAcknowledgement()
