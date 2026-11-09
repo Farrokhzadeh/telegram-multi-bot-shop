@@ -42,8 +42,8 @@ public sealed class CustomerHistoryTelegramSenderTests
         using var http = new HttpClient(stub);
         var sender = new CustomerHistoryTelegramSender(http);
         var verified = PrivateHistory(12345, "/orders");
-        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => sender.SendAsync(StageOnlySyntheticToken, PrivateHistory(12346, "/orders"), new("Preview")));
-        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => sender.SendAsync(StageOnlySyntheticToken, PrivateHistory(12345, "/start"), new("Preview")));
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => sender.SendAsync(StageOnlySyntheticToken, PrivateHistory(12346, "/orders"), new("Preview"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => sender.SendAsync(StageOnlySyntheticToken, PrivateHistory(12345, "/start"), new("Preview"), TestContext.Current.CancellationToken));
         Assert.Equal(0, stub.Calls);
         var result = await sender.SendAsync(StageOnlySyntheticToken, verified, new("Historical orders (read-only)"), TestContext.Current.CancellationToken);
         Assert.Equal(CustomerHistorySendState.Confirmed, result.State);
