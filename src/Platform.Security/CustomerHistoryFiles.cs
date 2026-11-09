@@ -35,6 +35,7 @@ public sealed class CustomerHistoryFiles
             return;
         }
         string temp = Path.Combine(directory, ".pending-" + Guid.NewGuid().ToString("N"));
+        if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException("Historical order storage rejected.");
         try
         {
             await using (var stream = new FileStream(temp, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite }))
@@ -48,7 +49,7 @@ public sealed class CustomerHistoryFiles
     {
         string path = Name(member);
         var info = new FileInfo(path);
-        if (!info.Exists || info.LinkTarget is not null || info.Length is < 40 or > 1048769 || (File.GetUnixFileMode(path) & (UnixFileMode)63) != 0)
+        if (!OperatingSystem.IsLinux() || !info.Exists || info.LinkTarget is not null || info.Length is < 40 or > 1048769 || (File.GetUnixFileMode(path) & (UnixFileMode)63) != 0)
             throw new UnauthorizedAccessException("Historical order storage rejected.");
         var bytes = await File.ReadAllBytesAsync(path, ct);
         _ = new CustomerHistoryArchive(secrets).Open(brand, member, bytes);
