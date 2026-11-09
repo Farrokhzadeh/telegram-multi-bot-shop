@@ -13,6 +13,8 @@ public sealed class TelegramIngressTests
     [InlineData("/menu")]
     [InlineData("/support")]
     [InlineData("/discounts")]
+    [InlineData("/orders")]
+    [InlineData("/orders 20")]
     public void OnlyAuthenticatedPrivateSenderCanSupplyCommandProof(string command)
     {
         byte[] secret = RandomNumberGenerator.GetBytes(32);
@@ -58,6 +60,20 @@ public sealed class TelegramIngressTests
         Assert.Equal("Telegram update was rejected.", error.Message);
     }
 
+    [Theory]
+    [InlineData("/orders 0")]
+    [InlineData("/orders 01")]
+    [InlineData("/orders -20")]
+    [InlineData("/orders 21")]
+    [InlineData("/orders 10020")]
+    [InlineData("/orders 20x")]
+    public void InvalidHistoryPageIsNeverAnAuthenticatedCommand(string command)
+    {
+        Assert.False(CustomerHistoryCommandRouter.TryParsePage(command, out _));
+        byte[] key = RandomNumberGenerator.GetBytes(32);
+        using var verifier = new TelegramWebhookVerifier(Context(), key);
+        Assert.Throws<TelegramIngressRejectedException>(() => verifier.Verify([TelegramFixture.Header(key)], TelegramFixture.Body(command)));
+    }
     private static BrandContext Context()
     {
         var registry = new BotBrandRegistry([new("test-bot", "a", Guid.NewGuid(), 1001, Guid.NewGuid(), 1, true)]);

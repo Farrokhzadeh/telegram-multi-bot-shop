@@ -1,0 +1,29 @@
+using System.Globalization;
+using Platform.Persistence;
+using Platform.Security;
+
+namespace Platform.Telegram;
+
+public sealed class CustomerHistoryCommandRouter(DbSessionFactory sessions, CustomerHistoryArchive archive, CustomerHistoryFiles files)
+{
+    public static bool TryParsePage(string value, out int offset)
+    {
+        offset = 0;
+        if (value == "/orders") return true;
+        if (!value.StartsWith("/orders ", StringComparison.Ordinal) || value.Length is < 9 or > 13 ||
+            !int.TryParse(value.AsSpan(8), NumberStyles.None, CultureInfo.InvariantCulture, out int valueOffset) ||
+            valueOffset is < 20 or > 10000 || valueOffset % 20 != 0 ||
+            valueOffset.ToString(CultureInfo.InvariantCulture) != value[8..]) return false;
+        offset = valueOffset;
+        return true;
+    }
+    public async Task<CustomerHistoricalPage> ReadAsync(VerifiedTelegramUpdate update, CancellationToken ct = default)
+    {
+        if (update.IsCallback || !TryParsePage(update.Value, out int offset)) throw new TelegramIngressRejectedException();
+        await using var session = await sessions.BeginReadOnlyAsync(ct);
+        var member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct);
+        if (member.Blocked || member.Banned) throw new TelegramIngressRejectedException();
+        var encrypted = await files.ReadAsync(update.Context, member.Id, ct);
+        return archive.Page(update.Context, member.Id, encrypted.Span, offset);
+    }
+}

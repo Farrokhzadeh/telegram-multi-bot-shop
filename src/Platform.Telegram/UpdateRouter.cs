@@ -6,19 +6,25 @@ using Platform.Security;
 
 namespace Platform.Telegram;
 
-public enum UpdateRouteCode { Started, Menu, Support, Discounts, Product, Order, Subscribed, Unsubscribed, Duplicate, Busy, StaffProofObserved, Quantity, QuantityRejected }
-public sealed record UpdateRouteResult(UpdateRouteCode Code, long FlowRevision, Guid? EntityId = null, int? Quantity = null);
+public enum UpdateRouteCode { Started, Menu, Support, Discounts, Product, Order, Subscribed, Unsubscribed, Duplicate, Busy, StaffProofObserved, Quantity, QuantityRejected, History }
+public sealed record UpdateRouteResult(UpdateRouteCode Code, long FlowRevision, Guid? EntityId = null, int? Quantity = null, CustomerHistoricalPage? History = null);
 public sealed class UpdateRouter
 {
     private readonly DbSessionFactory sessions;
     private readonly HumanSupportRouter? support;
+    private readonly CustomerHistoryCommandRouter? history;
     private readonly Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock;
-    public UpdateRouter(DbSessionFactory sessions, Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock, HumanSupportRouter? support = null)
-    { this.sessions = sessions; this.observeRestock = observeRestock; this.support = support; }
+    public UpdateRouter(DbSessionFactory sessions, Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock, HumanSupportRouter? support = null, CustomerHistoryCommandRouter? history = null)
+    { this.sessions = sessions; this.observeRestock = observeRestock; this.support = support; this.history = history; }
 
     public async Task<UpdateRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(update);
+        if (!update.IsCallback && CustomerHistoryCommandRouter.TryParsePage(update.Value, out _))
+        {
+            if (history is null) throw new TelegramIngressRejectedException();
+            return new(UpdateRouteCode.History, 0, History: await history.ReadAsync(update, ct));
+        }
         if (!update.IsCallback && !update.Value.StartsWith('/') && update.AssetRef is null)
         {
             BrandUser current;

@@ -41,6 +41,35 @@ public static class LegacyReadOnlyOrderQualification
         var named = reader.ReadCustomer(context, namedManifest, member, namedRow, namedRow.Evidence);
         if (named.SavedTitle != "Saved original title" || named.SavedPaymentMethod != "bank" || !named.IncompleteTerms || named.PaymentStatus != "unknown" || named.DeliveryStatus != "unknown") throw new InvalidOperationException("Original saved title or payment method was inferred as verified.");
         body["checkout_snapshot"] = new JsonObject();
+        var history = new CustomerHistoryArchive(secrets); var projection = new LegacyCustomerHistoryProjection(secrets);
+        var exported = projection.SealAll(context, manifest, [row]);
+        if (exported.Count != 1 || !exported.TryGetValue(member, out var protectedHistory)) throw new InvalidOperationException("Member history projection lost the source record.");
+        var first = history.Page(context, member, protectedHistory, 0);
+        if (first.Orders.Count != 1 || first.NextOffset is not null || first.Orders[0].OriginalReference != source.Id || first.Orders[0].OriginalCurrency != "IRR" || first.Orders[0].OriginalTotal != 600000 || first.Orders[0].PaymentStatus != "unknown" || first.Orders[0].DeliveryStatus != "unknown") throw new InvalidOperationException("Archived history not preserved for customer.");
+        var many = Enumerable.Range(0, 55).Select(n => new CustomerHistoricalOrder("ORD-" + n.ToString("D12"), new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc).AddMinutes(n), 2, 600000, "IRR", null, null, true)).ToArray();
+        var pages = history.Seal(context, member, many);
+        if (history.Page(context, member, pages, 0).NextOffset != 20 || history.Page(context, member, pages, 20).NextOffset != 40 || history.Page(context, member, pages, 40).Orders.Count != 15 || history.Page(context, member, pages, 40).NextOffset is not null) throw new InvalidOperationException("History pagination lost original order coverage.");
+        try { _ = history.Page(context, Guid.NewGuid(), pages, 0); throw new InvalidOperationException("Foreign-member history read accepted."); } catch (UnauthorizedAccessException) { }
+        try { _ = history.Page(other, member, pages, 0); throw new InvalidOperationException("Foreign-brand history read accepted."); } catch (UnauthorizedAccessException) { }
+        try { _ = history.Seal(context, member, [many[0], many[0]]); throw new InvalidOperationException("Duplicate original order was accepted."); } catch (UnauthorizedAccessException) { }
+        byte[] corrupted = pages.ToArray(); corrupted[^1] ^= 1;
+        try { _ = history.Page(context, member, corrupted, 0); throw new InvalidOperationException("Tampered customer history was accepted."); } catch (UnauthorizedAccessException) { }
+        string directory = Path.Combine(Path.GetTempPath(), "teleg-customer-history-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        try
+        {
+            var storage = new CustomerHistoryFiles(directory, secrets);
+            await storage.PublishAsync(context, member, pages, ct);
+            var stored = await storage.ReadAsync(context, member, ct);
+            if (history.Page(context, member, stored.Span, 20).Orders.Count != 20) throw new InvalidOperationException("Encrypted storage history was truncated.");
+            await storage.PublishAsync(context, member, history.Seal(context, member, many), ct);
+            try { await storage.PublishAsync(context, member, history.Seal(context, member, many.Skip(1).ToArray()), ct); throw new InvalidOperationException("Changed immutable history accepted."); } catch (UnauthorizedAccessException) { }
+            try { _ = await storage.ReadAsync(other, member, ct); throw new InvalidOperationException("Foreign-brand history read accepted."); } catch (UnauthorizedAccessException) { }
+            File.SetUnixFileMode(Path.Combine(directory, member.ToString("N") + ".history"), UnixFileMode.UserRead | UnixFileMode.GroupRead);
+            try { _ = await storage.ReadAsync(context, member, ct); throw new InvalidOperationException("Public-readable history accepted."); } catch (UnauthorizedAccessException) { }
+            File.SetUnixFileMode(Path.Combine(directory, member.ToString("N") + ".history"), UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        finally { Directory.Delete(directory, true); }
         foreach (string currency in new[] { "USD", "UNKNOWN" })
         {
             body["currency"] = currency; var next = source with { Body = body.ToJsonString() }; Guid nextTarget = Guid.NewGuid();
