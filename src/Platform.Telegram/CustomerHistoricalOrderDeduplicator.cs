@@ -52,7 +52,7 @@ public static class CustomerHistoricalOrderDeduplicator
             {
                 SavedTitle = present.SavedTitle ?? order.SavedTitle,
                 SavedPaymentMethod = present.SavedPaymentMethod ?? order.SavedPaymentMethod,
-                IncompleteTerms = present.IncompleteTerms && order.IncompleteTerms
+                IncompleteTerms = present.IncompleteTerms
             };
         }
     }

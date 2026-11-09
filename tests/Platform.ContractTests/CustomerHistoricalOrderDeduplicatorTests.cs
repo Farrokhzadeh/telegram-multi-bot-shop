@@ -53,6 +53,19 @@ public sealed class CustomerHistoricalOrderDeduplicatorTests
     }
 
     [Fact]
+    public void TypedAliasCannotEraseOriginalIncompleteTerms()
+    {
+        var archived = new[] { Order(1) };
+        var typed = archived[0] with { SavedTitle = "Verified title", IncompleteTerms = false };
+        var page = CustomerHistoricalOrderDeduplicator.Page(archived, [typed], 0, requireArchiveMatch: true);
+        var result = Assert.Single(page.Orders);
+        Assert.True(result.IncompleteTerms);
+        Assert.Equal("Verified title", result.SavedTitle);
+        Assert.Equal("unknown", result.PaymentStatus);
+        Assert.Equal("unknown", result.DeliveryStatus);
+    }
+
+    [Fact]
     public void ImportedHistoricalOnlyRecordAppearsOnceWithoutErasingOriginals()
     {
         var result = CustomerHistoricalOrderDeduplicator.Page([Order(2)], [Order(1)], 0);
