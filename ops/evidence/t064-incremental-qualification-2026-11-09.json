@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_source_safe_incremental_implementation_pending_final_ci",
+  "intermediate_commits": [
+    "e4a050b4af55fe2a22b4248f64572a1a875f6d02",
+    "2045d03e9670d273fa91e6ae9e1e721857a7cb8f",
+    "5b66e0630d1c99912cd2c5b25266529337ecb042",
+    "982260e065139881f0edf8003f4c818493171270"
+  ],
+  "ci_strategy": "intermediate_pushes_skip_ci;one_final_ci_after_docs_commit",
+  "local_verification": {
+    "safe_owner_private_history_inventory": {
+      "status": "passed",
+      "original_orders": 4916,
+      "brand_member_history_files": 12282,
+      "mode_exceptions": 0,
+      "read_only": true,
+      "runner": "detached_systemd_unit"
+    },
+    "staging_python_bridge_tests": {
+      "status": "passed",
+      "tests": 4,
+      "runner": "detached_systemd_unit"
+    },
+    "redacted_evidence_parity_tests": {
+      "status": "passed",
+      "tests": 2,
+      "runner": "detached_systemd_unit"
+    },
+    "typed_alias_disposable_postgresql_tests": {
+      "status": "awaiting_final_ci",
+      "routes": [
+        "wallet",
+        "free",
+        "bank"
+      ]
+    }
+  },
+  "preserved": {
+    "source_original_orders": 4916,
+    "typed_historical_orders": 919,
+    "reviewed_order_exceptions": 3997,
+    "original_wallet_irr_cases": 174,
+    "missing_checkout_snapshot_cases": 3819,
+    "precision_exceptions": 2,
+    "chronology_exceptions": 2,
+    "original_sent_markers": 899,
+    "unassigned_coupon_records": 21,
+    "retained_irr_wallet_liabilities": 40,
+    "production_bot_containers_running": 3,
+    "host_containers_running": 13,
+    "source_original_worktree_changed_by_this_batch": false,
+    "production_database_or_payment_mutations": false,
+    "real_customer_history_mounted_to_staging": false
+  },
+  "outstanding": [
+    "full_protected_source_target_liability_parity",
+    "source_backed_private_bot_mount_and_real_customer_history_qualification",
+    "unreviewed_order_terms_and_original_irr_balance_dispositions",
+    "unassigned_prepaid_coupon_ownership",
+    "delivery_sent_markers_and_missing_media",
+    "remaining_legacy_source_families"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
