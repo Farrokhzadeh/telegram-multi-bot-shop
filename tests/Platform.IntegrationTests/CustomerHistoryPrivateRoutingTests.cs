@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Persistence;
@@ -10,6 +11,18 @@ namespace Platform.IntegrationTests;
 [Collection("PostgreSQL races")]
 public sealed class CustomerHistoryPrivateRoutingTests
 {
+    private sealed class HistoryReply : HttpMessageHandler
+    {
+        public int Calls { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"ok":true,"result":{"message_id":77,"chat":{"id":7001,"type":"private"}}}""")
+            });
+        }
+    }
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static VerifiedTelegramUpdate Inbound(BrandContext brand, long actor, string command)
     {
@@ -55,6 +68,20 @@ public sealed class CustomerHistoryPrivateRoutingTests
                 Assert.Equal("unknown", o.DeliveryStatus);
                 Assert.True(o.ReadOnly);
             });
+            var response = new HistoryReply();
+            using (var http = new HttpClient(response))
+            {
+                var delivery = new CustomerHistoryDeliveryPipeline(router, new CustomerHistoryTelegramSender(http));
+                string token = f.Context(0).BotId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + new string('x', 40);
+                var receipt = await delivery.SendAsync(token, Inbound(f.Context(0), CheckoutFixture.Actor(0), "/orders"), ct);
+                Assert.True(receipt.Completed);
+                Assert.True(receipt.ConfirmedMessages > 0);
+                Assert.Equal(receipt.ConfirmedMessages, response.Calls);
+                int before = response.Calls;
+                string foreign = f.Context(1).BotId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + new string('x', 40);
+                await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => delivery.SendAsync(foreign, Inbound(f.Context(0), CheckoutFixture.Actor(0), "/orders"), ct));
+                Assert.Equal(before, response.Calls);
+            }
             var sameActorOtherBrand = await router.ReadAsync(Inbound(f.Context(1), CheckoutFixture.Actor(1), "/orders"), ct);
             Assert.Equal(3, sameActorOtherBrand.Orders.Count);
             Assert.All(sameActorOtherBrand.Orders, o => Assert.StartsWith("SOURCE-1-", o.OriginalReference, StringComparison.Ordinal));
