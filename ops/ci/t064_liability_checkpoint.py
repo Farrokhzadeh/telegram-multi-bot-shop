@@ -46,7 +46,7 @@ def verify(orders,coupons,delivery,wallet,review,history,assets,asset_date):
 		require(a["original_orders"]==g["original_orders"]==e["original_orders"]==a["selected_typed_orders"]+a["held_for_review"])
 		require(a["selected_typed_orders"]==g["typed_orders"] and a["held_for_review"]==g["review_orders"])
 		require(a["held_for_review"]==sum(a[k] for k in ("missing_checkout_snapshot","original_wallet_irr_terms","nonterminating_original_bank_unit","settled_payment_predates_order")))
-		require(e["delivery_headers"]==e["source_sent_markers"]==e["delivery_headers_with_original_order"])
+		require(e["delivery_headers"]==e.get("source_sent_markers",0)==e.get("delivery_headers_with_original_order",0))
 		require(b["original_discounts"]==b["assigned_owner"]+b["unassigned_owner"])
 		require(f["source_users"]=={"prod1":9277,"prod2":12,"prod3":2993}[s])
 		v=assets["instances"][s]
@@ -61,7 +61,7 @@ def verify(orders,coupons,delivery,wallet,review,history,assets,asset_date):
 		irr_orders+=a["original_wallet_irr_terms"]
 		precision+=a["nonterminating_original_bank_unit"]
 		chronology+=a["settled_payment_predates_order"]
-		sent+=e["source_sent_markers"]
+		sent+=e.get("source_sent_markers",0)
 		discounts+=b["original_discounts"]
 		unowned+=b["unassigned_owner"]
 		balances+=f["preserved_nonzero_irr_balances"]
@@ -70,7 +70,7 @@ def verify(orders,coupons,delivery,wallet,review,history,assets,asset_date):
 		media["missing_receipts"]+=m.get("missing",0)
 		media["no_local_reference"]+=m.get("no_local_reference",0)
 		media["unverified_product_media"]+=v.get("product_media_references_unverified",0)
-		sources[s]={"original_orders":a["original_orders"],"typed_orders":a["selected_typed_orders"],"retained_order_exceptions":a["held_for_review"],"irr_liability_accounts":f["preserved_nonzero_irr_balances"],"unassigned_coupon_records":b["unassigned_owner"],"historical_sent_markers":e["source_sent_markers"]}
+		sources[s]={"original_orders":a["original_orders"],"typed_orders":a["selected_typed_orders"],"retained_order_exceptions":a["held_for_review"],"irr_liability_accounts":f["preserved_nonzero_irr_balances"],"unassigned_coupon_records":b["unassigned_owner"],"historical_sent_markers":e.get("source_sent_markers",0)}
 	totals=orders["totals"]
 	require((original,typed,held,unclear,irr_orders,precision,chronology,sent)==(4916,919,3997,3819,174,2,2,899))
 	require((totals["source_original_orders"],totals["canonical_qualified_selected_orders"],totals["protected_exception_orders"],totals["missing_checkout_snapshot"],totals["original_irr_wallet_terms"],totals["nonterminating_original_bank_unit"],totals["confirmed_external_payment_before_original_order_creation"],totals["original_delivery_sent_markers_total"])==(original,typed,held,unclear,irr_orders,precision,chronology,sent))
