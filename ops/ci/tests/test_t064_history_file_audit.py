@@ -17,6 +17,7 @@ class T064PrivateHistoryFileTests(unittest.TestCase):
 		for source in ("prod1","prod2"):
 			d=self.root/("teleg-history-archive-"+source)/"teleg-customer-history-reviewed"
 			d.mkdir(parents=True,mode=0o700)
+			d.parent.chmod(0o700)
 			self.data[source]=d
 		self.a=self.data["prod1"]/("a"*32+".history")
 		self.b=self.data["prod2"]/("b"*32+".history")
