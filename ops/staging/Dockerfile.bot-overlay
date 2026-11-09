@@ -1,0 +1,6 @@
+ARG BASE_IMAGE=accabad-panel-app:ci-5752ec9c21e49b93e1d7d9f0b95bb8a7d713737d
+FROM ${BASE_IMAGE}
+USER root
+COPY --chown=1000:1000 handlers.py /app/apps/bot/handlers.py
+COPY --chown=1000:1000 staging_history_bridge.py /app/apps/bot/staging_history_bridge.py
+USER appuser
