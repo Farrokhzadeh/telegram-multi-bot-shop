@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_owner_options_financial_quarantine_private_history_pipeline_no_ci",
+  "owner_decisions": {
+    "financial_option": "A",
+    "historical_telegram_verification_option": "A",
+    "real_accounts_authorized": "method_approved_but_recipient_identities_not_supplied",
+    "ci_permitted": false
+  },
+  "commits": [
+    "23f9640a56b0eaaeecb6afb3ce88e7382a36b449",
+    "757d9fe2c6bb4321937c4556b20a67bb57380f41",
+    "8ff45bd5e3fd3a584db58099ee7248a5b2e153b0",
+    "6648eea4f618181902946d03f5e2313c41600aaa",
+    "24b06a81b7e489135cdfb6e6ded4b1c765a1aaf7",
+    "102e97327ea447b8be2803c663a908f91ba51fe9"
+  ],
+  "policy": {
+    "original_orders_preserved": 4916,
+    "protected_review_orders": 3997,
+    "source_unassigned_coupons": 21,
+    "retained_nonzero_original_irr_balances": 40,
+    "original_sent_markers": 899,
+    "unowned_coupons_blocked_for_every_kind": true,
+    "original_incomplete_terms_never_cleared": true,
+    "no_inferred_settlement_or_refund": true,
+    "no_new_delivery_or_redemption": true
+  },
+  "tests": {
+    "coupon_source_policy": {
+      "isolated_dotnet_sdk": "10.0.403",
+      "synthetic_checks": 13,
+      "exit_code": 0,
+      "initial_compile_probe": "failed_cs9135_in_nonconstant_guid_pattern_fixed_by_followup_commit",
+      "scope": "actual_source_record_terms_and_proofs_compiled_with_minimal_stubs_not_full_project",
+      "private_log": "t064-coupon-policy-23f9640/tests2.log"
+    },
+    "history_private_pipeline": {
+      "isolated_dotnet_sdk": "10.0.403",
+      "synthetic_checks": 39,
+      "exit_code": 0,
+      "scope": "actual_router_sender_deduplicator_renderer_pipeline_compiled_with_synthetic_dependencies_not_full_project",
+      "wrong_bot_or_unverified_command_rejected": true,
+      "unknown_telegram_response_no_retry": true,
+      "private_log": "t064-dotnet-offline/pipeline2.log"
+    },
+    "history_ciphertext_audit": {
+      "unit_tests": 6,
+      "unit_exit_code": 0,
+      "protected_encrypted_member_files": 12282,
+      "matched": true,
+      "decryption_performed": false,
+      "private_log": "t064-checks-c8701f3/file-tests.log",
+      "private_receipt": "t064-checks-c8701f3/files-live.json"
+    },
+    "history_mount_audit": {
+      "unit_tests": 20,
+      "unit_exit_code": 0,
+      "live_bot_containers": 4,
+      "live_mounts": 4,
+      "protected_archive_mounted": false,
+      "private_log": "t064-checks-c8701f3/tests3.log",
+      "private_receipt": "t064-checks-c8701f3/live3.json"
+    },
+    "private_file_mode": "0600",
+    "new_ci_runs_started": false,
+    "full_repository_xunit_executed": false,
+    "real_telegram_messages_sent": 0,
+    "real_customer_history_served": false
+  },
+  "safety": {
+    "source_legacy_archives_mutated": false,
+    "production_bots_deployed_or_modified": false,
+    "financial_state_changed": false,
+    "running_containers_after": 13,
+    "production_bots_after": 3,
+    "staging_synthetic_only": true
+  },
+  "remaining": [
+    "build_and_test_entire_Csharp_repo_with_disposable_PostgreSQL_without_CI",
+    "provision_isolated_readonly_source_backed_brand_member_history_runtime",
+    "collect_two_owner_controlled_private_recipient_identities_and_verify_staging_allowlist",
+    "qualify_actual_private_historical_telegram_routing_and_no_cross_member_access",
+    "complete_original_paid_liability_payment_coupon_delivery_media_disposition_without_erasing_unknowns",
+    "independent_real_shared_target_import_and_source_target_parity"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
