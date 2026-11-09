@@ -11,8 +11,24 @@ public sealed record LegacyReadOnlyOrder(Guid ArchiveId, string OriginalReferenc
     public bool DeliveryVerified => false;
     public override string ToString() => "LegacyReadOnlyOrder [redacted]";
 }
+public sealed record LegacyCustomerOrderView(string OriginalReference, DateTime CreatedAt, int Quantity, decimal OriginalTotal, string OriginalCurrency, string? SavedTitle, string? SavedPaymentMethod, bool IncompleteTerms)
+{
+    public bool Historical => true;
+    public bool ReadOnly => true;
+    public string PaymentStatus => "unknown";
+    public string DeliveryStatus => "unknown";
+    public bool CanPay => false;
+    public bool CanRefund => false;
+    public bool CanDeliver => false;
+    public override string ToString() => "LegacyCustomerOrderView [redacted]";
+}
 public sealed class LegacyReadOnlyOrderHistory(SecretSnapshot secrets)
 {
+    public LegacyCustomerOrderView ReadCustomer(BrandContext context, VerifiedImportManifest manifest, Guid member, ArchivedLegacyRecord row, ProtectedLegacyEvidence retained)
+    {
+        var original = Read(context, manifest, member, row, retained);
+        return new(original.OriginalReference, original.CreatedAt, original.Quantity, original.OriginalTotal, original.OriginalCurrency, original.SavedTitle, original.SavedPaymentMethod, original.IncompleteTerms);
+    }
     public LegacyReadOnlyOrder Read(BrandContext context, VerifiedImportManifest manifest, Guid member, ArchivedLegacyRecord row, ProtectedLegacyEvidence retained)
     {
         if (context.BrandId != manifest.TargetBrand || member == Guid.Empty || row.Source.Projection != LegacyProjection.OrderRecord || !new LegacyRecordArchive(secrets).Matches(context, row, retained)) throw new MigrationRejectedException();
