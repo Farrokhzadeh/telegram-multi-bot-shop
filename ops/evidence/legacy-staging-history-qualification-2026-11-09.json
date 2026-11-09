@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "qualification": "staging_synthetic_telegram_history_only",
+  "source_commit": "5c6eb58a96e544759a1593e6e670f10da44ac974",
+  "github_actions_run": 42607590968,
+  "ci_passed": true,
+  "staging_bot_username": "testadbadbot",
+  "staging_project": "accabad-staging",
+  "history_source": "synthetic_brand_member_encrypted_archive_only",
+  "synthetic_original_orders": 55,
+  "synthetic_typed_order_aliases": 10,
+  "unique_history_records_shown": 55,
+  "pagination_counts": [
+    20,
+    20,
+    15
+  ],
+  "negative_cases": [
+    "foreign_actor",
+    "foreign_bot",
+    "foreign_instance",
+    "invalid_page"
+  ],
+  "private_member_scoped_storage_verified": true,
+  "staging_only_handler_overlay_active": true,
+  "original_staging_image_retained_for_rollback": true,
+  "telegram_private_staging_admin_message_acknowledged": true,
+  "telegram_messages_sent_in_bridge_probe": 1,
+  "actual_user_initiated_inbound_orders_seen": false,
+  "production_live_bot_containers_changed": false,
+  "production_data_used": false,
+  "payment_credit_refund_or_delivery_actions": false,
+  "running_container_count_after": 13,
+  "financial_exceptions_closed": false,
+  "release_ready": false,
+  "note": "A simulated authorized private /orders 40 staging update produced one synthetic history message delivered to an approved private staging administrator. Genuine Telegram-user incoming update is not separately verified; no real migrated customer records were served. T064/T066/T068 remain open."
+}
