@@ -48,7 +48,9 @@ internal static class StagingHistoryBridge
         if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException("Staging history bridge rejected.");
         using var stream = new FileStream(path, new FileStreamOptions
         {
-            Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None,
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
             UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
         });
         stream.Write(data);
