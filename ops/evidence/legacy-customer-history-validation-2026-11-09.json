@@ -1,0 +1,87 @@
+{
+  "scope": "owner_private_authenticated_customer_visible_historical_order_archive_qualification",
+  "qualification_date": "2026-11-09",
+  "implementation": {
+    "main_commit": "39c0603c778b1684501b4c0b992420583c4cc836",
+    "ci_run": 42584651001,
+    "ci_conclusion": "success",
+    "artifact_id": 13658264466,
+    "artifact_zip_sha256": "0de2992c6c4ab53f8da390c2374a0703d3e1c22752c7e5f91ba529521648672e",
+    "native_schema_runner_sha256": "6015e5af43dd4ff925a6efa6c7cc7d827e80562f6185dd3f20685a36973d6335",
+    "native_schema_runner_bytes": 7596560
+  },
+  "ci_checks": {
+    "unit": 204,
+    "integration": 738,
+    "contract": 128,
+    "dotnet_total": 1070,
+    "python": 55,
+    "spec_kit": 15,
+    "linux_native_aot_executables": 5,
+    "failed": 0,
+    "skipped": 0
+  },
+  "sources": [
+    {
+      "source": "prod1",
+      "brand": "acc-abad",
+      "memberships": 9277,
+      "original_orders": 4167,
+      "private_history_files": 9277,
+      "private_first_receipt_sha256": "c814867ce250aa3bfa13493c6e0e6ecd395272f496a7aa65e8269aeb0d1ce2cf",
+      "fresh_process_replay_identical": true
+    },
+    {
+      "source": "prod2",
+      "brand": "kuala",
+      "memberships": 12,
+      "original_orders": 0,
+      "private_history_files": 12,
+      "private_first_receipt_sha256": "9859d778c75f2d2558a3d53c1c180d3a6bbb338857348365c277838fb28e268e",
+      "fresh_process_replay_identical": true
+    },
+    {
+      "source": "prod3",
+      "brand": "zikotech",
+      "memberships": 2993,
+      "original_orders": 749,
+      "private_history_files": 2993,
+      "private_first_receipt_sha256": "89ac690f4b7d3162a7e2a6492ea49b0001276851d020e0958d0bad586e76b17b",
+      "fresh_process_replay_identical": true
+    }
+  ],
+  "totals": {
+    "original_orders": 4916,
+    "memberships": 12282,
+    "private_member_encrypted_files": 12282,
+    "typed_selected_historical_orders": 919,
+    "protected_read_only_exception_orders": 3997
+  },
+  "safeguards": {
+    "all_original_order_archive_proofs_verified": true,
+    "all_private_ciphertext_file_permissions_0600_or_stricter": true,
+    "per_member_and_brand_authenticated_encryption": true,
+    "original_native_currency_preserved": true,
+    "missing_checkout_terms_not_reconstructed": true,
+    "source_database_connections_opened": false,
+    "production_database_accessed": false,
+    "live_provider_or_telegram_calls": false,
+    "source_or_target_container_created": false,
+    "existing_production_containers_before": 13,
+    "existing_production_containers_after": 13,
+    "existing_private_history_files_byte_identical_after_replay": true,
+    "private_redacted_receipts_identical_after_replay": true,
+    "live_bot_route_activated": false,
+    "customer_history_runtime_mounted": false
+  },
+  "remaining": {
+    "typed_and_archived_history_unification_and_deduplication": true,
+    "actual_telegram_customer_message_rendering": true,
+    "live_host_mount_permissions_and_authentication": true,
+    "full_paid_obligation_coupon_delivery_media_reconciliation": true,
+    "t064_complete": false,
+    "t066_complete": false,
+    "t068_executed": false,
+    "release_ready": false
+  }
+}
