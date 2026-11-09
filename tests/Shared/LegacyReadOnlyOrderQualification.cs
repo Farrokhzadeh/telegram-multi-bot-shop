@@ -9,6 +9,7 @@ public static class LegacyReadOnlyOrderQualification
 {
     public static async Task RunAsync(CancellationToken ct = default)
     {
+        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
         using var files = new SyntheticSecretFiles(); using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var context = CipherQualification.Context(SyntheticSecretFiles.BrandA); var other = CipherQualification.Context(SyntheticSecretFiles.BrandB); Guid member = Guid.NewGuid();
         var body = JsonNode.Parse("""{"id":"ORD-ABC123ABC123","user_id":99001234,"product_id":456,"qty":2,"total":"600000","currency":"IRR","created_at":"2024-02-01T00:00:00Z","checkout_snapshot":{}}""")!;
