@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "actual_owner_private_source_archive_customer_history_pagination_qualified_no_live_serving",
+  "code_commit": "0c95161807c4bff0063e80b916a10751f8e29be2",
+  "ci_run": 42625872148,
+  "ci_conclusion": "success",
+  "github_artifact_id": 13679535618,
+  "artifact_zip_sha256": "3d1854ef6df1214895ccb5c1875970580a3a44e3362b5a86f1bd8df53f9a35a6",
+  "native_schema_runner_sha256": "0867503080edc8aea01f23c7e4fe6f771f5ed1c0aa21f8bc289fd835cd357439",
+  "native_bytes": 7604816,
+  "actual_owner_private_execution": {
+    "detached_resource_limited_native_operator_exit_code": 0,
+    "source_only": true,
+    "brands": [
+      {
+        "source": "prod1",
+        "original_orders": 4167,
+        "memberships": 9277,
+        "pagination_verified": true,
+        "foreign_member_denied": true
+      },
+      {
+        "source": "prod2",
+        "original_orders": 0,
+        "memberships": 12,
+        "pagination_verified": true,
+        "foreign_member_denied": true
+      },
+      {
+        "source": "prod3",
+        "original_orders": 749,
+        "memberships": 2993,
+        "pagination_verified": true,
+        "foreign_member_denied": true
+      }
+    ],
+    "total_original_orders": 4916,
+    "total_member_histories": 12282,
+    "per_member_brand_authenticated_encryption": true,
+    "private_new_receipts_per_source": 3,
+    "all_new_receipts_release_ready": false
+  },
+  "independent_ciphertext_integrity": {
+    "detached_exit_code": 0,
+    "previous_file_count": 12282,
+    "post_file_count": 12282,
+    "pre_post_ciphertext_commitments_equal": true,
+    "post_audit_private_receipt": "teleg-customer-history-tool-0c9516/history-post-qualification.json"
+  },
+  "safety": {
+    "source_database_accessed": false,
+    "target_database_accessed": false,
+    "production_data_mutated": false,
+    "live_telegram_messages_sent": 0,
+    "payment_refund_coupon_or_delivery_actions": 0,
+    "production_bots_running": 3,
+    "existing_containers_running": 13,
+    "staging_real_history_enabled": false,
+    "legacy_git_worktree_changed_by_task": false
+  },
+  "remaining_gates": [
+    "isolated_real_history_runtime_mount_and_private_telegram_delivery",
+    "typed_order_alias_real_shared_target_source_parity",
+    "complete_financial_liability_disposition_of_3997_orders_and_40_irr_accounts",
+    "prepaid_coupon_ownership_and_original_use_evidence",
+    "historical_deliveries_receipts_media_and_pending_paid_obligations",
+    "full_independent_protected_source_target_reconciliation"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
