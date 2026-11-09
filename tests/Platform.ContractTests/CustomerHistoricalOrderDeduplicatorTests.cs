@@ -23,7 +23,7 @@ public sealed class CustomerHistoricalOrderDeduplicatorTests
         Assert.Equal(20, first.NextOffset);
         Assert.Equal(40, second.NextOffset);
         Assert.Null(third.NextOffset);
-        Assert.Equal("Verified original title", Assert.Single(all.Where(x => x.OriginalReference == archives[0].OriginalReference)).SavedTitle);
+        Assert.Equal("Verified original title", Assert.Single(all, x => x.OriginalReference == archives[0].OriginalReference).SavedTitle);
         Assert.All(all, x => Assert.Equal("unknown", x.PaymentStatus));
     }
 
