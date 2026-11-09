@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_protected_source_only_review_and_encrypted_history_file_safety",
+  "commits": [
+    "bd8347f1ee578b0d30dc04f6f563e83910d76780",
+    "4965bb4e3f65ff7a052ca8c117e6e85defea77ce",
+    "f7bb82a3c83913d2fb781afb5cb7efb5d77c607e",
+    "f0af725ed8e639b5cf81132ea5ea7cc760228a17",
+    "d7de0def5d34f16d876622b95414d2b1b08d3898"
+  ],
+  "checks": {
+    "private_review_register": {
+      "status": "passed",
+      "tests": 5,
+      "qualified_typed_orders": 919,
+      "individually_retained_review_orders": 3997,
+      "source_original_orders": 4916,
+      "immutable_archive_plan_sha256_match": true,
+      "unique_case_projection_and_identity": true,
+      "private_receipt_relative_to_owner_work_root": "t064-review-register-4965bb4/result.json"
+    },
+    "encrypted_history_files": {
+      "status": "passed",
+      "tests": 6,
+      "memberships": 12282,
+      "by_source": {
+        "prod1": 9277,
+        "prod2": 12,
+        "prod3": 2993
+      },
+      "all_regular_private_no_symlink_hardlink": true,
+      "unique_ciphertexts": true,
+      "private_receipt_relative_to_owner_work_root": "t064-history-files-f0af725/result.json"
+    },
+    "modified_native_history_operator": {
+      "status": "code_committed_final_ci_pending",
+      "checks_added": [
+        "per_member_full_20_entry_pagination",
+        "foreign_member_decryption_rejection"
+      ],
+      "actual_protected_source_execution": "not_run"
+    }
+  },
+  "environment": {
+    "server": "accabad-server",
+    "execution": "separate_detached_resource_limited_systemd_units",
+    "production_database_changes": false,
+    "live_telegram_messages_sent": 0,
+    "prod_bot_containers_running": 3,
+    "host_containers_running": 13,
+    "staging_still_synthetic_only": true,
+    "original_legacy_worktree_changes_made": false
+  },
+  "known_unresolved": {
+    "original_order_review": 3997,
+    "irr_wallet_accounts": 40,
+    "unassigned_coupon_records": 21,
+    "original_sent_delivery_markers": 899,
+    "customer_history_real_serving_qualified": false,
+    "paid_obligations_owner_dispositions_complete": false
+  },
+  "qualification": {
+    "t064_complete": false,
+    "t066_complete": false,
+    "t068_executed": false,
+    "release_ready": false
+  }
+}
