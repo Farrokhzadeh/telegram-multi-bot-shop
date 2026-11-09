@@ -11,13 +11,13 @@ namespace Platform.IntegrationTests;
 [Collection("PostgreSQL races")]
 public sealed class CustomerHistoryPrivateRoutingTests
 {
-    private sealed class HistoryReply : HttpMessageHandler
+    private sealed class HistoryReply(HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
     {
         public int Calls { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Calls++;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            return Task.FromResult(new HttpResponseMessage(status)
             {
                 Content = new StringContent("""{"ok":true,"result":{"message_id":77,"chat":{"id":7001,"type":"private"}}}""")
             });
@@ -81,6 +81,17 @@ public sealed class CustomerHistoryPrivateRoutingTests
                 string foreign = f.Context(1).BotId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + new string('x', 40);
                 await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => delivery.SendAsync(foreign, Inbound(f.Context(0), CheckoutFixture.Actor(0), "/orders"), ct));
                 Assert.Equal(before, response.Calls);
+            }
+            var uncertain = new HistoryReply(HttpStatusCode.ServiceUnavailable);
+            using (var http = new HttpClient(uncertain))
+            {
+                var delivery = new CustomerHistoryDeliveryPipeline(router, new CustomerHistoryTelegramSender(http));
+                string token = f.Context(0).BotId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + new string('x', 40);
+                var receipt = await delivery.SendAsync(token, Inbound(f.Context(0), CheckoutFixture.Actor(0), "/orders"), ct);
+                Assert.False(receipt.Completed);
+                Assert.Equal(CustomerHistorySendState.Unknown, receipt.FinalState);
+                Assert.Equal(0, receipt.ConfirmedMessages);
+                Assert.Equal(1, uncertain.Calls);
             }
             var sameActorOtherBrand = await router.ReadAsync(Inbound(f.Context(1), CheckoutFixture.Actor(1), "/orders"), ct);
             Assert.Equal(3, sameActorOtherBrand.Orders.Count);
