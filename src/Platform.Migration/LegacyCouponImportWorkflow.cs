@@ -9,7 +9,7 @@ public sealed record LegacyCouponRecord(ArchivedLegacyRecord Record, Guid Revisi
 {
     internal CouponImportTerms Terms()
     {
-        if (Record.Source.Projection != LegacyProjection.DiscountRecord || Revision == Guid.Empty || Product == Guid.Empty || Member == Guid.Empty || PaidSourceOrder == Guid.Empty || Kind is not ("promotion" or "goodwill" or "prepaid_entitlement")) throw new MigrationRejectedException();
+        if (Record.Source.Projection != LegacyProjection.DiscountRecord || Revision == Guid.Empty || Product == Guid.Empty || Member is null or Guid.Empty || PaidSourceOrder == Guid.Empty || Kind is not ("promotion" or "goodwill" or "prepaid_entitlement")) throw new MigrationRejectedException();
         using var document = Record.Source.Open(); var source = document.RootElement;
         decimal percent = LegacyValues.Number(source, "pct_off"); int maximum = source.GetProperty("max_uses").GetInt32(), used = source.GetProperty("current_uses").GetInt32();
         long? product = source.GetProperty("product_id").ValueKind == System.Text.Json.JsonValueKind.Null ? null : source.GetProperty("product_id").GetInt64();

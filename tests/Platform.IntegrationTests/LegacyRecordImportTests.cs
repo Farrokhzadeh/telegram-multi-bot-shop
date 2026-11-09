@@ -145,8 +145,13 @@ public sealed class LegacyRecordImportTests
         var source = new LegacySourceRecord(LegacyProjection.DiscountRecord, "UNOWNED", """{"code":"UNOWNED","product_id":456,"assigned_user_id":null,"pct_off":"100","max_uses":10,"current_uses":1,"active":true}""");
         Guid target = Guid.NewGuid(); var manifest = Manifest(f, Guid.NewGuid(), [source.Proof(target, f.Context(0), f.Secrets)]);
         var archive = await new LegacyRecordArchive(f.Secrets).WriteAsync(f.Context(0), manifest, source, target, (_, _) => Task.FromResult("protected:synthetic/quarantined-unowned"), Ct);
-        var coupon = new LegacyCouponRecord(archive, Guid.NewGuid(), world.Set.Catalog[0].Target, null, "prepaid_entitlement", world.Set.Orders[0].Record.Target);
-        Assert.Throws<MigrationRejectedException>(() => coupon.Proofs(f.Context(0), f.Secrets));
+        foreach (string kind in new[] { "prepaid_entitlement", "promotion", "goodwill" })
+        {
+            var coupon = new LegacyCouponRecord(archive, Guid.NewGuid(), world.Set.Catalog[0].Target, null, kind, kind == "prepaid_entitlement" ? world.Set.Orders[0].Record.Target : null);
+            Assert.Throws<MigrationRejectedException>(() => coupon.Proofs(f.Context(0), f.Secrets));
+        }
+        var impersonated = new LegacyCouponRecord(archive, Guid.NewGuid(), world.Set.Catalog[0].Target, world.Set.Wallets[0].TargetUser, "promotion");
+        Assert.Throws<MigrationRejectedException>(() => impersonated.Proofs(f.Context(0), f.Secrets));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts", Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting", Ct));
     }
     [Fact]
