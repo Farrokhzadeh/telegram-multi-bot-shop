@@ -21,7 +21,7 @@ public static class CustomerHistoryMessageRenderer
     }
     public static IReadOnlyList<CustomerHistoryMessage> Render(CustomerHistoricalPage page)
     {
-        if (page is null || page.Orders is null || page.Orders.Count > 20 || page.NextOffset is int next && (next is < 20 or > 10000 || next % 20 != 0))
+        if (page is null || page.Orders is null || page.Orders.Count > 20 || page.NextOffset is int nextIndex && (nextIndex is < 20 or > 10000 || nextIndex % 20 != 0))
             throw new ArgumentException("Invalid historical-order page.", nameof(page));
         var messages = new List<CustomerHistoryMessage>();
         var current = new StringBuilder(Heading);
