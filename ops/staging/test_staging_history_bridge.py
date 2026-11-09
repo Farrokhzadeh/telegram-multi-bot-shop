@@ -58,6 +58,24 @@ class StageOnlyHistoryTests(unittest.TestCase):
             self.assertFalse(asyncio.run(module.maybe_reply_history(upd, ctx, "", 7002, [7002])))
         self.assertFalse(messages)
 
+    def test_staging_history_audit_contains_no_identifiers_or_content(self):
+        upd, ctx, messages = self.update()
+        with (patch.dict(os.environ, {"INSTANCE_ID": "staging"}),
+              patch.object(module, "ROOT", types.SimpleNamespace(is_dir=lambda: True)),
+              patch.object(module, "BINARY", types.SimpleNamespace(is_file=lambda: True)),
+              patch.object(module, "_bound_actor", return_value=7001),
+              patch.object(module, "_request", return_value=[
+                  "[STAGING TEST - SYNTHETIC ORDERS ONLY]\\nSynthetic private data"
+              ]),
+              self.assertLogs("staging.history", level="INFO") as log):
+            self.assertTrue(asyncio.run(module.maybe_reply_history(upd, ctx, "", 7001, [7001])))
+        audit = "\\n".join(log.output)
+        self.assertIn("history_send_attempt", audit)
+        self.assertIn("history_send_acknowledged", audit)
+        self.assertIn("history_response_complete", audit)
+        self.assertNotIn("7001", audit)
+        self.assertNotIn("Synthetic private data", audit)
+
     def test_fail_closed_if_stage_command_rejected(self):
         upd, ctx, messages = self.update()
         with (patch.dict(os.environ, {"INSTANCE_ID": "staging"}),

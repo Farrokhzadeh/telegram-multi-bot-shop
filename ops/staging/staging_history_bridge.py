@@ -5,12 +5,14 @@ The actor and private chat come from Telegram's authenticated polling update.
 """
 import asyncio
 import json
+import logging
 import os
 import pathlib
 import subprocess
 
 ROOT = pathlib.Path("/app/data/teleg-staging-history-v1")
 BINARY = pathlib.Path("/app/data/teleg-staging-runtime/Platform.BotHost")
+LOGGER = logging.getLogger("staging.history")
 
 
 def _request(actor, bot_id, command):
@@ -66,6 +68,7 @@ async def maybe_reply_history(update, context, argument, actor, admins):
     sender = update.effective_user
     if (message is None or chat is None or sender is None or
             chat.type != "private" or chat.id != actor or sender.id != actor):
+        LOGGER.warning("history_ingress_rejected_nonprivate")
         return True
     command = "/orders" + (" " + argument if argument else "")
     try:
@@ -74,13 +77,17 @@ async def maybe_reply_history(update, context, argument, actor, admins):
             raise ValueError("Not the staging bot")
         messages = await asyncio.to_thread(_request, actor, bot.id, command)
     except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        LOGGER.warning("history_render_rejected")
         await message.reply_text(
             "[STAGING TEST] Synthetic history unavailable; no live orders were accessed.",
             parse_mode=None, protect_content=True, disable_notification=True,
         )
         return True
-    for text in messages:
+    for index, text in enumerate(messages, start=1):
+        LOGGER.info("history_send_attempt segment=%d", index)
         await message.reply_text(
             text, parse_mode=None, protect_content=True, disable_notification=True,
         )
+        LOGGER.info("history_send_acknowledged segment=%d", index)
+    LOGGER.info("history_response_complete segments=%d", len(messages))
     return True
