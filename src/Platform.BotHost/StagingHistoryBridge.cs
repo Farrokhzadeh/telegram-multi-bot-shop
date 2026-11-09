@@ -55,7 +55,7 @@ internal static class StagingHistoryBridge
         });
         stream.Write(data);
         stream.Flush(true);
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        File.SetUnixFileMode(path, UnixFileMode.UserRead);
     }
     private static BrandContext Context(Guid brand, Guid deployment, long bot)
     {
