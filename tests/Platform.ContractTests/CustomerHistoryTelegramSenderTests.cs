@@ -83,6 +83,7 @@ public sealed class CustomerHistoryTelegramSenderTests
         var sender = new CustomerHistoryTelegramSender(http);
         await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync(StageOnlySyntheticToken, -1001, new("Preview"), TestContext.Current.CancellationToken));
         await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync("not-a-bot-token", 7001, new("Preview"), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync(":" + new string('x', 40), 7001, new("Preview"), TestContext.Current.CancellationToken));
         await Assert.ThrowsAsync<ArgumentException>(() => sender.SendAsync(StageOnlySyntheticToken, 7001, new(new string('X', 3501)), TestContext.Current.CancellationToken));
         Assert.Equal(0, fake.Calls);
     }

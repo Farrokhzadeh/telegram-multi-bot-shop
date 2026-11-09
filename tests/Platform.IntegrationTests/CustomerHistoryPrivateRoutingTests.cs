@@ -72,6 +72,13 @@ public sealed class CustomerHistoryPrivateRoutingTests
                 await session.CommitAsync(ct);
             }
             await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.ReadAsync(Inbound(f.Context(0), CheckoutFixture.Actor(0), "/orders"), ct));
+            await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.ReadAsync(Inbound(f.Context(1), CheckoutFixture.Actor(1), "/orders 21"), ct));
+            await using (var session = await f.Sessions.BeginAsync(ct))
+            {
+                await session.ExecuteAsync(new DbStatement("UPDATE shop.users SET banned_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(f.Users[3])), ct);
+                await session.CommitAsync(ct);
+            }
+            await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.ReadAsync(Inbound(f.Context(3), CheckoutFixture.Actor(3), "/orders"), ct));
         }
         finally { Directory.Delete(directory, true); }
     }

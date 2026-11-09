@@ -14,7 +14,7 @@ public sealed class CustomerHistoryTelegramSender(HttpClient http)
     public async Task<CustomerHistorySendOutcome> SendAsync(string token, long privateChat, CustomerHistoryMessage message, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token) || token.Length is < 38 or > 128 || token.Count(c => c == ':') != 1 ||
-            token.AsSpan(0, token.IndexOf(':')).IndexOfAnyExcept("0123456789".AsSpan()) >= 0 ||
+            token[0] is < '0' or > '9' || token.AsSpan(0, token.IndexOf(':')).IndexOfAnyExcept("0123456789".AsSpan()) >= 0 ||
             token.AsSpan(token.IndexOf(':') + 1).IndexOfAnyExcept("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-".AsSpan()) >= 0 ||
             privateChat <= 0 || message is null || message.ParseMode is not null || message.HasActionButtons ||
             string.IsNullOrWhiteSpace(message.Text) || message.Text.Length > 3500)

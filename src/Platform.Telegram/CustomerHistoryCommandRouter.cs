@@ -26,6 +26,8 @@ public sealed class CustomerHistoryCommandRouter(DbSessionFactory sessions, Cust
         var encrypted = await files.ReadAsync(update.Context, member.Id, ct);
         var originals = archive.Open(update.Context, member.Id, encrypted.Span);
         var imported = await CustomerHistoricalTypedAliasReader.ReadAsync(session, update.Context, member.Id, ct);
+        var current = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
+        if (current.Blocked || current.Banned) throw new TelegramIngressRejectedException();
         return CustomerHistoricalOrderDeduplicator.Page(originals, imported, offset, requireArchiveMatch: true);
     }
 }
