@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_existing_source_review_register_exact_original_proof_bound_qualification",
+  "code_commit": "50832c83c9b4d9f1c30ecb2f6dac3e5bfcb5e648",
+  "ci_strategy": "intermediate_changes_skip_ci;single_final_ci_after_documentation",
+  "checks_added": [
+    "review_source_archive_commitment",
+    "review_exact_source_projection_legacy_id_target_match",
+    "unique_review_case_identity",
+    "full_original_record_partition",
+    "original_order_selected_plus_held_parity",
+    "typed_plan_commitment",
+    "review_reasons_complete_and_rejected_on_tampering"
+  ],
+  "protected_preflight": {
+    "status": "passed",
+    "runner": "detached_resource_limited_systemd_unit",
+    "private_receipt": "t064-review-preflight-50832c/review-integrity.json",
+    "original_orders": 4916,
+    "typed_original_orders": 919,
+    "retained_original_orders": 3997,
+    "all_three_source_commitment_matches": true
+  },
+  "native_individual_proof_verification": {
+    "status": "pending_final_ci_and_actual_protected_run"
+  },
+  "safety": {
+    "live_database_connected": false,
+    "production_bots_mutated": false,
+    "telegram_sent": false,
+    "source_financial_history_modified": false,
+    "real_customer_history_activated": false
+  },
+  "outstanding": {
+    "irr_wallet_liabilities": 40,
+    "unowned_coupon_records": 21,
+    "reviewed_order_financial_dispositions": 3997,
+    "original_historical_sent_markers": 899,
+    "full_source_target_liability_reconciliation": false
+  },
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
