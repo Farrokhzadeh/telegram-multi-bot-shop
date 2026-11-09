@@ -36,6 +36,13 @@ if (args is ["--qualify-wallet-orders", "--job-file", var orderJob, "--target-co
     { Console.Error.WriteLine("Protected wallet order qualification rejected; retain private evidence for review."); return 78; }
 }
 
+if (args is ["--qualify-customer-history", "--job-file", var historyJob, "--receipt", var historyReceipt])
+{
+    try { await CustomerHistoryCopyQualification.RunAsync(ReadProtectedFile(historyJob), historyReceipt, ReadProtectedFile); Console.WriteLine("Protected customer history qualification passed; redacted receipt written."); return 0; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or ArithmeticException or MigrationRejectedException or Platform.Security.CipherRejectedException or Platform.Security.SecretConfigurationException)
+    { Console.Error.WriteLine("Protected customer history qualification rejected; retain private evidence for review."); return 78; }
+}
+
 if (args is ["--qualify-history-archive", "--job-file", var archiveJob, "--receipt", var archiveReceipt])
 {
     try { await ArchiveCopyQualification.RunAsync(ReadProtectedFile(archiveJob), archiveReceipt, ReadProtectedFile); Console.WriteLine("Protected history archive qualification passed; redacted receipt written."); return 0; }
