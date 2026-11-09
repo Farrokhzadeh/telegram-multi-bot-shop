@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_offline_source_level_csharp_probe_and_live_mount_isolation_no_ci",
+  "source_commits": [
+    "c8701f372a9104720061b7a07a65628a9b29e537",
+    "c2580b6a822d43f0db75a4b4eaae6bb674659de8"
+  ],
+  "ci_started": false,
+  "ci_rerun": false,
+  "latest_existing_ci_head": "239955ef0abe507983c07424420cf894bd83642f",
+  "dotnet_probe": {
+    "status": "passed_limited_scope",
+    "sdk": "10.0.403",
+    "docker_image": "mcr.microsoft.com/dotnet/sdk:10.0",
+    "compiled_repository_sources": [
+      "src/Platform.Telegram/CustomerHistoryCommandRouter.cs",
+      "src/Platform.Telegram/CustomerHistoryTelegramSender.cs",
+      "src/Platform.Telegram/CustomerHistoricalOrderDeduplicator.cs",
+      "src/Platform.Telegram/CustomerHistoryMessageRenderer.cs"
+    ],
+    "dependency_mode": "minimal_synthetic_test_doubles_not_full_repository_build",
+    "synthetic_checks_passed": 31,
+    "exit_code": 0,
+    "network": "none",
+    "production_volumes_mounted": false,
+    "docker_socket_mounted": false,
+    "container_readonly_root": true,
+    "container_memory_limit_mb": 768,
+    "container_cpu_limit": 0.5,
+    "private_log": "t064-dotnet-offline/probe2.log",
+    "private_log_mode": "0600",
+    "full_xunit_integration_tests_run": false,
+    "postgresql_test_database_used": false
+  },
+  "history_mount_preflight": {
+    "python_tests_passed": 20,
+    "python_tests_failed": 0,
+    "actual_live_bot_containers_inspected": 4,
+    "actual_live_bot_mounts_inspected": 4,
+    "protected_history_root_mounted": false,
+    "readonly_bot_root_filesystems": true,
+    "private_bot_network_namespaces": true,
+    "no_added_capabilities_or_devices": true,
+    "remapped_docker_socket_mounts_rejected": true,
+    "private_test_log": "t064-checks-c8701f3/tests3.log",
+    "private_live_receipt": "t064-checks-c8701f3/live3.json",
+    "private_file_modes": "0600",
+    "matched": true
+  },
+  "safety": {
+    "existing_containers_running_after": 13,
+    "production_bots_running_after": 3,
+    "synthetic_staging_bot_running_after": true,
+    "production_database_mutated": false,
+    "production_bot_deployments_changed": false,
+    "financial_records_mutated": false,
+    "real_customer_history_served": false,
+    "live_telegram_messages_sent": 0,
+    "original_legacy_backup_or_history_modified": false
+  },
+  "remaining_gates": [
+    "full_customer_history_private_routing_xunit_against_disposable_PostgreSQL",
+    "actual_isolated_real_history_serving_and_user_authenticated_telegram_ingress",
+    "complete_repeat_safe_historical_payment_coupon_delivery_catalog_shared_target_import",
+    "qualified_disposition_for_3997_original_order_exceptions_40_IRR_balances_21_unassigned_coupons_899_sent_markers_and_missing_media",
+    "independent_actual_protected_source_target_liability_and_ciphertext_reconciliation",
+    "future_staging_and_cutover_gates_are_separate"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
