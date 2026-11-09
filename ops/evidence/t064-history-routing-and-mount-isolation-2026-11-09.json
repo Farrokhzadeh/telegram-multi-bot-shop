@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_auth_private_history_routing_test_and_protected_source_mount_isolation",
+  "commits": [
+    "507095adbbca5a6c8ef6952545d897542ce715ef",
+    "f97f56e9ea94395b41c3b9eb8be98018a499db08"
+  ],
+  "ci_started": false,
+  "ci_policy": "owner_prohibited_new_runs",
+  "files_added": [
+    "tests/Platform.IntegrationTests/CustomerHistoryPrivateRoutingTests.cs",
+    "ops/ci/t064_history_mount_preflight.py",
+    "ops/ci/tests/test_t064_history_mount_preflight.py"
+  ],
+  "disposable_customer_history_routing_tests": {
+    "status": "not_run_sdk_unavailable_no_ci_allowed",
+    "checks_defined": [
+      "three_brand_member_scope",
+      "same_actor_different_brands",
+      "different_actor_same_brand",
+      "private_20_plus_5_pagination",
+      "empty_history_archive",
+      "unknown_actor_rejected",
+      "blocked_membership_rejected",
+      "cross_brand_member_cryptographic_rejection",
+      "no_payment_delivery_status_inference"
+    ],
+    "runtime_deployed": false
+  },
+  "protected_mount_preflight": {
+    "status": "passed",
+    "owner_server": "accabad-server",
+    "execution": "detached_cpu_memory_limited_systemd_unit",
+    "python_tests_passed": 11,
+    "python_tests_failed": 0,
+    "actual_live_bot_containers_inspected": 4,
+    "actual_live_bot_mounts_inspected": 4,
+    "protected_root_unmounted_from_all_four": true,
+    "no_privileged_bots": true,
+    "no_docker_socket_mounts": true,
+    "private_receipt": "t064-mount-isolation-f97f56e9/result.json",
+    "private_receipt_unix_mode": "0600",
+    "private_directory_unix_mode": "0700"
+  },
+  "safety": {
+    "production_bot_containers_running": 3,
+    "host_running_containers": 13,
+    "staging_image": "accabad-panel-app:staging-history-18b2c9e",
+    "production_database_changed": false,
+    "production_bot_deployment_changed": false,
+    "real_customer_history_mounted_into_bot": false,
+    "live_telegram_messages_sent": 0,
+    "financial_data_changed": false,
+    "original_legacy_worktree_changes_by_task": 0
+  },
+  "unresolved": [
+    "run_new_Csharp_disposable_integration_when_owner_allows_checks",
+    "secure_real_history_runtime_without_exposing_original_archive",
+    "original_unresolved_order_and_wallet_liabilities",
+    "unowned_historical_coupon_reconciliation",
+    "historical_delivery_and_missing_media_adjudication",
+    "complete_independent_source_target_reconciliation"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
