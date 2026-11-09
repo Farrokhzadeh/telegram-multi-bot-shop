@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_one_owner_approved_source_authenticated_offline_history_no_ci",
+  "owner_authorization": {
+    "approved_real_test_accounts": 1,
+    "legacy_bot_scope": [
+      "acc-abad",
+      "zikotech"
+    ],
+    "excluded_legacy_bot": "kuala",
+    "supersedes_provisional_two_account_requirement": true,
+    "telegram_actor_id_excluded_from_repository": true
+  },
+  "source_member_proofs": {
+    "prod1": {
+      "user_proof_verified": true,
+      "private_member_history_present": true
+    },
+    "prod2": {
+      "user_proof_verified": false,
+      "not_tested": true
+    },
+    "prod3": {
+      "user_proof_verified": true,
+      "private_member_history_present": true
+    },
+    "cross_brand_target_id_collision": false,
+    "private_identity_mappings_published": false
+  },
+  "protected_history_qualification": {
+    "sdk": "10.0.403",
+    "actual_security_history_and_renderer_sources_compiled": true,
+    "compile_warning_count": 0,
+    "compile_error_count": 0,
+    "source_user_history_decrypt_and_page_render": {
+      "prod1": "passed",
+      "prod3": "passed"
+    },
+    "source_order_counts_published": false,
+    "wrong_member_decryption_denied": true,
+    "wrong_brand_decryption_denied": true,
+    "original_currency_preserved": true,
+    "unknown_payment_delivery_status_preserved": true,
+    "docker_outbound_network": "none",
+    "key_and_history_mounts": "read_only",
+    "source_database_connected": false,
+    "real_customer_history_sent": false,
+    "private_receipts": [
+      "t064-single-owner-20261109/real3-prod1.log",
+      "t064-single-owner-20261109/real3-prod3.log"
+    ],
+    "private_file_modes": "0600",
+    "encrypted_member_files_post_audit": 12282,
+    "source_ciphertext_hashes_match_prior_receipt": true
+  },
+  "staging_telegram": {
+    "verified_staging_bot": "testadbadbot",
+    "getMe_confirmed": true,
+    "getChat_private_recipient_confirmed": true,
+    "request_methods_executed": [
+      "getMe",
+      "getChat"
+    ],
+    "real_history_delivery_attempt": "blocked_before_execution",
+    "attempt_marker_created": false,
+    "message_sent": false,
+    "telegram_delivery_confirmed": false,
+    "telegram_ingress_runtime_qualified": false
+  },
+  "constraints": {
+    "new_ci_runs_started": false,
+    "production_bot_configuration_changed": false,
+    "production_postgresql_mutated": false,
+    "legacy_backup_mutated": false,
+    "source_history_written": false,
+    "active_stage_remains_synthetic_only": true,
+    "production_bots_running_after": 3,
+    "host_containers_running_after": 13
+  },
+  "remaining": [
+    "complete_actual_readonly_real_history_staging_telegram_ingress_and_private_delivery",
+    "run_full_disposable_PostgreSQL_Csharp_integration_tests_without_CI",
+    "complete_repeat_safe_target_historical_import_and_unresolved_liability_disposition",
+    "complete_independent_protected_source_target_reconciliation",
+    "separately_authorize_staging_cutover_if_applicable"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
