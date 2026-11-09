@@ -57,6 +57,7 @@ public sealed class LegacyOriginalReviewQualificationTests
             }
             writer.WriteEndArray();
             writer.WriteEndObject();
+            writer.Flush();
         }
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
