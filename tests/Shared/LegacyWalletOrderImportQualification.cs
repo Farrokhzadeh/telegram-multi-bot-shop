@@ -142,6 +142,8 @@ public static class LegacyWalletOrderImportQualification
         if (catalog && fault == "invalid") return;
         if (heldDirect)
         {
+            string expectedReason = fault == "before_order" ? "settled_payment_predates_order" : "missing_exact_settled_source_payment";
+            if (plan.Review.Single(r => r.Projection == LegacyProjection.OrderRecord).Reason != expectedReason) throw new InvalidOperationException("Unsafe direct-payment review classification.");
             var held = await new ImportWorkflow(world.Source, f.Sessions).ImportWalletOrdersAsync(context, f.Secrets, plan, (reference, _) => Task.FromResult(protectedFiles[reference]), ReadRetention, new LegacyRecordReconciliationReport(f.Database.Data, f.Secrets), ct);
             if (!held.Matched || await f.CountAsync("SELECT count(*) FROM shop.orders", ct) != 0 || await f.CountAsync("SELECT count(*) FROM shop.payments", ct) != 0) throw new InvalidOperationException("Unproven direct payment was imported."); return;
         }

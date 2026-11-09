@@ -98,10 +98,14 @@ public sealed class LegacyWalletOrderPlan
                             {
                                 var paid = candidate.Terms([row.Source.Proof(row.Target, context, secrets)]);
                                 decimal due = ExactDecimal.Multiply(terms.Method == "bank" ? terms.UnitToman!.Value : terms.UnitUsd, terms.Quantity);
-                                if (paid.Telegram == terms.Telegram && paid.Bank == (terms.Method == "bank") && paid.Due == due && paid.Status == "settled" && paid.Confirmed is DateTime confirmed && confirmed >= terms.Created)
+                                if (paid.Telegram == terms.Telegram && paid.Bank == (terms.Method == "bank") && paid.Due == due && paid.Status == "settled" && paid.Confirmed is DateTime confirmed)
                                 {
-                                    orders.Add(new(row, owner.TargetUser, historicalBrandName, NativePaymentSettledAt: confirmed)); payments.Add(candidate);
-                                    selectedPayments.Add((candidate.Record.Source.Projection, candidate.Record.Source.Id)); continue;
+                                    if (confirmed < terms.Created) reason = "settled_payment_predates_order";
+                                    else
+                                    {
+                                        orders.Add(new(row, owner.TargetUser, historicalBrandName, NativePaymentSettledAt: confirmed)); payments.Add(candidate);
+                                        selectedPayments.Add((candidate.Record.Source.Projection, candidate.Record.Source.Id)); continue;
+                                    }
                                 }
                             }
                             catch (MigrationRejectedException) { }
