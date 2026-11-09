@@ -22,7 +22,7 @@ class T064ReviewRegisterTests(unittest.TestCase):
 			plan=(source+"-binary-plan").encode()
 			(d/"archive.plan").write_bytes(plan)
 			(d/"archive.plan").chmod(0o600)
-			count=3 if source=="prod1" else 1 if source=="prod3" else 1
+			count=3 if source=="prod1" else 2 if source=="prod3" else 0
 			typed=1 if source!="prod2" else 0
 			reasons=({"incomplete_order_terms":1,"missing_exact_settled_source_payment":1} if source=="prod1" else {"incomplete_order_terms":1} if source=="prod3" else {})
 			rows=[{"projection":"OrderRecord","legacy_id":str(i),"target":str(uuid.uuid4()),"reason":reason} for i,reason in enumerate([reason for reason,n in reasons.items() for _ in range(n)])]
