@@ -41,6 +41,7 @@ public sealed class CustomerHistoryPrivateRoutingTests
     [Fact]
     public async Task AuthenticatedReadOnlyHistoryCannotCrossMemberOrBrandAndPreservesPagination()
     {
+        if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
         var ct = Ct;
         await using var f = await CheckoutFixture.CreateAsync(users: 6, balance: 0, stock: 0, ct: ct);
         string directory = Path.Combine(Path.GetTempPath(), "teleg-customer-history-" + Guid.NewGuid().ToString("N"));
