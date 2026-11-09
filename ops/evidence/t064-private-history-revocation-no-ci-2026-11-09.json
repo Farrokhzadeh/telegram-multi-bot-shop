@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_private_history_postread_auth_snapshot_guard_no_ci",
+  "commits": [
+    "f451421822dad201bab884f2ba782fd81815f0ea",
+    "74839a9aa0445d2a999f950d350913b296c6a8d6"
+  ],
+  "changes": [
+    "fresh_repeatable_read_snapshot_rechecks_authenticated_member_after_loading_archive_and_typed_aliases",
+    "reject_empty_numeric_telegram_bot_id_before_sending",
+    "new_disposable_private_routing_and_sender_negative_cases"
+  ],
+  "checks": {
+    "csharp_routing_and_sender_tests": "not_run_dotnet_sdk_unavailable",
+    "new_ci_runs_started": false,
+    "latest_visible_ci_head_sha": "239955ef0abe507983c07424420cf894bd83642f",
+    "detached_python_mount_preflight": {
+      "passed": 11,
+      "failed": 0,
+      "exit_code": 0,
+      "private_server_receipt": "t064-checks-74839a9/tests.log",
+      "private_server_exit": "t064-checks-74839a9/tests.exit",
+      "private_files_mode": "0600",
+      "private_directory_mode": "0700",
+      "cpu_quota": "25%",
+      "memory_limit": "128M",
+      "note": "unchanged Python mount-isolation regression suite; does not execute new C# guards"
+    }
+  },
+  "safety": {
+    "live_production_bots_running": 3,
+    "staging_bot_running": true,
+    "host_containers_running": 13,
+    "production_database_or_bot_deployment_modified": false,
+    "real_history_runtime_mounted": false,
+    "real_history_served": false,
+    "telegram_messages_sent": 0
+  },
+  "remaining": [
+    "execute_new_Csharp_integration_and_contract_tests_when_permitted",
+    "qualify_isolated_read_only_real_history_runtime_and_private_telegram_ingress",
+    "complete_original_paid_liability_coupon_delivery_media_exception_adjudication",
+    "complete_protected_source_target_reconciliation"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
