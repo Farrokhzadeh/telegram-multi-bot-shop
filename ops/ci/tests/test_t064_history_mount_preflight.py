@@ -15,7 +15,8 @@ class CustomerHistoryMountPreflightTests(unittest.TestCase):
 		self.root=pathlib.Path(self.temp.name)/"protected-source-history"
 		self.root.mkdir(mode=0o700)
 		self.data={name:{"mounts":[{"Source":"/opt/accabad-stage-data","Destination":"/app/data"}],
-			"privileged":False,"running":True,"image":module.STAGE_IMAGE if name=="accabad-staging-bot-1" else "unchanged-prod"} for name in module.BOTS}
+			"privileged":False,"running":True,"image":module.STAGE_IMAGE if name=="accabad-staging-bot-1" else "unchanged-prod",
+			"readonly":True,"ipc":"private","pid":"","userns":"","network":module.NETWORKS[name],"capadd":None,"devices":None} for name in module.BOTS}
 	def test_isolated_bots_do_not_expose_archives(self):
 		result=module.verify(self.root,self.data)
 		self.assertEqual(4,result["bot_containers"])
@@ -39,6 +40,27 @@ class CustomerHistoryMountPreflightTests(unittest.TestCase):
 		with self.assertRaises(ValueError):module.verify(self.root,self.data)
 	def test_privileged_bot_rejected(self):
 		self.data[module.BOTS[0]]["privileged"]=True
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_writable_root_rejected(self):
+		self.data[module.BOTS[0]]["readonly"]=False
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_host_pid_rejected(self):
+		self.data[module.BOTS[0]]["pid"]="host"
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_host_ipc_rejected(self):
+		self.data[module.BOTS[0]]["ipc"]="host"
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_host_network_rejected(self):
+		self.data[module.BOTS[0]]["network"]="host"
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_host_user_namespace_rejected(self):
+		self.data[module.BOTS[0]]["userns"]="host"
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_added_capability_rejected(self):
+		self.data[module.BOTS[0]]["capadd"]=["SYS_ADMIN"]
+		with self.assertRaises(ValueError):module.verify(self.root,self.data)
+	def test_added_device_rejected(self):
+		self.data[module.BOTS[0]]["devices"]=[{"PathOnHost":"/dev/sda"}]
 		with self.assertRaises(ValueError):module.verify(self.root,self.data)
 	def test_wrong_staging_image_rejected(self):
 		self.data[module.BOTS[3]]["image"]="real-history"

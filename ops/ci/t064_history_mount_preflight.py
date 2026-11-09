@@ -8,6 +8,7 @@ import sys
 
 BOTS=("accabad-prod1-bot-1","accabad-prod2-bot-1","accabad-prod3-bot-1","accabad-staging-bot-1")
 STAGE_IMAGE="accabad-panel-app:staging-history-18b2c9e"
+NETWORKS={name:name.removesuffix("-bot-1")+"_ai-private" for name in BOTS}
 
 def require(value):
 	if not value:
@@ -26,7 +27,9 @@ def verify(root,containers):
 	count=0
 	for name in BOTS:
 		row=containers[name]
-		require(row["running"] is True and row["privileged"] is False)
+		require(row["running"] is True and row["privileged"] is False and row["readonly"] is True)
+		require(row["ipc"]=="private" and row["pid"] in ("","private") and row["userns"] in ("","private"))
+		require(row["network"]==NETWORKS[name] and row["capadd"] in (None,[]) and row["devices"] in (None,[]))
 		if name=="accabad-staging-bot-1":
 			require(row["image"]==STAGE_IMAGE)
 		mounts=row["mounts"]
@@ -40,17 +43,20 @@ def verify(root,containers):
 			count+=1
 	return {"scope":"t064_owner_private_history_archive_live_bot_mount_isolation","bot_containers":len(containers),"inspected_mounts":count,
 		"protected_source_root_exposed_to_bots":False,"staging_synthetic_image_unchanged":True,
+		"readonly_root_filesystems":True,"private_namespaces_and_networks":True,"no_added_capabilities_or_devices":True,
 		"runtime_qualification_complete":False,"real_customer_history_served":False,"release_ready":False,"matched":True}
 
 def inspect():
 	result={}
 	for name in BOTS:
-		call=subprocess.run(["docker","inspect","--format","{{json .Mounts}}|{{.HostConfig.Privileged}}|{{.State.Running}}|{{.Config.Image}}",name],
+		call=subprocess.run(["docker","inspect","--format","{{json .Mounts}}|{{.HostConfig.Privileged}}|{{.State.Running}}|{{.Config.Image}}|{{.HostConfig.ReadonlyRootfs}}|{{.HostConfig.IpcMode}}|{{.HostConfig.PidMode}}|{{.HostConfig.UsernsMode}}|{{.HostConfig.NetworkMode}}|{{json .HostConfig.CapAdd}}|{{json .HostConfig.Devices}}",name],
 			text=True,capture_output=True,timeout=12,check=False)
 		require(call.returncode==0 and len(call.stdout)<65536 and not call.stderr)
 		parts=call.stdout.strip().split("|")
-		require(len(parts)==4 and parts[1] in ("true","false") and parts[2] in ("true","false"))
-		result[name]={"mounts":json.loads(parts[0]),"privileged":parts[1]=="true","running":parts[2]=="true","image":parts[3]}
+		require(len(parts)==11 and parts[1] in ("true","false") and parts[2] in ("true","false") and parts[4] in ("true","false"))
+		result[name]={"mounts":json.loads(parts[0]),"privileged":parts[1]=="true","running":parts[2]=="true","image":parts[3],
+			"readonly":parts[4]=="true","ipc":parts[5],"pid":parts[6],"userns":parts[7],"network":parts[8],
+			"capadd":json.loads(parts[9]),"devices":json.loads(parts[10])}
 	return result
 
 def main():
