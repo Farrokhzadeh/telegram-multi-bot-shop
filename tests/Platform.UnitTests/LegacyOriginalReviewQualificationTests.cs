@@ -30,19 +30,35 @@ public sealed class LegacyOriginalReviewQualificationTests
             reason = reason ?? "incomplete_order_terms"
         }).ToList();
         if (duplicate) entries.Add(entries[0]);
-        return JsonSerializer.Serialize(new
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
         {
-            archive_manifest_sha256 = changedHash ? new string('0', 64) : Convert.ToHexStringLower(manifest.Digest.Span),
-            typed_manifest_sha256 = new string('a', 64),
-            original_records = 3,
-            typed_orders = 1,
-            typed_payments = 0,
-            native_zero_proofs = 0,
-            inactive_master_catalog = 0,
-            reviewed_records = entries.Count,
-            review_reason_counts = new Dictionary<string, int> { [reason ?? "incomplete_order_terms"] = entries.Count },
-            review = entries
-        });
+            writer.WriteStartObject();
+            writer.WriteString("archive_manifest_sha256", changedHash ? new string('0', 64) : Convert.ToHexStringLower(manifest.Digest.Span));
+            writer.WriteString("typed_manifest_sha256", new string('a', 64));
+            writer.WriteNumber("original_records", 3);
+            writer.WriteNumber("typed_orders", 1);
+            writer.WriteNumber("typed_payments", 0);
+            writer.WriteNumber("native_zero_proofs", 0);
+            writer.WriteNumber("inactive_master_catalog", 0);
+            writer.WriteNumber("reviewed_records", entries.Count);
+            writer.WriteStartObject("review_reason_counts");
+            writer.WriteNumber(reason ?? "incomplete_order_terms", entries.Count);
+            writer.WriteEndObject();
+            writer.WriteStartArray("review");
+            foreach (var entry in entries)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("projection", entry.projection);
+                writer.WriteString("legacy_id", entry.legacy_id);
+                writer.WriteString("target", entry.target);
+                writer.WriteString("reason", entry.reason);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
     [Fact]
     public void OriginalReviewCasesAreIndividuallyBoundToSourceProofs()
