@@ -38,6 +38,14 @@ internal static class CustomerHistoryCopyQualification
                 manifest.SourceSchemaDigest != sourcePlan.RootElement.GetProperty("schema_sha256").GetString() ||
                 manifest.SourceRevision != "66371a23a1c8149dc5bdf89a0355aa689d454dba") throw new MigrationRejectedException();
             int expectedOrders = sourceBrand switch { "acc-abad" => 4167, "kuala" => 0, "zikotech" => 749, _ => throw new MigrationRejectedException() };
+            int selectedOrders = sourceBrand switch { "acc-abad" => 689, "kuala" => 0, "zikotech" => 230, _ => throw new MigrationRejectedException() };
+            string reviewPath = Path.Combine(directory, "wallet-shared-direct-catalog-review.json");
+            var reviewInfo = new FileInfo(reviewPath);
+            if (!reviewInfo.Exists || reviewInfo.LinkTarget is not null || reviewInfo.Length is < 2 or > 8388608 ||
+                (File.GetUnixFileMode(reviewPath) & (UnixFileMode)63) != 0) throw new MigrationRejectedException();
+            var review = LegacyOriginalReviewQualification.Verify(manifest, read(reviewPath),
+                read(Path.Combine(directory, "wallet-shared-direct-catalog-plan.sha256")).Trim(), selectedOrders);
+            if (review.OriginalOrders != expectedOrders) throw new MigrationRejectedException();
             var originals = manifest.Proofs.Where(p => p.Projection == LegacyProjection.OrderRecord).ToArray();
             if (originals.Length != expectedOrders) throw new MigrationRejectedException();
             using var secretDoc = JsonDocument.Parse(read(Path.Combine(keys, secretFile)));
@@ -93,6 +101,10 @@ internal static class CustomerHistoryCopyQualification
                 w.WriteNumber("original_orders", count); w.WriteNumber("memberships", members);
                 w.WriteBoolean("all_original_orders_accounted", true);
                 w.WriteBoolean("per_member_brand_key_encrypted", true);
+                w.WriteNumber("typed_historical_orders", review.TypedOrders);
+                w.WriteNumber("retained_unresolved_original_orders", review.ReviewedOrders);
+                w.WriteNumber("verified_original_review_rows", review.ReviewedRecords);
+                w.WriteBoolean("all_original_review_cases_bound_to_frozen_source_proofs", true);
                 w.WriteBoolean("actual_source_history_pagination_verified", true);
                 w.WriteBoolean("foreign_member_decryption_rejected", true);
                 w.WriteBoolean("unchanged_private_archive", true);
