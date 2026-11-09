@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-09",
+  "scope": "t064_protected_source_liability_and_existing_media_report_cross_evidence",
+  "source_media_report_date_utc": "2026-11-05",
+  "code_commits": [
+    "4dcaaaa14ed8fd025016c9f0b6458a9bd80e8469",
+    "8c9c7dc869007196ac467dcf78f4434871187a1d"
+  ],
+  "ci_requested": false,
+  "ci_started_by_this_batch": false,
+  "verification": {
+    "detached_private_runner": "systemd_resource_limited",
+    "tests_passed": 9,
+    "tests_failed": 0,
+    "actual_source_evidence_matched": true,
+    "private_receipt": "t064-liability-checkpoint-8c9c7dc/result.json",
+    "first_failed_fixture_run_retained": "t064-liability-checkpoint-4dcaaaa/"
+  },
+  "totals": {
+    "original_orders": 4916,
+    "qualified_typed_orders": 919,
+    "protected_order_exceptions": 3997,
+    "missing_checkout_snapshots": 3819,
+    "original_irr_order_terms": 174,
+    "precision_exceptions": 2,
+    "chronology_exceptions": 2,
+    "irr_liability_accounts": 40,
+    "historical_ledger_records": 7502,
+    "historical_coupons": 123,
+    "unassigned_coupon_records": 21,
+    "historical_sent_markers": 899,
+    "verified_receipts": 3901,
+    "missing_receipts": 288,
+    "no_local_reference": 536,
+    "unverified_product_media": 3
+  },
+  "per_brand": {
+    "prod1": {
+      "original_orders": 4167,
+      "qualified_typed_orders": 689,
+      "protected_order_exceptions": 3478,
+      "irr_liability_accounts": 34,
+      "unassigned_coupons": 20,
+      "sent_markers": 693
+    },
+    "prod2": {
+      "original_orders": 0,
+      "qualified_typed_orders": 0,
+      "protected_order_exceptions": 0,
+      "irr_liability_accounts": 0,
+      "unassigned_coupons": 0,
+      "sent_markers": 0
+    },
+    "prod3": {
+      "original_orders": 749,
+      "qualified_typed_orders": 230,
+      "protected_order_exceptions": 519,
+      "irr_liability_accounts": 6,
+      "unassigned_coupons": 1,
+      "sent_markers": 206
+    }
+  },
+  "safety": {
+    "source_database_connected": false,
+    "production_financial_mutations": false,
+    "telegram_messages_sent": 0,
+    "source_key_uses": false,
+    "real_history_runtime_enabled": false,
+    "production_bot_containers_running": 3,
+    "host_containers_running": 13,
+    "missing_media_used_as_payment_waiver": false,
+    "sent_marker_used_as_receipt_proof": false
+  },
+  "outstanding": [
+    "full_paid_obligation_and_exception_disposition",
+    "original_IRR_balance_resolution_without_conversion",
+    "unassigned_coupon_owner_and_prepaid_liability_evidence",
+    "missing_media_and_delivery_acknowledgement_recovery",
+    "secure_live_customer_history_mount",
+    "independent_complete_source_target_reconciliation",
+    "Csharp_original_review_proof_and_native_qualification_after_owner_approved_checks"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_executed": false,
+  "release_ready": false
+}
