@@ -32,7 +32,7 @@ internal static class StagingHistoryTelegramQualification
                 throw new UnauthorizedAccessException();
             string token = ReadPrivate(tokenPath, 128);
             string recipient = ReadPrivate(recipientPath, 20);
-            if (!long.TryParse(recipient, NumberStyles.None, CultureInfo.InvariantCulture, out long chatId) || chatId <= 0 || 
+            if (!long.TryParse(recipient, NumberStyles.None, CultureInfo.InvariantCulture, out long chatId) || chatId <= 0 ||
                 !Path.IsPathFullyQualified(attemptPath) || Path.GetFileName(attemptPath) != "native-history-preview.attempt")
                 throw new UnauthorizedAccessException();
             string parent = Path.GetDirectoryName(attemptPath) ?? throw new UnauthorizedAccessException();
