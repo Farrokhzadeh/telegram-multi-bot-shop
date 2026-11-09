@@ -6,7 +6,7 @@ namespace Platform.Telegram;
 public static class CustomerHistoricalOrderDeduplicator
 {
     public static CustomerHistoricalPage Page(IReadOnlyList<CustomerHistoricalOrder> archived,
-        IReadOnlyList<CustomerHistoricalOrder> importedHistorical, int offset, int limit = 20)
+        IReadOnlyList<CustomerHistoricalOrder> importedHistorical, int offset, int limit = 20, bool requireArchiveMatch = false)
     {
         ArgumentNullException.ThrowIfNull(archived);
         ArgumentNullException.ThrowIfNull(importedHistorical);
@@ -15,7 +15,14 @@ public static class CustomerHistoricalOrderDeduplicator
             throw new ArgumentOutOfRangeException(nameof(offset));
         var originals = new Dictionary<string, CustomerHistoricalOrder>(StringComparer.Ordinal);
         foreach (var order in archived) Add(order, false);
-        foreach (var order in importedHistorical) Add(order, true);
+        var aliases = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var order in importedHistorical)
+        {
+            if (order is null || !aliases.Add(order.OriginalReference) ||
+                requireArchiveMatch && !originals.ContainsKey(order.OriginalReference))
+                throw new UnauthorizedAccessException("Historical order alias is unverified.");
+            Add(order, true);
+        }
         var all = originals.Values.OrderByDescending(o => o.CreatedAt)
             .ThenBy(o => o.OriginalReference, StringComparer.Ordinal).ToArray();
         if (offset > all.Length) throw new ArgumentOutOfRangeException(nameof(offset));

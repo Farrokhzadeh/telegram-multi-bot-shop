@@ -41,6 +41,18 @@ public sealed class CustomerHistoricalOrderDeduplicatorTests
     }
 
     [Fact]
+    public void StrictArchiveCoverageRejectsUnmatchedAndRepeatedTypedAliases()
+    {
+        var originals = new[] { Order(1), Order(2) };
+        Assert.Throws<UnauthorizedAccessException>(() => CustomerHistoricalOrderDeduplicator.Page(originals, [Order(3)], 0, requireArchiveMatch: true));
+        Assert.Throws<UnauthorizedAccessException>(() => CustomerHistoricalOrderDeduplicator.Page(originals, [Order(1), Order(1)], 0, requireArchiveMatch: true));
+        Assert.Throws<UnauthorizedAccessException>(() => CustomerHistoricalOrderDeduplicator.Page(originals, [Order(1) with { SavedTitle = "Verified" }, Order(1)], 0));
+        var merged = CustomerHistoricalOrderDeduplicator.Page(originals, [Order(1) with { SavedTitle = "Verified" }], 0, requireArchiveMatch: true);
+        Assert.Equal(2, merged.Orders.Count);
+        Assert.Equal("Verified", Assert.Single(merged.Orders, o => o.OriginalReference == Order(1).OriginalReference).SavedTitle);
+    }
+
+    [Fact]
     public void ImportedHistoricalOnlyRecordAppearsOnceWithoutErasingOriginals()
     {
         var result = CustomerHistoricalOrderDeduplicator.Page([Order(2)], [Order(1)], 0);

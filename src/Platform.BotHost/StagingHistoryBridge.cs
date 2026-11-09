@@ -154,7 +154,7 @@ internal static class StagingHistoryBridge
         if (originals.Count != FixtureCount || originals.Any(o => !o.OriginalReference.StartsWith("STAGE-SYNTH-", StringComparison.Ordinal)))
             throw new UnauthorizedAccessException("Staging history bridge rejected.");
         var imported = originals.Take(10).Select(o => o with { SavedTitle = "Verified synthetic product" }).ToArray();
-        var page = CustomerHistoricalOrderDeduplicator.Page(originals, imported, offset);
+        var page = CustomerHistoricalOrderDeduplicator.Page(originals, imported, offset, requireArchiveMatch: true);
         var messages = CustomerHistoryMessageRenderer.Render(page)
             .Select(part => "[STAGING TEST - SYNTHETIC ORDERS ONLY]\n" + part.Text).ToArray();
         if (messages.Any(m => m.Length > 3900))
