@@ -23,9 +23,10 @@ internal static class StagingHistoryRuntime
 	private static string ReadText(string path, int max)
 	{
 		string value = Encoding.UTF8.GetString(ReadPrivate(path, max));
-		if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl) && value[^1] != '\n')
+		if (value.EndsWith('\n')) value = value[..^1];
+		if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
 			throw new UnauthorizedAccessException();
-		return value.TrimEnd('\n');
+		return value;
 	}
 	internal static async Task<int> RunAsync(string root, CancellationToken ct = default)
 	{

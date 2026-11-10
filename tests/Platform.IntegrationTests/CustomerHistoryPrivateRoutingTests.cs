@@ -125,14 +125,17 @@ public sealed class CustomerHistoryPrivateRoutingTests
                 Assert.Equal(firstDelivery.ConfirmedMessages + more.ConfirmedMessages, delivered.Calls);
                 Assert.Equal(2, Directory.GetFiles(attempts, "*.attempt").Length);
                 Assert.All(Directory.GetFiles(attempts, "*.attempt"), marker =>
-                    Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(marker)));
+                {
+                    if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
+                    Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(marker));
+                });
                 var unknown = new HistoryReply(HttpStatusCode.ServiceUnavailable);
                 using var failed = new HttpClient(unknown);
-                var uncertain = new CustomerHistoryPrivateRuntime(verifier,
+                var guardedUnknown = new CustomerHistoryPrivateRuntime(verifier,
                     new CustomerHistoryDeliveryPipeline(router, new CustomerHistoryTelegramSender(failed)),
                     f.Context(0).BotId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + new string('x', 40),
                     CheckoutFixture.Actor(0), attempts);
-                var stopped = await uncertain.HandleAsync([header], Request(85, CheckoutFixture.Actor(0), "/orders"), ct);
+                var stopped = await guardedUnknown.HandleAsync([header], Request(85, CheckoutFixture.Actor(0), "/orders"), ct);
                 Assert.False(stopped.Completed);
                 Assert.Equal(CustomerHistorySendState.Unknown, stopped.FinalState);
                 Assert.Equal(1, unknown.Calls);
