@@ -140,7 +140,7 @@ public sealed class CustomerHistoryPrivateRoutingTests
                 Assert.Equal(CustomerHistorySendState.Unknown, stopped.FinalState);
                 Assert.Equal(1, unknown.Calls);
                 await Assert.ThrowsAsync<TelegramIngressRejectedException>(() =>
-                    uncertain.HandleAsync([header], Request(85, CheckoutFixture.Actor(0), "/orders"), ct));
+                    guardedUnknown.HandleAsync([header], Request(85, CheckoutFixture.Actor(0), "/orders"), ct));
                 Assert.Equal(1, unknown.Calls);
             }
             var sameActorOtherBrand = await router.ReadAsync(Inbound(f.Context(1), CheckoutFixture.Actor(1), "/orders"), ct);
