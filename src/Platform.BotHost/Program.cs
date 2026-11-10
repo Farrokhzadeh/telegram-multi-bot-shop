@@ -13,5 +13,10 @@ if (args is ["--staging-history-render", "--root", var historyRoot, "--actor", v
 }
 if (args is ["--qualify-staging-history-telegram", "--token-file", var tokenFile, "--recipient-file", var recipientFile, "--attempt-file", var attemptFile])
     return await StagingHistoryTelegramQualification.RunAsync(tokenFile, recipientFile, attemptFile);
+if (args is ["--staging-history-once", "--root", var runtimeRoot])
+{
+    try { return await StagingHistoryRuntime.RunAsync(runtimeRoot); }
+    catch (Exception) { Console.Error.WriteLine("Isolated private history request rejected or outcome uncertain; no automatic retry."); return 78; }
+}
 if (args is ["--qualify-ingress"]) return IngressQualification.Run();
 return HostBootstrap.Run(args, "BotHost");
