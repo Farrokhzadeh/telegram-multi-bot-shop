@@ -100,7 +100,7 @@ public sealed class CustomerHistoryPrivateRoutingTests
             using var verifier = new TelegramWebhookVerifier(f.Context(0), secret);
             string header = Convert.ToBase64String(secret).TrimEnd('=').Replace('+', '-').Replace('/', '_');
             static byte[] Request(long id, long actor, string command) => Encoding.UTF8.GetBytes(
-                $$"""{"update_id":{{id}},"message":{"message_id":77,"from":{"id":{{actor}},"is_bot":false},"chat":{"id":{{actor}},"type":"private"},"text":"{{command}}"}}""");
+                $$"""{"update_id":{{{id}}},"message":{"message_id":77,"from":{"id":{{{actor}}},"is_bot":false},"chat":{"id":{{{actor}}},"type":"private"},"text":"{{{command}}}"}}""");
             var delivered = new HistoryReply();
             using (var http = new HttpClient(delivered))
             {
