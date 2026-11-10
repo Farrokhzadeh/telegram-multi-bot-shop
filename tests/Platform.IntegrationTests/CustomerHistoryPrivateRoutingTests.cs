@@ -94,6 +94,53 @@ public sealed class CustomerHistoryPrivateRoutingTests
                 Assert.Equal(0, receipt.ConfirmedMessages);
                 Assert.Equal(1, uncertain.Calls);
             }
+            string attempts = Path.Combine(directory, "teleg-history-attempts");
+            Directory.CreateDirectory(attempts, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            byte[] secret = SHA256.HashData("synthetic single-recipient read-only runtime"u8);
+            using var verifier = new TelegramWebhookVerifier(f.Context(0), secret);
+            string header = Convert.ToBase64String(secret).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            static byte[] Request(long id, long actor, string command) => Encoding.UTF8.GetBytes(
+                "{\\"update_id\\":" + id + ",\\"message\\":{\\"message_id\\":77,\\"from\\":{\\"id\\":" + actor +
+                ",\\"is_bot\\":false},\\"chat\\":{\\"id\\":" + actor + ",\\"type\\":\\"private\\"},\\"text\\":\\"" + command + "\\"}}");
+            var delivered = new HistoryReply();
+            using (var http = new HttpClient(delivered))
+            {
+                var runtime = new CustomerHistoryPrivateRuntime(verifier,
+                    new CustomerHistoryDeliveryPipeline(router, new CustomerHistoryTelegramSender(http)),
+                    f.Context(0).BotId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + new string('x', 40),
+                    CheckoutFixture.Actor(0), attempts);
+                var firstDelivery = await runtime.HandleAsync([header], Request(80, CheckoutFixture.Actor(0), "/orders"), ct);
+                Assert.True(firstDelivery.Completed);
+                Assert.Equal(firstDelivery.ConfirmedMessages, delivered.Calls);
+                Assert.True(firstDelivery.ConfirmedMessages > 0);
+                await Assert.ThrowsAsync<TelegramIngressRejectedException>(() =>
+                    runtime.HandleAsync([header], Request(80, CheckoutFixture.Actor(0), "/orders"), ct));
+                await Assert.ThrowsAsync<TelegramIngressRejectedException>(() =>
+                    runtime.HandleAsync(["bad"], Request(81, CheckoutFixture.Actor(0), "/orders"), ct));
+                await Assert.ThrowsAsync<TelegramIngressRejectedException>(() =>
+                    runtime.HandleAsync([header], Request(82, CheckoutFixture.Actor(3), "/orders"), ct));
+                await Assert.ThrowsAsync<TelegramIngressRejectedException>(() =>
+                    runtime.HandleAsync([header], Request(83, CheckoutFixture.Actor(0), "/start"), ct));
+                var more = await runtime.HandleAsync([header], Request(84, CheckoutFixture.Actor(0), "/orders 20"), ct);
+                Assert.True(more.Completed);
+                Assert.Equal(firstDelivery.ConfirmedMessages + more.ConfirmedMessages, delivered.Calls);
+                Assert.Equal(2, Directory.GetFiles(attempts, "*.attempt").Length);
+                Assert.All(Directory.GetFiles(attempts, "*.attempt"), marker =>
+                    Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(marker)));
+                var unknown = new HistoryReply(HttpStatusCode.ServiceUnavailable);
+                using var failed = new HttpClient(unknown);
+                var uncertain = new CustomerHistoryPrivateRuntime(verifier,
+                    new CustomerHistoryDeliveryPipeline(router, new CustomerHistoryTelegramSender(failed)),
+                    f.Context(0).BotId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + new string('x', 40),
+                    CheckoutFixture.Actor(0), attempts);
+                var stopped = await uncertain.HandleAsync([header], Request(85, CheckoutFixture.Actor(0), "/orders"), ct);
+                Assert.False(stopped.Completed);
+                Assert.Equal(CustomerHistorySendState.Unknown, stopped.FinalState);
+                Assert.Equal(1, unknown.Calls);
+                await Assert.ThrowsAsync<TelegramIngressRejectedException>(() =>
+                    uncertain.HandleAsync([header], Request(85, CheckoutFixture.Actor(0), "/orders"), ct));
+                Assert.Equal(1, unknown.Calls);
+            }
             var sameActorOtherBrand = await router.ReadAsync(Inbound(f.Context(1), CheckoutFixture.Actor(1), "/orders"), ct);
             Assert.Equal(3, sameActorOtherBrand.Orders.Count);
             Assert.All(sameActorOtherBrand.Orders, o => Assert.StartsWith("SOURCE-1-", o.OriginalReference, StringComparison.Ordinal));
