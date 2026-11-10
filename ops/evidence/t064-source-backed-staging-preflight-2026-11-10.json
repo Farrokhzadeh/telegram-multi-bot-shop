@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "task": "T064",
+  "date": "2026-11-10",
+  "scope": "actual_approved_owner_offline_staging_history_preflight",
+  "source_backups": {
+    "prod1": {
+      "sha256_matches_pinned_inventory": true,
+      "restored_in_disposable_postgresql": true
+    },
+    "prod3": {
+      "sha256_matches_pinned_inventory": true,
+      "restored_in_disposable_postgresql": true
+    },
+    "prod2": {
+      "sha256_matches_pinned_inventory": true,
+      "not_used_for_recipient": true
+    }
+  },
+  "isolation": {
+    "postgres_container_network": "none",
+    "postgres_container_host_mounts": 0,
+    "original_backups_mutated": false,
+    "production_database_connected": false,
+    "original_production_bots_changed": false,
+    "staging_bot_legacy_python_still_running": true,
+    "shared_staging_bot_webhook_or_polling_changed": false
+  },
+  "staging_databases": {
+    "accabad": {
+      "source": "prod1",
+      "original_orders": 10,
+      "actual_source_member_verified": true,
+      "encrypted_archive_prepared": true,
+      "read_only_runtime_preflight": "passed"
+    },
+    "zikotech": {
+      "source": "prod3",
+      "original_orders": 0,
+      "actual_source_member_verified": true,
+      "encrypted_archive_prepared": true,
+      "read_only_runtime_preflight": "passed"
+    },
+    "reader_role": "shop_staging_history_reader",
+    "readable_tables": [
+      "shop.brands",
+      "shop.users",
+      "shop.orders",
+      "shop.legacy_id_map"
+    ],
+    "money_and_payment_tables_readable": false,
+    "insert_permission": false,
+    "readonly_default": true,
+    "staging_memberships_isolated": true,
+    "source_backed_originals_immutable_and_encrypted": true
+  },
+  "verification": {
+    "real_dotnet_both_brand_preflights_passed": 2,
+    "missing_enable_flag_rejected": true,
+    "non_staging_instance_rejected": true,
+    "wrong_root_rejected": true,
+    "wrong_source_brand_mount_rejected": true,
+    "foreign_member_rejected": true,
+    "foreign_actor_rejected": true,
+    "staged_encrypted_archive_sha256_verified": true,
+    "bot_host_build": "passed",
+    "bot_host_build_warnings": 0,
+    "bot_host_build_errors": 0,
+    "live_telegram_send_attempted": false,
+    "telegram_send_acknowledged": false,
+    "telegram_update_authenticated_from_real_telegram": false,
+    "synthetic_local_signed_input_only": true,
+    "ci_started": false,
+    "staging_bot_tokens_copied_into_isolated_preflight": false,
+    "telegram_outbound_network_enabled": false
+  },
+  "remaining": [
+    "exclusive_trusted_ingress_handoff_for_staging_bot_without_python_polling_conflict",
+    "actual_owner_initiated_private_orders_update_reception_and_one_shot_telegram_delivery_verification",
+    "financial_ambiguous_obligation_parity",
+    "repeat_safe_shared_disposable_actual_import_and_final_regression"
+  ],
+  "owner_action_required_now": false,
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_complete": false,
+  "release_ready": false
+}
