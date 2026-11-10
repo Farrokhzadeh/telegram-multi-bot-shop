@@ -62,7 +62,7 @@ internal static class StagingHistoryRuntime
 		CryptographicOperations.ZeroMemory(secret);
 		string connectionString = ReadText(Path.Combine(root, "database-connection"), 1024);
 		var connection = new NpgsqlConnectionStringBuilder(connectionString);
-		if (connection.Host != "127.0.0.1" || !connection.Database.StartsWith("shop_staging_history_", StringComparison.Ordinal) ||
+		if (connection.Host != "127.0.0.1" || connection.Database is not string database || !database.StartsWith("shop_staging_history_", StringComparison.Ordinal) ||
 			connection.Username != "shop_staging_history_reader" || connection.IncludeErrorDetail || connection.Multiplexing)
 			throw new UnauthorizedAccessException();
 		await using var data = NpgsqlDataSource.Create(connection.ConnectionString);
