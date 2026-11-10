@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "task": "T064",
+  "checkpoint": "step_1_private_readonly_history_runtime",
+  "date": "2026-11-10",
+  "source_commit": "6e5b598d2fde743fc41f4bcce89f37340366171f",
+  "implementation": {
+    "entrypoint": "src/Platform.BotHost/Program.cs --staging-history-once --root",
+    "host": "src/Platform.BotHost/StagingHistoryRuntime.cs",
+    "transport": "src/Platform.Telegram/CustomerHistoryPrivateRuntime.cs",
+    "staging_only": true,
+    "one_request_per_invocation": true,
+    "explicit_enable_required": true,
+    "owner_approved_actor_allowlist_required": true,
+    "verified_private_webhook_required": true,
+    "bot_id_bound_to_token": true,
+    "read_only_postgresql": true,
+    "encrypted_private_history_files": true,
+    "atomic_private_send_attempt_marker": true,
+    "no_automatic_resend": true,
+    "uses_existing_read_only_history_router_and_sender": true
+  },
+  "verification": {
+    "checkout_exact_git_blobs": true,
+    "baseline_history_integration": {
+      "passed": 1,
+      "failed": 0
+    },
+    "final_history_integration": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "bot_host_build": {
+      "passed": true,
+      "warnings": 0,
+      "errors": 0
+    },
+    "isolated_disposable_postgresql": true,
+    "telegram_faked": true,
+    "actual_telegram_send": false,
+    "live_deployment": false,
+    "production_bots_unchanged": true,
+    "ci_invoked": false
+  },
+  "remaining": [
+    "real_history_staging_message_qualification_with_one_explicitly_approved_recipient",
+    "full_original_financial_obligation_exception_parity",
+    "shared_disposable_import_and_repeat_replay",
+    "final_complete_qualification"
+  ],
+  "step_1_code_ready": true,
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_complete": false,
+  "release_ready": false
+}
