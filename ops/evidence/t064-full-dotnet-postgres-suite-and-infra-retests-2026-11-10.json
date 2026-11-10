@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "checkpoint_date": "2026-11-10",
+  "task": "T064",
+  "scope": "offline_full_dotnet_test_suite_disposable_postgresql_no_ci",
+  "source_snapshot": "fb254d6c0d521a147aaa683d9e5262c654fa9fde",
+  "test_only_fixes": [
+    "c3fa8e85c0321478b89c48b684d1eaef44239b87",
+    "2a88653bbf06be20a135ae77546df9c19acbfe7e"
+  ],
+  "checkout": {
+    "private_transfer": true,
+    "source_and_test_files_git_hash_verified": 363,
+    "nuget_locked_restore": "passed_linux_x64",
+    "production_repository_derived_credentials_used": false
+  },
+  "builds": {
+    "migration": "passed_zero_warnings",
+    "bot_host": "passed_zero_warnings",
+    "unit_tests": "passed_zero_warnings",
+    "contract_tests": "passed_zero_warnings",
+    "integration_tests": "passed_zero_warnings"
+  },
+  "test_runs": {
+    "unit": {
+      "passed": 206,
+      "failed": 0,
+      "skipped": 0
+    },
+    "contract": {
+      "passed": 148,
+      "failed": 0,
+      "skipped": 0
+    },
+    "integration_initial": {
+      "passed": 739,
+      "failed": 3,
+      "skipped": 0,
+      "total": 742,
+      "exit_code": 1,
+      "failures": [
+        "backup_restore_missing_synthetic_container_identity",
+        "preorder_worker_probe_missing_release_executable_after_rid_path",
+        "preorder_worker_probe_missing_release_executable_after_rid_path"
+      ]
+    },
+    "integration_targeted_requalification": {
+      "backup_restore": {
+        "passed": 1,
+        "failed": 0
+      },
+      "worker_crash_recovery": {
+        "passed": 2,
+        "failed": 0
+      },
+      "all_three_original_failures_requalified": true
+    },
+    "individual_case_coverage_passed": 1096,
+    "clean_full_integration_rerun": false
+  },
+  "controls": {
+    "postgres_image": "postgres:18.6",
+    "postgres_disposable": true,
+    "network": "none_with_test_sdk_sharing_only_postgres_network_namespace",
+    "production_database_connection": false,
+    "postgres_container_ports_published": 0,
+    "postgres_container_host_mounts": 0,
+    "docker_socket_exposed_to_test_container": false,
+    "backup_restore_translation": "restricted_local_pg_dump_pg_restore_allowlist_only_for_disposable_database",
+    "preorder_worker_managed_probe_only": true,
+    "source_archives_modified": false,
+    "production_bots_running_after": 3,
+    "production_bots_changed": false,
+    "real_telegram_messages_sent": 0,
+    "ci_started": false,
+    "production_payment_or_delivery_actions": false
+  },
+  "remaining": [
+    "qualify_real_authenticated_readonly_history_serving_with_approved_private_recipient",
+    "resolve_or_quarantine_source_uncertain_order_payment_coupon_delivery_liabilities_with_original_evidence",
+    "complete_disposable_shared_target_real_source_import_and_repeat_replay_parity",
+    "run_final_full_suite_clean_on_qualified_harness"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_complete": false,
+  "release_ready": false
+}
