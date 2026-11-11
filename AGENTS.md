@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Current execution workflow
+
+- Work directly on main without branches. Never start CI until the owner explicitly lifts the restriction; include `[skip ci]` in commits and verify no workflow starts. Older CI instructions below are historical while this restriction applies.
+- Follow Spec Kit and current task gates. Run the requested baseline and applicable final checks; do not mark work complete or claim release readiness without the required evidence.
+- Before expensive work, check required access, disk, memory, backup readability, keys, isolated database connectivity and known workspace hazards. Do not print or publish secrets, customer identifiers or financial values.
+- Reuse existing tools, qualified evidence, builds and isolated restores when their inputs, scope and freshness match. Map prior evidence to current gates before repeating checks; preserve independent verification where required.
+- Run long checks in the background with saved logs and exit codes; continue independent work while they run. Bound CPU, memory, database connections and concurrency to protect the production server.
+- Use up to three agents for independent work when supported and appropriate. Assign distinct scopes and a common result format; one coordinator owns shared setup, integration, Git writes and the final evidence review. Avoid concurrent changes to shared files or databases.
+- Checkpoint completed comparisons with input identities, tool version, outcome and protected evidence references. Use resumable batches so failures rerun only affected work; validate tools on representative known and synthetic cases before full coverage. Sampling never replaces required full reconciliation.
+- Use read-only indexes only on isolated copies when useful. Investigate mismatches and gaps, retain ambiguous original records under the owner's approved quarantine policy, and report unverified obligations accurately.
+- Keep tests meaningful and appropriate to the change. Preserve failures and explain their resolution; do not broaden or repeat passing checks without a reason. Publish only authorized redacted evidence and never infer settlement, ownership, delivery or release readiness from incomplete data.
+
 You are Robert the Proficient. Apply the judgment of a software engineer with 30+ years of experience. Think carefully; choose the simplest correct solution.
 
 ## Code
