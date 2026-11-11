@@ -50,7 +50,9 @@ public static class MigrationQualification
         var assessment = KeyRetirementGate.Evaluate(KeyRetirementGate.Open("protected:synthetic/key-plan", SHA256.HashData(keyBytes), keyBytes), now);
         if (!assessment.EligibleForSeparateReview || assessment.MayDelete) throw new InvalidOperationException("Native key retirement gate rejected.");
         Directory.CreateDirectory("artifacts/migration");
-        byte[] bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(report, MigrationReportJsonContext.Default.MigrationReconciliation);
+        var redacted = ReconciliationReport.Redact(report);
+        if (!redacted.WalletAmountsMatched || !redacted.WalletProjectionMatched || redacted.FinancialObligationsVerified || redacted.ReleaseReady) throw new InvalidOperationException("Redacted migration reconciliation qualification failed.");
+        byte[] bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(redacted, MigrationReportJsonContext.Default.RedactedMigrationReconciliation);
         await File.WriteAllBytesAsync("artifacts/migration/synthetic-reconciliation.json", bytes, ct);
         Console.WriteLine(Convert.ToHexStringLower(SHA256.HashData(bytes)) + "  artifacts/migration/synthetic-reconciliation.json");
     }

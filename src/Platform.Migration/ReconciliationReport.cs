@@ -11,8 +11,24 @@ public sealed record MigrationReconciliation(Guid Batch, long ExpectedMappings, 
     public bool ReleaseReady => false;
     public override string ToString() => "MigrationReconciliation [redacted]";
 }
+public sealed record RedactedMigrationReconciliation(long ExpectedMappings, long CommittedMappings, long MissingMappings, long MismatchedMappings, long UnexpectedMappings,
+    long OpeningPostings, long NonPostingHistory, long PaidUnfulfilledOrders, long HeldCouponUnits, long TargetCiphertexts, long SaleableInventory, bool WalletAmountsMatched, bool WalletProjectionMatched)
+{
+    public string Scope => "qualified_wallet_projection_only";
+    public bool FinancialObligationsVerified => false;
+    public bool ReleaseReady => false;
+}
 public sealed class ReconciliationReport(DbSessionFactory sessions)
 {
+    public static RedactedMigrationReconciliation Redact(MigrationReconciliation report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        long[] counts = [report.ExpectedMappings, report.CommittedMappings, report.MissingMappings, report.MismatchedMappings, report.UnexpectedMappings, report.OpeningPostings, report.NonPostingHistory, report.PaidUnfulfilledOrders, report.HeldCouponUnits, report.TargetCiphertexts, report.SaleableInventory];
+        if (counts.Any(count => count < 0)) throw new MigrationRejectedException();
+        bool amounts = report.OpeningUsd == report.ExpectedOpeningUsd && report.TargetWalletUsd == report.ExpectedOpeningUsd && report.WalletDifferenceUsd == 0;
+        bool matched = report.Complete && amounts && report.ExpectedMappings == report.CommittedMappings && report.MissingMappings == 0 && report.MismatchedMappings == 0 && report.UnexpectedMappings == 0;
+        return new(report.ExpectedMappings, report.CommittedMappings, report.MissingMappings, report.MismatchedMappings, report.UnexpectedMappings, report.OpeningPostings, report.NonPostingHistory, report.PaidUnfulfilledOrders, report.HeldCouponUnits, report.TargetCiphertexts, report.SaleableInventory, amounts, matched);
+    }
     public async Task<WalletRecordReconciliation> CompareWalletsAsync(VerifiedImportManifest manifest, IReadOnlyList<LegacyWalletSnapshot> source, CancellationToken ct = default, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? readRetention = null)
     {
         var rows = source.Select(r => r with { History = Array.AsReadOnly(r.History.ToArray()) }).ToArray();
@@ -98,6 +114,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
 }
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(MigrationReconciliation))]
+[JsonSerializable(typeof(RedactedMigrationReconciliation))]
 [JsonSerializable(typeof(LegacyAggregateReconciliation))]
 [JsonSerializable(typeof(HistoricalOrderReconciliation))]
 [JsonSerializable(typeof(WalletRecordReconciliation))]

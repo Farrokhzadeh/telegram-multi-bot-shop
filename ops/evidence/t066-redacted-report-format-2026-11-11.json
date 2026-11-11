@@ -1,0 +1,47 @@
+{
+  "baseline_units": {
+    "failed": 0,
+    "notExecuted": 0,
+    "passed": 218,
+    "total": 218
+  },
+  "build_errors": 0,
+  "build_warnings": 0,
+  "changed_file_formatting_passed": true,
+  "checkpoint_date": "2026-11-11",
+  "ci_invoked": false,
+  "final_units": {
+    "failed": 0,
+    "notExecuted": 0,
+    "passed": 224,
+    "total": 224
+  },
+  "financial_obligations_verified": false,
+  "focused_database_integration": {
+    "failed": 0,
+    "notExecuted": 0,
+    "passed": 1,
+    "total": 1
+  },
+  "fresh_protected_source_reconciliation": false,
+  "initial_test_workspace_symlink_build_failure_retained": true,
+  "isolated_synthetic_database_stopped": true,
+  "native_aot_published": false,
+  "original_running_container_count": 13,
+  "private_amounts_and_batch_identifiers_excluded": true,
+  "production_bots_unchanged": true,
+  "release_ready": false,
+  "runtime_symlink_excluded_during_clean_build": true,
+  "schema_version": 1,
+  "scope": "explicit_redacted_wallet_report_format_and_synthetic_managed_qualification",
+  "source_generated_public_json_allowlist_verified": true,
+  "synthetic_artifact_uses_redacted_format": true,
+  "t066_complete": false,
+  "t068_complete": false,
+  "task": "T066",
+  "tested_source_blobs": {
+    "src/Platform.Migration/ReconciliationReport.cs": "197ff12c0aea276517eb0383f3a5fb62476781d6",
+    "tests/Platform.UnitTests/RedactedReconciliationTests.cs": "b966f07a8db104cb049bf152b8e56301fb21d1e2",
+    "tests/Shared/MigrationQualification.cs": "e1ac9d649e0d04d3b48bf9356485c0f268f28f2e"
+  }
+}
