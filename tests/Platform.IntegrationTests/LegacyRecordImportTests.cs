@@ -72,6 +72,7 @@ public sealed class LegacyRecordImportTests
         var catalog = new LegacyCatalogImportWorkflow(f.Sessions, f.Secrets, f.Brands[0]); var orders = new LegacyOrderRecordImportWorkflow(f.Sessions, f.Secrets);
         Task<ProtectedLegacyEvidence> Read(string asset, CancellationToken ct) => world.Read(asset, ct);
         var report = await reports.CompareAsync(f.Context(0), manifest, set, Read, Ct); Assert.True(report.Matched); Assert.False(report.ReleaseReady);
+        var redacted = ReconciliationReport.RedactRecords(report); Assert.True(redacted.ProjectionMatched); Assert.False(redacted.FinancialObligationsVerified); Assert.False(redacted.ReleaseReady);
         string json = JsonSerializer.Serialize(report, MigrationReportJsonContext.Default.LegacyRecordReconciliation);
         foreach (string value in new[] { reference, "PRIVATE-COUPON", "PRIVATE-LEGACY-CODE", "Original private brand", "private original receipt", "123456789" }) Assert.DoesNotContain(value, json, StringComparison.Ordinal);
         Assert.Equal(12.34m, (await new ReconciliationReport(f.Sessions).ReadAsync(manifest, Ct)).OpeningUsd);

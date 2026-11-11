@@ -18,8 +18,21 @@ public sealed record RedactedMigrationReconciliation(long ExpectedMappings, long
     public bool FinancialObligationsVerified => false;
     public bool ReleaseReady => false;
 }
+public sealed record RedactedLegacyRecordReconciliation(long ExpectedRecords, long ComparedRecords, long MismatchedRecords, long InvalidArchives, long MissingMappings, long MismatchedMappings, long UnexpectedMappings, bool WalletMatched, long SaleableInventory, long ExpectedEncryptedFields, long ReencryptedFields, long InvalidRetentions, long ManualIrrAccounts, long RetainedHistoryRows, long RetainedIrrHistory, long RetainedZeroHistory, long UnexpectedActivityEvents, bool ProjectionMatched)
+{
+    public string Scope => "source_bound_legacy_projections_and_protected_records";
+    public bool FinancialObligationsVerified => false;
+    public bool ReleaseReady => false;
+}
 public sealed class ReconciliationReport(DbSessionFactory sessions)
 {
+    public static RedactedLegacyRecordReconciliation RedactRecords(LegacyRecordReconciliation report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        long[] counts = [report.ExpectedRecords, report.ComparedRecords, report.MismatchedRecords, report.InvalidArchives, report.MissingMappings, report.MismatchedMappings, report.UnexpectedMappings, report.SaleableInventory, report.ExpectedEncryptedFields, report.ReencryptedFields, report.InvalidRetentions, report.ManualIrrAccounts, report.RetainedHistoryRows, report.RetainedIrrHistory, report.RetainedZeroHistory, report.UnexpectedActivityEvents];
+        if (counts.Any(count => count < 0)) throw new MigrationRejectedException();
+        return new(report.ExpectedRecords, report.ComparedRecords, report.MismatchedRecords, report.InvalidArchives, report.MissingMappings, report.MismatchedMappings, report.UnexpectedMappings, report.WalletMatched, report.SaleableInventory, report.ExpectedEncryptedFields, report.ReencryptedFields, report.InvalidRetentions, report.ManualIrrAccounts, report.RetainedHistoryRows, report.RetainedIrrHistory, report.RetainedZeroHistory, report.UnexpectedActivityEvents, report.Matched);
+    }
     public static RedactedMigrationReconciliation Redact(MigrationReconciliation report)
     {
         ArgumentNullException.ThrowIfNull(report);
@@ -119,6 +132,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
 [JsonSerializable(typeof(HistoricalOrderReconciliation))]
 [JsonSerializable(typeof(WalletRecordReconciliation))]
 [JsonSerializable(typeof(LegacyRecordReconciliation))]
+[JsonSerializable(typeof(RedactedLegacyRecordReconciliation))]
 [JsonSerializable(typeof(ProtectedLegacyEvidence))]
 public sealed partial class MigrationReportJsonContext : JsonSerializerContext;
 public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets, long ComparedWallets, long MismatchedRecords, long MissingMappings, long MismatchedMappings, long UnmatchedEntries, long UnexpectedMappings, long InvalidRetentions = 0, long ManualIrrAccounts = 0, long RetainedHistoryRows = 0, long RetainedIrrHistory = 0, long RetainedZeroHistory = 0)
