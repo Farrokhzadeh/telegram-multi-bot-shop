@@ -1,0 +1,143 @@
+{
+  "application_source_commit": "7e913027b1827e68f811203bc21831a1f1b6db80",
+  "baseline_full_suite_source_commit": "d2f5174629d8633b5466664ec7414b7aaada66d6",
+  "checkpoint_date": "2026-11-11",
+  "cleanup": {
+    "ci_invoked": false,
+    "owned_qualification_databases_removed": 2,
+    "owned_source_and_target_containers_removed": 2,
+    "private_backup_keys_archives_receipts_and_source_copy_data_retained": true,
+    "production_bots_unchanged": true
+  },
+  "controls": {
+    "ci_invoked": false,
+    "live_financial_fulfillment_or_stock_actions": false,
+    "production_bots_changed": false,
+    "production_database_writes": false
+  },
+  "current_guard_formatting_passed": true,
+  "current_operator_checks_generated_review_before_target_writes": true,
+  "current_shared_import": {
+    "all_brand_imports_and_replays_matched": true,
+    "brands": 3,
+    "historical_orders": 919,
+    "historical_payments": 888,
+    "inactive_catalog": 9,
+    "memberships": 12282,
+    "original_zero_proofs": 67,
+    "release_ready": false,
+    "retained_review_records": 16348,
+    "same_database": true,
+    "scope": "canonical_three_brand_same_disposable_target",
+    "source_unchanged": true
+  },
+  "final_guard_unit_suite": {
+    "failed": 0,
+    "notExecuted": 0,
+    "passed": 218,
+    "total": 218
+  },
+  "initial_final_run_harness_failure_retained": true,
+  "listener_fix_commit": "a42bfbf08fa8c540b23e57e6e3a0d4e5166c6143",
+  "one_clean_full_baseline_run": true,
+  "operator_build_errors": 0,
+  "operator_build_warnings": 0,
+  "preservation": {
+    "encrypted_coupons": 123,
+    "exact_IRR_balance_accounts": 40,
+    "historically_shared_unowned_coupons": 2,
+    "member_histories": 12282,
+    "missing_media_or_unknown_payment_delivery_not_waived": true,
+    "original_currency_and_coupon_counters_preserved": true,
+    "original_orders": 4916,
+    "original_sent_markers": 899,
+    "quarantined_orders": 3997,
+    "retained_original_wallet_history": 7502,
+    "typed_orders": 919,
+    "unassigned_coupons_quarantined": 21
+  },
+  "protected_source_coverage": {
+    "original_reencrypted_fields": 5212,
+    "selected_original_archives": 18231,
+    "source_table_rows": 219909,
+    "sources": 3,
+    "tables_per_source": 56
+  },
+  "release_ready": false,
+  "restore_and_restart": {
+    "full_row_hashes_match_after_external_database_restart": true,
+    "full_row_hashes_match_after_restore": true,
+    "original_backup_hashes_unchanged": true,
+    "production_bots_unchanged": true,
+    "release_ready": false,
+    "restore_preserves_public_execute_revocations": true,
+    "scope": "current_code_protected_three_brand_shared_import_restore_restart",
+    "tables": 28
+  },
+  "review_record_identities_match_prior_protected_evidence": true,
+  "runtime_images": {
+    "dotnet_sdk": {
+      "architecture": "amd64",
+      "image_id": "sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e",
+      "repo_digests": [
+        "mcr.microsoft.com/dotnet/sdk@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e"
+      ]
+    },
+    "postgres_source": {
+      "architecture": "amd64",
+      "image_id": "sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb",
+      "repo_digests": [
+        "postgres@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb"
+      ]
+    },
+    "postgres_target": {
+      "architecture": "amd64",
+      "image_id": "sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583",
+      "repo_digests": [
+        "postgres@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583"
+      ]
+    }
+  },
+  "schema_version": 1,
+  "scope": "protected_historical_import_with_owner_approved_preservation_and_quarantine",
+  "source_and_test_files_verified": 364,
+  "source_verification": {
+    "baseline_commit": "d2f5174629d8633b5466664ec7414b7aaada66d6",
+    "baseline_source_test_config_files": 364,
+    "final_commit": "7e913027b1827e68f811203bc21831a1f1b6db80",
+    "final_delta_files": 3,
+    "final_delta_git_blobs_equal_tested_server_bytes": true
+  },
+  "t064_complete": true,
+  "t066_complete": false,
+  "t068_complete": false,
+  "task": "T064",
+  "telegram_history": {
+    "accabad_original_orders": 10,
+    "approved_private_accounts": 1,
+    "automatic_send_retry": false,
+    "both_real_commands_and_responses_confirmed": true,
+    "zikotech_original_orders": 0
+  },
+  "test_suites": {
+    "contract": {
+      "failed": 0,
+      "notExecuted": 0,
+      "passed": 148,
+      "total": 148
+    },
+    "integration": {
+      "failed": 0,
+      "notExecuted": 0,
+      "passed": 742,
+      "total": 742
+    },
+    "unit": {
+      "failed": 0,
+      "notExecuted": 0,
+      "passed": 206,
+      "total": 206
+    }
+  },
+  "writable_synthetic_artifact_mount_fix": true
+}
