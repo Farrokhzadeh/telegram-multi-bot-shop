@@ -84,4 +84,29 @@ public sealed class LegacyOriginalReviewQualificationTests
         Assert.Throws<MigrationRejectedException>(() => LegacyOriginalReviewQualification.Verify(manifest, Review(manifest, proofs), new string('b', 64), 1));
         Assert.Throws<MigrationRejectedException>(() => LegacyOriginalReviewQualification.Verify(manifest, Review(manifest, proofs), new string('a', 64), 2));
     }
+    [Theory]
+    [InlineData("incomplete_order_terms")]
+    [InlineData("missing_exact_settled_source_payment")]
+    [InlineData("missing_checkout_snapshot")]
+    [InlineData("original_wallet_irr_terms")]
+    [InlineData("nonterminating_unit_terms")]
+    [InlineData("settled_payment_predates_order")]
+    [InlineData("missing_exact_native_zero_transaction")]
+    [InlineData("missing_exact_native_wallet_debit")]
+    [InlineData("zero_order_requires_separate_proof")]
+    [InlineData("outside_wallet_order_scope")]
+    public void CurrentAndRetainedQuarantineReasonsRemainSourceBound(string reason)
+    {
+        var (manifest, proofs) = Fixture();
+        Assert.Equal(2, LegacyOriginalReviewQualification.Verify(manifest, Review(manifest, proofs, reason: reason), new string('a', 64), 1).ReviewedOrders);
+        Assert.Throws<MigrationRejectedException>(() => LegacyOriginalReviewQualification.Verify(manifest, Review(manifest, proofs, wrongTarget: true, reason: reason), new string('a', 64), 1));
+    }
+    [Theory]
+    [InlineData("paid")]
+    [InlineData("delivered")]
+    public void FinalFinancialOrDeliveryStatesCannotReplaceQuarantineReasons(string reason)
+    {
+        var (manifest, proofs) = Fixture();
+        Assert.Throws<MigrationRejectedException>(() => LegacyOriginalReviewQualification.Verify(manifest, Review(manifest, proofs, reason: reason), new string('a', 64), 1));
+    }
 }

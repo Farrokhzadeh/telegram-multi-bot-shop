@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "checkpoint_date": "2026-11-11",
+  "task": "T064",
+  "scope": "source_bound_quarantine_review_preflight_before_target_writes",
+  "baseline_application_source": "d2f5174629d8633b5466664ec7414b7aaada66d6",
+  "baseline_full_suite": {
+    "unit": 206,
+    "contract": 148,
+    "integration": 742,
+    "failed": 0,
+    "skipped": 0,
+    "clean_complete_run": true
+  },
+  "changes": {
+    "current_and_historical_order_quarantine_reasons_accepted": true,
+    "generated_review_checked_before_schema_or_record_writes": true,
+    "wrong_source_target_rejected": true,
+    "paid_or_delivered_reason_labels_rejected": true
+  },
+  "final_checks": {
+    "full_unit_suite_passed": 218,
+    "failed": 0,
+    "skipped": 0,
+    "migration_operator_build_warnings": 0,
+    "migration_operator_build_errors": 0,
+    "changed_csharp_whitespace": "passed"
+  },
+  "controls": {
+    "ci_invoked": false,
+    "production_database_writes": false,
+    "production_deployment_changed": false,
+    "financial_adjudication_or_waiver": false
+  },
+  "remaining": [
+    "fresh_current_code_protected_shared_import_and_replay",
+    "exact_restore_restart_validation",
+    "final_evidence_and_task_qualification"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_complete": false,
+  "release_ready": false
+}

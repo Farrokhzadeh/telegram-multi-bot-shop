@@ -33,12 +33,14 @@ internal static class WalletOrderCopyQualification
         }
         await Freeze(shared ? "wallet-shared-direct-catalog-plan.sha256" : "wallet-zero-topup-direct-catalog-plan.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(plan.Manifest.Encode()))));
         await Freeze(shared ? "wallet-shared-direct-catalog-target.sha256" : "wallet-zero-topup-direct-catalog-target.sha256", Encoding.UTF8.GetBytes(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(connection)))));
-        await Freeze(shared ? "wallet-shared-direct-catalog-review.json" : "wallet-zero-topup-direct-catalog-review.json", WalletCopyQualification.JsonBody(w =>
+        string reviewName = shared ? "wallet-shared-direct-catalog-review.json" : "wallet-zero-topup-direct-catalog-review.json";
+        await Freeze(reviewName, WalletCopyQualification.JsonBody(w =>
         {
             w.WriteString("archive_manifest_sha256", Convert.ToHexStringLower(archive.Digest.Span)); w.WriteString("typed_manifest_sha256", Convert.ToHexStringLower(plan.Manifest.Digest.Span)); w.WriteNumber("original_records", disposition.Archived); w.WriteNumber("typed_orders", disposition.Orders); w.WriteNumber("typed_payments", disposition.Payments); w.WriteNumber("native_zero_proofs", disposition.NativeZero); w.WriteNumber("inactive_master_catalog", disposition.Catalog); w.WriteNumber("reviewed_records", disposition.Reviewed); w.WriteStartObject("review_reason_counts"); foreach (var reason in disposition.ReviewReasons.OrderBy(r => r.Key, StringComparer.Ordinal)) w.WriteNumber(reason.Key, reason.Value); w.WriteEndObject(); w.WriteStartArray("review");
             foreach (var row in plan.Review) { w.WriteStartObject(); w.WriteString("projection", row.Projection.ToString()); w.WriteString("legacy_id", row.LegacyId); w.WriteString("target", row.Target); w.WriteString("reason", row.Reason); w.WriteEndObject(); }
             w.WriteEndArray();
         }));
+        _ = LegacyOriginalReviewQualification.Verify(archive, read(Path.Combine(directory, reviewName)), Convert.ToHexStringLower(plan.Manifest.Digest.Span), plan.Set.Orders.Count);
         await Platform.Persistence.SchemaRunner.ApplyAsync(data, destination, ct);
         await using (var role = data.CreateCommand("DO $$ BEGIN CREATE ROLE shop_legacy_import NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$; GRANT shop_legacy_import TO shop_test_runner")) await role.ExecuteNonQueryAsync(ct);
         var sessions = new DbSessionFactory(data); if (shared) await WalletCopyQualification.SeedSharedAsync(sessions, context.BrandId, archive.SourceBrand, ct);

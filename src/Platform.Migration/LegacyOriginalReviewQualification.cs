@@ -54,7 +54,7 @@ public static class LegacyOriginalReviewQualification
             actualReasons[reason] = actualReasons.GetValueOrDefault(reason) + 1;
             if (projection == LegacyProjection.OrderRecord)
             {
-                if (reason is not ("incomplete_order_terms" or "missing_exact_settled_source_payment")) throw new MigrationRejectedException();
+                if (reason is not ("incomplete_order_terms" or "missing_exact_settled_source_payment" or "missing_checkout_snapshot" or "original_wallet_irr_terms" or "nonterminating_unit_terms" or "settled_payment_predates_order" or "missing_exact_native_zero_transaction" or "missing_exact_native_wallet_debit" or "zero_order_requires_separate_proof" or "outside_wallet_order_scope")) throw new MigrationRejectedException();
                 reviewedOrders++;
             }
         }
