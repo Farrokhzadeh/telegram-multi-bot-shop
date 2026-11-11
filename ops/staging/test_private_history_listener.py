@@ -1,4 +1,5 @@
 import importlib.util,pathlib,tempfile,time,unittest
+from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('listener',pathlib.Path(__file__).with_name('private_history_listener.py'));listener=importlib.util.module_from_spec(spec);spec.loader.exec_module(listener)
 class ListenerTests(unittest.TestCase):
 	def update(self):return {'update_id':2,'message':{'message_id':3,'date':int(time.time()),'from':{'id':101,'is_bot':False},'chat':{'id':101,'type':'private'},'text':'/orders'}}
@@ -25,4 +26,15 @@ class ListenerTests(unittest.TestCase):
 		with tempfile.TemporaryDirectory() as d:
 			p=pathlib.Path(d)/'data';listener.write_new(p,b'one');p.chmod(0o600);q=pathlib.Path(d)/'link';q.symlink_to(p)
 			with self.assertRaises(ValueError):listener.private(q)
+	def test_poll_retries_receive_timeout(self):
+		with patch.object(listener,'api',side_effect=[TimeoutError(),[]]) as api,patch.object(listener.time,'sleep'):
+			self.assertEqual(listener.poll('synthetic',{'timeout':15}),[]);self.assertEqual(api.call_count,2);self.assertTrue(all(c.args[1]=='getUpdates' for c in api.call_args_list))
+	def test_poll_stops_after_three_timeouts(self):
+		with patch.object(listener,'api',side_effect=TimeoutError()) as api,patch.object(listener.time,'sleep'):
+			with self.assertRaises(TimeoutError):listener.poll('synthetic',{})
+			self.assertEqual(api.call_count,3)
+	def test_poll_does_not_retry_http_rejection(self):
+		with patch.object(listener,'api',side_effect=listener.urllib.error.HTTPError('synthetic',409,'conflict',None,None)) as api:
+			with self.assertRaises(listener.urllib.error.HTTPError):listener.poll('synthetic',{})
+			self.assertEqual(api.call_count,1)
 if __name__=='__main__':unittest.main()

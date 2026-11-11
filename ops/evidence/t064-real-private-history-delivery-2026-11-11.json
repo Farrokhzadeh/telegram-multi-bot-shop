@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "checkpoint_date": "2026-11-11",
+  "task": "T064",
+  "scope": "isolated_authenticated_source_backed_private_telegram_history",
+  "source_commit": "d2f5174629d8633b5466664ec7414b7aaada66d6",
+  "approved_account_count": 1,
+  "private_account_identifiers_published": false,
+  "checks": [
+    {
+      "source": "prod1",
+      "brand": "acc-abad",
+      "original_orders": 10,
+      "all_orders_fit_first_page": true,
+      "real_private_command_verified": true,
+      "telegram_response_confirmed": true,
+      "owner_confirmed_receipt": true,
+      "send_attempts": 1,
+      "legacy_staging_restored": true
+    },
+    {
+      "source": "prod3",
+      "brand": "zikotech",
+      "original_orders": 0,
+      "real_private_command_verified": true,
+      "telegram_response_confirmed": true,
+      "send_attempts": 1,
+      "legacy_staging_restored": true
+    }
+  ],
+  "failed_receive_sessions": {
+    "count": 2,
+    "history_sends_attempted": 0,
+    "last_error": "TimeoutError",
+    "evidence_retained": true
+  },
+  "receive_timeout_fix": {
+    "bounded_receive_attempts": 3,
+    "retries_getUpdates_only": true,
+    "http_rejections_not_retried": true,
+    "history_response_resend": false,
+    "python_guard_tests": 13,
+    "final_session_receive_timeout_recovered": true
+  },
+  "controls": {
+    "ci_invoked": false,
+    "production_bots_unchanged": true,
+    "production_database_writes": false,
+    "financial_or_fulfillment_actions": false,
+    "kuala_tested": false,
+    "existing_production_bots_archives_mounted": false
+  },
+  "remaining": [
+    "current_full_postgresql_suite",
+    "current_protected_shared_import_replay_restore_restart",
+    "final_quarantine_qualification"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_complete": false,
+  "release_ready": false
+}

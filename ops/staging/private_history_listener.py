@@ -1,4 +1,4 @@
-import argparse,fcntl,json,os,pathlib,re,signal,subprocess,time,urllib.request
+import argparse,fcntl,json,os,pathlib,re,signal,subprocess,time,urllib.error,urllib.request
 STAGE='accabad-staging-bot-1'
 def run(args,timeout=30):
 	return subprocess.run(args,capture_output=True,text=True,check=True,timeout=timeout).stdout
@@ -19,6 +19,12 @@ def api(token,method,values=None):
 	data=json.loads(body)
 	if data.get('ok') is not True:raise ValueError('Telegram request rejected')
 	return data['result']
+def poll(token,values):
+	for attempt in range(3):
+		try:return api(token,'getUpdates',values)
+		except (TimeoutError,urllib.error.URLError) as error:
+			if isinstance(error,urllib.error.HTTPError) or attempt==2:raise
+			print('WAIT: receive timeout; retrying command reception only.',flush=True);time.sleep(1)
 def runtime(args,deliver=False):
 	root='/app/data/teleg-staging-history-'+args.brand+'-20261111'
 	command=['docker','run','--rm','--name','teleg-t064-history-once','--network','container:'+args.database_container,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--cpus','0.5','--memory','512m','--pids-limit','128','--tmpfs','/tmp:rw,noexec,nosuid,size=32m','-e','INSTANCE_ID=staging','-e','DOTNET_CLI_TELEMETRY_OPTOUT=1','-e','DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1','-e','SHOP_ALLOW_STAGING_HISTORY_'+('TELEGRAM_SEND' if deliver else 'PREFLIGHT')+'=1','-v',str(args.runtime)+':/runtime:ro','-v',str(args.root)+':'+root+':ro']
@@ -54,7 +60,7 @@ def main():
 		while time.monotonic()<deadline:
 			values={'timeout':15,'limit':100,'allowed_updates':['message']}
 			if offset is not None:values['offset']=offset
-			updates=api(token,'getUpdates',values)
+			updates=poll(token,values)
 			if not isinstance(updates,list):raise ValueError('Polling response rejected')
 			for update in updates:
 				uid=update.get('update_id')
@@ -77,4 +83,4 @@ def main():
 		write_new(args.root/'listener-result.json',json.dumps(receipt,sort_keys=True).encode())
 if __name__=='__main__':
 	try:raise SystemExit(main())
-	except Exception:print('STOP: private history listener rejected or outcome uncertain; inspect private markers before any retry.',flush=True);raise SystemExit(78)
+	except Exception as error:print('STOP: private history listener rejected or outcome uncertain; type='+type(error).__name__+'; http_status='+str(getattr(error,'code',None))+'; inspect private markers before any retry.',flush=True);raise SystemExit(78)
