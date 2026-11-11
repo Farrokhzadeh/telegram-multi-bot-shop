@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "task": "T064",
+  "date": "2026-11-11",
+  "checkpoint": "bounded_real_history_listener_ready",
+  "implementation_commit": "c45c8220f91e030b9fb34ad45168b7e014355781",
+  "verification": {
+    "focused_csharp_private_routing": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "python_listener_guards": {
+      "passed": 10,
+      "failed": 0
+    },
+    "both_real_history_preflights_passed": true,
+    "staging_bot_identity_verified": true,
+    "webhook_absent": true,
+    "isolated_runtime_telegram_egress_verified": true,
+    "single_member_readonly_databases": 2,
+    "no_published_database_ports": true,
+    "original_source_copy_network_remains_none": true,
+    "encrypted_history_copy_hashes_match": true,
+    "three_production_bots_unchanged": true,
+    "ci_invoked": false
+  },
+  "listener": {
+    "brand": "accabad",
+    "authorized_recipient_count": 1,
+    "ingress": "Telegram HTTPS getUpdates; captured original update passed to private runtime",
+    "ready_observed": true,
+    "window_seconds": 3600,
+    "only_fresh_private_orders_command": true,
+    "single_request": true,
+    "atomic_send_attempt_marker": true,
+    "automatic_send_retry": false,
+    "legacy_staging_handler_paused": true,
+    "legacy_staging_restore_after_attempt_or_expiry": true,
+    "systemd_stop_post_restore": true
+  },
+  "telegram_delivery_confirmed": false,
+  "remaining": [
+    "approved_account_real_command_and_confirmed_history_response",
+    "separate_zikotech_empty_history_delivery_test",
+    "remaining_financial_obligation_exception_and_final_qualification"
+  ],
+  "t064_complete": false,
+  "t066_complete": false,
+  "t068_complete": false,
+  "release_ready": false
+}
