@@ -40,8 +40,9 @@ public sealed class CheckoutFixture : IAsyncDisposable
     public static long Actor(int user) => 7001 + user / 3;
     public LocalCheckoutRequest Request(int quantity = 1, decimal price = 10) => new(Guid.CreateVersion7(), Product, quantity, price);
 
-    public static async Task<CheckoutFixture> CreateAsync(int users = 3, decimal balance = 100, int stock = 1, CancellationToken ct = default)
+    public static async Task<CheckoutFixture> CreateAsync(int users = 3, decimal balance = 100, int stock = 1, CancellationToken ct = default, bool seedCatalog = true)
     {
+        if (!seedCatalog && (users != 0 || stock != 0)) throw new ArgumentException();
         var database = await DisposablePostgres.CreateAsync(ct);
         var files = new SyntheticSecretFiles();
         SecretSnapshot? secrets = null;
@@ -50,19 +51,19 @@ public sealed class CheckoutFixture : IAsyncDisposable
             Guid[] brands = BrandIds;
             files.WriteManifest(brands: brands);
             secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: brands));
-            await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
+            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
             var fixture = new CheckoutFixture(database, files, secrets, users);
             await using (var seed = await fixture.Sessions.BeginAsync(ct))
             {
-                await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,password_verifier) VALUES ($1,'public-checkout-admin','password',$2)", DbValue.Uuid(fixture.admin), DbValue.Text(Verifier.Value)), ct);
-                await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','immediate','public shared item')", DbValue.Uuid(fixture.Product)), ct);
+                if (seedCatalog) await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,password_verifier) VALUES ($1,'public-checkout-admin','password',$2)", DbValue.Uuid(fixture.admin), DbValue.Text(Verifier.Value)), ct);
+                if (seedCatalog) await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','immediate','public shared item')", DbValue.Uuid(fixture.Product)), ct);
                 for (int i = 0; i < 3; i++)
                 {
                     await seed.ExecuteAsync(new DbStatement("""
                         INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
                         VALUES ($1,$2,$2,$2,'international','en',$2,$3,$4,'current',true)
                         """, DbValue.Uuid(brands[i]), DbValue.Text("public-checkout-" + i), DbValue.Bigint(1001 + i), DbValue.Binary([1])), ct);
-                    await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_products(brand_id,product_id,visible,price_usdt) VALUES ($1,$2,true,10)", DbValue.Uuid(brands[i]), DbValue.Uuid(fixture.Product)), ct);
+                    if (seedCatalog) await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_products(brand_id,product_id,visible,price_usdt) VALUES ($1,$2,true,10)", DbValue.Uuid(brands[i]), DbValue.Uuid(fixture.Product)), ct);
                 }
                 for (int i = 0; i < users; i++)
                 {

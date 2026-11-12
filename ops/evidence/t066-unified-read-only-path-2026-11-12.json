@@ -1,0 +1,31 @@
+{
+  "scope": "synthetic_unified_read_only_reconciliation_implementation",
+  "date": "2026-11-12",
+  "baseline_main": "30286f6bb88fb2571469924d764f39653e64ed99",
+  "unit_cases": 251,
+  "focused_postgresql_cases": 66,
+  "host_launcher_cases": 10,
+  "operator_bundle_assets": 10,
+  "build_warnings": 0,
+  "build_errors": 0,
+  "metadata_credentials_excluded": true,
+  "negative_cases": [
+    "changed_frozen_plan_hash",
+    "changed_quarantine_reason",
+    "changed_target_row",
+    "changed_target_fingerprint",
+    "runtime_environment_injection",
+    "unexpected_mount",
+    "linked_or_permissive_input"
+  ],
+  "failed_attempt_logs_retained": true,
+  "synthetic_database_stopped": true,
+  "protected_execution_completed": false,
+  "financial_obligations_verified": false,
+  "media_availability_verified": false,
+  "release_ready": false,
+  "t066_complete": false,
+  "t068_complete": false,
+  "ci_started": false,
+  "native_aot_qualified": false
+}

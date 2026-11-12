@@ -14,7 +14,7 @@ public sealed class FoundationTests
     {
         FoundationQualification.VerifyIndependentInventoryKeys();
         await using var database = await DisposablePostgres.CreateAsync(Ct);
-        await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
+        await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
         await FoundationQualification.VerifySchemaAsync(database.Data, Ct);
     }
 
@@ -22,7 +22,7 @@ public sealed class FoundationTests
     public async Task GlobalAdministratorCannotCommitMisattributedBrandAuditOrItsBusinessWrites()
     {
         await using var database = await DisposablePostgres.CreateAsync(Ct);
-        await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
+        await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
         var sessions = new DbSessionFactory(database.Data);
         Guid admin = Guid.NewGuid(), first = Guid.NewGuid(), second = Guid.NewGuid(), user = Guid.NewGuid(), product = Guid.NewGuid();
         await using (var seed = await sessions.BeginAsync(Ct))

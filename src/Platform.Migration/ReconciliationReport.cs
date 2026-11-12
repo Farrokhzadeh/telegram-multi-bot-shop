@@ -24,8 +24,36 @@ public sealed record RedactedLegacyRecordReconciliation(long ExpectedRecords, lo
     public bool FinancialObligationsVerified => false;
     public bool ReleaseReady => false;
 }
+public sealed record RedactedLegacySnapshotBrand(string SourceBrand, long SourceTables, long SourceRows, long OriginalArchiveRecords, long RecoveredCipherFields, RedactedLegacyRecordReconciliation Projection, long OriginalRecords, long TypedOrders, long TypedPayments, long OriginalZeroProofs, long CatalogRecords, long QuarantinedRecords, long DerivedZeroFiles, IReadOnlyDictionary<string, int> QuarantineReasons)
+{
+    public bool PreservationMatched => SourceTables == 56 && OriginalArchiveRecords == OriginalRecords && OriginalRecords == TypedOrders + TypedPayments + OriginalZeroProofs + CatalogRecords + QuarantinedRecords && DerivedZeroFiles == OriginalZeroProofs && Projection.ExpectedRecords >= TypedOrders + TypedPayments + OriginalZeroProofs + CatalogRecords && Projection.ExpectedRecords == Projection.ComparedRecords && Projection.MismatchedRecords == 0 && Projection.InvalidArchives == 0 && Projection.MissingMappings == 0 && Projection.MismatchedMappings == 0 && Projection.UnexpectedMappings == 0 && Projection.WalletMatched && Projection.SaleableInventory == 0 && Projection.ExpectedEncryptedFields == Projection.ReencryptedFields && Projection.InvalidRetentions == 0 && Projection.UnexpectedActivityEvents == 0 && Projection.ProjectionMatched && RecoveredCipherFields >= Projection.ReencryptedFields;
+    public bool FinancialObligationsVerified => false;
+    public bool ReleaseReady => false;
+}
+public sealed record RedactedLegacySnapshotReconciliation(IReadOnlyList<RedactedLegacySnapshotBrand> Brands)
+{
+    public string Scope => "frozen_snapshot_preservation_and_quarantine_only";
+    public string MediaScope => "preserved_original_references_and_quarantine_only";
+    public bool MediaAvailabilityVerified => false;
+    public bool PreservationMatched => Brands.Count == 3 && Brands.Select(b => b.SourceBrand).SequenceEqual(new[] { "acc-abad", "kuala", "zikotech" }, StringComparer.Ordinal) && Brands.All(b => b.PreservationMatched);
+    public bool FinancialObligationsVerified => false;
+    public bool ReleaseReady => false;
+}
 public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReconciliationTarget? target = null)
 {
+    public static RedactedLegacySnapshotReconciliation RedactSnapshot(IReadOnlyList<RedactedLegacySnapshotBrand> brands)
+    {
+        ArgumentNullException.ThrowIfNull(brands);
+        foreach (var brand in brands)
+        {
+            ArgumentNullException.ThrowIfNull(brand); ArgumentNullException.ThrowIfNull(brand.Projection); ArgumentNullException.ThrowIfNull(brand.QuarantineReasons);
+            long[] counts = [brand.SourceTables, brand.SourceRows, brand.OriginalArchiveRecords, brand.RecoveredCipherFields, brand.OriginalRecords, brand.TypedOrders, brand.TypedPayments, brand.OriginalZeroProofs, brand.CatalogRecords, brand.QuarantinedRecords, brand.DerivedZeroFiles];
+            if (counts.Any(n => n < 0) || brand.QuarantineReasons.Any(p => p.Value < 0 || string.IsNullOrEmpty(p.Key) || p.Key.Any(c => c is not (>= 'a' and <= 'z') and not '_')) || brand.QuarantineReasons.Sum(p => (long)p.Value) != brand.QuarantinedRecords) throw new MigrationRejectedException();
+        }
+        try { foreach (var brand in brands) _ = checked(brand.TypedOrders + brand.TypedPayments + brand.OriginalZeroProofs + brand.CatalogRecords + brand.QuarantinedRecords); }
+        catch (OverflowException) { throw new MigrationRejectedException(); }
+        return new(Array.AsReadOnly(brands.Select(b => b with { QuarantineReasons = new System.Collections.ObjectModel.ReadOnlyDictionary<string, int>(b.QuarantineReasons.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal)) }).ToArray()));
+    }
     public static RedactedLegacyRecordReconciliation RedactRecords(LegacyRecordReconciliation report)
     {
         ArgumentNullException.ThrowIfNull(report);
@@ -134,6 +162,8 @@ public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReco
 [JsonSerializable(typeof(LegacyRecordReconciliation))]
 [JsonSerializable(typeof(RedactedLegacyRecordReconciliation))]
 [JsonSerializable(typeof(ProtectedLegacyEvidence))]
+[JsonSerializable(typeof(RedactedLegacySnapshotBrand))]
+[JsonSerializable(typeof(RedactedLegacySnapshotReconciliation))]
 public sealed partial class MigrationReportJsonContext : JsonSerializerContext;
 public sealed record WalletRecordReconciliation(Guid Batch, long ExpectedWallets, long ComparedWallets, long MismatchedRecords, long MissingMappings, long MismatchedMappings, long UnmatchedEntries, long UnexpectedMappings, long InvalidRetentions = 0, long ManualIrrAccounts = 0, long RetainedHistoryRows = 0, long RetainedIrrHistory = 0, long RetainedZeroHistory = 0)
 {

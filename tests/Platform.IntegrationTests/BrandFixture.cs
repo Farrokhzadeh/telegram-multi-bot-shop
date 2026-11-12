@@ -23,7 +23,7 @@ internal sealed class BrandFixture : IAsyncDisposable
         var database = await DisposablePostgres.CreateAsync(ct);
         try
         {
-            await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
+            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
             var fixture = new BrandFixture(database);
             if (brands is not null) Array.Copy(brands, fixture.Brands, 3);
             var deployment = deploymentId ?? Guid.NewGuid();

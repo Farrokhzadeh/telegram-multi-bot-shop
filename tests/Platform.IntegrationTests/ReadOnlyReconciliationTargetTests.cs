@@ -14,10 +14,14 @@ public sealed class ReadOnlyReconciliationTargetTests
         await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: Ct); await MigrationQualification.EnableRoleAsync(f, Ct);
         var row = MigrationQualification.Wallet(); var manifest = MigrationQualification.Manifest(f, "public-readonly", f.Brands[0], [row]);
         await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, row, Ct);
+        await WithReader(f, reader => check(f, reader, manifest, row));
+    }
+    internal static async Task WithReader(CheckoutFixture f, Func<NpgsqlDataSource, Task> check)
+    {
         var options = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString); SchemaManifest.ForQualification(options.ConnectionString).Validate(); string database = options.Database!;
         await using (var setup = f.Database.Data.CreateCommand("DO $$ BEGIN CREATE ROLE teleg_target_reader LOGIN PASSWORD 'synthetic-target-reader-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$; REVOKE CREATE,TEMPORARY ON DATABASE \"" + database + "\" FROM PUBLIC; GRANT CONNECT ON DATABASE \"" + database + "\" TO teleg_target_reader; REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT USAGE ON SCHEMA shop TO teleg_target_reader; GRANT SELECT ON ALL TABLES IN SCHEMA shop TO teleg_target_reader; COMMENT ON DATABASE \"" + database + "\" IS 'teleg-t066-reconciliation-copy:" + Backup + "'")) await setup.ExecuteNonQueryAsync(Ct);
         options.Username = "teleg_target_reader"; options.Password = "synthetic-target-reader-only"; options.Enlist = false; options.IncludeErrorDetail = false;
-        await using var reader = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); await check(f, reader, manifest, row);
+        await using var reader = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); await check(reader);
     }
     [Fact]
     public async Task ReaderComparesWalletAndRecordReportsWithoutImportAuthority() => await WithTarget(async (f, reader, manifest, row) =>

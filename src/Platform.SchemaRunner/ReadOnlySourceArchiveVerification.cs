@@ -20,7 +20,7 @@ internal static partial class ReadOnlySourceArchiveVerification
         if (value.Host != host || value.Database != database || value.Username != "teleg_source_reader" || value.Port != 5432 || value.IncludeErrorDetail || value.LogParameters || value.Enlist || value.Multiplexing) throw new MigrationRejectedException();
         return new(host, 5432, database, "teleg_source_reader");
     }
-    internal static async Task<ReadOnlySourceArchiveEvidence> VerifyAsync(string connection, string sourcePlan, ReadOnlyMemory<byte> archivePlan, string archiveDirectory, string checkpointDirectory, string expectedBrand, BrandContext context, SecretSnapshot secrets, IReadOnlyList<string> legacyKeys, CancellationToken ct = default)
+    internal static async Task<ReadOnlySourceArchiveEvidence> VerifyAsync(string connection, string sourcePlan, ReadOnlyMemory<byte> archivePlan, string archiveDirectory, string checkpointDirectory, string expectedBrand, BrandContext context, SecretSnapshot secrets, IReadOnlyList<string> legacyKeys, CancellationToken ct = default, Func<LegacySourceReader, VerifiedImportManifest, CancellationToken, Task>? verifyTarget = null)
     {
         if (!OperatingSystem.IsLinux() || !Path.IsPathFullyQualified(checkpointDirectory) || !Directory.Exists(checkpointDirectory) || !Path.GetFileName(checkpointDirectory).StartsWith("teleg-reconcile-checkpoints-", StringComparison.Ordinal) || new DirectoryInfo(checkpointDirectory).LinkTarget is not null || (File.GetUnixFileMode(checkpointDirectory) & (UnixFileMode)63) != 0 || Path.GetFullPath(checkpointDirectory) == Path.GetFullPath(archiveDirectory)) throw new MigrationRejectedException();
         if (Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_SOURCE_INSPECTION") != "1" || Environment.GetEnvironmentVariable("SHOP_ALLOW_PROTECTED_RECONCILIATION") != "1" || legacyKeys.Count is < 1 or > 4 || legacyKeys.Any(string.IsNullOrEmpty) || sourcePlan.Length > 1048576 || archivePlan.Length is < 128 or > 16777216) throw new MigrationRejectedException();
@@ -101,6 +101,7 @@ internal static partial class ReadOnlySourceArchiveVerification
                     count = checked(count + result.Count); fields = checked(fields + result.RecoveredFields);
                 }
             }
+            if (verifyTarget is not null) await verifyTarget(source, manifest, ct);
             var after = await source.VerifyCopyAsync(schema, expected, key, ct);
             await CheckDatabaseAsync();
             byte[] afterIndex = await ReadPrivateAsync(indexPath, ct), afterTool = await ArchiveToolIdentity.CurrentAsync(ct);

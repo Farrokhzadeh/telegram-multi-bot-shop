@@ -8,7 +8,7 @@ namespace Platform.Testing;
 
 public static class LegacyWalletOrderPlanQualification
 {
-    public static async Task RunAsync(string fault = "valid", CancellationToken ct = default)
+    public static async Task RunAsync(string fault = "valid", CancellationToken ct = default, Action<LegacyWalletOrderPlan>? inspect = null)
     {
         using var files = new SyntheticSecretFiles(); using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var context = CipherQualification.Context(SyntheticSecretFiles.BrandA); Guid batch = Guid.NewGuid(); const string orderId = "ORD-ABC123ABC123", archiveHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -69,7 +69,7 @@ public static class LegacyWalletOrderPlanQualification
             }
             Task<LegacyWalletOrderPlan> PlanZero() => LegacyWalletOrderPlan.CreateWithZeroOrdersAsync(context, secrets, archive, walletManifest, destination, "protected:synthetic/zero-orders", "Original synthetic brand", wallets, records, Prepare, ct);
             if (fault == "zero_prepared") { try { await PlanZero(); throw new InvalidOperationException("Changed prepared zero archive accepted."); } catch (MigrationRejectedException) { return; } }
-            var zeroPlan = await PlanZero(); int accepted = fault == "zero_valid" ? 1 : 0;
+            var zeroPlan = await PlanZero(); inspect?.Invoke(zeroPlan); int accepted = fault == "zero_valid" ? 1 : 0;
             var zeroCoverage = LegacyRecordDispositionReport.Verify(zeroPlan);
             if (!zeroCoverage.Accounted || zeroCoverage.Archived != records.Length || zeroCoverage.Orders != accepted || zeroCoverage.NativeZero != accepted || zeroCoverage.Reviewed != records.Length - accepted * 2 || zeroCoverage.ReleaseReady || zeroCoverage.ToString().Contains(orderId, StringComparison.Ordinal)) throw new InvalidOperationException("Zero-order source disposition reconciliation failed.");
             try { LegacyRecordDispositionReport.Verify(zeroPlan.Records, zeroPlan.Set.Orders, zeroPlan.Set.Payments, zeroPlan.Set.Delivery, []); if (zeroCoverage.Reviewed != 0) throw new InvalidOperationException("Missing reviewed original accepted."); } catch (MigrationRejectedException) { }
@@ -91,6 +91,7 @@ public static class LegacyWalletOrderPlanQualification
             catch (MigrationRejectedException) { return; }
         }
         var plan = LegacyWalletOrderPlan.Create(context, secrets, archive, walletManifest, destination, "protected:synthetic/typed-orders", "Original synthetic brand", wallets, records);
+        inspect?.Invoke(plan);
         var coverage = LegacyRecordDispositionReport.Verify(plan);
         if (!coverage.Accounted || coverage.Archived != records.Length || coverage.Orders != plan.Set.Orders.Count || coverage.Reviewed != plan.Review.Count || coverage.ReleaseReady || coverage.ToString().Contains(orderId, StringComparison.Ordinal)) throw new InvalidOperationException("Wallet-order source disposition reconciliation failed.");
         if (plan.Review.Count != 0)

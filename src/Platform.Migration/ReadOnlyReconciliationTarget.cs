@@ -14,15 +14,20 @@ public sealed class ReadOnlyReconciliationTarget
     public override string ToString() => "ReadOnlyReconciliationTarget [redacted]";
     public static async Task<ReadOnlyReconciliationTarget> VerifyAsync(NpgsqlDataSource data, VerifiedImportManifest manifest, string backupSha256, bool granted, CancellationToken ct = default)
     {
-        var endpoint = new NpgsqlConnectionStringBuilder(data.ConnectionString); const string prefix = "shop_qualification_";
-        manifest.Destination.Validate();
-        if (!granted || manifest.Destination.SqlSha256 != SchemaRunner.BaselineSqlSha256 || backupSha256.Length != 64 || !backupSha256.All(char.IsAsciiHexDigit) || endpoint.Host is not ("127.0.0.1" or "localhost" or "::1") || endpoint.Username != Username || endpoint.Port is < 1 or > 65535 || endpoint.IncludeErrorDetail || endpoint.LogParameters || endpoint.Enlist || endpoint.Multiplexing || endpoint.Database is null || endpoint.Database != "t066_reconcile" && (!endpoint.Database.StartsWith(prefix, StringComparison.Ordinal) || endpoint.Database.Length != prefix.Length + 32 || !endpoint.Database[prefix.Length..].All(char.IsAsciiHexDigit))) throw new MigrationRejectedException();
+        manifest.Destination.Validate(); if (manifest.Destination.SqlSha256 != SchemaRunner.BaselineSqlSha256) throw new MigrationRejectedException();
+        var endpoint = ValidateConnection(data.ConnectionString, backupSha256, granted);
         string backup = backupSha256.ToLowerInvariant();
         await using var session = await new DbSessionFactory(data).BeginReadOnlyAsync(ct);
-        var receipt = await CheckAsync(session, endpoint.Database, manifest.Destination.ServerVersion, backup, ct);
+        var receipt = await CheckAsync(session, endpoint.Database!, manifest.Destination.ServerVersion, backup, ct);
         return new(manifest, endpoint, backup, receipt.CatalogSha256);
     }
-    internal async Task RequireAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct)
+    public static NpgsqlConnectionStringBuilder ValidateConnection(string connection, string backupSha256, bool granted)
+    {
+        var endpoint = new NpgsqlConnectionStringBuilder(connection); const string prefix = "shop_qualification_";
+        if (!granted || backupSha256.Length != 64 || !backupSha256.All(char.IsAsciiHexDigit) || endpoint.Host is not ("127.0.0.1" or "localhost" or "::1") || endpoint.Username != Username || endpoint.Port is < 1 or > 65535 || endpoint.IncludeErrorDetail || endpoint.LogParameters || endpoint.Enlist || endpoint.Multiplexing || endpoint.Database is null || endpoint.Database != "t066_reconcile" && (!endpoint.Database.StartsWith(prefix, StringComparison.Ordinal) || endpoint.Database.Length != prefix.Length + 32 || !endpoint.Database[prefix.Length..].All(char.IsAsciiHexDigit))) throw new MigrationRejectedException();
+        return endpoint;
+    }
+    public async Task RequireAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct)
     {
         if (manifest.Reference != reference || !CryptographicOperations.FixedTimeEquals(manifestDigest, manifest.Digest.Span) || !session.MatchesEndpoint(host, port, database, Username)) throw new MigrationRejectedException();
         var receipt = await CheckAsync(session, database, manifest.Destination.ServerVersion, backup, ct);

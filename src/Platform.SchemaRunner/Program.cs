@@ -22,6 +22,20 @@ string ReadProtectedFile(string path)
     return File.ReadAllText(path);
 }
 
+if (args is ["--reconcile-legacy-read-only", "--job-prod1", var reconcileOne, "--job-prod2", var reconcileTwo, "--job-prod3", var reconcileThree, "--original-destination-file", var reconcileDestination, "--target-connection-file", var reconcileTarget, "--target-backup-hash-file", var reconcileBackup, "--target-fingerprints-file", var reconcileFingerprints, "--checkpoint-directory", var reconcileCheckpoints, "--receipt", var reconcileReceipt])
+{
+    try { await ReadOnlyUnifiedReconciliationCommand.RunAsync([reconcileOne, reconcileTwo, reconcileThree], reconcileDestination, reconcileTarget, reconcileBackup, reconcileFingerprints, reconcileCheckpoints, reconcileReceipt); Console.WriteLine("Frozen snapshot preservation and quarantine reconciliation passed; release remains gated."); return 0; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or ArithmeticException or MigrationRejectedException or NpgsqlException or Platform.Persistence.DbOperationException or System.Security.Cryptography.CryptographicException or Platform.Security.CipherRejectedException or Platform.Security.SecretConfigurationException)
+    { Console.Error.WriteLine("Frozen snapshot reconciliation rejected; retain private evidence for review."); return 78; }
+}
+
+if (args is ["--prepare-reconciliation-target-metadata", "--connection-file", var originalTargetConnection, "--expected-connection-hash-file", var originalTargetHash, "--manifest-out", var originalTargetMetadata])
+{
+    try { await ReadOnlyTargetMetadataCommand.RunAsync(originalTargetConnection, originalTargetHash, originalTargetMetadata); Console.WriteLine("Original target metadata prepared without credentials."); return 0; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or FormatException or MigrationRejectedException)
+    { Console.Error.WriteLine("Original target metadata rejected; retain private evidence for review."); return 78; }
+}
+
 if (args is ["--reconcile-source-archive-read-only", "--job-file", var archiveCheckJob, "--checkpoint-directory", var archiveCheckpoints, "--receipt", var archiveCheckReceipt])
 {
     try { await ReadOnlySourceArchiveCommand.RunAsync(ArchivePrivateFile.ReadText(archiveCheckJob), archiveCheckpoints, archiveCheckReceipt, ArchivePrivateFile.ReadText); Console.WriteLine("Read-only source and archive verification passed; redacted receipt written."); return 0; }

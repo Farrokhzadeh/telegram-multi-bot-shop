@@ -19,9 +19,9 @@ public sealed class LegacyWalletRetentionFixture : IAsyncDisposable
     public static byte[] RegisterBody() => Encoding.UTF8.GetBytes($$"""
         {"version":2,"policy":"manual_irr_and_original_nonposting_history_v2","sources":[{"source":"prod1","brand":"acc-abad","archive_sha256":"{{Archive}}","source_users":1,"wallets":[{"legacy_user_id":"99001234","original_irr_amount":"1234.50"}],"history":[{"id":"usd-original","user_id":"99001234","amount":"7.50","currency":"USD","created_at":"2024-01-01 01:00:00+00","desc":"PRIVATE original history"},{"id":"irr-original","user_id":"99001234","amount":"-900.25","currency":"IRR","created_at":"2024-01-01 02:00:00+00"},{"id":"zero-original","user_id":"99001234","amount":"0","currency":"USD","created_at":"2024-01-01 03:00:00+00"}]},{"source":"prod2","brand":"kuala"},{"source":"prod3","brand":"zikotech"}]}
         """);
-    public static async Task<LegacyWalletRetentionFixture> CreateAsync(CancellationToken ct)
+    public static async Task<LegacyWalletRetentionFixture> CreateAsync(CancellationToken ct, bool seedCatalog = true)
     {
-        var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: ct);
+        var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: ct, seedCatalog: seedCatalog);
         try
         {
             await MigrationQualification.EnableRoleAsync(f, ct);

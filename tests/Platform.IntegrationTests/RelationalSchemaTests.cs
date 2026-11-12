@@ -13,8 +13,8 @@ public sealed class RelationalSchemaTests
     {
         await using var database = await DisposablePostgres.CreateAsync(Ct);
         var manifest = SchemaManifest.ForQualification(database.Data.ConnectionString);
-        var applied = await SchemaRunner.ApplyAsync(database.Data, manifest, Ct);
-        var repeated = await SchemaRunner.ApplyAsync(database.Data, manifest, Ct);
+        var applied = await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, manifest, Ct);
+        var repeated = await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, manifest, Ct);
         Assert.True(applied.Applied);
         Assert.False(repeated.Applied);
         Assert.Equal(applied.CatalogSha256, repeated.CatalogSha256);
@@ -34,7 +34,7 @@ public sealed class RelationalSchemaTests
     {
         await using var database = await CreateAsync();
         await ExecuteAsync(database, mutation);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => SchemaRunner.ApplyAsync(database.Data,
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Platform.Persistence.SchemaRunner.ApplyAsync(database.Data,
             SchemaManifest.ForQualification(database.Data.ConnectionString), Ct));
     }
 
@@ -43,11 +43,11 @@ public sealed class RelationalSchemaTests
     {
         await using var database = await DisposablePostgres.CreateAsync(Ct);
         var manifest = SchemaManifest.ForQualification(database.Data.ConnectionString);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => SchemaRunner.ApplyAsync(database.Data,
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Platform.Persistence.SchemaRunner.ApplyAsync(database.Data,
             manifest with { SqlSha256 = new string('0', 64) }, Ct));
         Assert.Equal(0L, await ScalarAsync<long>(database, "SELECT count(*) FROM pg_namespace WHERE nspname='shop'"));
         await ExecuteAsync(database, "CREATE SCHEMA shop");
-        await Assert.ThrowsAsync<InvalidOperationException>(() => SchemaRunner.ApplyAsync(database.Data, manifest, Ct));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, manifest, Ct));
         Assert.Equal(0L, await ScalarAsync<long>(database, "SELECT count(*) FROM pg_tables WHERE schemaname='shop'"));
     }
 
@@ -57,7 +57,7 @@ public sealed class RelationalSchemaTests
         await using var database = await DisposablePostgres.CreateAsync(Ct);
         var manifest = SchemaManifest.ForQualification(database.Data.ConnectionString);
         SchemaReceipt[] results = await Task.WhenAll(Enumerable.Range(0, 2)
-            .Select(_ => SchemaRunner.ApplyAsync(database.Data, manifest, Ct)));
+            .Select(_ => Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, manifest, Ct)));
         Assert.Single(results, r => r.Applied);
         Assert.Single(results.Select(r => r.CatalogSha256).Distinct());
     }
@@ -68,7 +68,7 @@ public sealed class RelationalSchemaTests
         await using var database = await DisposablePostgres.CreateAsync(Ct);
         await using var connection = await database.Data.OpenConnectionAsync(Ct);
         await using var transaction = await connection.BeginTransactionAsync(Ct);
-        await using var command = new NpgsqlCommand(SchemaRunner.BaselineSql, connection, transaction);
+        await using var command = new NpgsqlCommand(Platform.Persistence.SchemaRunner.BaselineSql, connection, transaction);
         await command.ExecuteNonQueryAsync(Ct);
         await transaction.RollbackAsync(Ct);
         Assert.Equal(0L, await ScalarAsync<long>(database, "SELECT count(*) FROM pg_namespace WHERE nspname='shop'"));
@@ -435,7 +435,7 @@ public sealed class RelationalSchemaTests
         var database = await DisposablePostgres.CreateAsync(Ct);
         try
         {
-            await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
+            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
             await ExecuteTransactionAsync(database, """
                 INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
                 VALUES ('00000000-0000-0000-0000-000000000001','a','public-a','public a','iran','fa','public_a',1001,decode('01','hex'),'public-key-a'),

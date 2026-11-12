@@ -105,7 +105,7 @@ public sealed class SupportSchemaTests
         var database = await DisposablePostgres.CreateAsync(Ct);
         try
         {
-            await SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
+            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
             await ExecuteTransactionAsync(database, $$"""
                 INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
                 VALUES ('00000000-0000-0000-0000-000000000001','sa','public-sa','public sa','iran','fa','public_sa',1001,decode('01','hex'),'public-key-a'),
