@@ -1,8 +1,8 @@
-import json,os,stat,sys,time,uuid
+import hashlib,json,os,stat,sys,time,uuid
 from pathlib import Path
 
 ROOT=Path("/stage/legacy")
-OPS={"status","wallet","stop","fake_payment","fake_supplier","fake_telegram","fake_fx","fake_ai"}
+OPS={"status","wallet","wallet-paused","stop","fake_payment","fake_supplier","fake_telegram","fake_fx","fake_ai"}
 
 def private(path,limit=4096):
 	if path.resolve(strict=True)!=path or path.parent.resolve(strict=True)!=path.parent: raise ValueError()
@@ -26,7 +26,7 @@ def write(path,value,replace=False):
 		os.link(temp,path);temp.unlink()
 
 def main(mode):
-	if mode not in {"init","serve"} or os.getenv("SHOP_CUTOVER_STAGE")!="synthetic-acc-abad-v1" or ROOT.resolve(strict=True)!=ROOT or stat.S_IMODE(ROOT.stat().st_mode)!=0o700 or ROOT.stat().st_uid!=os.geteuid(): raise ValueError()
+	if mode not in {"init","serve","stock-init"} or os.getenv("SHOP_CUTOVER_STAGE")!="synthetic-acc-abad-v1" or ROOT.resolve(strict=True)!=ROOT or stat.S_IMODE(ROOT.stat().st_mode)!=0o700 or ROOT.stat().st_uid!=os.geteuid(): raise ValueError()
 	run=uuid.UUID(hex=private(ROOT/"identity",64).strip()).hex
 	if os.getenv("POSTGRES_HOST")!="127.0.0.1" or os.getenv("POSTGRES_DB")!="t068_legacy_stage" or os.getenv("INSTANCE_ID")!="t068-acc-abad" or os.getenv("DEPLOYMENT_STAGE")!="staging": raise ValueError()
 	os.environ.setdefault("DJANGO_SETTINGS_MODULE","django_project.settings.base")
@@ -53,8 +53,25 @@ def main(mode):
 		return
 	saved=json.loads(private(state_path))
 	if set(saved)!={"run","product","user","database"} or saved["run"]!=run or saved["database"]!=connection.settings_dict["NAME"]: raise ValueError()
+	if mode=="stock-init":
+		plan=json.loads(private(ROOT/"stock-plan.json"))
+		assert set(plan)=={"run","product","unit","credential"} and uuid.UUID(plan["run"]).hex==run and plan["credential"]=="SYNTHETIC-COMMON-"+run+"-"+uuid.UUID(plan["unit"]).hex
+		with transaction.atomic():
+			name="SYNTHETIC COMMON "+uuid.UUID(plan["unit"]).hex
+			products=list(Product.objects.filter(name=name))
+			if not products:
+				product=Product.objects.create(name=name,price=10,auto_price=False)
+				add_inventory_items(product,[plan["credential"]])
+			else: assert len(products)==1;product=products[0]
+			items=list(InventoryItem.objects.filter(product=product))
+			assert len(items)==1 and items[0].order_id is None and items[0].data==plan["credential"]
+			with connection.cursor() as cursor:
+				cursor.execute("SELECT data FROM inventory WHERE id=%s",[items[0].pk]);cipher=cursor.fetchone()[0]
+		write(ROOT/"stock-binding.json",{"product":product.pk,"unit":items[0].pk,"cipher":hashlib.sha256(cipher.encode()).hexdigest(),"plain":hashlib.sha256(plan["credential"].encode()).hexdigest()},True)
+		saved["product"]=product.pk;write(state_path,saved,True)
+		return
 	assert_database_binding()
-	if TelegramUser.objects.count()!=1 or Product.objects.count()!=1: raise ValueError()
+	if TelegramUser.objects.count()!=1 or Product.objects.count()!=(2 if (ROOT/"stock-plan.json").exists() else 1): raise ValueError()
 	def result(operation,outcome):
 		return {"operation":operation,"outcome":outcome,"orders":Order.objects.count(),"allocated":InventoryItem.objects.filter(order__isnull=False).count(),"debits":WalletTransaction.objects.filter(amount__lt=0).count(),"synthetic":True,"releaseReady":False}
 	write(ROOT/"ready.json",result("ready","ready"),True)
@@ -69,12 +86,18 @@ def main(mode):
 			command=private(request,128).strip()
 			if command not in OPS: raise ValueError()
 			outcome="simulated" if command.startswith("fake_") else "ready"
-			if command=="wallet":
+			if command in {"wallet","wallet-paused"}:
 				attempt=ROOT/"attempts"/request.stem
 				if attempt.exists(): outcome="uncertain_do_not_retry"
 				else:
 					write(attempt,{"operation":"wallet","request":request.stem})
-					accepted=purchase_item(saved["user"],saved["product"],1,currency="USD",expected_total=10)
+					with transaction.atomic():
+						accepted=purchase_item(saved["user"],saved["product"],1,currency="USD",expected_total=10)
+						if command=="wallet-paused":
+							assert accepted.ok
+							write(ROOT/("held-"+request.stem+".json"),result(command,"transaction-held"))
+							time.sleep(120)
+							raise ValueError()
 					outcome="purchased" if accepted.ok else "rejected"
 			write(response,result(command,outcome))
 			if command=="stop": return

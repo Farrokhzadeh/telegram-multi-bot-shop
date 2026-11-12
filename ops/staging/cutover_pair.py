@@ -1,4 +1,4 @@
-import argparse,base64,fcntl,hashlib,json,os,re,secrets,stat,subprocess,sys,time,uuid
+import argparse,base64,fcntl,shutil,hashlib,json,os,re,secrets,stat,subprocess,sys,time,uuid
 from pathlib import Path
 
 if not __debug__: raise SystemExit(78)
@@ -142,7 +142,50 @@ def prepare(root):
 		m["containers"][role]={"id":call(["create",*flags])};save(root/"pair.private.json",m)
 		validate(root,m)
 	return m
+def tree_fingerprint(path):
+	items=[]
+	for f in sorted([path,*path.rglob("*")]):
+		s=f.lstat();assert not stat.S_ISLNK(s.st_mode)
+		if f.is_file(): assert stat.S_ISREG(s.st_mode) and s.st_nlink==1
+		else: assert f.is_dir()
+		items.append((str(f.relative_to(path)),s.st_uid,s.st_gid,stat.S_IMODE(s.st_mode),digest(f) if f.is_file() else "directory"))
+	return hashlib.sha256(json.dumps(items,separators=(",",":")).encode()).hexdigest()
+def copy_owned(source,destination):
+	shutil.copytree(source,destination,copy_function=shutil.copy2)
+	for f in [source,*source.rglob("*")]:
+		s=f.lstat();assert not stat.S_ISLNK(s.st_mode);os.chown(destination/f.relative_to(source),s.st_uid,s.st_gid)
+def prepare_clone(root,source):
+	assert source!=root and re.fullmatch(r"/var/lib/teleg-cli/t068-pair-[a-z0-9-]+",str(source)) and source.resolve(strict=True)==source and source.stat().st_uid==0 and stat.S_IMODE(source.stat().st_mode)==0o700
+	old=json.loads(private(source/"pair.private.json"));validate(source,old)
+	assert all(not inspect(v["id"])["State"]["Running"] for v in old["containers"].values())
+	assert not (root/"pair.private.json").exists()
+	run=uuid.uuid4().hex;bindings={}
+	for side,uid,pguid in [("legacy",1000,70),("target",10001,999)]:
+		data=side+"-db";before=tree_fingerprint(source/data);copy_owned(source/data,root/data);assert tree_fingerprint(root/data)==before
+		bindings[data]=before
+		directory(root/side,uid)
+		for name in ["requests","results","attempts","logs"]: directory(root/side/name,uid)
+		before=tree_fingerprint(source/side/"tmp");copy_owned(source/side/"tmp",root/side/"tmp");assert tree_fingerprint(root/side/"tmp")==before
+		for name in ["requests","results","attempts"]:
+			shutil.copytree(source/side/name,root/side/("step1-"+name),copy_function=shutil.copy2)
+		for name in [side+".env",data+".env"]: env(root/name,dict(line.split("=",1) for line in private(source/name).splitlines()))
+		state=json.loads((source/side/"state.json").read_text());state["run"]=run if side=="legacy" else str(uuid.UUID(hex=run))
+		save(root/side/"state.json",state);os.chown(root/side/"state.json",uid,uid)
+		f=root/side/"identity";f.write_text(run+"\n");f.chmod(0o600);os.chown(f,uid,uid)
+		if side=="legacy":
+			e=root/(side+".env");vals=dict(line.split("=",1) for line in private(e).splitlines());vals["PGAPPNAME"]="t068-cutover-stage";e.unlink();env(e,vals)
+		assert tree_fingerprint(source/data)==bindings[data]
+	m={"run":run,"scope":"synthetic_acc_abad_fence","cloned_from_run":old["run"],"source_copy_fingerprints":bindings,"containers":{},"bundle":{str(f.relative_to(root/"build/bin")):digest(f) for f in (root/"build/bin").rglob("*") if f.is_file()},"legacy_script":digest(root/"tools/cutover_legacy_runtime.py")}
+	assert (root/"build/bin/Platform.AotSmoke.dll").is_file()
+	save(root/"pair.private.json",m)
+	for role in CAPS:
+		_,_,_,_,_,flags=config(root,run,role);m["containers"][role]={"id":call(["create",*flags])};save(root/"pair.private.json",m);validate(root,m)
+	validate(source,old);assert all(not inspect(v["id"])["State"]["Running"] for v in old["containers"].values())
+	return m
 def start(root,m,side=None):
+	if (root/"fence-header.private.json").exists():
+		from cutover_fence import consume_start
+		consume_start(root,m,side)
 	sides=[side] if side else ["legacy","target"]
 	assert set(m["containers"])==set(CAPS)
 	assert all(not inspect(m["containers"][r]["id"])["State"]["Running"] for r in sides)
@@ -180,7 +223,8 @@ def stop(root,m,side=None):
 		name,image,_,_,_,_=config(root,m["run"],role);x=inspect(m["containers"][role]["id"])
 		assert x["Id"]==m["containers"][role]["id"] and x["Name"]=="/"+name and x["Image"]==image and x["Config"]["Labels"]["teleg.run"]==m["run"] and x["Config"]["Labels"]["teleg.task"]=="T068"
 		call(["stop","--time","15",x["Id"]],45)
-def request(root,side,command,request_id=None):
+def request(root,side,command,request_id=None,_fenced=False,_wait=True):
+	if (root/"fence-header.private.json").exists() and not _fenced: raise ValueError("Use epoch-fenced admission")
 	key=request_id or uuid.uuid4().hex
 	assert side in {"legacy","target"} and re.fullmatch("[a-f0-9]{32}",key)
 	path=root/side/"requests"/(key+".request");uid=1000 if side=="legacy" else 10001
@@ -196,16 +240,17 @@ def request(root,side,command,request_id=None):
 			finally: os.close(fd)
 			os.rename(temp,path)
 	finally: os.close(lock)
+	if not _wait: return key,None
 	result=root/side/"results"/(key+".json")
 	for _ in range(120):
 		if result.is_file(): return key,json.loads(result.read_text())
 		time.sleep(.25)
 	raise ValueError()
 def main():
-	a=argparse.ArgumentParser();a.add_argument("action",choices=["prepare","start","stop","validate","status"]);a.add_argument("--root",required=True);a.add_argument("--side",choices=["legacy","target"]);args=a.parse_args()
+	a=argparse.ArgumentParser();a.add_argument("action",choices=["prepare","start","stop","validate","status"]);a.add_argument("--root",required=True);a.add_argument("--from-root");a.add_argument("--side",choices=["legacy","target"]);args=a.parse_args()
 	root=Path(args.root)
 	if os.geteuid()!=0 or not re.fullmatch(r"/var/lib/teleg-cli/t068-pair-[a-z0-9-]+",str(root)) or root.resolve(strict=True)!=root or root.stat().st_uid!=0 or stat.S_IMODE(root.stat().st_mode)!=0o700: raise ValueError()
-	m=prepare(root) if args.action=="prepare" else json.loads(private(root/"pair.private.json"))
+	m=(prepare_clone(root,Path(args.from_root)) if args.from_root else prepare(root)) if args.action=="prepare" else json.loads(private(root/"pair.private.json"))
 	if args.action=="start": start(root,m,args.side)
 	elif args.action=="stop": stop(root,m,args.side)
 	else: validate(root,m)

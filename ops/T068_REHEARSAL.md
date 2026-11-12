@@ -1,5 +1,5 @@
 # T068 isolated single-brand cutover rehearsal
-Status: **NOT COMPLETE**;81/96 unchanged. **Step1 is implemented and synthetically qualified:** an isolated legacy/target runtime pair for acc-abad. The common writer fence, durable callback handoff, protected-copy rehearsal and rollback remain open.
+Status: **NOT COMPLETE**;81/96 unchanged. **Step1 is implemented and synthetically qualified:** an isolated legacy/target runtime pair for acc-abad. Step2's fence is qualified for the synthetic pair below. Durable callback handoff, protected-copy rehearsal and rollback remain open.
 ## Authority and scope
 The owner authorized isolated copied-data/staging work with generated secrets and fake transports, without production writer stops, customer messages, real financial/provider effects or release. This checkpoint uses generated data only. No T066 source/target container, protected archive, original key, media or quarantined record is an input.
 Base main:`c46d75bdbbe2658a410e2797d3a53a8121f78d6e`. Current AGENTS, constitution3.0.0, active spec/plan/tasks/schema/handoff, staging plan, release gates, T064/T066 qualification and T067 runbook remain authoritative.
@@ -35,15 +35,32 @@ The generated [step1 evidence](evidence/t068-paired-runtime-step1-2026-11-12.jso
 ## Operator use
 Private checkpoint:`/var/lib/teleg-cli/t068-pair-20261112`. Read its execution ledger and validate exact resources before reuse. The public launcher intentionally accepts only private root-owned paths beneath`/var/lib/teleg-cli/t068-pair-*`; ownership fixtures require root on the owner server.
 `python3 ops/staging/cutover_pair.py validate --root <private-root>` verifies the installed pair. Explicit`start`,`stop` and`status` actions support independent side controls. Initial`prepare` requires a fresh reviewed build/tools directory and measured headroom; it does not select existing production services. Never repoint this synthetic harness at production or protected import endpoints. An environment label or a saved checkpoint alone is not execution proof.
+## Step2 — synthetic writer/stock fence (2026-11-13)
+A separate copied pair at`/var/lib/teleg-cli/t068-pair-fence-v2-20261113` now has an enforced single-owner database lifecycle. The original step1 pair and all protected copies were left stopped and unchanged.
+`cutover_fence.py` serializes operations with a host lock and maintains a root-private HMAC ledger, monotonic epochs and a checked head pointer. A grant starts with both databases stopped, performs fresh pinned-PostgreSQL single-user stock checks in explicit read-only transactions, records an intent and issues a side/epoch-bound, single-use start permit. The ordinary launcher cannot start a fenced pair independently. The opposite database remains stopped, blocking writers that retain its credentials.
+Admission requires the active side and current epoch. Freeze stops both sides and preserves pending inputs in private quarantine. Recovery verifies the complete journal and fresh stock state and leaves both sides frozen. Recorded target intent prevents automatic legacy reactivation; rollback authority remains separately gated. The signing key is outside runtime/database mounts.
+Both engines received encrypted replicas of one explicitly generated synthetic unit, authenticated during setup and bound by plaintext/ciphertext commitments. Handoff rejects missing/changed replicas, conflicting allocation and transfer away from an already allocated replica.
+Actual checks passed:
+- The real legacy checkout held an uncommitted transaction. Freeze terminated it, fresh stopped-data inspection proved rollback, and its pending input was retained.
+- Six generic SQL writer clients per engine—bot, callback, admin, job, import and stock probes—could write/roll back while active and failed with retained credentials after fencing.
+- Competing grants for one epoch produced one success and one rejection; stale-epoch, foreign-owner and unilateral-start requests were rejected.
+- A real coordinator SIGKILL occurred after its signed intent was durable and before head update. The stale head was rejected; recovery preserved target intent and resumed no owner.
+- The actual target checkout committed the common unit once: legacy0/target1. Reverse legacy activation remained blocked.
+- Live filtered Docker events recorded three writer-database starts and no overlap.
+Validation:251 baseline units,12 existing host guards, eight new fence guards, six live phases, zero-warning managed build and final formatting. A fresh final stopped-data review passed. The formatter's workload advisory remains recorded. The first attempt used retrospective Docker history, which lost early starts; its logs/data were preserved, and qualification used fresh copies plus live capture.
+[Generated step2 evidence](evidence/t068-synthetic-writer-stock-fence-2026-11-13.json) binds sources, bundle, journal, stock checks and event stream. All four new containers are stopped;33 preexisting containers and the protected T066 copies are unchanged.
+This qualifies the isolated one-brand pair's database/lifecycle boundary. The generic SQL probes do not qualify actual bot/API/job host wiring, real callbacks or production shared-core per-brand controls. Installed pairs require the controller for lifecycle changes; Docker administration remains a trusted host boundary.
+Operator flow:`status`,`grant --side ... --epoch ...`,`admit --side ... --epoch ... --command ...`,`freeze --epoch ...` and`recover`, all with the exact reviewed`--root`. Recovery is a safe freeze, not permission to reverse accepted effects or restart old writers.
+
 ## Remaining T068 gates
 | Gate | Reusable evidence | Remaining work |
 |---|---|---|
 | Frozen preservation/reconciliation | T063/T064/T066 qualified their exact frozen scopes | Bind new protected rehearsal clones to matching inputs and verify start/end commitments |
 | Paired runtime | Step1 synthetic pair, actual checkout and independent stop/restart | Bind the eventual authorized-copy rehearsal without importing production secrets into ordinary hosts |
-| All writer classes fenced | Existing consumer-lock boundary tests prove its limits | Enforce one common authority across old/new bot, callback, admin, job/import and stock writers, including stale connections and restart |
+| All writer classes fenced | Step2 database/lifecycle fence and generic SQL probes | Qualify actual host routing and protected/shared-core deployment |
 | Callback/update handoff | Local fake command channel only | Durable owner/epoch, freeze-window capture and safe late/duplicate/foreign/uncertain-event replay |
-| Stock ownership | Generated units are distinct; original stock is not imported | Audited custody/segregation and actual competing allocation proof for the same unit |
+| Stock ownership | Step2 same synthetic unit allocated legacy0/target1 with no writer-database overlap | Bind actual protected stock custody without inferring unknown ownership |
 | Handoff interruption/restart | Step1 runtime persistence and fail-closed malformed-input checks | Interrupt every actual handoff boundary and verify accepted money, stock, jobs and delivery obligations |
 | Rollback | T064 frozen restore proof; T067 procedure | Execute paired rollback before acceptance, then preserve/reconcile accepted target effects before any old owner resumes |
 | Independent final review | Source-bound step1 runtime evidence | Review complete actual staging execution before checking T068 |
-Next: implement step2, the common enforced writer/stock fence, using this pair. T068, T075/T076/T080/T081 and production release remain separately gated. All original financial, ownership, delivery and media unknowns remain quarantined.
+Next: step3 durable callback/update capture and handoff using the fenced pair. T068, T075/T076/T080/T081 and production release remain separately gated. All original financial, ownership, delivery and media unknowns remain quarantined.
