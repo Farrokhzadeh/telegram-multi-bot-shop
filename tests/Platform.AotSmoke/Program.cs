@@ -11,6 +11,12 @@ using Platform.Security;
 using Platform.Testing;
 using Platform.Telegram;
 
+if (args.Length > 0 && args[0] == "--cutover-stage")
+{
+    try { if (args is not ["--cutover-stage", "--root", var root, "--mode", var mode]) throw new InvalidOperationException(); await CutoverStageRuntime.RunAsync(root, mode); }
+    catch (Exception) { Console.Error.WriteLine("Synthetic cutover runtime rejected; no live transport is configured."); Environment.ExitCode = 78; }
+    return;
+}
 if (args is ["--preorder-worker-probe"]) { await PreorderProcessQualification.ChildAsync(); return; }
 await SourceCopyQualification.RunAsync();
 Console.WriteLine("PASS: native read-only source copy, independent commitments and denied writes.");
