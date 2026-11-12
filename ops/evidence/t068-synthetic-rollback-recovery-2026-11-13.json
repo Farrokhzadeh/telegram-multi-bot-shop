@@ -1,0 +1,62 @@
+{
+  "actual_host_shared_core_controls_verified": false,
+  "all_28_target_tables_compared_after_restore_and_restart": true,
+  "all_handoff_boundaries_verified": false,
+  "all_new_containers_stopped": true,
+  "base_main": "497578bde250bbe2628f3596a539d0abd98b7a40",
+  "baseline_units_reused": 251,
+  "bundle_manifest_sha256": "b17e12276b4b9b033b74611ced2089494794d2b8778a2242a223877b385eae4f",
+  "changed_target_tables_from_one_checkout": [
+    "audit_events",
+    "bot_activity_events",
+    "fulfillments",
+    "inventory_items",
+    "jobs",
+    "orders",
+    "wallet_entries",
+    "wallets"
+  ],
+  "common_unit_allocations": {
+    "legacy": 0,
+    "target": 1
+  },
+  "database_starts_observed": 4,
+  "evidence_sha256": {
+    "baseline.trx": "079ea600eea5daa79e9d609b332c57ff02161c01102f8941865977bf83367f0c",
+    "guards-final-31-rerun.private.log": "604e9da199280e5b103b266f8804cd64215b8fa116fddb56b267c18127dce43e",
+    "guards-final-31.private.log": "be184342c5222e405ebcb4a49f52ec25789a86f4d885dba385cabd0f8c284b54",
+    "initial_snapshot_failure": "4bacd8fb991ec27079eb4074e769b970070c7a57c4bab45d2cee0098df38d661",
+    "recovery-accepted.private.json": "26e539df0526dedc0deece979f705fc56785dfe815b8652ad3008f744919faed",
+    "recovery-before.private.json": "400d812a025508a293b3ef01d70ebbd8eacc45164956052221362464b73e3e57",
+    "recovery-docker-events.private.jsonl": "9be9051d2a33906cc6722b979ae9f124fae267ff4d3f5fff83c5dced68f795e9",
+    "recovery-freeze-crash.exit": "cfeb3721a817579ed0f8bf7235b8b586be2d1f6426e5f7e4c3d3d62a3015f8d7",
+    "recovery-runtime-result.private.json": "b0daf7e119e4c223d1386fc047b7521ca3a77a321383ce3a4957cbd748c91f97",
+    "rollback-backup-manifest.private.json": "2c8c38d2a47cfa66a7c4e044cc2d3a06f33dbabbba79fb3475c34ba61528f842"
+  },
+  "freeze_coordinator_sigkill_exit": -9,
+  "host_guards": 31,
+  "live_phases": [
+    "source-owner-resumed-before-target-acceptance",
+    "source-interruption-left-all-target-tables-unchanged",
+    "post-acceptance-freeze-sigkill-recovered-without-old-writer",
+    "independent-restored-database-preserved-all-28-tables",
+    "target-restart-preserved-accepted-state-and-replay-fences"
+  ],
+  "overlapping_writer_databases": false,
+  "postacceptance_legacy_reverse_rejected": true,
+  "postacceptance_reverse_replay_to_legacy_verified": false,
+  "preacceptance_source_resume_verified": true,
+  "preexisting_containers_unchanged": 45,
+  "protected_copy_cutover_rollback_verified": false,
+  "release_ready": false,
+  "retained_initial_failure": "Initial notice-based snapshot emitted no verifiable table receipts before any writer grant; direct SELECT receipts passed on the unchanged prepared pair.",
+  "scope": "generated-data paired preacceptance rollback and accepted-state freeze/restore/restart only",
+  "source_copy_fingerprints_rechecked": true,
+  "source_sha256": {
+    "cutover_fence.py": "c4eef9dfbdf47c3f07e79ce4fe59fccfa7aa0198aeb434cb98454f1dd611bc0c",
+    "cutover_inbox.py": "ef537189e89df1de7369ce6c6a57202088195d7487dbb639fa996441533c8f91",
+    "cutover_pair.py": "be52b59e74b14787105f17388e6ab33a57095e84b9d0586c078c865720dfe0bb",
+    "test_cutover_recovery_runtime.py": "29532fa38d3c62bd82cd7d1f422a30bcb9929fe35f3e020a57de09db2ef6cd6a"
+  },
+  "task_complete": false
+}

@@ -1,0 +1,19 @@
+{
+  "frozen_fingerprints_sha256": "8b618211d449084d14e0a6d3122feee1c17f037b06f296a0eb49438736c7a268",
+  "metadata_file_matches_qualified_staged_binding": true,
+  "operational_stock_admission_qualified": false,
+  "postacceptance_reverse_to_legacy_mapping_qualified": false,
+  "protected_original_containers_still_stopped": true,
+  "protected_writer_rehearsal_executed": false,
+  "qualified_frozen_operational_row_counts": {
+    "fulfillments": 0,
+    "inventory_items": 0,
+    "jobs": 0,
+    "telegram_deliveries": 0
+  },
+  "release_ready": false,
+  "required_input": "Reviewed single-brand copied-data admission/custody manifest and obligation-preserving reverse mapping; no inference from absent records",
+  "reused_qualification": "T066 complete frozen preservation/quarantine; ba7785e0f9da331cfa426470a21928adad1ba13f",
+  "scope": "Unresolved protected writer-rehearsal inputs; qualified frozen data evidence reused without starting copies",
+  "task_complete": false
+}
