@@ -13,6 +13,11 @@
     <Compile Include="../Shared/LegacyReadOnlyOrderQualification.cs" Link="Shared/LegacyReadOnlyOrderQualification.cs" />
     <Compile Include="../Shared/SyntheticSecretFiles.cs" Link="Shared/SyntheticSecretFiles.cs" />
     <Compile Include="../Shared/SupplierCredentialQualification.cs" Link="Shared/SupplierCredentialQualification.cs" />
+    <Compile Include="../../src/Platform.SchemaRunner/ReadOnlySourceRole.cs" Link="Shared/ReadOnlySourceRole.cs" />
+    <Compile Include="../../src/Platform.SchemaRunner/ReadOnlySourceArchiveVerification.cs" Link="Shared/ReadOnlySourceArchiveVerification.cs" />
+    <Compile Include="../../src/Platform.SchemaRunner/ArchiveFamilyCheckpoint.cs" Link="Shared/ArchiveFamilyCheckpoint.cs" />
+    <Compile Include="../../src/Platform.SchemaRunner/ArchiveFamilyCheckpointIo.cs" Link="Shared/ArchiveFamilyCheckpointIo.cs" />
+    <Compile Include="../../src/Platform.SchemaRunner/ArchiveToolIdentity.cs" Link="Shared/ArchiveToolIdentity.cs" />
     <ProjectReference Include="../../src/Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../../src/Platform.Migration/Platform.Migration.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

@@ -22,6 +22,13 @@ string ReadProtectedFile(string path)
     return File.ReadAllText(path);
 }
 
+if (args is ["--reconcile-source-archive-read-only", "--job-file", var archiveCheckJob, "--checkpoint-directory", var archiveCheckpoints, "--receipt", var archiveCheckReceipt])
+{
+    try { await ReadOnlySourceArchiveCommand.RunAsync(ArchivePrivateFile.ReadText(archiveCheckJob), archiveCheckpoints, archiveCheckReceipt, ArchivePrivateFile.ReadText); Console.WriteLine("Read-only source and archive verification passed; redacted receipt written."); return 0; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException or KeyNotFoundException or FormatException or ArithmeticException or MigrationRejectedException or NpgsqlException or Platform.Persistence.DbOperationException or System.Security.Cryptography.CryptographicException or Platform.Security.CipherRejectedException or Platform.Security.SecretConfigurationException)
+    { Console.Error.WriteLine("Read-only source and archive verification rejected; retain private evidence for review."); return 78; }
+}
+
 if (args is ["--qualify-wallet-orders-shared", "--job-prod1", var sharedOne, "--job-prod2", var sharedTwo, "--job-prod3", var sharedThree, "--target-connection-file", var sharedTarget, "--receipt", var sharedReceipt])
 {
     try { await SharedWalletOrderQualification.RunAsync([sharedOne, sharedTwo, sharedThree], sharedTarget, sharedReceipt, ReadProtectedFile); Console.WriteLine("Canonical shared target qualification passed; redacted receipt written."); return 0; }
