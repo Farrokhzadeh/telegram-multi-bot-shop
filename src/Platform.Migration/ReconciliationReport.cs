@@ -24,7 +24,7 @@ public sealed record RedactedLegacyRecordReconciliation(long ExpectedRecords, lo
     public bool FinancialObligationsVerified => false;
     public bool ReleaseReady => false;
 }
-public sealed class ReconciliationReport(DbSessionFactory sessions)
+public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReconciliationTarget? target = null)
 {
     public static RedactedLegacyRecordReconciliation RedactRecords(LegacyRecordReconciliation report)
     {
@@ -52,7 +52,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         var verification = await WalletRetentionVerification.ReadAsync(retained, readRetention, ct);
         long invalidRetentions = retained.LongCount(r => !verification.Matches(r));
         await using var session = await sessions.BeginReadOnlyAsync(ct);
-        await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
+        if (target is null) await LegacyMapStore.RequireDestinationAsync(session, manifest, ct); else await target.RequireAsync(session, manifest, ct);
         long mismatch = 0, missingMaps = 0, mismatchedMaps = 0, foundMaps = 0;
         foreach (var row in rows)
         {
@@ -84,12 +84,12 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
         if (rows.Select(r => r.Target).Distinct().Count() != rows.Length) throw new MigrationRejectedException();
         foreach (var row in rows) foreach (var proof in row.Proofs(manifest.TargetBrand)) manifest.Require(proof);
         await using var session = await sessions.BeginReadOnlyAsync(ct);
-        await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
+        if (target is null) await LegacyMapStore.RequireDestinationAsync(session, manifest, ct); else await target.RequireAsync(session, manifest, ct);
         long mismatched = 0;
         foreach (var row in rows) if (!await HistoricalOrderImportWorkflow.MatchesAsync(session, row, ct)) mismatched++;
         long expected = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.HistoricalOrder);
         long unmatched = expected - rows.LongLength;
-        var mappings = await ReadAsync(session, manifest, ct);
+        var mappings = await ReadAsync(session, manifest, ct, target);
         long batchMappings = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
         long expectedKeysInBatch = 0;
         foreach (var proof in manifest.Proofs)
@@ -102,12 +102,12 @@ public sealed class ReconciliationReport(DbSessionFactory sessions)
     public async Task<MigrationReconciliation> ReadAsync(VerifiedImportManifest manifest, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginReadOnlyAsync(ct);
-        return await ReadAsync(session, manifest, ct);
+        return await ReadAsync(session, manifest, ct, target);
     }
-    internal static async Task<MigrationReconciliation> ReadAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct)
+    internal static async Task<MigrationReconciliation> ReadAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct, ReadOnlyReconciliationTarget? target = null)
     {
-        await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
-        var coverage = await LegacyMapStore.ReadCoverageAsync(session, manifest, ct);
+        if (target is null) await LegacyMapStore.RequireDestinationAsync(session, manifest, ct); else await target.RequireAsync(session, manifest, ct);
+        var coverage = await LegacyMapStore.ReadCoverageAsync(session, manifest, ct, target);
         var money = await session.QuerySingleAsync(new DbStatement("SELECT COALESCE(sum(signed_amount) FILTER(WHERE movement_kind='opening_balance' AND is_posting),0)::text,count(*) FILTER(WHERE movement_kind='opening_balance' AND is_posting),count(*) FILTER(WHERE movement_kind='legacy_history' AND NOT is_posting) FROM shop.wallet_entries WHERE legacy_import_batch=$1", DbValue.Uuid(manifest.Batch)), r => (Opening: ExactDecimal.Parse(r.GetString(0)), Postings: r.GetInt64(1), History: r.GetInt64(2)), ct);
         var liabilities = await session.QuerySingleAsync(new DbStatement("""
             SELECT (SELECT count(*) FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND o.payment_status IN ('paid','not_required') AND o.fulfillment_status NOT IN ('completed','cancelled','compensated')),

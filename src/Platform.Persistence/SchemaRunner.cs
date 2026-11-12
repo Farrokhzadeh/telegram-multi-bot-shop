@@ -85,6 +85,20 @@ public static class SchemaRunner
         return new SchemaReceipt("0001", BaselineSqlSha256, catalogSha256, applied);
     }
 
+    public static async Task<SchemaReceipt> InspectReadOnlyAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken ct = default)
+    {
+        await using var check = new NpgsqlCommand("SELECT current_setting('transaction_read_only')='on' AND current_setting('transaction_isolation')='repeatable read',obj_description(oid,'pg_namespace') FROM pg_namespace WHERE nspname='shop'", connection, transaction);
+        string marker;
+        await using (var reader = await check.ExecuteReaderAsync(ct))
+        {
+            if (!await reader.ReadAsync(ct) || !reader.GetBoolean(0) || reader.IsDBNull(1)) throw new InvalidOperationException("Read-only schema identity rejected.");
+            marker = reader.GetString(1); if (await reader.ReadAsync(ct)) throw new InvalidOperationException("Read-only schema identity rejected.");
+        }
+        string prefix = "shop-schema|0001|" + BaselineSqlSha256 + "|";
+        if (!marker.StartsWith(prefix, StringComparison.Ordinal) || marker.Length != prefix.Length + 64 || !marker[prefix.Length..].All(char.IsAsciiHexDigit)) throw new InvalidOperationException("Read-only schema identity rejected.");
+        return new("0001", BaselineSqlSha256, await VerifyCatalogAsync(connection, transaction, ct), false);
+    }
+
     private static async Task<string> VerifyCatalogAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, CancellationToken cancellationToken)
     {
         var actual = new List<string>();

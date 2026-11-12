@@ -15,7 +15,7 @@ public sealed record LegacyRecordReconciliation(Guid Batch, long ExpectedRecords
     public string Scope => "source_bound_legacy_projections_and_protected_records";
     public override string ToString() => "LegacyRecordReconciliation [redacted]";
 }
-public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destination, SecretSnapshot secrets)
+public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destination, SecretSnapshot secrets, ReadOnlyReconciliationTarget? target = null)
 {
     private readonly DbSessionFactory sessions = new(destination, new DbSessionOptions { ReadOnly = true, Isolation = IsolationLevel.RepeatableRead });
     public async Task<LegacyRecordReconciliation> CompareAsync(BrandContext context, VerifiedImportManifest manifest, LegacyImportSet source, Func<string, CancellationToken, Task<ProtectedLegacyEvidence>> readArchive, CancellationToken ct = default, Func<string, CancellationToken, Task<ReadOnlyMemory<byte>>>? readRetention = null)
@@ -38,8 +38,8 @@ public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destinatio
             try { var evidence = await readArchive(row.Reference, ct); if (!archive.Matches(context, row, evidence)) invalidArchives++; else reencrypted += evidence.ReencryptedFields?.Count ?? 0; }
             catch (Exception error) when (error is IOException or KeyNotFoundException) { invalidArchives++; }
         }
-        await using var session = await sessions.BeginAsync(ct); await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
-        var mapping = await ReconciliationReport.ReadAsync(session, manifest, ct); long mismatched = 0;
+        await using var session = await sessions.BeginAsync(ct); if (target is null) await LegacyMapStore.RequireDestinationAsync(session, manifest, ct); else await target.RequireAsync(session, manifest, ct);
+        var mapping = await ReconciliationReport.ReadAsync(session, manifest, ct, target); long mismatched = 0;
         foreach (var row in orders) if (!await LegacyOrderRecordImportWorkflow.MatchesAsync(session, row, ct)) mismatched++;
         foreach (var row in payments) if (!await LegacyPaymentImportWorkflow.MatchesAsync(session, manifest, row, ct)) mismatched++;
         var couponStore = new LegacyCouponImportWorkflow(sessions, secrets);

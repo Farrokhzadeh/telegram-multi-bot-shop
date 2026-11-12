@@ -1,0 +1,47 @@
+{
+  "scope": "synthetic_read_only_target_comparison_grant",
+  "baseCommit": "5f5b7c419079cf29d073b5b6968e42d04fc0810a",
+  "unit": {
+    "passed": 241,
+    "failed": 0,
+    "skipped": 0
+  },
+  "integration": {
+    "passed": 61,
+    "failed": 0,
+    "skipped": 0,
+    "newCases": 7
+  },
+  "independentPostgres16PrivilegeCases": 15,
+  "builds": {
+    "managed": true,
+    "warnings": 0,
+    "errors": 0,
+    "nativeAotQualified": false
+  },
+  "initialResults": [
+    {
+      "kind": "controlled_build_stop_for_mount_narrowing",
+      "exit": 137
+    },
+    {
+      "kind": "read_only_artifact_output",
+      "passed": 59,
+      "failed": 1
+    },
+    {
+      "kind": "corrected_artifact_mount",
+      "passed": 60,
+      "failed": 0
+    }
+  ],
+  "originalImportGuardPreserved": true,
+  "grantBindsObservedCatalog": true,
+  "backupAndFullRowParitySeparatelyRequired": true,
+  "protectedDatabaseExecution": false,
+  "productionChanged": false,
+  "ciStarted": false,
+  "t066Complete": false,
+  "financialObligationsVerified": false,
+  "releaseReady": false
+}

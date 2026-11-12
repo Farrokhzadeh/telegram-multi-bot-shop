@@ -126,6 +126,14 @@ public sealed class DbSession : IAsyncDisposable
         finally { Exit(); }
     }
 
+    public async Task<SchemaReceipt> InspectSchemaAsync(CancellationToken cancellationToken = default)
+    {
+        EnterActive();
+        try { return await SchemaRunner.InspectReadOnlyAsync(connection, transaction, cancellationToken); }
+        catch (Exception error) { throw RecordFailure(error, DbPhase.Executing, cancellationToken); }
+        finally { Exit(); }
+    }
+
     public bool MatchesEndpoint(string host, int port, string database, string username)
     {
         var endpoint = new NpgsqlConnectionStringBuilder(connection.ConnectionString);

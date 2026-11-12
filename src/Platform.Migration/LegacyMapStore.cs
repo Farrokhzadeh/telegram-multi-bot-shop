@@ -17,9 +17,9 @@ public static class LegacyMapStore
     }
 
     internal sealed record Coverage(long Committed, long Missing, long Mismatched, long Unexpected, long BatchCount);
-    internal static async Task<Coverage> ReadCoverageAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct = default)
+    internal static async Task<Coverage> ReadCoverageAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct = default, ReadOnlyReconciliationTarget? target = null)
     {
-        await RequireDestinationAsync(session, manifest, ct);
+        if (target is null) await RequireDestinationAsync(session, manifest, ct); else await target.RequireAsync(session, manifest, ct);
         var expected = manifest.Proofs.ToDictionary(p => (p.SourceTable, p.KeyKind, p.LegacyId)); var seen = new HashSet<(string, string, string)>();
         (string Table, string Kind, string Id)? cursor = null;
         long committed = 0, mismatched = 0, inBatch = 0;
