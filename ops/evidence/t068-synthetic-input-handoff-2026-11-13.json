@@ -1,0 +1,63 @@
+{
+  "actual_host_shared_core_controls_verified": false,
+  "all_new_containers_stopped": true,
+  "base_main": "61a2777256ea3d9d21052bde1b24e83f6e891f6d",
+  "baseline_reused_from_identical_inputs": true,
+  "baseline_units": 251,
+  "bundle_manifest_sha256": "b17e12276b4b9b033b74611ced2089494794d2b8778a2242a223877b385eae4f",
+  "captured_inputs": 3,
+  "common_unit_allocations": {
+    "legacy": 0,
+    "target": 1
+  },
+  "coordinator_sigkill_exit": -9,
+  "database_starts_observed": 3,
+  "evidence_sha256": {
+    "baseline.trx": "079ea600eea5daa79e9d609b332c57ff02161c01102f8941865977bf83367f0c",
+    "guards-final-31.private.log": "7f2d3cb11990aedb110635c8c207635b257c5d535a6b8a0794ade473effc07c6",
+    "inbox-coordinator-crash.exit": "cfeb3721a817579ed0f8bf7235b8b586be2d1f6426e5f7e4c3d3d62a3015f8d7",
+    "inbox-docker-events.private.jsonl": "dec8f11fe4ba5ec050047e9d6f2038983c973d7182044bb5225f8f0e93c9df22",
+    "inbox-runtime-result.private.json": "abad488198b51fd775a2ebfe2ac83d93464489d0c472bccd6f7d79e59a453a12",
+    "review-legacy-counts.private.log": "974eed0c5386808de86f3877d94e28f95b331e957030ae5500fbcfb2c70117ea",
+    "review-target-counts.private.log": "ad144bf7f11b77bd4026a2beb42a9da89e2c0e38d5d87f02e32791312d168084"
+  },
+  "held_payment_notices": 1,
+  "host_guards": 31,
+  "independent_database_counts": {
+    "legacy": [
+      1,
+      1,
+      1
+    ],
+    "target": [
+      2,
+      2,
+      2
+    ]
+  },
+  "live_phases": [
+    "interrupted-source-input-retained-without-retry",
+    "freeze-window-inputs-durable-payment-held",
+    "target-accepted-after-coordinator-sigkill-reconciled",
+    "restart-preserved-effects-and-uncertainty"
+  ],
+  "observed_target_checkout_results": 1,
+  "overlapping_writer_databases": false,
+  "preexisting_containers_unchanged": 41,
+  "protected_copy_cutover_rollback_verified": false,
+  "real_callback_or_provider_verified": false,
+  "release_ready": false,
+  "retained_prior_run": "Original accepted-effects run retained; final strict canonical-input guard qualified on this fresh pair.",
+  "retained_review_failure": "First review rejected a Docker Mounts list-order permutation; exact mount sets and all other fields independently matched. Original failure retained.",
+  "scope": "generated-data single-brand durable inbox and fake ingress only",
+  "source_copy_fingerprints_rechecked": true,
+  "source_sha256": {
+    "cutover_fence.py": "c4eef9dfbdf47c3f07e79ce4fe59fccfa7aa0198aeb434cb98454f1dd611bc0c",
+    "cutover_inbox.py": "ef537189e89df1de7369ce6c6a57202088195d7487dbb639fa996441533c8f91",
+    "cutover_pair.py": "be52b59e74b14787105f17388e6ab33a57095e84b9d0586c078c865720dfe0bb",
+    "test_cutover_inbox.py": "e5506de75bbc535a4e9d87a653386cdded4fae56de20688f5eae8b7fd7878a8d",
+    "test_cutover_inbox_runtime.py": "1cd08d5be0a65782e9a2e7c7509c85f71366734bf66ec085acc371f691966638"
+  },
+  "task_complete": false,
+  "uncertain_source_dispatches_retained": 1
+}
