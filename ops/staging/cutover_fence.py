@@ -117,7 +117,7 @@ def consume_start(root,m,side):
 	assert s["phase"]=="granting" and s["intent"]==side and v=={"epoch":s["epoch"],"side":side,"manifest":digest(m),"run":m["run"]} and stopped(m)
 	destination=root/("consumed-permit-"+str(s["epoch"])+".private.json");assert not destination.exists();p.rename(destination);sync(root)
 def admit(root,side,epoch,command,request_id=None):
-	assert side in SIDES and command in {"wallet","wallet-paused","telegram","status","fake_payment","fake_supplier","fake_telegram","fake_fx","fake_ai"} and (command!="telegram" or side=="target")
+	assert side in SIDES and command in {"wallet","wallet-paused","telegram","payment","status","fake_payment","fake_supplier","fake_telegram","fake_fx","fake_ai"} and (command not in {"telegram","payment"} or side=="target")
 	with lock(root):
 		m=model(root);s=chain(root,m)[-1];assert s["phase"]=="active" and s["owner"]==side and s["epoch"]==epoch
 		pair.validate(root,m)

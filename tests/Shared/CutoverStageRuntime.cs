@@ -7,6 +7,7 @@ using Platform.Persistence;
 using Platform.SchemaRunner;
 using Platform.Security;
 using Platform.Telegram;
+using Platform.Core;
 namespace Platform.Testing;
 
 public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, string Secrets);
@@ -23,10 +24,21 @@ public static class CutoverStageRuntime
 {
     public static async Task RunAsync(string root, string mode, CancellationToken ct = default)
     {
-        if (!OperatingSystem.IsLinux() || root != "/stage/target" || mode is not ("init" or "serve" or "stock-init" or "telegram-init") || Environment.GetEnvironmentVariable("SHOP_CUTOVER_STAGE") != "synthetic-acc-abad-v1" || Environment.GetEnvironmentVariable("SHOP_TEST_ALLOW_DATABASE_CREATION") != "1") throw new InvalidOperationException();
+        if (!OperatingSystem.IsLinux() || root != "/stage/target" || mode is not ("init" or "serve" or "stock-init" or "telegram-init" or "payment-init" or "payment-verify" or "payment-audit") || Environment.GetEnvironmentVariable("SHOP_CUTOVER_STAGE") != "synthetic-acc-abad-v1" || Environment.GetEnvironmentVariable("SHOP_TEST_ALLOW_DATABASE_CREATION") != "1") throw new InvalidOperationException();
         if (File.GetUnixFileMode(root) != (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)) throw new InvalidOperationException();
         string marker = ArchivePrivateFile.ReadText(Path.Combine(root, "identity")).Trim();
         if (!Guid.TryParseExact(marker, "N", out var run) || run == Guid.Empty) throw new InvalidOperationException();
+        if (mode == "payment-verify")
+        {
+            var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment-key.json"), 1, 1024), CutoverPaymentJson.Default.CutoverPaymentKey) ?? throw new InvalidOperationException();
+            var input = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment-verification", "input.json"), 1, 8192), CutoverPaymentJson.Default.CutoverPaymentInput) ?? throw new InvalidOperationException();
+            bool verified = false;
+            try { using var notice = CutoverPaymentCapture.Verify(run, key, input); verified = true; }
+            catch (Exception error) when (error is PaymentNoticeRejectedException or ArgumentException or FormatException) { }
+            var result = new CutoverPaymentVerification(run, input.Nonce, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input.Body))), input.Event, verified);
+            Write(Path.Combine(root, "payment-verification", "result.json"), JsonSerializer.Serialize(result, CutoverPaymentJson.Default.CutoverPaymentVerification));
+            return;
+        }
         string path = Path.Combine(root, "state.json");
         if (mode == "init")
         {
@@ -45,6 +57,24 @@ public static class CutoverStageRuntime
         }
         var saved = JsonSerializer.Deserialize(ArchivePrivateFile.Read(path, 1, 4096), CutoverStageJson.Default.CutoverStageState) ?? throw new InvalidOperationException();
         if (saved.Run != run || saved.Database.Length != 51 || !saved.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) || !Guid.TryParseExact(saved.Database[19..], "N", out _) || !saved.Secrets.StartsWith(root + "/tmp/shop-secret-qualification-", StringComparison.Ordinal)) throw new InvalidOperationException();
+        if (mode == "payment-audit")
+        {
+            using var keys = SecretFiles.Load(saved.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
+            var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment-key.json"), 1, 1024), CutoverPaymentJson.Default.CutoverPaymentKey) ?? throw new InvalidOperationException();
+            var files = new CutoverPaymentFiles(Path.Combine(root, "payment-archives"), keys, CheckoutFixture.ResolveContexts()[0], key, new(run, Guid.NewGuid(), "", "", ""));
+            if (key.Run != run || key.Member != saved.User) throw new InvalidOperationException();
+            var paths = Directory.GetFiles(Path.Combine(root, "payment-archives"), "*.json").Order(StringComparer.Ordinal).ToArray();
+            if (paths.Length is < 1 or > 64) throw new InvalidOperationException();
+            var hashes = new StringBuilder();
+            foreach (string archive in paths)
+            {
+                byte[] plain = files.Read(archive);
+                try { hashes.Append(Path.GetFileName(archive)).Append(':').Append(Convert.ToHexStringLower(SHA256.HashData(ArchivePrivateFile.Read(archive, 1, 8192)))).Append('\n'); }
+                finally { CryptographicOperations.ZeroMemory(plain); }
+            }
+            Write(Path.Combine(root, "payment-audit-result.json"), JsonSerializer.Serialize(new CutoverPaymentAudit(run, paths.Length, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(hashes.ToString())))), CutoverPaymentJson.Default.CutoverPaymentAudit));
+            return;
+        }
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException());
         if (options.Host != "127.0.0.1" || options.Database != "shop_test_control" || options.Username != "shop_test_runner") throw new InvalidOperationException();
         options.ApplicationName = "t068-cutover-stage"; options.Database = saved.Database; options.IncludeErrorDetail = false; options.MaxPoolSize = 4;
@@ -53,6 +83,23 @@ public static class CutoverStageRuntime
         using var secrets = SecretFiles.Load(saved.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
         var sessions = new DbSessionFactory(data);
         var context = CheckoutFixture.ResolveContexts()[0];
+        if (mode == "payment-init")
+        {
+            if (File.Exists(Path.Combine(root, "payment-key.json"))) throw new InvalidOperationException();
+            foreach (string directory in new[] { "payment", "payment-archives", "payment-verification" })
+            { Directory.CreateDirectory(Path.Combine(root, directory), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); if (Directory.EnumerateFileSystemEntries(Path.Combine(root, directory)).Any()) throw new InvalidOperationException(); }
+            await using (var policy = await sessions.BeginAsync(ct))
+            { await policy.ExecuteAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,allow_wallet_topup=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(context.BrandId)), ct); await policy.CommitAsync(ct); }
+            Guid payment = Guid.NewGuid(); var store = new PaymentEvidenceStore(sessions, secrets);
+            _ = await store.CreateTopupAsync(context, CheckoutFixture.Actor(0), payment, new(10.25m, Currency.Usd), CryptoAsset.UsdtBsc, ct);
+            string provider = PaymentSettlementFixture.Provider(payment);
+            await using (var bind = await sessions.BeginAsync(ct))
+            { await store.BindInvoiceAsync(bind, context, CheckoutFixture.Actor(0), payment, provider, 10.4m, ct); await bind.CommitAsync(ct); }
+            byte[] secret = RandomNumberGenerator.GetBytes(32);
+            try { Write(Path.Combine(root, "payment-key.json"), JsonSerializer.Serialize(new CutoverPaymentKey(run, payment, saved.User, "topup:" + payment.ToString("D"), provider, Convert.ToHexStringLower(secret)), CutoverPaymentJson.Default.CutoverPaymentKey)); }
+            finally { CryptographicOperations.ZeroMemory(secret); }
+            return;
+        }
         if (mode == "stock-init")
         {
             var plan = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "stock-plan.json"), 1, 1024), CutoverStageJson.Default.CutoverStockPlan) ?? throw new InvalidOperationException();
@@ -115,8 +162,19 @@ public static class CutoverStageRuntime
                 if (File.Exists(result)) continue;
                 byte[] bytes = ArchivePrivateFile.Read(request, 1, 128); string command;
                 try { command = new UTF8Encoding(false, true).GetString(bytes).Trim(); } finally { CryptographicOperations.ZeroMemory(bytes); }
-                if (command is not ("status" or "wallet" or "wallet-paused" or "telegram" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
+                if (command is not ("status" or "wallet" or "wallet-paused" or "telegram" or "payment" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
                 string outcome = command.StartsWith("fake_", StringComparison.Ordinal) ? "simulated" : "ready";
+                if (command == "payment")
+                {
+                    var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment-key.json"), 1, 1024), CutoverPaymentJson.Default.CutoverPaymentKey) ?? throw new InvalidOperationException();
+                    try
+                    {
+                        var input = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment", id.ToString("N") + ".json"), 1, 8192), CutoverPaymentJson.Default.CutoverPaymentInput) ?? throw new InvalidOperationException();
+                        var files = new CutoverPaymentFiles(Path.Combine(root, "payment-archives"), secrets, context, key, input);
+                        outcome = await CutoverPaymentCapture.CaptureAsync(sessions, secrets, context, saved.User, run, key, input, files.SaveAsync, ct);
+                    }
+                    catch (Exception error) when (error is PaymentNoticeRejectedException or UnauthorizedAccessException or ArgumentException or JsonException) { outcome = "Rejected"; }
+                }
                 if (command == "telegram")
                 {
                     var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "telegram-key.json"), 1, 256), CutoverTelegramJson.Default.CutoverTelegramKey) ?? throw new InvalidOperationException();
@@ -155,7 +213,7 @@ public static class CutoverStageRuntime
             return await read.QuerySingleAsync(new DbStatement("SELECT (SELECT count(*) FROM shop.orders),(SELECT count(*) FROM shop.inventory_items WHERE state='allocated'),(SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit')"), r => new CutoverStageResult(operation, outcome, r.GetInt64(0), r.GetInt64(1), r.GetInt64(2)), ct);
         }
     }
-    private static void Write(string path, string value, bool replace = false)
+    internal static void Write(string path, string value, bool replace = false)
     {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
