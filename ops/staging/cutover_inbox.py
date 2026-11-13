@@ -1,4 +1,4 @@
-import argparse,contextlib,fcntl,hashlib,hmac,json,os,re,stat,uuid
+import argparse,base64,contextlib,fcntl,hashlib,hmac,json,os,re,stat,uuid
 from pathlib import Path
 import cutover_fence as fence
 pair=fence.pair
@@ -27,6 +27,16 @@ def install(root):
 		c={"version":1,"run":m["run"],"manifest":fence.digest(m),"brand":"acc-abad","origins":{k:uuid.uuid4().hex for k in ["telegram","payment"]},"actor":"synthetic-member"}
 		pair.save(root/"inbox.private.json",fence.sign(root,c));fence.sync(root);return c
 def identity(envelope): return fence.digest({k:envelope[k] for k in ["run","brand","channel","origin","event"]})[:32]
+def telegram_payload(v): return {"run":str(uuid.UUID(hex=v["run"])),"update":int(v["event"]),"body":v["body"],"header":v["header"]}
+def telegram_binding(root):
+	m=fence.model(root);v=fence.verify(root,json.loads(pair.private(root/"telegram-binding.private.json")));key=fence.owned(root,"target","telegram-key.json");path=root/"target/telegram";s=path.lstat()
+	assert path.resolve(strict=True)==path and stat.S_ISDIR(s.st_mode) and s.st_uid==10001 and stat.S_IMODE(s.st_mode)==0o700
+	assert uuid.UUID(key["run"]).hex==m["run"] and re.fullmatch("[a-f0-9]{64}",key["secret"]) and v=={"run":m["run"],"manifest":fence.digest(m),"key_sha256":pair.digest(root/"target/telegram-key.json")}
+	return key
+def bind_telegram(root):
+	with lock(root),fence.lock(root):
+		config(root);m=fence.model(root);s=fence.chain(root,m)[-1];assert s["phase"]=="frozen" and fence.stopped(m) and not (root/"telegram-binding.private.json").exists()
+		pair.save(root/"telegram-binding.private.json",fence.sign(root,{"run":m["run"],"manifest":fence.digest(m),"key_sha256":pair.digest(root/"target/telegram-key.json")}));fence.sync(root);telegram_binding(root)
 def read(root,event):
 	assert re.fullmatch("[a-f0-9]{32}",event);path=root/"inbox-events"/event;directory(path);records=[];previous=event
 	for n,p in enumerate(sorted(path.iterdir())):
@@ -54,9 +64,12 @@ def capture(root,body,signature):
 		assert isinstance(body,bytes) and 2<=len(body)<=4096
 		c=config(root);key=bytes.fromhex(pair.private(root/"inbox-ingress.private").strip())
 		assert isinstance(signature,str) and re.fullmatch("[a-f0-9]{64}",signature) and hmac.compare_digest(signature,hmac.new(key,body,hashlib.sha256).hexdigest())
-		v=decode(body);assert body==fence.canonical(v) and set(v)=={"run","brand","channel","origin","actor","event","action"}
+		v=decode(body);assert body==fence.canonical(v) and set(v)=={"run","brand","channel","origin","actor","event","action"}|({"body","header"} if v.get("action")=="telegram" else set())
 		assert v["run"]==c["run"] and v["brand"]==c["brand"] and v["actor"]==c["actor"] and v["channel"] in c["origins"] and v["origin"]==c["origins"][v["channel"]]
-		assert re.fullmatch("0|[1-9][0-9]{0,18}",v["event"]) and int(v["event"])<=9223372036854775807 and v["action"] in ({"wallet","wallet-paused"} if v["channel"]=="telegram" else {"review"})
+		assert re.fullmatch("0|[1-9][0-9]{0,18}",v["event"]) and int(v["event"])<=9223372036854775807 and v["action"] in ({"wallet","wallet-paused","telegram"} if v["channel"]=="telegram" else {"review"})
+		if v["action"]=="telegram":
+			key=telegram_binding(root);expected=base64.urlsafe_b64encode(bytes.fromhex(key["secret"])).decode().rstrip("=");assert hmac.compare_digest(v["header"],expected) and 2<=len(v["body"].encode())<=2048
+			update=json.loads(v["body"]);assert isinstance(update,dict) and type(update.get("update_id")) is int and update["update_id"]==int(v["event"])
 		event=identity(v);path=root/"inbox-events"/event;value={"sequence":0,"event":event,"previous":event,"phase":"captured","envelope":v,"body_sha256":hashlib.sha256(body).hexdigest(),"signature":signature}
 		if path.exists():
 			prior=read(root,event)[0];assert prior==value;fence.sync(path);fence.sync(path.parent);return {"event":event,"duplicate":True}
@@ -68,9 +81,13 @@ def dispatch(root,event,side,epoch):
 		config(root);records=read(root,event);assert len(records)==1
 		if records[0]["envelope"]["channel"]=="payment": return append(root,event,{"phase":"held","reason":"payment_requires_reconciliation"})
 		assert side in fence.SIDES
+		envelope=records[0]["envelope"]
+		if envelope["action"]=="telegram": assert side=="target";telegram_binding(root)
 		with fence.lock(root):
 			m=fence.model(root);s=fence.chain(root,m)[-1];assert s["phase"]=="active" and s["owner"]==side and s["epoch"]==epoch
 		append(root,event,{"phase":"dispatching","side":side,"epoch":epoch,"request":event})
+		if envelope["action"]=="telegram":
+			path=root/"target/telegram"/(event+".json");assert not path.exists();pair.save(path,telegram_payload(envelope));os.chown(path,10001,10001);fence.sync(path.parent)
 		fence.admit(root,side,epoch,records[0]["envelope"]["action"],event)
 		return {"event":event,"phase":"dispatching"}
 def reconcile(root,event):
@@ -82,7 +99,11 @@ def reconcile(root,event):
 		admission=fence.verify(root,json.loads(pair.private(root/"fence-requests"/(event+".json"))))
 		assert admission=={"epoch":last["epoch"],"side":last["side"],"command":records[0]["envelope"]["action"],"request":event}
 		v={k.lower():x for k,x in fence.owned(root,last["side"],"results/"+event+".json").items()}
-		assert v["operation"]=="wallet" and v["synthetic"] is True and v["releaseready"] is False
+		command=records[0]["envelope"]["action"];assert v["operation"]==("telegram" if command=="telegram" else "wallet") and v["synthetic"] is True and v["releaseready"] is False
+		if command=="telegram":
+			assert fence.owned(root,"target","telegram/"+event+".json")==telegram_payload(records[0]["envelope"])
+			if v["outcome"] not in {"Product","Menu","Duplicate","Rejected"}: return {"event":event,"phase":"uncertain_do_not_retry"}
+			return append(root,event,{"phase":"result_observed","side":last["side"],"epoch":last["epoch"],"result_sha256":pair.digest(path),"outcome":"telegram:"+v["outcome"]})
 		if v["outcome"] not in {"Purchased","purchased"}: return {"event":event,"phase":"uncertain_do_not_retry"}
 		return append(root,event,{"phase":"result_observed","side":last["side"],"epoch":last["epoch"],"result_sha256":pair.digest(path),"outcome":"purchased"})
 def inventory(root):
@@ -92,9 +113,10 @@ def inventory(root):
 			records=read(root,p.name);phase=records[-1]["phase"];counts[phase]=counts.get(phase,0)+1
 		return counts
 def main():
-	os.umask(0o077);a=argparse.ArgumentParser();a.add_argument("action",choices=["install","capture","dispatch","reconcile","status"]);a.add_argument("--root",required=True);a.add_argument("--event");a.add_argument("--side",choices=sorted(fence.SIDES));a.add_argument("--epoch",type=int);args=a.parse_args();root=Path(args.root)
+	os.umask(0o077);a=argparse.ArgumentParser();a.add_argument("action",choices=["install","bind-telegram","capture","dispatch","reconcile","status"]);a.add_argument("--root",required=True);a.add_argument("--event");a.add_argument("--side",choices=sorted(fence.SIDES));a.add_argument("--epoch",type=int);args=a.parse_args();root=Path(args.root)
 	assert os.geteuid()==0 and re.fullmatch(r"/var/lib/teleg-cli/t068-pair-[a-z0-9-]+",str(root));directory(root)
 	if args.action=="install": install(root);result={"installed":True}
+	elif args.action=="bind-telegram": bind_telegram(root);result={"bound":True}
 	elif args.action=="capture":
 		v=decode(__import__("sys").stdin.buffer.read(8193));assert set(v)=={"body","signature"};result=capture(root,v["body"].encode(),v["signature"])
 	elif args.action=="dispatch": result=dispatch(root,args.event,args.side,args.epoch)

@@ -12,6 +12,19 @@ public sealed class UpdateRouterTests
     private static readonly byte[] Secret = SHA256.HashData("public synthetic webhook qualification"u8);
 
     [Fact]
+    public async Task UnknownProductIsRejectedBeforeActivityAndDoesNotConsumeItsUpdate()
+    {
+        await using var fixture = await Menus();
+        var router = Router(fixture, () => throw new InvalidOperationException());
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 'p', Guid.NewGuid(), updateId: 501), Ct));
+        await using (var rejected = await fixture.Sessions.BeginAsync(Ct))
+            Assert.Equal(0L, await rejected.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events"), r => r.GetInt64(0), Ct));
+        Assert.Equal(UpdateRouteCode.Product, (await router.RouteAsync(Callback(fixture, 1, 'p', fixture.Product, updateId: 501), Ct)).Code);
+        Assert.Equal(UpdateRouteCode.Duplicate, (await router.RouteAsync(Callback(fixture, 1, 'p', fixture.Product, updateId: 501), Ct)).Code);
+        await using var accepted = await fixture.Sessions.BeginAsync(Ct);
+        Assert.Equal(1L, await accepted.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id=501"), r => r.GetInt64(0), Ct));
+    }
+    [Fact]
     public async Task ExplicitConsentReplayCancelAndFreshConsentHaveNoFinancialEffect()
     {
         await using var fixture = await Menus();

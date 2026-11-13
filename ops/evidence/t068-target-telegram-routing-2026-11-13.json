@@ -1,0 +1,83 @@
+{
+  "accepted_router_updates": 2,
+  "actual_shared_core_per_brand_lifecycle_verified": false,
+  "actual_target_telegram_verifier_router_used": true,
+  "all_new_pair_containers_stopped": true,
+  "application_source_sha256": {
+    "src/Platform.Telegram/UpdateRouter.cs": "c130737bb5814d634983bf13e0ffc642da0b459851591cee65714cbca0a5a4ea",
+    "tests/Platform.AotSmoke/Platform.AotSmoke.csproj": "0463f9e93dbe2c7bcf24451ffd50e24a6152f96fd0f8e553665825378c9ef469",
+    "tests/Platform.IntegrationTests/CutoverTelegramRouterTests.cs": "b81239bc39958cc6e909bc00f6aeb7c02810ac6e9aa08a375d1494763e83077b",
+    "tests/Platform.IntegrationTests/Platform.IntegrationTests.csproj": "2aefdfe336ae2dd865b4a514276f5906cccdb491972831a3eddfda13189c0e9f",
+    "tests/Platform.IntegrationTests/UpdateRouterTests.cs": "2920aade5dfb19e1ab931cb664bb0b3a5416781f8392ca4acc6527c40d8ae54e",
+    "tests/Shared/CutoverStageRuntime.cs": "6cd24afd685c1fe51c8aa75b6373bd6bec66e8b1257964e9972101121abc2e1f",
+    "tests/Shared/CutoverTelegramRouter.cs": "18565cf8c1d22c0add37860f93c888c56fdf229bab6f65d81e144c99f5834166"
+  },
+  "base_main": "cb02bcfaaffd2c67152c88671938420b4248d5f7",
+  "baseline_units": 251,
+  "bundle_manifest_sha256": "528179dd30c3d660f1497ae901ff80b93e8448335cf1b85df8be0789771af98a",
+  "captured_router_events": 6,
+  "coordinator_sigkill_exit": -9,
+  "database_starts_observed": 3,
+  "direct_replay_auth_probes": 3,
+  "evidence_sha256": {
+    "baseline.trx": "6ad2b0d9d4560e78f698ae7fb244674804e46e3b0c362cb6fe9b8fbeee70bdf4",
+    "build/build.log": "dedf9e15509f0bd98511e3bd656cd71f724481f1c08cc9ea2bd0b63d9544fe25",
+    "build/integration-build.log": "a940be6ae4ea3deec27c3d945cea9320aab277fc3d500bbc365c96fd01a1d0e3",
+    "build/unit-build.log": "0ca582bdb0787c8a04169d5f19c3a5b514eadbffbbd9bf8c8e57de41c6e0d885",
+    "compile_fixture_helper_failure": "5a809fdff360b742f33e3ec02a0f07d71271d3049ac80e2f823a26b6101a5e68",
+    "failed_fixture_permission_trx": "1b25ee2619cf594ea4e47f6bf296a7c9467ecceec9b025bfe3e5a65e318168d4",
+    "failed_router_trx": "5d82bb82ef1b41c7bf5b9beacbd0b6a43d661b206e4220c812704550a7390c23",
+    "guards-final.private.log": "73df11bac06f1ef13b7a8ff72b1fdb4c1f7c9cb39318496d6a6d2f5c2b71670b",
+    "guards.private.log": "1c518376ffb709697da87eca021afb9239e3f093c788ef546233ceb782c8f2dd",
+    "public-fixture-ownership.private.json": "8b2e4020d63b39d84c86e20b40d036f1801b25f3a6f59747a8ec00f05002080f",
+    "target/focused-results/focused.trx": "119a24d48b601eedce8c6e4ae0ae0f917a8581a1514fb50b1447f0420c9b01c7",
+    "telegram-after.private.json": "d7af995fb6c77eabbcf11ee768c5d5777d4000b4c8c141052c1d639178626437",
+    "telegram-before.private.json": "e0b03e541976f501e29b9980734d4b923be97cf68ea66651a73bf6093c333392",
+    "telegram-coordinator-crash.exit": "cfeb3721a817579ed0f8bf7235b8b586be2d1f6426e5f7e4c3d3d62a3015f8d7",
+    "telegram-docker-events.private.jsonl": "d1344969dfcd0c528f434e935168162b1c3049d7b2eecb5f2ff396b9fa40608f",
+    "telegram-independent-sql.private.log": "d8751e792b472fbef4c32f95c1a2d736efc60acf0d5f61f2aa60bfdd82fa1555",
+    "telegram-runtime-result.private.json": "91d193a50b2e162e2039213cb735a1b092cc29f064cdd15d3ed889c3e662fc75"
+  },
+  "final_fresh_units": 251,
+  "focused_postgresql_cases": 16,
+  "host_guards": 35,
+  "host_source_sha256": {
+    "cutover_fence.py": "4b6a1ffbf6082fb6c2a10ea04a51a6e13a05b82877806d7b049f28ff645ff86e",
+    "cutover_inbox.py": "d802e168ae44851551ac2010c08aa5683036f95075d00998b47bb9867357d282",
+    "test_cutover_telegram.py": "0c9c096724378edcd10d44fb9982cc17514a29c425a034a88c7ce92f82ab9924",
+    "test_cutover_telegram_runtime.py": "bea77f160b2900f6b9b509496fc3bc0c6f15391a73b563321a8d6107f88434e6"
+  },
+  "independent_sql": {
+    "accepted_update_activity_rows": 2,
+    "foreign_bot_highwater_changes": 0,
+    "rejected_update_activity_rows": 0,
+    "unexpected_members": 0
+  },
+  "legacy_callback_dispatch_verified": false,
+  "live_phases": [
+    "authenticated-update-retained-across-legacy-freeze",
+    "real-verifier-router-commit-survived-coordinator-sigkill",
+    "stale-foreign-actor-bot-product-and-secret-rejected",
+    "restart-replay-preserved-all-25-nonrouting-tables"
+  ],
+  "overlapping_writer_databases": false,
+  "payment_callback_routing_verified": false,
+  "preexisting_containers_unchanged": 49,
+  "protected_copy_rehearsal_verified": false,
+  "real_telegram_transport_used": false,
+  "rejected_captured_updates": 4,
+  "release_ready": false,
+  "retained_failures": [
+    "SDK CLI first-use failed on read-only root; direct pinned VSTest DLL used instead",
+    "Private resume rejected an existing empty results directory; directory preserved by rename",
+    "Generated test fixture asset was unreadable by UID10001; unchanged public SHA verified and output ownership corrected",
+    "Unpublished product callback reached activity constraint23514; existing publication authorization moved before activity write and direct regression passed",
+    "New direct regression initially used the wrong fixture helper; corrected query uses existing session API"
+  ],
+  "scope": "isolated generated-data real target Telegram verifier/router behind durable authenticated fake ingress",
+  "step3_complete": false,
+  "task_complete": false,
+  "unchanged_nonrouting_tables": 25,
+  "unknown_product_authorization_before_activity_verified": true,
+  "workload_formatter_advisory_retained": true
+}

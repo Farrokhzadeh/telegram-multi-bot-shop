@@ -77,6 +77,7 @@ public sealed class UpdateRouter
             if (member.Flow.Revision != callback.Revision || member.Flow.AnchorMessageId != update.MessageId) throw new TelegramIngressRejectedException();
             if (callback.Action is 's' or 'u' && member.Flow.ProductId != callback.Target) throw new TelegramIngressRejectedException();
         }
+        if (callback?.Action == 'p' && !await Published(session, update.Context, callback.Target, ct)) throw new TelegramIngressRejectedException();
         string key = BotActivityRegistry.TelegramIdentity(update.UpdateId);
         var action = Action(update, callback);
         var definition = BotActivityRegistry.FromCode(action.Action);
@@ -110,11 +111,6 @@ public sealed class UpdateRouter
         }
         else
         {
-            if (callback.Action == 'p')
-            {
-                bool published = await Published(session, update.Context, callback.Target, ct);
-                if (!published) throw new TelegramIngressRejectedException();
-            }
             member = await BrandUserStore.TransitionAsync(session, update.Context, update.ActorId, member.Id, member.Flow.Revision,
                 callback.Action == 'o' ? CustomerFlowState.Payment : CustomerFlowState.Quantity,
                 orderId: callback.Action == 'o' ? callback.Target : null, productId: callback.Action == 'o' ? null : callback.Target,

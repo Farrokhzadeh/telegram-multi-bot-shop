@@ -6,6 +6,7 @@ using Npgsql;
 using Platform.Persistence;
 using Platform.SchemaRunner;
 using Platform.Security;
+using Platform.Telegram;
 namespace Platform.Testing;
 
 public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, string Secrets);
@@ -22,7 +23,7 @@ public static class CutoverStageRuntime
 {
     public static async Task RunAsync(string root, string mode, CancellationToken ct = default)
     {
-        if (!OperatingSystem.IsLinux() || root != "/stage/target" || mode is not ("init" or "serve" or "stock-init") || Environment.GetEnvironmentVariable("SHOP_CUTOVER_STAGE") != "synthetic-acc-abad-v1" || Environment.GetEnvironmentVariable("SHOP_TEST_ALLOW_DATABASE_CREATION") != "1") throw new InvalidOperationException();
+        if (!OperatingSystem.IsLinux() || root != "/stage/target" || mode is not ("init" or "serve" or "stock-init" or "telegram-init") || Environment.GetEnvironmentVariable("SHOP_CUTOVER_STAGE") != "synthetic-acc-abad-v1" || Environment.GetEnvironmentVariable("SHOP_TEST_ALLOW_DATABASE_CREATION") != "1") throw new InvalidOperationException();
         if (File.GetUnixFileMode(root) != (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute)) throw new InvalidOperationException();
         string marker = ArchivePrivateFile.ReadText(Path.Combine(root, "identity")).Trim();
         if (!Guid.TryParseExact(marker, "N", out var run) || run == Guid.Empty) throw new InvalidOperationException();
@@ -79,6 +80,21 @@ public static class CutoverStageRuntime
             }
             finally { CryptographicOperations.ZeroMemory(plain); }
         }
+        if (mode == "telegram-init")
+        {
+            string keyPath = Path.Combine(root, "telegram-key.json");
+            if (File.Exists(keyPath)) throw new InvalidOperationException();
+            Directory.CreateDirectory(Path.Combine(root, "telegram"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            if (Directory.EnumerateFileSystemEntries(Path.Combine(root, "telegram")).Any()) throw new InvalidOperationException();
+            await using var seed = await sessions.BeginAsync(ct);
+            var member = await BrandUserStore.RequireAsync(seed, context, CheckoutFixture.Actor(0), saved.User, ct);
+            _ = await BrandUserStore.TransitionAsync(seed, context, CheckoutFixture.Actor(0), saved.User, member.Flow.Revision, CustomerFlowState.Catalog, anchorMessageId: 77, ct: ct);
+            await seed.CommitAsync(ct);
+            byte[] key = RandomNumberGenerator.GetBytes(32);
+            try { Write(keyPath, JsonSerializer.Serialize(new CutoverTelegramKey(run, Convert.ToHexStringLower(key)), CutoverTelegramJson.Default.CutoverTelegramKey)); }
+            finally { CryptographicOperations.ZeroMemory(key); }
+            return;
+        }
         await using (var read = await sessions.BeginReadOnlyAsync(ct))
         {
             long active = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brands WHERE active"), r => r.GetInt64(0), ct);
@@ -99,8 +115,21 @@ public static class CutoverStageRuntime
                 if (File.Exists(result)) continue;
                 byte[] bytes = ArchivePrivateFile.Read(request, 1, 128); string command;
                 try { command = new UTF8Encoding(false, true).GetString(bytes).Trim(); } finally { CryptographicOperations.ZeroMemory(bytes); }
-                if (command is not ("status" or "wallet" or "wallet-paused" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
+                if (command is not ("status" or "wallet" or "wallet-paused" or "telegram" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
                 string outcome = command.StartsWith("fake_", StringComparison.Ordinal) ? "simulated" : "ready";
+                if (command == "telegram")
+                {
+                    var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "telegram-key.json"), 1, 256), CutoverTelegramJson.Default.CutoverTelegramKey) ?? throw new InvalidOperationException();
+                    if (key.Run != run || key.Secret.Length != 64) throw new InvalidOperationException();
+                    byte[] secret = Convert.FromHexString(key.Secret);
+                    try
+                    {
+                        var input = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "telegram", id.ToString("N") + ".json"), 1, 8192), CutoverTelegramJson.Default.CutoverTelegramInput) ?? throw new InvalidOperationException();
+                        outcome = (await CutoverTelegramRouter.RouteAsync(sessions, context, saved.User, run, secret, input, ct)).Code.ToString();
+                    }
+                    catch (Exception error) when (error is TelegramIngressRejectedException or UnauthorizedAccessException or ArgumentException or JsonException) { outcome = "Rejected"; }
+                    finally { CryptographicOperations.ZeroMemory(secret); }
+                }
                 if (command == "wallet")
                 {
                     var accepted = await new CheckoutStore(sessions, secrets).PurchaseLocalAsync(context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10), ct);
