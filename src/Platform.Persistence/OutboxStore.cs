@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using NpgsqlTypes;
+using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -64,6 +65,17 @@ public static class OutboxStore
 
     public static Task<JobLease?> ClaimAsync(DbSession session, JobKind kind, Guid worker, TimeSpan duration,
         CancellationToken cancellationToken = default)
+        => ClaimCoreAsync(session, kind, worker, duration, null, cancellationToken);
+
+    public static async Task<JobLease?> ClaimForBrandAsync(DbSession session, BrandContext context, long expectedRevision,
+        JobKind kind, Guid worker, TimeSpan duration, CancellationToken cancellationToken = default)
+    {
+        await BrandWriterStore.RequireAsync(session, context, expectedRevision, cancellationToken);
+        return await ClaimCoreAsync(session, kind, worker, duration, context.BrandId, cancellationToken);
+    }
+
+    private static Task<JobLease?> ClaimCoreAsync(DbSession session, JobKind kind, Guid worker, TimeSpan duration,
+        Guid? brandId, CancellationToken cancellationToken)
     {
         if (worker == Guid.Empty) throw new ArgumentException("Worker identity is required.");
         string code = JobIntent.CodeOf(kind);
@@ -71,7 +83,7 @@ public static class OutboxStore
         return session.QuerySingleAsync<JobLease?>(new DbStatement("""
             WITH candidate AS (
                 SELECT j.id FROM shop.jobs j
-                WHERE j.job_kind=$1 AND j.available_at<=clock_timestamp() AND j.attempts<9223372036854775807
+                WHERE j.job_kind=$1 AND j.available_at<=clock_timestamp() AND j.attempts<9223372036854775807 AND ($5 IS NULL OR j.brand_id=$5)
                   AND (j.status IN ('pending','retry') OR ($4 AND j.status='leased' AND j.lease_until<=clock_timestamp()))
                   AND ($1<>'submit_supplier' OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.status='pending'))
                   AND (j.origin_revision IS NULL OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.revision=j.origin_revision))
@@ -81,7 +93,7 @@ public static class OutboxStore
                 FROM candidate c WHERE j.id=c.id RETURNING j.*
             )
             """ + " SELECT " + Columns + " FROM (SELECT 1) singleton LEFT JOIN claimed j ON true",
-            DbValue.Text(code), DbValue.Text(worker.ToString("D")), DbValue.Integer(Seconds(duration)), DbValue.Boolean(recover)),
+            DbValue.Text(code), DbValue.Text(worker.ToString("D")), DbValue.Integer(Seconds(duration)), DbValue.Boolean(recover), Uuid(brandId)),
             row => row.IsDBNull(0) ? null : new JobLease(row.GetGuid(0), ReadIntent(row), worker, row.GetInt64(6), row.GetUtc(7)), cancellationToken);
     }
 
