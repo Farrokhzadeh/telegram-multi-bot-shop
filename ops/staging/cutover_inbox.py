@@ -64,7 +64,7 @@ def capture(root,body,signature):
 		assert isinstance(body,bytes) and 2<=len(body)<=4096
 		c=config(root);key=bytes.fromhex(pair.private(root/"inbox-ingress.private").strip())
 		assert isinstance(signature,str) and re.fullmatch("[a-f0-9]{64}",signature) and hmac.compare_digest(signature,hmac.new(key,body,hashlib.sha256).hexdigest())
-		v=decode(body);assert body==fence.canonical(v) and set(v)=={"run","brand","channel","origin","actor","event","action"}|({"body","header"} if v.get("action")=="telegram" else {"body","signature"} if v.get("action") in {"payment","legacy-payment"} else set())
+		v=decode(body);assert body==fence.canonical(v) and set(v)=={"run","brand","channel","origin","actor","event","action"}|({"body","header"} if v.get("action") in {"telegram","legacy-telegram"} else {"body","signature"} if v.get("action") in {"payment","legacy-payment"} else set())
 		assert v["run"]==c["run"] and v["brand"]==c["brand"] and v["actor"]==c["actor"] and v["channel"] in c["origins"] and v["origin"]==c["origins"][v["channel"]]
 		verification=None
 		if v["action"] in {"payment","legacy-payment"}:
@@ -74,7 +74,10 @@ def capture(root,body,signature):
 			else:
 				from cutover_payment import verify
 			verification=verify(root,v)
-		else: assert re.fullmatch("0|[1-9][0-9]{0,18}",v["event"]) and int(v["event"])<=9223372036854775807 and v["action"] in ({"wallet","wallet-paused","telegram"} if v["channel"]=="telegram" else {"review"})
+		else: assert re.fullmatch("0|[1-9][0-9]{0,18}",v["event"]) and int(v["event"])<=9223372036854775807 and v["action"] in ({"wallet","wallet-paused","telegram","legacy-telegram"} if v["channel"]=="telegram" else {"review"})
+		if v["action"]=="legacy-telegram":
+			from cutover_legacy_telegram_inbox import verify
+			verify(root,v)
 		if v["action"]=="telegram":
 			key=telegram_binding(root);expected=base64.urlsafe_b64encode(bytes.fromhex(key["secret"])).decode().rstrip("=");assert hmac.compare_digest(v["header"],expected) and 2<=len(v["body"].encode())<=2048
 			update=json.loads(v["body"]);assert isinstance(update,dict) and type(update.get("update_id")) is int and update["update_id"]==int(v["event"])
@@ -98,7 +101,7 @@ def dispatch(root,event,side,epoch):
 		if records[0]["envelope"]["channel"]=="payment" and records[0]["envelope"]["action"]=="review": return append(root,event,{"phase":"held","reason":"payment_requires_reconciliation"})
 		assert side in fence.SIDES
 		envelope=records[0]["envelope"]
-		assert envelope["action"]!="legacy-payment"
+		assert envelope["action"] not in {"legacy-payment","legacy-telegram"}
 		if envelope["action"]=="telegram": assert side=="target";telegram_binding(root)
 		if envelope["action"]=="payment":
 			from cutover_payment import key
