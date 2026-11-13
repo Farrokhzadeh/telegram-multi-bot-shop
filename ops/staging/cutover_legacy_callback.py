@@ -2,8 +2,8 @@ import hashlib,hmac,json,os,secrets,sys,time,uuid
 from decimal import Decimal
 from legacy import ROOT,private,write
 if not __debug__: raise SystemExit(78)
-def main(mode):
-	assert os.geteuid()==1000 and mode in {'init','reject','pending','accept-crash','review','replay'} and os.getenv('SHOP_CUTOVER_STAGE')=='synthetic-acc-abad-v1'
+def main(mode,event=None):
+	assert os.geteuid()==1000 and mode in {'init','reject','pending','accept-crash','review','replay','dispatch'} and os.getenv('SHOP_CUTOVER_STAGE')=='synthetic-acc-abad-v1'
 	assert os.getenv('POSTGRES_HOST')=='127.0.0.1' and os.getenv('POSTGRES_DB')=='t068_legacy_stage' and os.getenv('INSTANCE_ID')=='t068-acc-abad' and os.getenv('DEPLOYMENT_STAGE')=='staging'
 	run=uuid.UUID(hex=private(ROOT/'identity',64).strip()).hex;state=json.loads(private(ROOT/'state.json'));assert state['run']==run
 	os.environ.setdefault('DJANGO_SETTINGS_MODULE','django_project.settings.base')
@@ -19,7 +19,7 @@ def main(mode):
 	from apps.payments.services import create_payment_attempt,record_invoice_result
 	from apps.payments.views import nowpayments_webhook
 	from apps.store.models import WalletTransaction,InventoryItem,Order,Product
-	assert_database_binding();assert connection.settings_dict['NAME']=='t068_legacy_stage' and TelegramUser.objects.count()==Product.objects.count()==1
+	assert_database_binding();assert connection.settings_dict['NAME']=='t068_legacy_stage' and TelegramUser.objects.count()==1 and Product.objects.count()==(2 if (ROOT/'stock-plan.json').exists() else 1)
 	def snapshot():
 		with transaction.atomic(),connection.cursor() as c:
 			c.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');c.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename");tables=[r[0] for r in c.fetchall()];rows={}
@@ -36,6 +36,11 @@ def main(mode):
 		attempt=create_payment_attempt(user_id=state['user'],kind=PaymentAttempt.KIND_WALLET,amount=Decimal('10.25'),pay_currency='usdtbsc');record_invoice_result(attempt.pk,{'id':'synthetic-'+run},'https://stage.invalid/invoice')
 		write(keypath,{'run':run,'secret':secret,'invoice':attempt.pk,'provider':'synthetic-'+run});write(ROOT/'callback-before.json',{'tables':snapshot(),'balance':str(TelegramUser.objects.get(pk=state['user']).balance),'ledger':WalletTransaction.objects.count(),'jobs':BackgroundJob.objects.count(),'orders':Order.objects.count(),'allocated':InventoryItem.objects.filter(order__isnull=False).count()});return
 	key=json.loads(private(keypath));assert key['run']==run and get_panel_setting('NP_IPN_SECRET','')==key['secret'];before=json.loads(private(ROOT/'callback-before.json',65536));factory=RequestFactory()
+	if mode=='dispatch':
+		assert isinstance(event,str) and len(event)==32 and uuid.UUID(hex=event).hex==event
+		path=ROOT/'callback-inputs'/(event+'.json');raw=private(path,8192);v=json.loads(raw);assert set(v)=={'run','event','body','signature'} and v['run']==run and v['event']==event and all(isinstance(x,str) for x in v.values())
+		r=nowpayments_webhook(factory.post('/webhooks/nowpayments/',data=v['body'].encode(),content_type='application/json',HTTP_X_NOWPAYMENTS_SIG=v['signature']));assert r.status_code in {200,400,403}
+		write(ROOT/'callback-results'/(event+'.json'),{'run':run,'event':event,'input_sha256':hashlib.sha256(raw.encode()).hexdigest(),'status':r.status_code,'duplicate':json.loads(r.content).get('duplicate') is True,'synthetic':True,'release_ready':False});return
 	def call(status='finished',invalid=False,unbound=False,body=None,method='post'):
 		v={'order_id':'unbound-'+run if unbound else key['invoice'],'payment_status':status,'payment_id':key['provider'],'invoice_id':key['provider'],'price_amount':10.25,'price_currency':'usd','pay_currency':'usdtbsc'};canonical=json.dumps(v,separators=(',',':'),sort_keys=True).encode();signature='0'*128 if invalid else hmac.new(key['secret'].encode(),canonical,hashlib.sha512).hexdigest();raw=canonical if body is None else body(canonical)
 		r=nowpayments_webhook(getattr(factory,method)('/webhooks/nowpayments/',data=raw,content_type='application/json',HTTP_X_NOWPAYMENTS_SIG=signature));return r.status_code,json.loads(r.content)
@@ -62,6 +67,6 @@ def main(mode):
 	write(ROOT/('callback-'+mode+'-result.json'),{'run':run,'mode':mode,'synthetic':True,'release_ready':False,'tables':snapshot()})
 if __name__=='__main__':
 	try:
-		assert len(sys.argv)==2;main(sys.argv[1])
+		assert len(sys.argv) in {2,3};main(sys.argv[1],sys.argv[2] if len(sys.argv)==3 else None)
 	except Exception:
 		print('Synthetic legacy callback qualification rejected.',file=sys.stderr);raise SystemExit(78)
