@@ -14,7 +14,14 @@ public sealed record PaymentCapture(PaymentCaptureOutcome Outcome, Guid PaymentI
 
 public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapshot secrets)
 {
-    public async Task<Guid> CreateTopupAsync(BrandContext context, long actor, Guid payment, Money amount, CryptoAsset network, CancellationToken ct = default)
+    public Task<Guid> CreateTopupAsync(BrandContext context, long actor, Guid payment, Money amount, CryptoAsset network, CancellationToken ct = default)
+        => CreateTopupCoreAsync(context, actor, payment, amount, network, null, ct);
+    public Task<Guid> CreateTopupForBrandAsync(BrandContext context, long expectedRevision, long actor, Guid payment, Money amount, CryptoAsset network, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
+        return CreateTopupCoreAsync(context, actor, payment, amount, network, expectedRevision, ct);
+    }
+    private async Task<Guid> CreateTopupCoreAsync(BrandContext context, long actor, Guid payment, Money amount, CryptoAsset network, long? writerRevision, CancellationToken ct)
     {
         if (payment == Guid.Empty || amount.Currency != Currency.Usd || amount.Amount <= 0 || decimal.Round(amount.Amount, 2) != amount.Amount || !Enum.IsDefined(network)) throw new ArgumentException("Invalid topup intent.");
         await using var session = await sessions.BeginAsync(ct);
@@ -23,6 +30,7 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
             await LockMemberAsync(session, context, actor, ct);
             BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BinaryPrimitives.ReadInt64BigEndian(payment.ToByteArray(bigEndian: true)))), ct);
+            if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
             var prior = await session.QuerySingleAsync(new DbStatement("SELECT topup_user_id,amount_due::text,network_asset FROM (SELECT 1) seed LEFT JOIN shop.payments ON id=$1", DbValue.Uuid(payment)),
                 r => r.IsDBNull(0) ? null : new Topup(r.GetGuid(0), ExactDecimal.Parse(r.GetString(1)), r.GetString(2)), ct);
             string asset = network == CryptoAsset.UsdtBsc ? "USDTBSC" : "USDTTRC20";
@@ -46,13 +54,18 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
-    public async Task BindInvoiceAsync(DbSession session, BrandContext context, long actor, Guid payment, string providerPayment, decimal expectedTokens, CancellationToken ct = default)
+    public Task BindInvoiceAsync(DbSession session, BrandContext context, long actor, Guid payment, string providerPayment, decimal expectedTokens, CancellationToken ct = default)
+        => BindInvoiceCoreAsync(session, context, actor, payment, providerPayment, expectedTokens, null, ct);
+    public Task BindInvoiceForBrandAsync(DbSession session, BrandContext context, long expectedRevision, long actor, Guid payment, string providerPayment, decimal expectedTokens, CancellationToken ct = default)
+        => BindInvoiceCoreAsync(session, context, actor, payment, providerPayment, expectedTokens, expectedRevision, ct);
+    private async Task BindInvoiceCoreAsync(DbSession session, BrandContext context, long actor, Guid payment, string providerPayment, decimal expectedTokens, long? writerRevision, CancellationToken ct)
     {
         try
         {
             if (string.IsNullOrEmpty(providerPayment) || providerPayment.Length > 64 || !providerPayment.All(char.IsAsciiDigit) || expectedTokens <= 0) throw new ArgumentException("Invalid trusted invoice binding.");
             await LockMemberAsync(session, context, actor, ct);
             BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
+            if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
             Payment data = await LoadAsync(session, context, payment, null, true, ct);
             if (data.Member != member.Id || data.Method != "crypto" || data.Currency != "USD") Reject(session);
             if (data.Provider is not null)
@@ -67,13 +80,22 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
-    public async Task<PaymentCapture> CaptureAsync(BrandContext context, VerifiedPaymentNotice notice,
+    public Task<PaymentCapture> CaptureAsync(BrandContext context, VerifiedPaymentNotice notice,
+        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default) => CaptureCoreAsync(context, notice, archive, null, ct);
+    public Task<PaymentCapture> CaptureForBrandAsync(BrandContext context, long expectedRevision, VerifiedPaymentNotice notice,
         Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
+        return CaptureCoreAsync(context, notice, archive, expectedRevision, ct);
+    }
+    private async Task<PaymentCapture> CaptureCoreAsync(BrandContext context, VerifiedPaymentNotice notice,
+        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, long? writerRevision, CancellationToken ct)
     {
         Payment before;
         DateTime observedAt;
         await using (var preflight = await sessions.BeginAsync(ct))
         {
+            if (writerRevision is long revision) await BrandWriterStore.RequireAsync(preflight, context, revision, ct);
             before = await LoadAsync(preflight, context, null, notice.Origin, false, ct);
             observedAt = await preflight.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
         }
@@ -85,6 +107,7 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
         try
         {
             await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 FOR UPDATE) u", DbValue.Uuid(before.Member), DbValue.Uuid(context.BrandId)), r => r.GetInt64(0), ct);
+            if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
             if (before.Order is Guid order) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE) o", DbValue.Uuid(order)), r => r.GetInt64(0), ct);
             Payment data = await LoadAsync(session, context, before.Id, null, true, ct);
             if (data.Provider != notice.ProviderPayment || data.Origin != notice.Origin || data.Expected != before.Expected || data.Member != before.Member) Reject(session);
