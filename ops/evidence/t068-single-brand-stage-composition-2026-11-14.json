@@ -1,0 +1,53 @@
+{
+  "artifact_manifest_sha256": "72cec7ad696c97283b8b870e06f1cdb20bc838743484b5a5ebbe372f7f6ba441",
+  "base_main": "64b554b8ab0a6ff5d32457282b9f35e74d533e76",
+  "baseline_brand_context_cases": 12,
+  "changed_source_files": 2,
+  "checks": {
+    "host-final": 6,
+    "regression-final": 7
+  },
+  "fresh_offline_disposable_database_count": 0,
+  "full_host_transport_composition_verified": false,
+  "full_interruption_matrix_verified": false,
+  "functional_review_passed": true,
+  "initial_host_attempt_failed": 2,
+  "initial_host_attempt_passed": 4,
+  "main_inputs_including_embedded_schema": 408,
+  "missing_reviewed_proof_names": [
+    "accepted_target_effect_reverse_mapping",
+    "original_obligations_preserved_without_inferred_settlement",
+    "source_stock_identity_and_custody_proofs",
+    "target_stock_projection_and_segregation",
+    "uncertain_callback_delivery_disposition"
+  ],
+  "native_aot_publication_verified": false,
+  "new_actors_stopped": true,
+  "normal_host_activation_verified": false,
+  "one_active_staging_brand": true,
+  "preexisting_container_configs_mounts_images_unchanged": 210,
+  "preexisting_container_state_changes": 0,
+  "preexisting_container_states_unchanged": 210,
+  "previous_restart_owner_disposition_reused": true,
+  "protected_copy_rehearsal_verified": false,
+  "protected_input_record_sha256_rechecked": "7f227a4d4de2e64aecdea71e811ab79f38522c868e561b68ccd531091b8c9b6e",
+  "protected_input_review_sha256": "2032d0a19de3c5bfd0e7e0ca381d66b59e72fc04e8cc166497af26c741d0ba59",
+  "release_ready": false,
+  "resource_noninterference_verified": false,
+  "review_script_sha256": "1deb5a2d4f32290de9498fad3d7931aef28c5142fcface9de08d8fca049d475a",
+  "same_brand_bot_api_payment_worker_verified": true,
+  "scope": "single active staging brand, loopback authenticated API, verified bot/payment ingress, fake-provider actual payment worker, pause/revision fencing and process-kill replay",
+  "second_host_attempt_failed": 1,
+  "second_host_attempt_passed": 5,
+  "server_state_guard_passed": true,
+  "source_sha256": {
+    "tests/Platform.IntegrationTests/StageWriterHostTests.cs": "6d7976a096bc4fe70410eb9769ddfefa45b47302d3674be120d76bdb0d7962db",
+    "tests/Shared/CutoverStageRuntime.cs": "ffc08b5071e6f7b02dca3269bd8f8ebd9b59e051eb9fc06c85a7077409815213"
+  },
+  "task_complete": false,
+  "test_trx_sha256": {
+    "host-final": "2381462d0a3ae64fc51bae96c99fc90f455d694b1eacbe17cb2bf4e72ff6149d",
+    "regression-final": "aaa6f6ddd1569e154671dbdb9e8497301b85a33395c79ef28e14827343c9efb1"
+  },
+  "unchanged_main_inputs": 406
+}

@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Headers;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Runtime.Versioning;
@@ -211,6 +213,72 @@ public sealed class StageWriterHostTests
                 Assert.Equal(payment ? 0L : 1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id=801"), r => r.GetInt64(0), Ct));
             }
             Guid status = Guid.NewGuid(); Request(status, "status"); var final = await Result(status, actor); Assert.Equal((0L, 0L, 0L), (final.Orders, final.Allocated, final.Debits)); await Stop(actor); actor.Dispose(); actor = null;
+        }
+        finally { await Cleanup(state, data, actor); }
+    }
+
+    [Fact]
+    public async Task SingleBrandApiBotAndPaymentWorkerShareRevisionAndRecoverWithoutDuplicatingMoney()
+    {
+        CutoverStageState? state = null; NpgsqlDataSource? data = null; Process? actor = null;
+        try
+        {
+            Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); await CutoverStageRuntime.RunAsync(Root, "payment-init", Ct); await CutoverStageRuntime.RunAsync(Root, "telegram-init", Ct); state = State();
+            var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions);
+            await using var login = await sessions.BeginAsync(Ct);
+            using var ticket = await AdminSessionStore.LoginAsync(login, "public-checkout-admin", new string('s', 20).AsMemory(), TimeSpan.FromHours(1), Ct); await login.CommitAsync(Ct);
+            Guid adjustment = Guid.NewGuid(); string body = "{\"BrandId\":\"" + context.BrandId + "\",\"Value\":{\"MemberId\":\"" + state.User + "\",\"AmountUsd\":\"1\",\"ExpectedVersion\":1,\"Reason\":\"public synthetic adjustment\",\"CommandId\":\"" + adjustment + "\"}}";
+            HttpClient Client()
+            {
+                var endpoint = JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(Root, "api.json")), CutoverStageJson.Default.CutoverStageApi)!;
+                Assert.Equal(state.Run, endpoint.Run); var uri = new Uri(endpoint.Address); Assert.Equal("127.0.0.1", uri.Host); Assert.Equal("http", uri.Scheme);
+                var client = new HttpClient { BaseAddress = uri, Timeout = TimeSpan.FromSeconds(10) }; client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ticket.Token.ExportForTransport()); return client;
+            }
+            async Task<HttpStatusCode> Adjust(HttpClient client, bool fresh = false)
+            {
+                using var response = await client.PostAsync("/v1/admin/wallet-adjustments", new StringContent(fresh ? body.Replace(adjustment.ToString(), Guid.NewGuid().ToString()).Replace("\"ExpectedVersion\":1", "\"ExpectedVersion\":2") : body, Encoding.UTF8, "application/json"), Ct); return response.StatusCode;
+            }
+            actor = Start(); await Ready(actor); using var first = Client();
+            for (int i = 0; i < 16; i++) { Guid probe = Guid.NewGuid(); Request(probe, "status"); Assert.Equal("ready", (await Result(probe, actor)).Outcome); }
+            first.DefaultRequestHeaders.Authorization = null; Assert.Equal(HttpStatusCode.Unauthorized, await Adjust(first));
+            first.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ticket.Token.ExportForTransport()); Assert.Equal(HttpStatusCode.OK, await Adjust(first));
+            var key = JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(Root, "payment-key.json")), CutoverPaymentJson.Default.CutoverPaymentKey)!;
+            string notice = PaymentNoticeFixture.Body(key.Origin, "finished", asset: "usdtbsc", quote: 10.25m, provider: key.Provider);
+            string signature = Convert.ToHexStringLower(HMACSHA512.HashData(Encoding.ASCII.GetBytes(key.Secret), Encoding.UTF8.GetBytes(notice)));
+            var input = new CutoverPaymentInput(state.Run, Guid.NewGuid(), Convert.ToHexStringLower(SHA256.HashData(Convert.FromHexString(signature))), notice, signature);
+            Guid capture = Guid.NewGuid(); CutoverStageRuntime.Write(Path.Combine(Root, "payment", capture.ToString("N") + ".json"), JsonSerializer.Serialize(input, CutoverPaymentJson.Default.CutoverPaymentInput)); Request(capture, "payment"); Assert.Equal("Ready", (await Result(capture, actor)).Outcome);
+            Assert.Equal(new(false, 2), await controls.SetActiveAsync(owner, context, 1, false, Guid.NewGuid(), Ct));
+            string before = await WorkflowActivityQualification.DomainAsync(sessions, true, Ct);
+            Guid worker = Guid.NewGuid(); Request(worker, "payment-worker"); Assert.Equal("Rejected", (await Result(worker, actor)).Outcome); Assert.True((int)await Adjust(first, true) >= 400);
+            Assert.Equal(before, await WorkflowActivityQualification.DomainAsync(sessions, true, Ct));
+            Assert.Equal(new(true, 3), await controls.SetActiveAsync(owner, context, 2, true, Guid.NewGuid(), Ct));
+            before = await WorkflowActivityQualification.DomainAsync(sessions, true, Ct);
+            Guid stale = Guid.NewGuid(); Request(stale, "payment-worker"); Assert.Equal("Rejected", (await Result(stale, actor)).Outcome); Assert.True((int)await Adjust(first, true) >= 400);
+            Assert.Equal(before, await WorkflowActivityQualification.DomainAsync(sessions, true, Ct)); await Stop(actor); actor.Dispose(); actor = Start(); await actor.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct);
+            Assert.Equal(78, actor.ExitCode); Assert.False(File.Exists(Path.Combine(Root, "ready.json"))); Assert.False(File.Exists(Path.Combine(Root, "api.json"))); actor.Dispose(); actor = null;
+            state = state with { WriterRevision = 3 }; CutoverStageRuntime.Write(Path.Combine(Root, "state.json"), JsonSerializer.Serialize(state, CutoverStageJson.Default.CutoverStageState), true);
+            string retained = Path.Combine(Root, "retained-results"); Directory.CreateDirectory(retained, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            string result = Path.Combine(Root, "results", worker.ToString("N") + ".json"); File.Move(result, Path.Combine(retained, worker.ToString("N") + "-rejected.json"));
+            actor = Start(); await Ready(actor); Assert.Equal("Settled", (await Result(worker, actor)).Outcome);
+            using (var resumed = Client()) Assert.Equal(HttpStatusCode.OK, await Adjust(resumed));
+            var telegramKey = JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(Root, "telegram-key.json")), CutoverTelegramJson.Default.CutoverTelegramKey)!;
+            Guid telegram = Guid.NewGuid(); var update = new CutoverTelegramInput(state.Run, 901, Encoding.UTF8.GetString(TelegramFixture.Body("/menu", updateId: 901)), TelegramFixture.Header(Convert.FromHexString(telegramKey.Secret)));
+            CutoverStageRuntime.Write(Path.Combine(Root, "telegram", telegram.ToString("N") + ".json"), JsonSerializer.Serialize(update, CutoverTelegramJson.Default.CutoverTelegramInput)); Request(telegram, "telegram"); Assert.Equal("Menu", (await Result(telegram, actor)).Outcome);
+            Guid purchase = Guid.NewGuid(); Request(purchase, "wallet-current"); Assert.Equal("Purchased", (await Result(purchase, actor)).Outcome);
+            actor.Kill(true); await actor.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct); actor.Dispose(); actor = null;
+            File.Move(result, Path.Combine(retained, worker.ToString("N") + "-settled.json"));
+            actor = Start(); await Ready(actor); Assert.Equal("Idle", (await Result(worker, actor)).Outcome);
+            using (var recovered = Client()) Assert.Equal(HttpStatusCode.OK, await Adjust(recovered));
+            await using (var read = await sessions.BeginReadOnlyAsync(Ct))
+            {
+                Assert.True(await read.QuerySingleAsync(new DbStatement("SELECT balance=101.25 AND version=4 FROM shop.wallets WHERE user_id=$1", DbValue.Uuid(state.User)), r => r.GetBoolean(0), Ct));
+                Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.payments WHERE status='settled'"), r => r.GetInt64(0), Ct));
+                Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment' AND status='succeeded' AND attempts=1"), r => r.GetInt64(0), Ct));
+                Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest' AND status='pending'"), r => r.GetInt64(0), Ct));
+                Assert.Equal(4L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries"), r => r.GetInt64(0), Ct));
+            }
+            Guid status = Guid.NewGuid(); Request(status, "status"); var final = await Result(status, actor); Assert.Equal((1L, 1L, 1L), (final.Orders, final.Allocated, final.Debits)); await Stop(actor); actor.Dispose(); actor = null;
         }
         finally { await Cleanup(state, data, actor); }
     }

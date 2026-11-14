@@ -1,3 +1,11 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Platform.Api;
+using Platform.Payments;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -11,11 +19,13 @@ using Platform.Core;
 namespace Platform.Testing;
 
 public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, string Secrets, long WriterRevision = 0);
+public sealed record CutoverStageApi(Guid Run, string Address);
 public sealed record CutoverStockPlan(Guid Run, Guid Product, Guid Unit, string Credential);
 public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Cipher, string Plain);
 public sealed record CutoverStageResult(string Operation, string Outcome, long Orders, long Allocated, long Debits, bool Synthetic = true, bool ReleaseReady = false);
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CutoverStageState))]
+[JsonSerializable(typeof(CutoverStageApi))]
 [JsonSerializable(typeof(CutoverStockPlan))]
 [JsonSerializable(typeof(CutoverStockBinding))]
 [JsonSerializable(typeof(CutoverStageResult))]
@@ -145,8 +155,9 @@ public static class CutoverStageRuntime
             return;
         }
         string ready = Path.Combine(root, "ready.json");
-        if (File.Exists(ready)) { _ = ArchivePrivateFile.Read(ready, 1, 4096); File.Delete(ready); }
-        sessions = new WriterRegistry(sessions, [new(context, saved.WriterRevision)]).ForBrand(context);
+        foreach (string descriptor in new[] { ready, Path.Combine(root, "api.json") })
+        { if (File.Exists(descriptor)) { _ = ArchivePrivateFile.Read(descriptor, 1, 4096); File.Delete(descriptor); } }
+        var writers = new WriterRegistry(sessions, [new(context, saved.WriterRevision)]); sessions = writers.ForBrand(context);
         await using (var admission = await sessions.BeginAsync(ct))
         { await admission.AdmitWriterAsync(context, ct); await admission.CommitAsync(ct); }
         await using (var read = await sessions.BeginReadOnlyAsync(ct))
@@ -155,6 +166,10 @@ public static class CutoverStageRuntime
             var member = await BrandUserStore.RequireAsync(read, context, CheckoutFixture.Actor(0), saved.User, ct);
             if (active != 1 || member.Id != saved.User) throw new InvalidOperationException();
         }
+        var catalog = new CatalogStore(sessions, secrets, [], (_, _) => throw new InvalidOperationException("Only synthetic local catalog operations are configured."));
+        using var administration = new BrandAdministrationServices(writers, context, secrets, catalog, new byte[32]);
+        await using var api = await StartApiAsync(writers, administration, sessions, secrets, ct);
+        Write(Path.Combine(root, "api.json"), JsonSerializer.Serialize(new CutoverStageApi(run, api.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()), CutoverStageJson.Default.CutoverStageApi), true);
         Write(Path.Combine(root, "ready.json"), JsonSerializer.Serialize(await Result("ready", "ready"), CutoverStageJson.Default.CutoverStageResult), true);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromMinutes(20));
         while (!deadline.IsCancellationRequested)
@@ -169,7 +184,7 @@ public static class CutoverStageRuntime
                 if (File.Exists(result)) continue;
                 byte[] bytes = ArchivePrivateFile.Read(request, 1, 128); string command;
                 try { command = new UTF8Encoding(false, true).GetString(bytes).Trim(); } finally { CryptographicOperations.ZeroMemory(bytes); }
-                if (command is not ("status" or "wallet" or "wallet-paused" or "telegram" or "payment" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
+                if (command is not ("status" or "wallet" or "wallet-current" or "wallet-paused" or "telegram" or "payment" or "payment-worker" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
                 string outcome = command.StartsWith("fake_", StringComparison.Ordinal) ? "simulated" : "ready";
                 if (command == "payment")
                 {
@@ -182,6 +197,26 @@ public static class CutoverStageRuntime
                     }
                     catch (Exception error) when (error is PaymentNoticeRejectedException or UnauthorizedAccessException or ArgumentException or JsonException) { outcome = "Rejected"; }
                 }
+
+                if (command == "payment-worker")
+                {
+                    try
+                    {
+                        var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment-key.json"), 1, 1024), CutoverPaymentJson.Default.CutoverPaymentKey) ?? throw new InvalidOperationException();
+                        if (key.Run != run || key.Member != saved.User) throw new InvalidOperationException();
+                        JobLease? lease;
+                        await using (var claim = await sessions.BeginAsync(ct))
+                        { lease = await OutboxStore.ClaimAsync(claim, JobKind.VerifyPayment, Guid.NewGuid(), TimeSpan.FromSeconds(60), ct); await claim.CommitAsync(ct); }
+                        if (lease is null) outcome = "Idle";
+                        else
+                        {
+                            using var provider = PaymentSettlementFixture.Client(request => request == "/v1/payment/" + key.Provider ? PaymentNoticeFixture.Body(key.Origin, quote: 10.25m, provider: key.Provider, asset: "usdtbsc") : throw new InvalidOperationException());
+                            outcome = (await new PaymentVerificationWorker(sessions, new PaymentSettlementStore(sessions, secrets, catalog), provider).RunForBrandAsync(context, saved.WriterRevision, lease, ct))?.Outcome.ToString() ?? "Rejected";
+                        }
+                    }
+                    catch (UnauthorizedAccessException) { outcome = "Rejected"; }
+                }
+
                 if (command == "telegram")
                 {
                     var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "telegram-key.json"), 1, 256), CutoverTelegramJson.Default.CutoverTelegramKey) ?? throw new InvalidOperationException();
@@ -195,9 +230,9 @@ public static class CutoverStageRuntime
                     catch (Exception error) when (error is TelegramIngressRejectedException or UnauthorizedAccessException or ArgumentException or JsonException) { outcome = "Rejected"; }
                     finally { CryptographicOperations.ZeroMemory(secret); }
                 }
-                if (command == "wallet")
+                if (command is "wallet" or "wallet-current")
                 {
-                    try { outcome = (await new CheckoutStore(sessions, secrets).PurchaseLocalAsync(context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10), ct)).Outcome.ToString(); }
+                    try { outcome = (await new CheckoutStore(sessions, secrets).PurchaseLocalAsync(context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10, PolicyRevision: command == "wallet-current" ? saved.WriterRevision : 0), ct)).Outcome.ToString(); }
                     catch (UnauthorizedAccessException) { outcome = "Rejected"; }
                 }
                 if (command == "wallet-paused")
@@ -220,10 +255,26 @@ public static class CutoverStageRuntime
             return await read.QuerySingleAsync(new DbStatement("SELECT (SELECT count(*) FROM shop.orders),(SELECT count(*) FROM shop.inventory_items WHERE state='allocated'),(SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit')"), r => new CutoverStageResult(operation, outcome, r.GetInt64(0), r.GetInt64(1), r.GetInt64(2)), ct);
         }
     }
+
+    private static async Task<WebApplication> StartApiAsync(WriterRegistry writers, BrandAdministrationServices services, DbSessionFactory sessions, SecretSnapshot secrets, CancellationToken ct)
+    {
+        var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] }); builder.WebHost.UseUrls("http://127.0.0.1:0"); builder.Logging.ClearProviders();
+        var app = builder.Build();
+        try
+        {
+            app.UseRouting(); app.UseMiddleware<DiagnosticsMiddleware>((Action<string>)(_ => { }));
+            app.UseMiddleware<AdminGuardMiddleware>((Func<AdminToken, CancellationToken, Task<AuthenticatedAdmin?>>)(async (token, cancellation) =>
+            { await using var read = await sessions.BeginReadOnlyAsync(cancellation); return await AdminSessionStore.AuthenticateAsync(read, token, cancellation); }));
+            app.MapScopedCatalogAdministration(writers, secrets); app.MapScopedOrderAdministration(writers, secrets, _ => services); await app.StartAsync(ct); return app;
+        }
+        catch { await app.DisposeAsync(); throw; }
+    }
+
     internal static void Write(string path, string value, bool replace = false)
     {
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
-        string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        string directory = Path.GetDirectoryName(path)!;
+        string temporary = Path.Combine(directory == "/stage/target/requests" ? "/stage/target/tmp" : directory, Path.GetFileName(path) + "." + Guid.NewGuid().ToString("N") + ".tmp");
         using (var output = new FileStream(temporary, new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite, Options = FileOptions.WriteThrough }))
         { byte[] bytes = Encoding.UTF8.GetBytes(value + "\n"); output.Write(bytes); output.Flush(true); }
         File.Move(temporary, path, replace);
