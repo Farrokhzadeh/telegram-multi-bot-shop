@@ -13,8 +13,11 @@ public sealed record HumanSupportRouteResult(Guid TicketId, bool Created, bool B
 
 public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot secrets)
 {
-    public async Task<HumanSupportRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default)
+    public Task<HumanSupportRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default) => RouteCoreAsync(update, null, ct);
+    public Task<HumanSupportRouteResult> RouteForBrandAsync(VerifiedTelegramUpdate update, long expectedRevision, CancellationToken ct = default) => RouteCoreAsync(update, expectedRevision, ct);
+    private async Task<HumanSupportRouteResult> RouteCoreAsync(VerifiedTelegramUpdate update, long? writerRevision, CancellationToken ct)
     {
+        if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
         ArgumentNullException.ThrowIfNull(update);
         bool command = TelegramWebhookVerifier.IsSupportCommand(update.Value);
         if (update.IsCallback || (update.Value.StartsWith('/') && !command)) throw new TelegramIngressRejectedException();
@@ -24,6 +27,7 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
         await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member.Id)), r => r.GetGuid(0), ct);
         member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
         if (member.Banned || member.Blocked) throw new TelegramIngressRejectedException();
+        if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, update.Context, revision, ct);
         bool fresh = await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct);
         bool enabled = await session.QuerySingleAsync(new DbStatement("""
             SELECT b.support_enabled AND EXISTS(SELECT 1 FROM shop.admins a WHERE a.id=b.customer_support_admin_id

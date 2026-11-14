@@ -16,8 +16,15 @@ public sealed partial class CheckoutStore
         return await ReplayLockedAsync(session, context, actor, request, ct);
     }
 
-    internal async Task<CheckoutResult?> ReplayLockedAsync(DbSession session, BrandContext context, long actor, CheckoutRequest request, CancellationToken ct)
+    public async Task<CheckoutResult?> ReplayForBrandAsync(BrandContext context, long expectedRevision, long actor, CheckoutRequest request, CancellationToken ct = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
+        await using var session = await sessions.BeginAsync(ct);
+        return await ReplayLockedAsync(session, context, actor, request, ct, expectedRevision);
+    }
+    internal async Task<CheckoutResult?> ReplayLockedAsync(DbSession session, BrandContext context, long actor, CheckoutRequest request, CancellationToken ct, long? writerRevision = null)
+    {
+        if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
         if (request.OrderId == Guid.Empty || request.ProductId == Guid.Empty || request.Quantity is < 1 or > 10000 ||
             request.Payment is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank) || !Enum.IsDefined(request.Kind) ||
             (request.Network is not null && (request.Payment != CheckoutPayment.Crypto || !Enum.IsDefined(request.Network.Value)))) throw new ArgumentException("Invalid checkout request.");
@@ -25,6 +32,7 @@ public sealed partial class CheckoutStore
         BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
         if (member.Blocked || member.Banned) Reject(session);
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BinaryPrimitives.ReadInt64BigEndian(request.OrderId.ToByteArray(bigEndian: true)))), ct);
+        if (writerRevision is long revision) await BrandWriterStore.RequireCustomerAsync(session, context, actor, revision, request.ProductId, ct);
         var prior = await session.QuerySingleAsync(new DbStatement("""
             SELECT o.id,a.id,a.actor_user_id,a.brand_id,a.command_sha256 FROM (SELECT 1) seed
             LEFT JOIN shop.orders o ON o.id=$1 LEFT JOIN shop.audit_events a ON a.id=$1

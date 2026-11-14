@@ -72,9 +72,12 @@ public sealed class CatalogStore
             if (!Label(account.Provider) || !Label(account.AccountRef) || !this.accounts.TryAdd(account.Provider, account.AccountRef)) throw new ArgumentException("One trusted account per provider is required.");
     }
 
-    public async Task<CatalogItem?> GetAsync(BrandContext context, long verifiedActorId, Guid productId, CancellationToken ct = default)
+    public Task<CatalogItem?> GetAsync(BrandContext context, long verifiedActorId, Guid productId, CancellationToken ct = default) => GetCoreAsync(context, verifiedActorId, productId, null, ct);
+    public Task<CatalogItem?> GetForBrandAsync(BrandContext context, long expectedRevision, long verifiedActorId, Guid productId, CancellationToken ct = default) => GetCoreAsync(context, verifiedActorId, productId, expectedRevision, ct);
+    private async Task<CatalogItem?> GetCoreAsync(BrandContext context, long verifiedActorId, Guid productId, long? writerRevision, CancellationToken ct)
     {
-        var state = await RefreshAsync(context, verifiedActorId, new(productId, 1, CheckoutPayment.Wallet), true, ct);
+        if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
+        var state = await RefreshAsync(context, verifiedActorId, new(productId, 1, CheckoutPayment.Wallet), true, ct, writerRevision);
         if (state is null) return null;
         var display = CheckoutQuote.Create(new(state.UnitUsdt, state.UnitToman, state.AutoToman, state.FxEnabled, state.Fx, state.MaximumFxAge), state.Presentation, 1, CheckoutPayment.Wallet, [], state.Now);
         return new(productId, state.Presentation, state.UnitUsdt, display.Terms.UnitToman, state.AutoToman,
@@ -84,13 +87,18 @@ public sealed class CatalogStore
     public async Task<CheckoutQuote> QuoteAsync(BrandContext context, long verifiedActorId, CatalogQuery query, CancellationToken ct = default) =>
         (await PrepareAsync(context, verifiedActorId, query, ct)).Quote;
 
-    public async Task<PreparedCheckout> PrepareAsync(BrandContext context, long verifiedActorId, CatalogQuery query, CancellationToken ct = default)
+    public async Task<CheckoutQuote> QuoteForBrandAsync(BrandContext context, long expectedRevision, long verifiedActorId, CatalogQuery query, CancellationToken ct = default) =>
+        (await PrepareForBrandAsync(context, expectedRevision, verifiedActorId, query, ct)).Quote;
+    public Task<PreparedCheckout> PrepareAsync(BrandContext context, long verifiedActorId, CatalogQuery query, CancellationToken ct = default) => PrepareCoreAsync(context, verifiedActorId, query, null, ct);
+    public Task<PreparedCheckout> PrepareForBrandAsync(BrandContext context, long expectedRevision, long verifiedActorId, CatalogQuery query, CancellationToken ct = default) => PrepareCoreAsync(context, verifiedActorId, query, expectedRevision, ct);
+    private async Task<PreparedCheckout> PrepareCoreAsync(BrandContext context, long verifiedActorId, CatalogQuery query, long? writerRevision, CancellationToken ct)
     {
+        if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
         ValidateQuery(query);
-        var state = await RefreshAsync(context, verifiedActorId, query, false, ct);
+        var state = await RefreshAsync(context, verifiedActorId, query, false, ct, writerRevision);
         if (state is null || Supply(state, query.Quantity, query.Kind) is not CheckoutSupply supply) throw new PricingRejectedException();
         await using var session = await sessions.BeginAsync(ct);
-        Data? current = await LoadAsync(session, context, verifiedActorId, query.ProductId, ct);
+        Data? current = await LoadAsync(session, context, verifiedActorId, query.ProductId, ct, writerRevision);
         if (current is null || !SameState(state, current) || Supply(current, query.Quantity, query.Kind) != supply) Reject(session);
         CheckoutQuote quote = await BuildQuoteAsync(session, context, current, query, ct);
         var prepared = new PreparedCheckout(this, context, verifiedActorId, current.Member, query, quote, supply, current.PolicyRevision, current.ProductRevision,
@@ -101,13 +109,15 @@ public sealed class CatalogStore
         return prepared;
     }
 
-    public async Task RequireCurrentAsync(DbSession session, BrandContext context, long verifiedActorId, PreparedCheckout prepared, CancellationToken ct = default)
+    public Task RequireCurrentAsync(DbSession session, BrandContext context, long verifiedActorId, PreparedCheckout prepared, CancellationToken ct = default) => RequireCurrentCoreAsync(session, context, verifiedActorId, prepared, null, ct);
+    public Task RequireCurrentForBrandAsync(DbSession session, BrandContext context, long expectedRevision, long verifiedActorId, PreparedCheckout prepared, CancellationToken ct = default) => RequireCurrentCoreAsync(session, context, verifiedActorId, prepared, expectedRevision, ct);
+    private async Task RequireCurrentCoreAsync(DbSession session, BrandContext context, long verifiedActorId, PreparedCheckout prepared, long? writerRevision, CancellationToken ct)
     {
         try
         {
             if (!ReferenceEquals(prepared.Owner, this) || prepared.Context != context || prepared.Actor != verifiedActorId ||
                 Interlocked.Exchange(ref prepared.Used, 1) != 0 || Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30)) Reject(session);
-            Data? current = await LoadAsync(session, context, verifiedActorId, prepared.Query.ProductId, ct);
+            Data? current = await LoadAsync(session, context, verifiedActorId, prepared.Query.ProductId, ct, writerRevision);
             if (current is null || current.Member != prepared.Member || current.PolicyRevision != prepared.PolicyRevision || current.ProductRevision != prepared.ProductRevision || current.ListingRevision != prepared.ListingRevision ||
                 Supply(current, prepared.Query.Quantity, prepared.Query.Kind) != prepared.Supply || (prepared.Supply.RemoteUnits > 0 &&
                 (current.Source?.Id != prepared.Source || current.Source?.Revision != prepared.SourceRevision || current.Source?.ObservationRevision != prepared.ObservationRevision))) Reject(session);
@@ -117,9 +127,12 @@ public sealed class CatalogStore
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
-    public async Task<RestockObservation> ObserveRestockAsync(BrandContext context, long verifiedActorId, Guid productId, CancellationToken ct = default)
+    public Task<RestockObservation> ObserveRestockAsync(BrandContext context, long verifiedActorId, Guid productId, CancellationToken ct = default) => ObserveRestockCoreAsync(context, verifiedActorId, productId, null, ct);
+    public Task<RestockObservation> ObserveRestockForBrandAsync(BrandContext context, long expectedRevision, long verifiedActorId, Guid productId, CancellationToken ct = default) => ObserveRestockCoreAsync(context, verifiedActorId, productId, expectedRevision, ct);
+    private async Task<RestockObservation> ObserveRestockCoreAsync(BrandContext context, long verifiedActorId, Guid productId, long? writerRevision, CancellationToken ct)
     {
-        Data? state = await RefreshAsync(context, verifiedActorId, new(productId, 1, CheckoutPayment.Wallet), true, ct);
+        if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
+        Data? state = await RefreshAsync(context, verifiedActorId, new(productId, 1, CheckoutPayment.Wallet), true, ct, writerRevision);
         if (state is null) throw new PricingRejectedException();
         return new(productId, state.ProductRevision, state.ListingRevision, state.Now, Supply(state, state.Minimum) is null);
     }
@@ -191,10 +204,10 @@ public sealed class CatalogStore
         if (review is null) await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, id), order, DateTime.UtcNow, ct);
     }
 
-    private async Task<Data?> RefreshAsync(BrandContext context, long actor, CatalogQuery query, bool display, CancellationToken ct)
+    private async Task<Data?> RefreshAsync(BrandContext context, long actor, CatalogQuery query, bool display, CancellationToken ct, long? writerRevision = null)
     {
         Data? before;
-        await using (var preflight = await sessions.BeginAsync(ct)) before = await LoadAsync(preflight, context, actor, query.ProductId, ct);
+        await using (var preflight = await sessions.BeginAsync(ct)) before = await LoadAsync(preflight, context, actor, query.ProductId, ct, writerRevision);
         if (before is null) return null;
         int quantity = display ? before.Minimum : query.Quantity;
         if (!display && (quantity < before.Minimum || quantity > before.Maximum || !PaymentAllowed(before, query.Payment))) throw new PricingRejectedException();
@@ -209,14 +222,14 @@ public sealed class CatalogStore
             result = Normalize(result);
         }
         await using var apply = await sessions.BeginAsync(ct);
-        Data? current = await LoadAsync(apply, context, actor, query.ProductId, ct);
+        Data? current = await LoadAsync(apply, context, actor, query.ProductId, ct, writerRevision);
         if (current is null) return null;
         if (!SameState(before, current) || (query.Kind == CheckoutKind.PrepaidUnits ? 0 : RemoteNeeded(current, quantity)) != remote) Reject(apply);
         if (result is not null && account is not null)
         {
             Source observedSource = current.Source!;
             await WriteObservationAsync(apply, observedSource.Id, observedSource.Revision, observedSource.ObservationRevision, account, result, ct);
-            current = await LoadAsync(apply, context, actor, query.ProductId, ct) ?? throw new PricingRejectedException();
+            current = await LoadAsync(apply, context, actor, query.ProductId, ct, writerRevision) ?? throw new PricingRejectedException();
         }
         if (Supply(current, current.Minimum) is not null) await WakeRestockAsync(apply, current.ProductId, ct);
         await apply.CommitAsync(ct);
@@ -283,7 +296,7 @@ public sealed class CatalogStore
         return CheckoutQuote.Create(new(data.UnitUsdt, data.UnitToman, data.AutoToman, data.FxEnabled, data.Fx, data.MaximumFxAge), data.Presentation, query.Quantity, query.Payment, coupons, now);
     }
 
-    private async Task<Data?> LoadAsync(DbSession session, BrandContext context, long actor, Guid product, CancellationToken ct)
+    private async Task<Data?> LoadAsync(DbSession session, BrandContext context, long actor, Guid product, CancellationToken ct, long? writerRevision = null)
     {
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(actor)), row => row.GetInt64(0), ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
@@ -293,6 +306,7 @@ public sealed class CatalogStore
             FROM (SELECT 1) seed LEFT JOIN (SELECT * FROM shop.products WHERE id=$1 FOR UPDATE) p ON true
             """, DbValue.Uuid(product)), row => row.IsDBNull(0) ? null : new(row.GetBoolean(1), row.GetInt64(2), row.GetString(3), row.GetString(4), row.GetBoolean(5), row.IsDBNull(6) ? null : row.GetGuid(6), row.GetString(7), String(row, 8), String(row, 9), String(row, 10)), ct);
         if (master is null || !master.Active) return null;
+        if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
         var brand = await session.QuerySingleAsync(new DbStatement("""
             SELECT public_name,market,policy_version,allow_wallet,allow_crypto,allow_bank,fx_enabled,current_fx::text,fx_source,fx_fetched_at,max_exchange_rate_age_seconds
             FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR UPDATE

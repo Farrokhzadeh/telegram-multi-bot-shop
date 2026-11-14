@@ -20,11 +20,23 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
         return result;
     }
 
-    public async Task<CheckoutResult> AcceptLocalAsync(DbSession session, BrandContext context, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct = default)
+    public async Task<CheckoutResult> PurchaseLocalForBrandAsync(BrandContext context, long expectedRevision, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct = default)
+    {
+        await using var session = await sessions.BeginAsync(ct);
+        var result = await AcceptLocalForBrandAsync(session, context, expectedRevision, verifiedActorId, request, ct);
+        await session.CommitAsync(ct);
+        return result;
+    }
+    public Task<CheckoutResult> AcceptLocalAsync(DbSession session, BrandContext context, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct = default)
+        => AcceptLocalCoreAsync(session, context, verifiedActorId, request, null, ct);
+    public Task<CheckoutResult> AcceptLocalForBrandAsync(DbSession session, BrandContext context, long expectedRevision, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct = default)
+        => AcceptLocalCoreAsync(session, context, verifiedActorId, request, expectedRevision, ct);
+    private async Task<CheckoutResult> AcceptLocalCoreAsync(DbSession session, BrandContext context, long verifiedActorId, LocalCheckoutRequest request, long? writerRevision, CancellationToken ct)
     {
         try
         {
-            CheckoutResult result = await AcceptCoreAsync(session, context, verifiedActorId, request, ct);
+            if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
+            CheckoutResult result = await AcceptCoreAsync(session, context, verifiedActorId, request, writerRevision, ct);
             if (result.Outcome is not (CheckoutOutcome.Purchased or CheckoutOutcome.Replayed))
                 await BotActivityWriter.CheckoutRejectedAsync(session, context, verifiedActorId, request.ProductId, request.Quantity, ct);
             return result;
@@ -32,7 +44,7 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
-    private async Task<CheckoutResult> AcceptCoreAsync(DbSession session, BrandContext context, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct)
+    private async Task<CheckoutResult> AcceptCoreAsync(DbSession session, BrandContext context, long verifiedActorId, LocalCheckoutRequest request, long? writerRevision, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.OrderId == Guid.Empty || request.ProductId == Guid.Empty || request.Quantity is < 1 or > 10000 || request.UnitPrice <= 0 ||
@@ -41,6 +53,7 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, null, ct);
         if (member.Blocked || member.Banned) Reject(session);
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BinaryPrimitives.ReadInt64BigEndian(request.OrderId.ToByteArray(bigEndian: true)))), ct);
+        if (writerRevision is long revision) await BrandWriterStore.RequireCustomerAsync(session, context, verifiedActorId, revision, request.ProductId, ct);
         byte[] fingerprint = Fingerprint(context, member.Id, request);
         var prior = await session.QuerySingleAsync(new DbStatement("""
             SELECT o.id,a.id,a.actor_user_id,a.brand_id,a.command_sha256 FROM (SELECT 1) seed

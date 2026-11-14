@@ -31,8 +31,20 @@ public static class AdminBindingStore
     }
 
     // Only the verified private-ingress adapter supplies proof. This does not authenticate Telegram transport itself.
-    public static async Task<bool> ObservePrivateProofAsync(DbSession session, Guid adminId, AdminToken nonce,
+    public static Task<bool> ObservePrivateProofAsync(DbSession session, Guid adminId, AdminToken nonce,
+        PrivateTelegramProof proof, CancellationToken cancellationToken = default) => ObserveProofCoreAsync(session, adminId, nonce, proof, null, null, cancellationToken);
+    public static async Task<bool> ObservePrivateProofForBrandAsync(DbSession session, BrandContext context, long expectedRevision, Guid adminId, AdminToken nonce,
         PrivateTelegramProof proof, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
+            return await ObserveProofCoreAsync(session, adminId, nonce, proof, context, expectedRevision, cancellationToken);
+        }
+        catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
+    }
+    private static async Task<bool> ObserveProofCoreAsync(DbSession session, Guid adminId, AdminToken nonce,
+        PrivateTelegramProof proof, BrandContext? context, long? writerRevision, CancellationToken cancellationToken)
     {
         var pending = await PendingAsync(session, adminId, cancellationToken);
         if (pending is null || pending.TelegramId != proof.UserId) return false;
@@ -43,6 +55,7 @@ public static class AdminBindingStore
         {
             if (!CryptographicOperations.FixedTimeEquals(nonceHash, proof.NonceHash) ||
                 !CryptographicOperations.FixedTimeEquals(initial, pending.Hash)) return false;
+            if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context!, revision, cancellationToken);
             int changed = await session.ExecuteAsync(new DbStatement("""
                 UPDATE shop.admins SET binding_challenge_hash=$2 WHERE id=$1 AND binding_expires_at>clock_timestamp()
                     AND disabled_at IS NULL AND auth_version=$3 AND binding_challenge_hash=$4

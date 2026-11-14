@@ -14,11 +14,17 @@ public sealed class UpdateRouter
     private readonly HumanSupportRouter? support;
     private readonly CustomerHistoryCommandRouter? history;
     private readonly Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock;
+    private readonly Func<BrandContext, long, Guid, CancellationToken, Task<RestockObservation>>? observeRestockForBrand;
     public UpdateRouter(DbSessionFactory sessions, Func<BrandContext, Guid, CancellationToken, Task<RestockObservation>> observeRestock, HumanSupportRouter? support = null, CustomerHistoryCommandRouter? history = null)
     { this.sessions = sessions; this.observeRestock = observeRestock; this.support = support; this.history = history; }
 
-    public async Task<UpdateRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default)
+    public UpdateRouter(DbSessionFactory sessions, Func<BrandContext, long, Guid, CancellationToken, Task<RestockObservation>> observeRestockForBrand, HumanSupportRouter? support = null, CustomerHistoryCommandRouter? history = null)
+        : this(sessions, (_, _, _) => throw new InvalidOperationException("Scoped restock observation is required."), support, history) { this.observeRestockForBrand = observeRestockForBrand; }
+    public Task<UpdateRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default) => RouteCoreAsync(update, null, ct);
+    public Task<UpdateRouteResult> RouteForBrandAsync(VerifiedTelegramUpdate update, long expectedRevision, CancellationToken ct = default) => RouteCoreAsync(update, expectedRevision, ct);
+    private async Task<UpdateRouteResult> RouteCoreAsync(VerifiedTelegramUpdate update, long? writerRevision, CancellationToken ct)
     {
+        if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
         ArgumentNullException.ThrowIfNull(update);
         if (!update.IsCallback && CustomerHistoryCommandRouter.TryParsePage(update.Value, out _))
         {
@@ -30,11 +36,11 @@ public sealed class UpdateRouter
             BrandUser current;
             await using (var read = await sessions.BeginAsync(ct)) current = await BrandUserStore.RequireAsync(read, update.Context, update.ActorId, null, ct);
             if (current.Flow.State == CustomerFlowState.Quantity || (current.Flow.State != CustomerFlowState.Support && ParseQuantity(update.Value) is not null))
-                return await QuantityAsync(update, current, ct);
+                return await QuantityAsync(update, current, ct, writerRevision);
         }
         if (support is not null && !update.IsCallback && (TelegramWebhookVerifier.IsSupportCommand(update.Value) || !update.Value.StartsWith('/')))
         {
-            HumanSupportRouteResult result = await support.RouteAsync(update, ct);
+            HumanSupportRouteResult result = writerRevision is long supportRevision ? await support.RouteForBrandAsync(update, supportRevision, ct) : await support.RouteAsync(update, ct);
             return new(result.Busy ? UpdateRouteCode.Busy : UpdateRouteCode.Support, result.FlowRevision, result.TicketId);
         }
         Callback? callback = update.IsCallback ? ParseCallback(update.Value) : null;
@@ -44,10 +50,13 @@ public sealed class UpdateRouter
             await using (var preflight = await sessions.BeginAsync(ct))
             {
                 BrandUser actor = await BrandUserStore.RequireAsync(preflight, update.Context, update.ActorId, null, ct);
+                await AdmitAsync(preflight, update, callback.Target, writerRevision, ct);
                 if (actor.Blocked || actor.Banned || actor.Flow.Revision != callback.Revision || actor.Flow.AnchorMessageId != update.MessageId ||
                     actor.Flow.ProductId != callback.Target || !await Published(preflight, update.Context, callback.Target, ct)) throw new TelegramIngressRejectedException();
             }
-            observation = await observeRestock(update.Context, callback.Target, ct);
+            observation = writerRevision is long observationRevision
+                ? await (observeRestockForBrand ?? throw new InvalidOperationException("Scoped restock observation is required."))(update.Context, observationRevision, callback.Target, ct)
+                : await observeRestock(update.Context, callback.Target, ct);
         }
         if (observation is not null && observation.ProductId != callback!.Target) throw new TelegramIngressRejectedException();
         await using var session = await sessions.BeginAsync(ct);
@@ -58,7 +67,10 @@ public sealed class UpdateRouter
             if (binding.Length != 3 || !Guid.TryParseExact(binding[1], "N", out Guid adminId) || adminId == Guid.Empty || adminId.ToString("N") != binding[1]) throw new TelegramIngressRejectedException();
             using var nonce = AdminToken.Parse(binding[2]);
             var proof = PrivateTelegramProof.FromVerifiedIngress(update.Context, update.ActorId, update.ActorId, false, nonce);
-            if (!await AdminBindingStore.ObservePrivateProofAsync(session, adminId, nonce, proof, ct)) throw new TelegramIngressRejectedException();
+            bool observed = writerRevision is long proofRevision
+                ? await AdminBindingStore.ObservePrivateProofForBrandAsync(session, update.Context, proofRevision, adminId, nonce, proof, ct)
+                : await AdminBindingStore.ObservePrivateProofAsync(session, adminId, nonce, proof, ct);
+            if (!observed) throw new TelegramIngressRejectedException();
             await session.CommitAsync(ct);
             return new(UpdateRouteCode.StaffProofObserved, 0);
         }
@@ -67,6 +79,12 @@ public sealed class UpdateRouter
             : await BrandUserStore.ObservePrivateAsync(session, update.Context, update.ActorId, ct);
         await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member.Id)), r => r.GetGuid(0), ct);
         member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
+        if (writerRevision is not null)
+        {
+            Guid? product = callback?.Action is 'p' or 's' or 'u' ? callback.Target : callback?.Action == 'o'
+                ? await session.QuerySingleAsync(new DbStatement("SELECT product_id FROM (SELECT 1) seed LEFT JOIN shop.orders ON id=$1 AND user_id=$2", DbValue.Uuid(callback.Target), DbValue.Uuid(member.Id)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct) : null;
+            await AdmitAsync(session, update, product, writerRevision, ct);
+        }
         if (member.Banned || (member.Blocked && update.Value != "/start")) throw new TelegramIngressRejectedException();
         if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct)) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
         if (member.Blocked && update.Value == "/start")
@@ -127,13 +145,14 @@ public sealed class UpdateRouter
         return new(action.Code, member.Flow.Revision, entity);
     }
 
-    private async Task<UpdateRouteResult> QuantityAsync(VerifiedTelegramUpdate update, BrandUser expected, CancellationToken ct)
+    private async Task<UpdateRouteResult> QuantityAsync(VerifiedTelegramUpdate update, BrandUser expected, CancellationToken ct, long? writerRevision)
     {
         await using var session = await sessions.BeginAsync(ct);
         if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(UpdateRouteCode.Busy, expected.Flow.Revision);
         await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(expected.Id)), r => r.GetGuid(0), ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, expected.Id, ct);
         if (member.Blocked || member.Banned) throw new TelegramIngressRejectedException();
+        await AdmitAsync(session, update, expected.Flow.ProductId, writerRevision, ct);
         if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct)) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
         long highwater = await session.QuerySingleAsync(new DbStatement("SELECT telegram_update_highwater FROM shop.brands WHERE id=$1", DbValue.Uuid(update.Context.BrandId)), r => r.GetInt64(0), ct);
         if (update.UpdateId != highwater) throw new TelegramIngressRejectedException();
@@ -157,6 +176,11 @@ public sealed class UpdateRouter
             CustomerFlowState.Payment, productId: product, anchorMessageId: anchor, expiresAt: member.Flow.ExpiresAt, ct: ct);
         await session.CommitAsync(ct);
         return new(accepted ? UpdateRouteCode.Quantity : UpdateRouteCode.QuantityRejected, member.Flow.Revision, product, accepted ? quantity : null);
+    }
+    private static async Task AdmitAsync(DbSession session, VerifiedTelegramUpdate update, Guid? product, long? writerRevision, CancellationToken ct)
+    {
+        if (writerRevision is not long revision) return;
+        await BrandWriterStore.RequireCustomerAsync(session, update.Context, update.ActorId, revision, product, ct);
     }
     private static int? ParseQuantity(string value)
     {

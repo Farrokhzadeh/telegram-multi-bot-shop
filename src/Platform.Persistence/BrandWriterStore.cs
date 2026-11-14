@@ -18,6 +18,18 @@ public sealed class BrandWriterStore(DbSessionFactory sessions)
         if (!allowed) Deny(session);
     }
 
+    public static async Task RequireCustomerAsync(DbSession session, BrandContext context, long actor, long expectedRevision, Guid? product = null, CancellationToken ct = default)
+    {
+        try
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
+            await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(actor)), r => r.GetInt64(0), ct);
+            _ = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
+            if (product is Guid id) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(id)), r => r.GetInt64(0), ct);
+            await RequireAsync(session, context, expectedRevision, ct);
+        }
+        catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
+    }
     public async Task<BrandWriterState> ReadAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
