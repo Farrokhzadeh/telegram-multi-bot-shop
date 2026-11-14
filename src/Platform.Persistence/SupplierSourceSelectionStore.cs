@@ -37,6 +37,7 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Create, AuditEntity.ProductSupplierSource, source, null, AuditReason.ConfigurationChange, command, hash, 0, 1), ct)) return 1;
             var current = await session.QuerySingleAsync(new DbStatement("SELECT fulfillment_kind,revision FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => (Kind: r.GetString(0), Revision: r.GetInt64(1)), ct);
+            await session.AdmitSharedWriterAsync(ct);
             if (current.Kind != "supplier" || (productRevision.HasValue && current.Revision != productRevision.Value)) throw new InvalidOperationException("Supplier product revision conflict.");
             await session.ExecuteAsync(new DbStatement("INSERT INTO shop.product_supplier_sources(id,product_id,provider_code,external_product_id,external_variant_id) VALUES ($1,$2,$3,$4,$5)", DbValue.Uuid(source), DbValue.Uuid(product), DbValue.Text(provider), DbValue.Text(externalProduct), AdminCommand.Text(variant)), ct);
             await session.CommitAsync(ct); return 1;
@@ -87,6 +88,7 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.SelectSource, AuditEntity.Product, product, null, AuditReason.ConfigurationChange, command, hash, productRevision, productRevision + 1), ct)) return productRevision + 1;
             var current = await session.QuerySingleAsync(new DbStatement("SELECT revision,fulfillment_kind FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => (Revision: r.GetInt64(0), Kind: r.GetString(1)), ct);
+            await session.AdmitSharedWriterAsync(ct);
             if (current.Revision != productRevision || current.Kind != "supplier") throw new InvalidOperationException("Product revision or supplier policy conflict.");
             bool valid = await session.QuerySingleAsync(new DbStatement("""
                 SELECT s.id IS NOT NULL FROM (SELECT 1) seed LEFT JOIN LATERAL
@@ -102,6 +104,7 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
     private static async Task<Source> ReadSourceAsync(DbSession session, Guid product, Guid source, long revision, bool enabled, CancellationToken ct)
     {
         var master = await session.QuerySingleAsync(new DbStatement("SELECT revision,fulfillment_kind FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => (Revision: r.GetInt64(0), Kind: r.GetString(1)), ct);
+        await session.AdmitSharedWriterAsync(ct);
         var row = await session.QuerySingleAsync(new DbStatement("SELECT provider_code,external_product_id,external_variant_id,revision,enabled,observation_revision FROM shop.product_supplier_sources WHERE id=$1 AND product_id=$2 FOR UPDATE", DbValue.Uuid(source), DbValue.Uuid(product)), r => (Provider: r.GetString(0), Product: r.GetString(1), Variant: r.IsDBNull(2) ? null : r.GetString(2), Revision: r.GetInt64(3), Enabled: r.GetBoolean(4), Observation: r.GetInt64(5)), ct);
         if (row.Revision != revision || row.Enabled == enabled || (enabled && master.Kind != "supplier")) throw new InvalidOperationException("Source revision or lifecycle conflict.");
         return new(row.Provider, row.Product, row.Variant, row.Observation, master.Revision);

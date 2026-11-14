@@ -26,6 +26,7 @@ public sealed class UpdateRouter
     {
         if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
         ArgumentNullException.ThrowIfNull(update);
+        writerRevision ??= sessions.ExpectedWriterRevision(update.Context);
         if (!update.IsCallback && CustomerHistoryCommandRouter.TryParsePage(update.Value, out _))
         {
             if (history is null) throw new TelegramIngressRejectedException();
@@ -76,7 +77,7 @@ public sealed class UpdateRouter
         }
         BrandUser member = update.IsCallback
             ? await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct)
-            : await BrandUserStore.ObservePrivateAsync(session, update.Context, update.ActorId, ct);
+            : await BrandUserStore.ObservePrivateAsync(session, update.Context, update.ActorId, ct, admit: false);
         await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member.Id)), r => r.GetGuid(0), ct);
         member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
         if (writerRevision is not null)

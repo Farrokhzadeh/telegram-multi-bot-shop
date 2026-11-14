@@ -33,6 +33,7 @@ public sealed partial class CheckoutStore
         if (member.Blocked || member.Banned) Reject(session);
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BinaryPrimitives.ReadInt64BigEndian(request.OrderId.ToByteArray(bigEndian: true)))), ct);
         if (writerRevision is long revision) await BrandWriterStore.RequireCustomerAsync(session, context, actor, revision, request.ProductId, ct);
+        else await session.AdmitCustomerWriterAsync(context, actor, request.ProductId, ct);
         var prior = await session.QuerySingleAsync(new DbStatement("""
             SELECT o.id,a.id,a.actor_user_id,a.brand_id,a.command_sha256 FROM (SELECT 1) seed
             LEFT JOIN shop.orders o ON o.id=$1 LEFT JOIN shop.audit_events a ON a.id=$1

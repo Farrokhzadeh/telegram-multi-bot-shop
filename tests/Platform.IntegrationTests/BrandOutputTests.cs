@@ -84,7 +84,7 @@ public sealed class BrandOutputTests
             snapshots[i] = await Read(fixture, i);
         Assert.Equal("Out of stock", Localization.Text(snapshots[1], CustomerText.OutOfStock));
         Assert.Equal("ناموجود", Localization.Text(snapshots[0], CustomerText.OutOfStock));
-        await Assert.ThrowsAsync<DbOperationException>(() => router.RouteAsync(Callback(fixture, 1, 'p', fixture.PrivateProduct), Ct));
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Callback(fixture, 1, 'p', fixture.PrivateProduct), Ct));
         await using var hide = await fixture.Sessions.BeginAsync(Ct);
         await hide.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET visible=false WHERE product_id=$1", DbValue.Uuid(fixture.Product)), Ct);
         await hide.CommitAsync(Ct);

@@ -1,6 +1,7 @@
 using System.Data;
 using System.Globalization;
 using Npgsql;
+using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -32,6 +33,7 @@ public sealed class DbSessionFactory
 {
     private readonly NpgsqlDataSource data;
     private readonly DbSessionOptions options;
+    private WriterBinding? writer;
 
     public DbSessionFactory(NpgsqlDataSource data, DbSessionOptions? options = null)
     {
@@ -44,6 +46,19 @@ public sealed class DbSessionFactory
         this.data = data; // Caller owns the shared data source/pool.
     }
 
+    public bool IsWriterScoped => writer is not null;
+    public long? ExpectedWriterRevision(BrandContext context)
+    {
+        if (writer is null) return null;
+        return writer.Find(context)?.Revision ?? throw new UnauthorizedAccessException("Writer registration is unavailable.");
+    }
+    public DbSessionFactory ForBrandWriter(BrandContext context, long expectedRevision) => Bind(new WriterBinding([new(context, expectedRevision)], false));
+    public DbSessionFactory ForSharedWriters(IEnumerable<BrandWriterRegistration> registrations) => Bind(new WriterBinding(registrations, true));
+    private DbSessionFactory Bind(WriterBinding binding)
+    {
+        if (options.ReadOnly || writer is not null) throw new InvalidOperationException("Writer factories cannot be read-only or rebound.");
+        return new DbSessionFactory(data, options) { writer = binding };
+    }
     public Task<DbSession> BeginReadOnlyAsync(CancellationToken cancellationToken = default) => new DbSessionFactory(data, options with { ReadOnly = true, Isolation = IsolationLevel.RepeatableRead }).BeginAsync(cancellationToken);
     public async Task<DbSession> BeginAsync(CancellationToken cancellationToken = default)
     {
@@ -62,6 +77,7 @@ public sealed class DbSessionFactory
                 await control.ExecuteNonQueryAsync(cancellationToken);
             }
             session = new DbSession(connection, transaction, options);
+            session.BindWriter(writer);
             await session.ExecuteAsync(new DbStatement(
                 "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true),set_config('TimeZone','UTC',true)",
                 DbValue.Text(((int)options.StatementTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + "ms"),
@@ -83,7 +99,7 @@ public sealed class DbSessionFactory
     }
 }
 
-public sealed class DbSession : IAsyncDisposable
+public sealed partial class DbSession : IAsyncDisposable
 {
     private readonly NpgsqlConnection connection;
     private readonly NpgsqlTransaction transaction;
@@ -193,6 +209,7 @@ public sealed class DbSession : IAsyncDisposable
 
     public async Task CommitAsync(CancellationToken cancellationToken = default)
     {
+        RequireWriterCommit();
         EnterActive();
         bool dispatched = false;
         try

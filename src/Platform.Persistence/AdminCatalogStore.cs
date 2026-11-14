@@ -82,6 +82,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
                 bool valid = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.admins WHERE id=$1 AND disabled_at IS NULL AND telegram_verified_at IS NOT NULL AND public_contact_handle IS NOT NULL)", AdminCommand.Id(value.ContactAdminId)), r => r.GetBoolean(0), ct);
                 if (!valid) throw new ArgumentException("A current verified public support contact is required.");
             }
+            await session.AdmitWriterAsync(context, ct);
             int changed = await session.ExecuteAsync(new DbStatement("""
                 UPDATE shop.brands SET public_name=$1,default_language=$2,active=$3,allow_wallet=$4,allow_crypto=$5,allow_bank=$6,allow_wallet_topup=$7,
                     zero_balance_topup=$8,support_enabled=$9,customer_support_admin_id=$10,fx_enabled=$11,logo_asset_ref=$12,policy_version=policy_version+1,updated_at=clock_timestamp()
@@ -104,6 +105,8 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Update, AuditEntity.Product, product, null, AuditReason.ConfigurationChange, command, hash, revision, revision + 1), ct)) return revision + 1;
+            await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
+            await session.AdmitSharedWriterAsync(ct);
             int changed = await session.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.products(id,title,description,icon_ref,guidance,fulfillment_kind,availability_policy,local_first,active,revision)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1)
@@ -130,6 +133,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Update, AuditEntity.BrandProduct, product, context.BrandId, AuditReason.ConfigurationChange, command, hash, revision, revision + 1), ct)) return revision + 1;
             await session.QuerySingleAsync(new DbStatement("SELECT revision FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
+            await session.AdmitWriterAsync(context, ct);
             await session.QuerySingleAsync(new DbStatement("SELECT policy_version FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
             int changed = await session.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.brand_products(brand_id,product_id,visible,title_mode,title_override,description_mode,description_override,icon_mode,icon_override,guidance_mode,guidance_override,
@@ -161,6 +165,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.StockImport, AuditEntity.Product, product, null, AuditReason.OperatorReview, command, hash), ct)) return;
             await session.QuerySingleAsync(new DbStatement("SELECT revision FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock(739285126)"), ct);
+            await session.AdmitSharedWriterAsync(ct);
             var keys = await session.QueryManyAsync(new DbStatement("SELECT DISTINCT credential_key_id FROM shop.inventory_items ORDER BY credential_key_id"), r => r.GetString(0), 32, ct);
             string key = secrets.CurrentInventoryKeyId;
             foreach (var item in items)

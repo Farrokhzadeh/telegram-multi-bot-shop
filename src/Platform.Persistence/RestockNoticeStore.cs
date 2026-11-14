@@ -33,12 +33,17 @@ public sealed partial class CampaignStore
             await using var session = await sessions.BeginAsync(ct);
             try
             {
+                IReadOnlyList<(Guid Consent, Guid Member)>? locked = null;
+                if (session.IsWriterScoped)
+                {
+                    locked = await ReadRestockMembersAsync(session, product, brand, ct);
+                    foreach (Guid member in locked.Select(v => v.Member).Distinct().Order()) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member)), r => r.GetGuid(0), ct);
+                    await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetGuid(0), ct);
+                    await session.AdmitSharedWriterAsync(ct);
+                }
                 await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(5), ct);
                 if (!await AvailableAsync(session, brand, product, accounts, ct)) { await session.CommitAsync(ct); continue; }
-                var members = await session.QueryManyAsync(new DbStatement("""
-                    SELECT s.id,s.user_id FROM shop.product_stock_subscriptions s JOIN shop.users u ON u.id=s.user_id
-                    WHERE s.product_id=$1 AND u.brand_id=$2 AND s.closed_at IS NULL AND s.cancelled_at IS NULL AND s.triggered_at IS NULL ORDER BY s.user_id,s.id LIMIT 1000
-                    """, DbValue.Uuid(product), DbValue.Uuid(brand)), r => (Consent: r.GetGuid(0), Member: r.GetGuid(1)), 1000, ct);
+                var members = locked ?? await ReadRestockMembersAsync(session, product, brand, ct);
                 foreach (var item in members)
                 {
                     await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(item.Member)), r => r.GetGuid(0), ct);
@@ -64,6 +69,11 @@ public sealed partial class CampaignStore
         else await OutboxStore.CompleteAsync(finish, lease, ct);
         await finish.CommitAsync(ct); return total;
     }
+    private static Task<IReadOnlyList<(Guid Consent, Guid Member)>> ReadRestockMembersAsync(DbSession session, Guid product, Guid brand, CancellationToken ct) =>
+        session.QueryManyAsync(new DbStatement("""
+            SELECT s.id,s.user_id FROM shop.product_stock_subscriptions s JOIN shop.users u ON u.id=s.user_id
+            WHERE s.product_id=$1 AND u.brand_id=$2 AND s.closed_at IS NULL AND s.cancelled_at IS NULL AND s.triggered_at IS NULL ORDER BY s.user_id,s.id LIMIT 1000
+            """, DbValue.Uuid(product), DbValue.Uuid(brand)), r => (Consent: r.GetGuid(0), Member: r.GetGuid(1)), 1000, ct);
     public async Task<int> CleanupClosedSubscriptionsAsync(JobLease lease, CancellationToken ct = default)
     {
         if (lease.Intent.Kind != JobKind.SubscriptionCleanup) throw new UnauthorizedAccessException();
@@ -78,11 +88,11 @@ public sealed partial class CampaignStore
         {
             await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(5), ct);
             var rows = await session.QueryManyAsync(new DbStatement("""
-                SELECT s.id FROM shop.product_stock_subscriptions s WHERE s.closed_at<CURRENT_TIMESTAMP-INTERVAL '4320 hours'
+                SELECT s.id FROM shop.product_stock_subscriptions s WHERE (NOT $1 OR EXISTS(SELECT 1 FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=s.user_id AND b.active)) AND s.closed_at<CURRENT_TIMESTAMP-INTERVAL '4320 hours'
                     AND NOT EXISTS(SELECT 1 FROM shop.telegram_deliveries d WHERE d.product_stock_subscription_id=s.id AND (d.purpose<>'restock_notice' OR d.status NOT IN ('succeeded','failed','cancelled')))
                     AND NOT EXISTS(SELECT 1 FROM shop.jobs j JOIN shop.telegram_deliveries d ON d.id=j.telegram_delivery_id WHERE d.product_stock_subscription_id=s.id AND j.status NOT IN ('succeeded','failed','cancelled'))
                 ORDER BY s.id LIMIT 100 FOR UPDATE OF s SKIP LOCKED
-                """), r => r.GetGuid(0), 100, ct);
+                """, DbValue.Boolean(session.IsWriterScoped)), r => r.GetGuid(0), 100, ct);
             foreach (Guid id in rows)
             {
                 await session.ExecuteAsync(new DbStatement("DELETE FROM shop.jobs WHERE telegram_delivery_id IN (SELECT id FROM shop.telegram_deliveries WHERE product_stock_subscription_id=$1 AND purpose='restock_notice' AND status IN ('succeeded','failed','cancelled'))", DbValue.Uuid(id)), ct);

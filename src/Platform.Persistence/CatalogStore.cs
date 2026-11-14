@@ -307,6 +307,7 @@ public sealed class CatalogStore
             """, DbValue.Uuid(product)), row => row.IsDBNull(0) ? null : new(row.GetBoolean(1), row.GetInt64(2), row.GetString(3), row.GetString(4), row.GetBoolean(5), row.IsDBNull(6) ? null : row.GetGuid(6), row.GetString(7), String(row, 8), String(row, 9), String(row, 10)), ct);
         if (master is null || !master.Active) return null;
         if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
+        else await session.AdmitWriterAsync(context, ct);
         var brand = await session.QuerySingleAsync(new DbStatement("""
             SELECT public_name,market,policy_version,allow_wallet,allow_crypto,allow_bank,fx_enabled,current_fx::text,fx_source,fx_fetched_at,max_exchange_rate_age_seconds
             FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR UPDATE

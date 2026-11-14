@@ -10,6 +10,7 @@ public static class StockSubscriptionStore
     {
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, membershipId, ct);
         if (member.Blocked || member.Banned || !observation.OutOfStock || observation.ProductId == Guid.Empty || observation.ProductRevision < 0 || observation.ListingRevision < 0) Deny(session);
+        await session.AdmitCustomerWriterAsync(context, verifiedActorId, observation.ProductId, ct);
         bool eligible = await session.QuerySingleAsync(new DbStatement("""
             WITH listing AS (SELECT p.id FROM shop.products p JOIN shop.brand_products b ON b.product_id=p.id
                 WHERE p.id=$1 AND b.brand_id=$2 AND p.active AND b.visible AND p.revision=$3 AND b.revision=$4
@@ -31,6 +32,7 @@ public static class StockSubscriptionStore
     {
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, membershipId, ct);
         if (member.Blocked || member.Banned) Deny(session);
+        await session.AdmitCustomerWriterAsync(context, verifiedActorId, productId, ct);
         var consent = await session.QuerySingleAsync(new DbStatement("""
             WITH consent AS (SELECT id,triggered_at FROM shop.product_stock_subscriptions WHERE user_id=$1 AND product_id=$2 AND closed_at IS NULL FOR UPDATE)
             SELECT c.id,c.triggered_at IS NOT NULL FROM (SELECT 1) seed LEFT JOIN consent c ON true

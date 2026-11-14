@@ -25,16 +25,17 @@ public sealed partial class CampaignStore
     {
         if (worker == Guid.Empty) throw new ArgumentException("Worker identity is required.");
         await using var session = await sessions.BeginAsync(ct);
+        Guid? scopeBrand = await session.AdmitClaimWriterAsync(true, ct);
         var lease = await session.QuerySingleAsync<JobLease?>(new DbStatement("""
             WITH candidate AS (SELECT j.id FROM shop.jobs j JOIN shop.telegram_deliveries d ON d.id=j.telegram_delivery_id
-                WHERE j.job_kind='send_telegram' AND j.status IN ('pending','retry') AND j.available_at<=clock_timestamp()
+                WHERE ($2 IS NULL OR j.brand_id=$2) AND j.job_kind='send_telegram' AND j.status IN ('pending','retry') AND j.available_at<=clock_timestamp()
                     AND d.status IN ('pending','retry') AND d.next_attempt_at<=clock_timestamp() AND d.purpose IN
             """ + NoticePurposes + """
                 ORDER BY j.available_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED), claimed AS (
                 UPDATE shop.jobs j SET status='leased',locked_by=$1,lease_until=clock_timestamp()+INTERVAL '60 seconds',attempts=attempts+1
                 FROM candidate c WHERE j.id=c.id RETURNING j.*)
             SELECT j.id,j.brand_id,j.telegram_delivery_id,j.attempts,j.lease_until FROM (SELECT 1) seed LEFT JOIN claimed j ON true
-            """, DbValue.Text(worker.ToString("D"))), r => r.IsDBNull(0) ? null : new JobLease(r.GetGuid(0), JobIntent.Telegram(r.GetGuid(1), r.GetGuid(2)), worker, r.GetInt64(3), r.GetUtc(4)), ct);
+            """, DbValue.Text(worker.ToString("D")), scopeBrand is Guid brand ? DbValue.Uuid(brand) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid)), r => r.IsDBNull(0) ? null : new JobLease(r.GetGuid(0), JobIntent.Telegram(r.GetGuid(1), r.GetGuid(2)), worker, r.GetInt64(3), r.GetUtc(4)), ct);
         await session.CommitAsync(ct); return lease;
     }
     public async Task<NoticeDispatch?> BeginNoticeAsync(BrandContext context, JobLease lease, TimeSpan spacing, long? trustedStaffChat, IReadOnlyDictionary<string, string> supplierAccounts, CancellationToken ct = default)
@@ -125,11 +126,20 @@ public sealed partial class CampaignStore
     public async Task<int> RecoverExpiredNoticesAsync(CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
-        var ids = await session.QueryManyAsync(new DbStatement("SELECT j.id,j.telegram_delivery_id FROM shop.jobs j JOIN shop.telegram_deliveries d ON d.id=j.telegram_delivery_id WHERE j.status='leased' AND j.lease_until<=clock_timestamp() AND d.purpose IN " + NoticePurposes + " ORDER BY j.id LIMIT 100"), r => (Job: r.GetGuid(0), Delivery: r.GetGuid(1)), 100, ct);
+        var ids = await session.QueryManyAsync(new DbStatement("SELECT j.id,j.telegram_delivery_id FROM shop.jobs j JOIN shop.telegram_deliveries d ON d.id=j.telegram_delivery_id WHERE ($1 IS NULL OR d.brand_id=$1) AND j.status='leased' AND j.lease_until<=clock_timestamp() AND d.purpose IN " + NoticePurposes + " ORDER BY j.id LIMIT 100", session.WriterBrand is Guid scope ? DbValue.Uuid(scope) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid)), r => (Job: r.GetGuid(0), Delivery: r.GetGuid(1)), 100, ct);
+        if (session.IsWriterScoped)
+        {
+            var origins = new List<NoticeIdentity>();
+            foreach (var id in ids) origins.Add(await session.QuerySingleAsync(new DbStatement("SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id,d.brand_id FROM shop.telegram_deliveries d LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id WHERE d.id=$1", DbValue.Uuid(id.Delivery)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3), r.GetGuid(4)), ct));
+            foreach (Guid campaign in origins.Where(v => v.Campaign is not null).Select(v => v.Campaign!.Value).Distinct().Order()) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.campaigns WHERE id=$1 FOR UPDATE", DbValue.Uuid(campaign)), r => r.GetGuid(0), ct);
+            foreach (Guid member in origins.Where(v => v.Member is not null).Select(v => v.Member!.Value).Distinct().Order()) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member)), r => r.GetGuid(0), ct);
+            foreach (Guid product in origins.Where(v => v.Product is not null).Select(v => v.Product!.Value).Distinct().Order()) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetGuid(0), ct);
+            if (session.WriterBrand is Guid brand) await session.AdmitBrandWriterAsync(brand, ct);
+        }
         int recovered = 0;
         foreach (var id in ids)
         {
-            var origin = await session.QuerySingleAsync(new DbStatement("SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id FROM shop.telegram_deliveries d LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id WHERE d.id=$1", DbValue.Uuid(id.Delivery)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3)), ct);
+            var origin = await session.QuerySingleAsync(new DbStatement("SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id,d.brand_id FROM shop.telegram_deliveries d LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id WHERE d.id=$1", DbValue.Uuid(id.Delivery)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3), r.GetGuid(4)), ct);
             await LockNoticeOriginAsync(session, origin, ct);
             bool expired = await session.QuerySingleAsync(new DbStatement("SELECT status='leased' AND lease_until<=clock_timestamp() FROM shop.jobs WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Job)), r => r.GetBoolean(0), ct);
             if (!expired) continue;
@@ -158,21 +168,22 @@ public sealed partial class CampaignStore
     }
     private static Guid NoticeId(BrandContext context, JobLease lease) => lease.Intent.Kind == JobKind.SendTelegram && lease.Intent.BrandId == context.BrandId && lease.Intent.OriginId is Guid id ? id : throw new UnauthorizedAccessException();
     private static Task<NoticeIdentity> IdentityAsync(DbSession session, Guid delivery, BrandContext context, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("""
-        SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id FROM shop.telegram_deliveries d
+        SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id,d.brand_id FROM shop.telegram_deliveries d
         LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id WHERE d.id=$1 AND d.brand_id=$2 AND d.purpose IN
-        """ + NoticePurposes, DbValue.Uuid(delivery), DbValue.Uuid(context.BrandId)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3)), ct);
+        """ + NoticePurposes, DbValue.Uuid(delivery), DbValue.Uuid(context.BrandId)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3), r.GetGuid(4)), ct);
     private static async Task LockNoticeOriginAsync(DbSession session, NoticeIdentity data, CancellationToken ct)
     {
         if (data.Campaign is Guid campaign) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.campaigns WHERE id=$1 FOR UPDATE", DbValue.Uuid(campaign)), r => r.GetGuid(0), ct);
         if (data.Member is Guid member) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member)), r => r.GetGuid(0), ct);
         if (data.Product is Guid product) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetGuid(0), ct);
+        await session.AdmitBrandWriterAsync(data.Brand, ct);
         if (data.Subscription is Guid subscription) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.product_stock_subscriptions WHERE id=$1 FOR UPDATE", DbValue.Uuid(subscription)), r => r.GetGuid(0), ct);
     }
     private static Guid? Id(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetGuid(i);
     private static long? Long(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetInt64(i);
     private static string? Text(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
     private static DateTime? Time(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetUtc(i);
-    private sealed record NoticeIdentity(Guid? Campaign, Guid? Member, Guid? Subscription, Guid? Product);
+    private sealed record NoticeIdentity(Guid? Campaign, Guid? Member, Guid? Subscription, Guid? Product, Guid Brand);
     private sealed record NoticeState(string Status, string Recipient, long? StaffChat, string Purpose, long? Chat, bool Blocked, bool OptedOut, string Language, bool Active, long Bot,
         string? CampaignStatus, string? Text, string? Media, bool ConsentClosed, string? ProductTitle, string? CampaignLanguage, string? MemberLanguage, DateTime? ActiveSince, DateTime? LastSeen);
 }

@@ -24,6 +24,7 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BitConverter.ToInt64(batch.ToByteArray(), 0))), ct);
             var current = await session.QueryManyAsync(new DbStatement("SELECT id FROM shop.campaigns WHERE batch_id=$1 ORDER BY id", DbValue.Uuid(batch)), r => r.GetGuid(0), 100, ct);
             if (current.Count != 0 && !current.SequenceEqual(frozen.Select(v => v.Id))) throw new InvalidOperationException("Campaign launch identity conflict.");
+            await session.AdmitSharedWriterAsync(ct);
             foreach (var variant in frozen)
             {
                 if (!await AdminAuditStore.AppendAsync(session, actor, new(variant.Id, AuditAction.Create, AuditEntity.Campaign, variant.Id, variant.BrandId, AuditReason.OperatorReview, batch, hash), ct)) continue;
@@ -47,6 +48,7 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BitConverter.ToInt64(batch.ToByteArray(), 0))), ct);
             var rows = await session.QueryManyAsync(new DbStatement("SELECT id,brand_id,status FROM shop.campaigns WHERE batch_id=$1 ORDER BY id FOR UPDATE", DbValue.Uuid(batch)), r => (Id: r.GetGuid(0), Brand: r.GetGuid(1), Status: r.GetString(2)), 100, ct);
             if (rows.Count == 0) throw new InvalidOperationException("Campaign batch is unavailable.");
+            await session.AdmitSharedWriterAsync(ct);
             foreach (var row in rows)
             {
                 Guid audit = AuditId(command, row.Id);
@@ -84,6 +86,7 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
                         WHERE i.supplier_request_id=$1 AND i.origin_kind='supplier_bonus' AND i.state='admin_held' AND i.supplier_item_key IS NOT NULL AND i.remote_item_ref IS NOT NULL AND r.evidence_ref IS NOT NULL))
                 """, DbValue.Uuid(request), DbValue.Uuid(audit), DbValue.Uuid(context.BrandId), DbValue.Boolean(bonus)), r => r.GetBoolean(0), ct);
             if (!valid) throw new UnauthorizedAccessException("Staff notice origin is unavailable.");
+            await session.AdmitWriterAsync(context, ct);
             string purpose = bonus ? "staff_supplier_bonus" : "staff_supplier_case";
             string dedupe = purpose + ":" + AuditId(audit, generation).ToString("D") + ":" + request.ToString("D");
             Guid id = await session.QuerySingleAsync(new DbStatement("""

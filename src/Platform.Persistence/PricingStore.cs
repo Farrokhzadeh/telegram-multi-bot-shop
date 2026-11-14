@@ -178,6 +178,7 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
     public async Task<Guid?> ScheduleFxAsync(BrandContext context, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
+        await session.AdmitWriterAsync(context, ct);
         var state = await session.QuerySingleAsync(new DbStatement("SELECT fx_enabled,fx_fetched_at,clock_timestamp(),fx_source FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR SHARE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
             row => (Enabled: row.GetBoolean(0), Fetched: row.IsDBNull(1) ? (DateTime?)null : row.GetUtc(1), Now: row.GetUtc(2), Source: row.IsDBNull(3) ? null : row.GetString(3)), ct);
         if (!state.Enabled || (state.Source == PricingPolicy.FxSource && state.Fetched > state.Now.AddHours(-1) && state.Fetched <= state.Now)) return null;
@@ -243,6 +244,7 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
     }
     private static async Task LockBrandAsync(DbSession session, BrandContext context, CancellationToken ct)
     {
+        await session.AdmitWriterAsync(context, ct);
         long count = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), row => row.GetInt64(0), ct);
         if (count != 1) Reject(session);
     }

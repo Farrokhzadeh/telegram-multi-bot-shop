@@ -16,7 +16,7 @@ public sealed record BrandUser(Guid Id, string Language, bool Blocked, bool Bann
 public static class BrandUserStore
 {
     public static async Task<BrandUser> ObservePrivateAsync(DbSession session, BrandContext brand, long verifiedActorId,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool admit = true)
     {
         RequireIdentity(brand, verifiedActorId);
         int changed = await session.ExecuteAsync(new DbStatement("""
@@ -25,7 +25,9 @@ public static class BrandUserStore
             ON CONFLICT (brand_id,telegram_id) DO UPDATE SET last_seen_at=GREATEST(shop.users.last_seen_at,clock_timestamp())
             """, DbValue.Uuid(Guid.NewGuid()), DbValue.Bigint(verifiedActorId), DbValue.Uuid(brand.BrandId), DbValue.Bigint(brand.BotId)), ct);
         if (changed != 1) Reject(session);
-        return await RequireAsync(session, brand, verifiedActorId, null, ct);
+        var member = await RequireAsync(session, brand, verifiedActorId, null, ct);
+        if (admit) await session.AdmitWriterAsync(brand, ct);
+        return member;
     }
 
     public static Task<BrandUser?> FindAsync(DbSession session, BrandContext brand, long verifiedActorId, CancellationToken ct = default) =>
@@ -44,6 +46,7 @@ public static class BrandUserStore
     {
         RequireIdentity(brand, verifiedActorId);
         RequireLanguage(language);
+        await session.AdmitCustomerWriterAsync(brand, verifiedActorId, ct: ct);
         int changed = await session.ExecuteAsync(new DbStatement("""
             UPDATE shop.users u SET language=$1,marketing_opt_out_at=CASE WHEN $2 THEN COALESCE(u.marketing_opt_out_at,clock_timestamp()) ELSE NULL END
             FROM shop.brands b WHERE u.id=$3 AND u.brand_id=$4 AND u.telegram_id=$5 AND b.id=u.brand_id AND b.bot_id=$6 AND b.active
@@ -51,6 +54,7 @@ public static class BrandUserStore
             """, DbValue.Text(language), DbValue.Boolean(marketingOptOut), DbValue.Uuid(membershipId), DbValue.Uuid(brand.BrandId),
             DbValue.Bigint(verifiedActorId), DbValue.Bigint(brand.BotId)), ct);
         if (changed != 1) Reject(session);
+        await session.AdmitWriterAsync(brand, ct);
     }
 
     public static async Task<BrandUser> TransitionAsync(DbSession session, BrandContext brand, long verifiedActorId, Guid membershipId,
@@ -62,6 +66,7 @@ public static class BrandUserStore
             orderId == Guid.Empty || productId == Guid.Empty || anchorMessageId <= 0 ||
             (state == CustomerFlowState.Idle && (orderId is not null || productId is not null || anchorMessageId is not null || expiresAt is not null)))
             throw new ArgumentException("Invalid customer flow transition.");
+        await session.AdmitCustomerWriterAsync(brand, verifiedActorId, productId, ct);
         DbValue expiry = expiresAt is DateTime time ? DbValue.Utc(time) : DbValue.Null(NpgsqlDbType.TimestampTz);
         int changed = await session.ExecuteAsync(new DbStatement("""
             UPDATE shop.users u SET flow_state=$1,flow_revision=u.flow_revision+1,flow_order_id=$2,flow_product_id=$3,
@@ -74,6 +79,7 @@ public static class BrandUserStore
             anchorMessageId is long anchor ? DbValue.Bigint(anchor) : DbValue.Null(NpgsqlDbType.Bigint), expiry,
             DbValue.Uuid(membershipId), DbValue.Uuid(brand.BrandId), DbValue.Bigint(verifiedActorId), DbValue.Bigint(expectedRevision), DbValue.Bigint(brand.BotId)), ct);
         if (changed != 1) Reject(session);
+        await session.AdmitWriterAsync(brand, ct);
         return await RequireAsync(session, brand, verifiedActorId, membershipId, ct);
     }
 

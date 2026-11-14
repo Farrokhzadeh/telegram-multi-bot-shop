@@ -25,6 +25,7 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
         await using (var read = await sessions.BeginAsync(ct))
         {
             if (writerRevision is long revision) await BrandWriterStore.RequireAsync(read, context, revision, ct);
+            else await read.AdmitWriterAsync(context, ct);
             before = await LoadAsync(read, context, payment, ct);
         }
         if (before.Status == "settled") return new(PaymentSettlementOutcome.Replayed, ExternalSettlementRoute.AlreadyAccepted, before.Credit);
@@ -189,7 +190,11 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 FOR UPDATE) u", DbValue.Uuid(data.Member), DbValue.Uuid(context.BrandId)), r => r.GetInt64(0), ct);
         if (data.Product is Guid product) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
         if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
-        else await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
+        else
+        {
+            await session.AdmitWriterAsync(context, ct);
+            await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
+        }
         if (data.Order is Guid order) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE) o", DbValue.Uuid(order)), r => r.GetInt64(0), ct);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.payments WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(data.Id)), r => r.GetInt64(0), ct);
     }

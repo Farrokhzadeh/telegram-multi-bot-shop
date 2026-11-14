@@ -146,6 +146,12 @@ public static class SupportStore
 
     private static async Task<Ticket> RequireTicketAsync(DbSession session, Guid ticketId, CancellationToken ct)
     {
+        if (session.IsWriterScoped)
+        {
+            var owner = await session.QuerySingleAsync(new DbStatement("SELECT t.user_id,u.brand_id FROM shop.support_tickets t JOIN shop.users u ON u.id=t.user_id WHERE t.id=$1", DbValue.Uuid(ticketId)), r => (User: r.GetGuid(0), Brand: r.GetGuid(1)), ct);
+            await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(owner.User)), r => r.GetGuid(0), ct);
+            await session.AdmitBrandWriterAsync(owner.Brand, ct);
+        }
         Ticket? t = await ReadAsync(session, ticketId, ct);
         if (t is null) Deny(session);
         return t!;
@@ -156,6 +162,7 @@ public static class SupportStore
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(brand.BrandId), DbValue.Bigint(actorId)), row => row.GetInt64(0), ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, brand, actorId, null, ct);
         if (member.Blocked || member.Banned) Deny(session);
+        await session.AdmitWriterAsync(brand, ct);
         return member;
     }
 

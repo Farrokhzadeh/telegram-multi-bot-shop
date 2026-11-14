@@ -15,14 +15,15 @@ public sealed partial class PaymentInstructionStore
     {
         if (worker == Guid.Empty) throw new ArgumentException("Worker identity is required.");
         await using var session = await sessions.BeginAsync(ct);
+        Guid? scopeBrand = await session.AdmitClaimWriterAsync(true, ct);
         var lease = await session.QuerySingleAsync<JobLease?>(new DbStatement("""
             WITH candidate AS (SELECT j.id FROM shop.jobs j JOIN shop.telegram_deliveries d ON d.id=j.telegram_delivery_id JOIN shop.orders o ON o.id=d.order_id
-                WHERE o.payment_due_at IS NOT NULL AND j.job_kind='send_telegram' AND j.status IN ('pending','retry') AND j.available_at<=clock_timestamp()
+                WHERE ($2 IS NULL OR j.brand_id=$2) AND o.payment_due_at IS NOT NULL AND j.job_kind='send_telegram' AND j.status IN ('pending','retry') AND j.available_at<=clock_timestamp()
                     AND d.purpose='order_status' AND d.status IN ('pending','retry') AND d.next_attempt_at<=clock_timestamp()
                 ORDER BY j.available_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED), claimed AS (
                 UPDATE shop.jobs j SET status='leased',locked_by=$1,lease_until=clock_timestamp()+INTERVAL '60 seconds',attempts=attempts+1 FROM candidate c WHERE j.id=c.id RETURNING j.*)
             SELECT j.id,j.brand_id,j.telegram_delivery_id,j.attempts,j.lease_until FROM (SELECT 1) seed LEFT JOIN claimed j ON true
-            """, DbValue.Text(worker.ToString("D"))), r => r.IsDBNull(0) ? null : new JobLease(r.GetGuid(0), JobIntent.Telegram(r.GetGuid(1), r.GetGuid(2)), worker, r.GetInt64(3), r.GetUtc(4)), ct);
+            """, DbValue.Text(worker.ToString("D")), scopeBrand is Guid brand ? DbValue.Uuid(brand) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid)), r => r.IsDBNull(0) ? null : new JobLease(r.GetGuid(0), JobIntent.Telegram(r.GetGuid(1), r.GetGuid(2)), worker, r.GetInt64(3), r.GetUtc(4)), ct);
         await session.CommitAsync(ct); return lease;
     }
     public async Task<bool> BeginAsync(BrandContext context, JobLease lease, TimeSpan spacing, CancellationToken ct = default)
@@ -120,6 +121,7 @@ public sealed partial class PaymentInstructionStore
     {
         var before = await ReadAsync(session, context, id, ct);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE id=$1 FOR UPDATE) u", DbValue.Uuid(before.Member)), r => r.GetInt64(0), ct);
+        await session.AdmitWriterAsync(context, ct);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE) o", DbValue.Uuid(before.Order)), r => r.GetInt64(0), ct);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.telegram_deliveries WHERE id=$1 FOR UPDATE) d", DbValue.Uuid(id)), r => r.GetInt64(0), ct);

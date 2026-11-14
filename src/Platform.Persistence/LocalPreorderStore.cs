@@ -15,6 +15,7 @@ public sealed class LocalPreorderStore(DbSessionFactory sessions, SecretSnapshot
             Identity? candidate = await ReadHeadAsync(session, product, ct);
             if (candidate is not null) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(candidate.Member)), r => r.GetGuid(0), ct);
             await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetGuid(0), ct);
+            await session.AdmitSharedWriterAsync(ct);
             await OutboxStore.RenewAsync(session, lease, TimeSpan.FromSeconds(30), ct);
             Identity? current = await ReadHeadAsync(session, product, ct);
             Guid? allocated = null;
@@ -23,6 +24,11 @@ public sealed class LocalPreorderStore(DbSessionFactory sessions, SecretSnapshot
             {
                 BrandContext context = contexts.SingleOrDefault(c => c.BrandId == current.Brand) ?? throw new UnauthorizedAccessException("FIFO head has no trusted brand registration.");
                 bool active = await session.QuerySingleAsync(new DbStatement("SELECT active AND bot_id=$2 FROM shop.brands WHERE id=$1 FOR NO KEY UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
+                if (!active && session.IsWriterScoped)
+                {
+                    await OutboxStore.RetryAsync(session, lease, TimeSpan.FromSeconds(30), int.MaxValue, JobError.Busy, ct);
+                    await session.CommitAsync(ct); return null;
+                }
                 var state = await session.QuerySingleAsync(new DbStatement("""
                     SELECT o.quantity,o.hold_at IS NOT NULL OR o.review_code IS NOT NULL OR o.resolution_kind IS NOT NULL OR u.blocked_at IS NOT NULL OR u.banned_at IS NOT NULL,
                         EXISTS(SELECT 1 FROM shop.fulfillments WHERE order_id=o.id),o.fulfillment_kind_snapshot

@@ -9,13 +9,15 @@ public sealed class BrandWriterStore(DbSessionFactory sessions)
 {
     public static async Task RequireAsync(DbSession session, BrandContext context, long expectedRevision, CancellationToken ct = default)
     {
+        session.ValidateWriter(context, expectedRevision);
         ArgumentNullException.ThrowIfNull(context);
         if (expectedRevision < 0) throw new ArgumentOutOfRangeException(nameof(expectedRevision));
         bool allowed = await session.QuerySingleAsync(new DbStatement("""
-            WITH locked AS MATERIALIZED (SELECT active,policy_version FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE)
+            WITH locked AS MATERIALIZED (SELECT active,policy_version FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR NO KEY UPDATE)
             SELECT COALESCE((SELECT active AND policy_version=$3 FROM locked),false)
             """, DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(expectedRevision)), r => r.GetBoolean(0), ct);
         if (!allowed) Deny(session);
+        session.MarkWriter(context, expectedRevision);
     }
 
     public static async Task RequireCustomerAsync(DbSession session, BrandContext context, long actor, long expectedRevision, Guid? product = null, CancellationToken ct = default)

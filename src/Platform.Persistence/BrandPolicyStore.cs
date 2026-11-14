@@ -77,6 +77,7 @@ public static class BrandPolicyStore
         var audit = new AuditCommand(commandId, AuditAction.ChannelEnforcement, AuditEntity.Brand, brandId, brandId,
             AuditReason.ConfigurationChange, correlationId, SHA256.HashData("channel-enforcement-v1"u8), expectedRevision, expectedRevision + 1, previous, enabled);
         if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return expectedRevision + 1;
+        await session.AdmitBrandWriterAsync(brandId, ct);
         int changed = await session.ExecuteAsync(new DbStatement("""
             UPDATE shop.brands SET require_channel_join=$1,policy_version=policy_version+1,updated_at=clock_timestamp()
             WHERE id=$2 AND policy_version=$3 AND require_channel_join=$4

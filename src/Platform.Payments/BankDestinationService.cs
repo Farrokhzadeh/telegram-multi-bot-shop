@@ -30,6 +30,7 @@ public sealed class BankDestinationService : IDisposable
             try
             {
                 if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Update, AuditEntity.Brand, context.BrandId, context.BrandId, AuditReason.ConfigurationChange, command, hash), ct)) return;
+                await session.AdmitWriterAsync(context, ct);
                 var state = await session.QuerySingleAsync(new DbStatement("SELECT policy_version,market FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Revision: r.GetInt64(0), Market: r.GetString(1)), ct);
                 if (state.Revision != expectedPolicyRevision || state.Market != "iran") throw new InvalidOperationException("Receiving destination revision conflict.");
                 var cipher = new BrandCipher(secrets);

@@ -19,6 +19,7 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
     {
         if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
         ArgumentNullException.ThrowIfNull(update);
+        writerRevision ??= sessions.ExpectedWriterRevision(update.Context);
         bool command = TelegramWebhookVerifier.IsSupportCommand(update.Value);
         if (update.IsCallback || (update.Value.StartsWith('/') && !command)) throw new TelegramIngressRejectedException();
         await using var session = await sessions.BeginAsync(ct);

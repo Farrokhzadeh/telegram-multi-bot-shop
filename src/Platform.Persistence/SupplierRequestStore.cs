@@ -40,6 +40,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     {
         Require(context, lease);
         await using var session = await sessions.BeginAsync(ct);
+        await session.AdmitWriterAsync(context, ct);
         return await session.QuerySingleAsync(new DbStatement("SELECT " + BindingColumns + " FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND b.id=$2 AND b.bot_id=$3",
             DbValue.Uuid(lease.Intent.OriginId!.Value), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), ReadBinding, ct);
     }
@@ -291,6 +292,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         var id = await session.QuerySingleAsync(new DbStatement("SELECT o.user_id,o.product_id,o.id FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND b.id=$2 AND b.bot_id=$3", DbValue.Uuid(request), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Member: r.GetGuid(0), Product: r.GetGuid(1), Order: r.GetGuid(2)), ct);
         await session.ExecuteAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Member)), ct);
         await session.ExecuteAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Product)), ct);
+        await session.AdmitWriterAsync(context, ct);
         bool accepted = await session.QuerySingleAsync(new DbStatement("SELECT payment_status IN ('paid','not_required') AND fulfillment_status NOT IN ('cancelled','compensated','completed') AND hold_at IS NULL FROM shop.orders WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Order)), r => r.GetBoolean(0), ct);
         if (!accepted) throw new InvalidOperationException("Supplier obligation is terminal or held.");
         return await session.QuerySingleAsync(new DbStatement("SELECT " + BindingColumns + " FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id WHERE r.id=$1 FOR UPDATE OF r", DbValue.Uuid(request)), ReadBinding, ct);

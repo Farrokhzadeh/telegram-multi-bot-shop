@@ -33,6 +33,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(value.CommandId, AuditAction.WalletAdjustment, AuditEntity.Wallet, value.MemberId, context.BrandId, AuditReason.OperatorReview, value.CommandId, hash, value.ExpectedVersion, value.ExpectedVersion + 1), ct)) return value.CommandId;
             await MemberAsync(session, context, value.MemberId, ct);
+            await session.AdmitWriterAsync(context, ct);
             await PostAsync(session, actor, value.MemberId, delta, value.ExpectedVersion, value.CommandId, "admin_adjustment", null, null, value.Reason, ct);
             await session.CommitAsync(ct); return value.CommandId;
         }
@@ -63,6 +64,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
             var identity = await session.QuerySingleAsync(new DbStatement("SELECT o.user_id,o.product_id FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE o.id=$1 AND u.brand_id=$2", DbValue.Uuid(order), DbValue.Uuid(context.BrandId)), r => (Member: r.GetGuid(0), Product: r.GetGuid(1)), ct);
             await MemberAsync(session, context, identity.Member, ct);
             await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(identity.Product)), r => r.GetGuid(0), ct);
+            await session.AdmitWriterAsync(context, ct);
             var data = await session.QuerySingleAsync(new DbStatement("""
                 SELECT revision,payment_status,fulfillment_status,is_preorder,hold_at IS NOT NULL,release_authorized_at IS NOT NULL,resolution_kind,
                     payment_method,unit_price_usdt::text,quantity,COALESCE(discount_pct_snapshot,0)::text FROM shop.orders WHERE id=$1 FOR UPDATE

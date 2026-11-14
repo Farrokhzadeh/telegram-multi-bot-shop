@@ -63,9 +63,12 @@ public static class OutboxStore
         DbValue Origin(JobOrigin origin) => Uuid(intent.Origin == origin ? intent.OriginId : null);
     }
 
-    public static Task<JobLease?> ClaimAsync(DbSession session, JobKind kind, Guid worker, TimeSpan duration,
+    public static async Task<JobLease?> ClaimAsync(DbSession session, JobKind kind, Guid worker, TimeSpan duration,
         CancellationToken cancellationToken = default)
-        => ClaimCoreAsync(session, kind, worker, duration, null, cancellationToken);
+    {
+        Guid? brand = await session.AdmitClaimWriterAsync(false, cancellationToken);
+        return await ClaimCoreAsync(session, kind, worker, duration, brand, cancellationToken);
+    }
 
     public static async Task<JobLease?> ClaimForBrandAsync(DbSession session, BrandContext context, long expectedRevision,
         JobKind kind, Guid worker, TimeSpan duration, CancellationToken cancellationToken = default)
@@ -83,7 +86,7 @@ public static class OutboxStore
         return session.QuerySingleAsync<JobLease?>(new DbStatement("""
             WITH candidate AS (
                 SELECT j.id FROM shop.jobs j
-                WHERE j.job_kind=$1 AND j.available_at<=clock_timestamp() AND j.attempts<9223372036854775807 AND ($5 IS NULL OR j.brand_id=$5)
+                WHERE j.job_kind=$1 AND j.available_at<=clock_timestamp() AND j.attempts<9223372036854775807 AND ($5 IS NULL OR j.brand_id=$5) AND (NOT $6 OR j.brand_id IS NULL)
                   AND (j.status IN ('pending','retry') OR ($4 AND j.status='leased' AND j.lease_until<=clock_timestamp()))
                   AND ($1<>'submit_supplier' OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.status='pending'))
                   AND (j.origin_revision IS NULL OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.revision=j.origin_revision))
@@ -93,13 +96,14 @@ public static class OutboxStore
                 FROM candidate c WHERE j.id=c.id RETURNING j.*
             )
             """ + " SELECT " + Columns + " FROM (SELECT 1) singleton LEFT JOIN claimed j ON true",
-            DbValue.Text(code), DbValue.Text(worker.ToString("D")), DbValue.Integer(Seconds(duration)), DbValue.Boolean(recover), Uuid(brandId)),
+            DbValue.Text(code), DbValue.Text(worker.ToString("D")), DbValue.Integer(Seconds(duration)), DbValue.Boolean(recover), Uuid(brandId), DbValue.Boolean(session.IsSharedWriterScoped)),
             row => row.IsDBNull(0) ? null : new JobLease(row.GetGuid(0), ReadIntent(row), worker, row.GetInt64(6), row.GetUtc(7)), cancellationToken);
     }
 
     public static async Task<JobLease> RenewAsync(DbSession session, JobLease lease, TimeSpan duration,
         CancellationToken cancellationToken = default)
     {
+        await session.AdmitLeaseWriterAsync(lease, cancellationToken);
         await session.ExecuteLeaseFencedAsync(new DbStatement(
             "UPDATE shop.jobs j SET lease_until=clock_timestamp()+$4*INTERVAL '1 second'" + Fence,
             DbValue.Uuid(lease.Id), DbValue.Text(lease.Worker.ToString("D")), DbValue.Bigint(lease.Attempt), DbValue.Integer(Seconds(duration))), cancellationToken);
@@ -114,7 +118,7 @@ public static class OutboxStore
     public static Task FailAsync(DbSession session, JobLease lease, JobError error, CancellationToken cancellationToken = default) =>
         FinishAsync(session, lease, "failed", ErrorCode(error), cancellationToken);
 
-    public static Task RetryAsync(DbSession session, JobLease lease, TimeSpan delay, int maximumAttempts, JobError error,
+    public static async Task RetryAsync(DbSession session, JobLease lease, TimeSpan delay, int maximumAttempts, JobError error,
         CancellationToken cancellationToken = default)
     {
         if (lease.Intent.RequiresExplicitRecovery || error == JobError.RemoteOutcomeUnknown)
@@ -123,7 +127,8 @@ public static class OutboxStore
         if (maximumAttempts < 1) throw new ArgumentOutOfRangeException(nameof(maximumAttempts));
         string status = lease.Attempt >= maximumAttempts ? "failed" : "retry";
         string code = status == "failed" ? ErrorCode(JobError.AttemptLimit) : ErrorCode(error);
-        return session.ExecuteLeaseFencedAsync(new DbStatement("""
+        await session.AdmitLeaseWriterAsync(lease, cancellationToken);
+        await session.ExecuteLeaseFencedAsync(new DbStatement("""
             UPDATE shop.jobs j SET status=$4,locked_by=NULL,lease_until=NULL,
                 available_at=clock_timestamp()+$5*INTERVAL '1 second',
                 completed_at=CASE WHEN $4='failed' THEN clock_timestamp() ELSE NULL END,last_error_code=$6
@@ -131,11 +136,14 @@ public static class OutboxStore
             DbValue.Text(status), DbValue.Integer(Seconds(delay)), DbValue.Text(code)), cancellationToken);
     }
 
-    private static Task FinishAsync(DbSession session, JobLease lease, string status, string? code, CancellationToken cancellationToken) =>
-        session.ExecuteLeaseFencedAsync(new DbStatement("""
+    private static async Task FinishAsync(DbSession session, JobLease lease, string status, string? code, CancellationToken cancellationToken)
+    {
+        await session.AdmitLeaseWriterAsync(lease, cancellationToken);
+        await session.ExecuteLeaseFencedAsync(new DbStatement("""
             UPDATE shop.jobs j SET status=$4,locked_by=NULL,lease_until=NULL,completed_at=clock_timestamp(),last_error_code=$5
             """ + Fence, DbValue.Uuid(lease.Id), DbValue.Text(lease.Worker.ToString("D")), DbValue.Bigint(lease.Attempt),
             DbValue.Text(status), code is null ? DbValue.Null(NpgsqlDbType.Text) : DbValue.Text(code)), cancellationToken);
+    }
 
     private static JobIntent ReadIntent(DbRow row) => JobIntent.Read(row.GetString(2),
         row.IsDBNull(1) ? null : row.GetGuid(1), row.IsDBNull(3) ? null : row.GetGuid(3),

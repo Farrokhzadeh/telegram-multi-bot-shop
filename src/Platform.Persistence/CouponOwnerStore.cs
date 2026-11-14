@@ -38,6 +38,7 @@ public sealed partial class PricingStore
             }
             if (edit.ProductId is Guid product) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
             await LockBrandAsync(session, context, ct);
+            await session.AdmitWriterAsync(context, ct);
             var current = await session.QuerySingleAsync(new DbStatement("SELECT revision,redeemed_count FROM shop.discounts WHERE id=$1 AND brand_id=$2 FOR UPDATE", DbValue.Uuid(coupon), DbValue.Uuid(context.BrandId)), r => (Revision: r.GetInt64(0), Redeemed: r.GetInt64(1)), ct);
             if (current.Revision != revision) throw new InvalidOperationException("Coupon revision conflict.");
             long adjustment = checked(edit.EffectiveUsed - current.Redeemed);

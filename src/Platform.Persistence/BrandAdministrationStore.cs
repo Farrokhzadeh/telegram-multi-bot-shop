@@ -22,6 +22,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
         await using (var before = await sessions.BeginAsync(ct))
         {
             if (!await AdminAuditStore.AppendAsync(before, actor, audit, ct)) return revision + 1;
+            await before.AdmitWriterAsync(context, ct);
             RequireRevision(await ReadAsync(before, context, ct), revision);
         }
         VerifiedBotProfile verified = await verify(token, ct).WaitAsync(TimeSpan.FromSeconds(15), ct);
@@ -32,6 +33,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return revision + 1;
+            await session.AdmitWriterAsync(context, ct);
             int changed = await session.ExecuteAsync(new DbStatement("""
                 UPDATE shop.brands SET bot_token_ciphertext=$1,bot_token_key_id=$2,bot_username=$3,policy_version=policy_version+1,updated_at=clock_timestamp()
                 WHERE id=$4 AND bot_id=$5 AND policy_version=$6
@@ -62,6 +64,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
         await using (var before = await sessions.BeginAsync(ct))
         {
             if (!await AdminAuditStore.AppendAsync(before, actor, audit, ct)) return revision + 1;
+            await before.AdmitWriterAsync(context, ct);
             RequireRevision(await ReadAsync(before, context, ct), revision);
         }
         if (!await verify(context, Array.AsReadOnly(frozen), ct).WaitAsync(TimeSpan.FromSeconds(15), ct)) throw new InvalidOperationException("Bot channel eligibility is unavailable.");
@@ -69,6 +72,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return revision + 1;
+            await session.AdmitWriterAsync(context, ct);
             int changed = await session.ExecuteAsync(new DbStatement("UPDATE shop.brands SET policy_version=policy_version+1,updated_at=clock_timestamp() WHERE id=$1 AND bot_id=$2 AND policy_version=$3",
                 DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(revision)), ct);
             if (changed != 1) throw new InvalidOperationException("Brand configuration revision conflict.");

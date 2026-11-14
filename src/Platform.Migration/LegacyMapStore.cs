@@ -7,6 +7,7 @@ public static class LegacyMapStore
 {
     public static async Task RequireDestinationAsync(DbSession session, VerifiedImportManifest manifest, CancellationToken ct = default)
     {
+        session.RequireOfflineImport();
         manifest.Destination.Validate();
         if (manifest.Destination.SqlSha256 != SchemaRunner.BaselineSqlSha256) throw new MigrationRejectedException();
         var destination = manifest.Destination;

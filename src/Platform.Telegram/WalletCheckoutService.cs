@@ -13,6 +13,7 @@ public sealed class WalletCheckoutService(DbSessionFactory sessions, CheckoutSto
     private async Task<CheckoutResult> PurchaseCoreAsync(BrandContext context, long verifiedActorId, CheckoutRequest request,
         Func<long, long, CancellationToken, Task<ChannelMembership>> checkChannels, long? writerRevision, CancellationToken ct)
     {
+        writerRevision ??= sessions.ExpectedWriterRevision(context);
         if (writerRevision is < 0) throw new ArgumentOutOfRangeException(nameof(writerRevision));
         CheckoutResult? prior = await ReplayAsync(context, verifiedActorId, request, writerRevision, ct);
         if (prior is not null) return prior;
@@ -55,6 +56,7 @@ public sealed class WalletCheckoutService(DbSessionFactory sessions, CheckoutSto
     private async Task<CheckoutResult> AcceptCoreAsync(BrandContext context, long verifiedActorId, CheckoutRequest request,
         PreparedCheckout prepared, ChannelAccess access, long? writerRevision, CancellationToken ct)
     {
+        writerRevision ??= sessions.ExpectedWriterRevision(context);
         await using var session = await sessions.BeginAsync(ct);
         try
         {

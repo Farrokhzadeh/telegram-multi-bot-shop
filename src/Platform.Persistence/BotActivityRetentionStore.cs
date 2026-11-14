@@ -13,11 +13,13 @@ public sealed class BotActivityRetentionStore(DbSessionFactory sessions)
         try
         {
             await using var session = await sessions.BeginAsync(ct);
+            await session.AdmitSharedWriterAsync(ct);
+            string scope = session.IsWriterScoped ? " AND EXISTS(SELECT 1 FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=e.user_id AND b.active)" : "";
             int count = await session.ExecuteAsync(new DbStatement("""
                 WITH batch AS MATERIALIZED (
                     SELECT event_id AS id FROM shop.activity_cleanup_candidates($1))
                 DELETE FROM shop.bot_activity_events e USING batch WHERE e.id=batch.id
-                """, DbValue.Integer(limit)), ct);
+                """ + scope, DbValue.Integer(limit)), ct);
             var backlog = await BacklogAsync(session, ct);
             await session.CommitAsync(ct);
             Interlocked.Increment(ref batches); Interlocked.Add(ref deleted, count);

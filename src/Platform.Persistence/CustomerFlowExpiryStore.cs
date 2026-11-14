@@ -19,6 +19,7 @@ public sealed class CustomerFlowExpiryStore(DbSessionFactory sessions)
             """, DbValue.Uuid(memberId), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(expectedRevision)),
             r => r.IsDBNull(0) ? null : new Original(r.GetInt64(0), r.GetInt64(1), r.GetUtc(2), r.IsDBNull(3) ? null : r.GetGuid(3), r.IsDBNull(4) ? null : r.GetGuid(4)), ct);
         if (original is null) return false;
+        await session.AdmitCustomerWriterAsync(context, original.Actor, original.Product, ct);
         int changed = await session.ExecuteAsync(new DbStatement("""
             UPDATE shop.users SET flow_state='idle',flow_revision=flow_revision+1,flow_product_id=NULL,flow_order_id=NULL,flow_anchor_message_id=NULL,flow_expires_at=NULL
             WHERE id=$1 AND flow_revision=$2 AND flow_expires_at=$3

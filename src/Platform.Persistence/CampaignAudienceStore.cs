@@ -18,18 +18,27 @@ public sealed partial class CampaignStore
         await using var session = await sessions.BeginAsync(ct);
         try
         {
-            await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(5), ct);
+            if (!session.IsWriterScoped) await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(5), ct);
             var state = await session.QuerySingleAsync(new DbStatement("SELECT c.status,b.active FROM shop.campaigns c JOIN shop.brands b ON b.id=c.brand_id WHERE c.id=$1 AND b.id=$2 AND b.bot_id=$3 FOR UPDATE OF c",
                 DbValue.Uuid(campaign), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Status: r.GetString(0), Active: r.GetBoolean(1)), ct);
             if (state.Status is "cancelled" or "completed") { await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return 0; }
             if (state.Status is not ("approved" or "running")) throw new InvalidOperationException("Campaign is not approved.");
             if (!state.Active) { await OutboxStore.RetryAsync(session, lease, TimeSpan.FromMinutes(1), 1000000, JobError.Transient, ct); await session.CommitAsync(ct); return 0; }
+            Guid[]? locked = null;
+            if (session.IsWriterScoped)
+            {
+                locked = (await session.QueryManyAsync(new DbStatement("SELECT u.id " + Audience + " ORDER BY u.id LIMIT 1000 FOR UPDATE OF u", DbValue.Uuid(campaign)), r => r.GetGuid(0), 1000, ct)).ToArray();
+                await session.AdmitWriterAsync(context, ct);
+                await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(5), ct);
+            }
+            string scope = locked is null ? "" : locked.Length == 0 ? " AND false " : " AND u.id IN (" + string.Join(",", Enumerable.Range(2, locked.Length).Select(i => "$" + i.ToString(System.Globalization.CultureInfo.InvariantCulture))) + ") ";
+            DbValue[] args = locked is null ? [DbValue.Uuid(campaign)] : [DbValue.Uuid(campaign), .. locked.Select(DbValue.Uuid)];
             var rows = await session.QueryManyAsync(new DbStatement("""
                 INSERT INTO shop.telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,recipient_language,eligibility_checked_at,dedupe_key,campaign_id,campaign_batch_id)
                 SELECT gen_random_uuid(),c.brand_id,'customer_dm',u.id,'campaign','send',c.language,clock_timestamp(),'campaign:'||c.batch_id::text||':'||u.id::text,c.id,c.batch_id
-                """ + " " + Audience + " " + """
+                """ + " " + Audience + scope + " " + """
                 ORDER BY u.id LIMIT 1000 ON CONFLICT DO NOTHING RETURNING id
-                """, DbValue.Uuid(campaign)), r => r.GetGuid(0), 1000, ct);
+                """, args), r => r.GetGuid(0), 1000, ct);
             foreach (Guid delivery in rows) await OutboxStore.EnqueueAsync(session, JobIntent.Telegram(context.BrandId, delivery), delivery, DateTime.UtcNow, ct);
             await session.ExecuteAsync(new DbStatement("UPDATE shop.campaigns SET status='running',started_at=COALESCE(started_at,clock_timestamp()) WHERE id=$1", DbValue.Uuid(campaign)), ct);
             bool remaining = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 " + Audience + ")", DbValue.Uuid(campaign)), r => r.GetBoolean(0), ct);

@@ -22,11 +22,17 @@ public static class BrandEndpoints
     public static void MapBrandAdministration(this IEndpointRouteBuilder endpoints, BrandAdministrationStore store, Func<Guid, BrandContext?> resolve,
         Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken,
         Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
+        => MapCore(endpoints, _ => store, resolve, verifyToken, verifyChannels);
+    public static void MapScopedBrandAdministration(this IEndpointRouteBuilder endpoints, WriterRegistry writers, SecretSnapshot secrets,
+        Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken, Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
+        => MapCore(endpoints, context => new BrandAdministrationStore(writers.ForBrand(context), secrets), writers.Resolve, verifyToken, verifyChannels);
+    private static void MapCore(IEndpointRouteBuilder endpoints, Func<BrandContext, BrandAdministrationStore> store, Func<Guid, BrandContext?> resolve,
+        Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken, Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
     {
         endpoints.MapGet("/v1/admin/brands/{brand:guid}", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(http, async () =>
         {
             BrandContext? context = resolve(brand);
-            return context is null ? Results.NotFound() : Results.Json(await store.ReadAsync(http.GetRequiredAdministrator(), context, http.RequestAborted), BrandAdminJsonContext.Default.BrandConfiguration);
+            return context is null ? Results.NotFound() : Results.Json(await store(context).ReadAsync(http.GetRequiredAdministrator(), context, http.RequestAborted), BrandAdminJsonContext.Default.BrandConfiguration);
         })).RequireAdministrator();
         endpoints.MapPut("/v1/admin/brands/{brand:guid}/bot-token", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(http, async () =>
         {
@@ -34,7 +40,7 @@ public static class BrandEndpoints
             if (context is null) return Results.NotFound();
             var input = await AdminHttp.ReadAsync(http, BrandAdminJsonContext.Default.BotTokenChange);
             using var token = BotToken.Parse(input.Token);
-            long revision = await store.RotateTokenAsync(http.GetRequiredAdministrator(), context, token, input.ExpectedRevision, input.CommandId, verifyToken, http.RequestAborted);
+            long revision = await store(context).RotateTokenAsync(http.GetRequiredAdministrator(), context, token, input.ExpectedRevision, input.CommandId, verifyToken, http.RequestAborted);
             return Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
         })).RequireAdministrator();
         endpoints.MapPut("/v1/admin/brands/{brand:guid}/required-channels", (HttpContext http, Guid brand) => AdminHttp.HandleAsync(http, async () =>
@@ -43,7 +49,7 @@ public static class BrandEndpoints
             if (context is null) return Results.NotFound();
             var input = await AdminHttp.ReadAsync(http, BrandAdminJsonContext.Default.RequiredChannelsChange);
             if (input.Channels is null) throw new ArgumentException("Required channels are missing.");
-            long revision = await store.SetChannelsAsync(http.GetRequiredAdministrator(), context, input.Channels, input.ExpectedRevision, input.CommandId, verifyChannels, http.RequestAborted);
+            long revision = await store(context).SetChannelsAsync(http.GetRequiredAdministrator(), context, input.Channels, input.ExpectedRevision, input.CommandId, verifyChannels, http.RequestAborted);
             return Results.Json(new ConfigurationSaved(revision), BrandAdminJsonContext.Default.ConfigurationSaved);
         })).RequireAdministrator();
     }
