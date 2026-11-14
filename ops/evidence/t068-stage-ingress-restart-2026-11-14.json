@@ -1,0 +1,45 @@
+{
+  "artifact_manifest_sha256": "4e181e8476b3e148c9697dc8cba2b1792c41c0c74e31c4503f6df9275e4c072d",
+  "base_main": "2665ddd5a791a1238ef13cc402c069834186445c",
+  "baseline_brand_context_cases": 12,
+  "changed_source_files": 1,
+  "checks": {
+    "host-final": 5,
+    "regression-final": 29
+  },
+  "fresh_offline_disposable_database_count": 0,
+  "full_interruption_matrix_verified": false,
+  "functional_review_passed": true,
+  "main_inputs_including_embedded_schema": 408,
+  "missing_reviewed_proof_names": [
+    "accepted_target_effect_reverse_mapping",
+    "original_obligations_preserved_without_inferred_settlement",
+    "source_stock_identity_and_custody_proofs",
+    "target_stock_projection_and_segregation",
+    "uncertain_callback_delivery_disposition"
+  ],
+  "native_aot_publication_verified": false,
+  "new_actors_stopped": true,
+  "normal_host_activation_verified": false,
+  "preexisting_container_configs_mounts_images_unchanged": 199,
+  "preexisting_container_state_changes": 0,
+  "preexisting_container_states_unchanged": 199,
+  "previous_restart_owner_disposition_reused": true,
+  "protected_copy_rehearsal_verified": false,
+  "protected_input_record_sha256_rechecked": "7f227a4d4de2e64aecdea71e811ab79f38522c868e561b68ccd531091b8c9b6e",
+  "protected_input_review_sha256": "2032d0a19de3c5bfd0e7e0ca381d66b59e72fc04e8cc166497af26c741d0ba59",
+  "release_ready": false,
+  "resource_noninterference_verified": false,
+  "review_script_sha256": "ebfb397211c3034f6b09e1b109914139e97f44bab3603ebeb31bb3fb341e4664",
+  "scope": "standalone synthetic Telegram/payment ingress paused/stale rejection, retained input, explicit revision resume and actual process-kill replay without settlement",
+  "server_state_guard_passed": true,
+  "source_sha256": {
+    "tests/Platform.IntegrationTests/StageWriterHostTests.cs": "bd1fbe64361cafab912aee48c1692de6c3a4bc9ec32557f93873d3471dfe6362"
+  },
+  "task_complete": false,
+  "test_trx_sha256": {
+    "host-final": "c6a5c6140eb394978308f9266fd82a92debb22054796e65506d0e5d784ca17ee",
+    "regression-final": "5783254616d206f3106d6e641dea763c28d99b8b883bd38276d1e3d92619377b"
+  },
+  "unchanged_main_inputs": 407
+}
