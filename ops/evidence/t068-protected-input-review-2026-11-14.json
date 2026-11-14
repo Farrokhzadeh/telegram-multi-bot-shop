@@ -1,0 +1,49 @@
+{
+  "main": "fc947a1c3e905021d529abd29625df0db45aace6",
+  "input_record_sha256": "7f227a4d4de2e64aecdea71e811ab79f38522c868e561b68ccd531091b8c9b6e",
+  "state": "incomplete_not_activation_authority",
+  "input_record_is_private_regular_file": true,
+  "missing_reviewed_proofs": [
+    "accepted_target_effect_reverse_mapping",
+    "original_obligations_preserved_without_inferred_settlement",
+    "source_stock_identity_and_custody_proofs",
+    "target_stock_projection_and_segregation",
+    "uncertain_callback_delivery_disposition"
+  ],
+  "protected_activation_qualified": false,
+  "production_changes_allowed": false,
+  "release_ready": false,
+  "next_independent_scope": "fixed-revision standalone synthetic stage actor and pause/restart boundaries",
+  "recorded_baseline_facts": {
+    "metadata_file_matches_qualified_staged_binding": true,
+    "operational_stock_admission_qualified": false,
+    "postacceptance_reverse_to_legacy_mapping_qualified": false,
+    "protected_writer_rehearsal_executed": false,
+    "qualified_frozen_operational_row_counts": {
+      "fulfillments": 0,
+      "inventory_items": 0,
+      "jobs": 0,
+      "telegram_deliveries": 0
+    },
+    "release_ready": false,
+    "task_complete": false
+  },
+  "baseline_revalidation_performed": false,
+  "frozen_fingerprint_file_hash_rechecked": true,
+  "frozen_rows_not_requeried": true,
+  "baseline_revalidation_scope": "qualified fingerprint file bytes only; no protected database start or new row reconciliation",
+  "qualified_receipt_bytes_match_published_digest": true,
+  "qualified_reader_copy_container_status": [
+    {
+      "kind": "source_id",
+      "running": false,
+      "network_none": true
+    },
+    {
+      "kind": "target_id",
+      "running": false,
+      "network_none": true
+    }
+  ],
+  "no_protected_container_started": true
+}

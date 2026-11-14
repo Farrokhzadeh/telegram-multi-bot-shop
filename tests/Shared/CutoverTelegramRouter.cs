@@ -21,6 +21,7 @@ public static class CutoverTelegramRouter
         if (update.UpdateId != input.Update || update.ActorId != CheckoutFixture.Actor(0)) throw new TelegramIngressRejectedException();
         await using (var read = await sessions.BeginReadOnlyAsync(ct))
             _ = await BrandUserStore.RequireAsync(read, context, update.ActorId, member, ct);
-        return await new UpdateRouter(sessions, (_, _, _) => throw new TelegramIngressRejectedException()).RouteAsync(update, ct);
+        var router = sessions.IsWriterScoped ? new UpdateRouter(sessions, (_, _, _, _) => throw new TelegramIngressRejectedException()) : new UpdateRouter(sessions, (_, _, _) => throw new TelegramIngressRejectedException());
+        return await router.RouteAsync(update, ct);
     }
 }

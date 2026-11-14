@@ -1,0 +1,40 @@
+{
+  "artifact_manifest_sha256": "63f2ac8e0dc9c245bee2c7eb9e2d3d4d24dce6b45cd920c0730c9aaa4b5f32dc",
+  "base_main": "fc947a1c3e905021d529abd29625df0db45aace6",
+  "baseline_brand_context_cases": 12,
+  "changed_source_files": 4,
+  "checks": {
+    "host-final": 3,
+    "regression-final": 29
+  },
+  "fresh_offline_disposable_database_count": 0,
+  "full_interruption_matrix_verified": false,
+  "functional_review_passed": true,
+  "main_inputs_including_embedded_schema": 407,
+  "native_aot_publication_verified": false,
+  "new_actors_stopped": true,
+  "normal_host_activation_verified": false,
+  "preexisting_container_configs_mounts_images_unchanged": 191,
+  "preexisting_container_state_changes": 1,
+  "preexisting_container_states_unchanged": 190,
+  "protected_copy_rehearsal_verified": false,
+  "protected_input_review_sha256": "2032d0a19de3c5bfd0e7e0ca381d66b59e72fc04e8cc166497af26c741d0ba59",
+  "release_ready": false,
+  "resource_noninterference_verified": false,
+  "restart_causal_attribution_verified": false,
+  "review_script_sha256": "1d2c5661ae787c1ce3cc005601faac7a896ff532c2ef9e0639410b7e68921872",
+  "scope": "standalone synthetic stage actor immutable writer revision, readiness rejection, pause/kill/restart and selected Telegram compatibility",
+  "server_state_guard_passed": false,
+  "source_sha256": {
+    "tests/Platform.IntegrationTests/CutoverTelegramRouterTests.cs": "8a255259ff80b274946720616adbb0073d05583ab424fe0a03d1ae6172b01d8d",
+    "tests/Platform.IntegrationTests/StageWriterHostTests.cs": "a52d4f212382f866030561ee04d5ab7a1da6eec5314412c45e691b81425c948a",
+    "tests/Shared/CutoverStageRuntime.cs": "0b3d0c8f36d5a79f62161e4546f0db006b4a675b8674a327e62827e33b94191f",
+    "tests/Shared/CutoverTelegramRouter.cs": "8723446e8656c01dfb59f756c6faa82a001dcb93e292208cf5bb131b0195ed99"
+  },
+  "task_complete": false,
+  "test_trx_sha256": {
+    "host-final": "017f02febcd6a287f01a6bae9d9a88ecbf21b9d65713b8d434ba6ffd386ada7c",
+    "regression-final": "b9ea06d2028ffb6110c103c0f014712832427f1d6a9ccd07f9499f80d52d4bf9"
+  },
+  "unchanged_main_inputs": 404
+}

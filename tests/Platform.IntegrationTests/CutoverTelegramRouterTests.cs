@@ -42,4 +42,23 @@ public sealed class CutoverTelegramRouterTests
         Assert.Equal(UpdateRouteCode.Duplicate, (await CutoverTelegramRouter.RouteAsync(fixture.Sessions, fixture.Context(0), fixture.Users[0], run, Secret, input, Ct)).Code);
         Assert.Equal(0L, await fixture.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE user_id='" + fixture.Users[1].ToString("D") + "'::uuid", Ct));
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnsupportedRestockRemainsAnIngressRejectionWithEitherFactory(bool scoped)
+    {
+        await using var fixture = await CheckoutFixture.CreateAsync(users: 1, ct: Ct);
+        await using (var seed = await fixture.Sessions.BeginAsync(Ct))
+        {
+            await BrandUserStore.TransitionAsync(seed, fixture.Context(0), 7001, fixture.Users[0], 0, CustomerFlowState.Quantity, productId: fixture.Product, anchorMessageId: 77, ct: Ct);
+            await seed.CommitAsync(Ct);
+        }
+        Guid run = Guid.NewGuid();
+        var input = new CutoverTelegramInput(run, 701, Encoding.UTF8.GetString(TelegramFixture.Body("v1|1|s|" + fixture.Product.ToString("N"), true, 701)), TelegramFixture.Header(Secret));
+        var sessions = scoped ? fixture.Sessions.ForBrandWriter(fixture.Context(0), 0) : fixture.Sessions;
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => CutoverTelegramRouter.RouteAsync(sessions, fixture.Context(0), fixture.Users[0], run, Secret, input, Ct));
+        Assert.Equal(0L, await fixture.CountAsync("SELECT count(*) FROM shop.product_stock_subscriptions", Ct));
+        Assert.Equal(0L, await fixture.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id=701", Ct));
+    }
+
 }

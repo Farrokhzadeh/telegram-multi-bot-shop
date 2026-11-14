@@ -10,7 +10,7 @@ using Platform.Telegram;
 using Platform.Core;
 namespace Platform.Testing;
 
-public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, string Secrets);
+public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, string Secrets, long WriterRevision = 0);
 public sealed record CutoverStockPlan(Guid Run, Guid Product, Guid Unit, string Credential);
 public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Cipher, string Plain);
 public sealed record CutoverStageResult(string Operation, string Outcome, long Orders, long Allocated, long Debits, bool Synthetic = true, bool ReleaseReady = false);
@@ -56,7 +56,7 @@ public static class CutoverStageRuntime
             return;
         }
         var saved = JsonSerializer.Deserialize(ArchivePrivateFile.Read(path, 1, 4096), CutoverStageJson.Default.CutoverStageState) ?? throw new InvalidOperationException();
-        if (saved.Run != run || saved.Database.Length != 51 || !saved.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) || !Guid.TryParseExact(saved.Database[19..], "N", out _) || !saved.Secrets.StartsWith(root + "/tmp/shop-secret-qualification-", StringComparison.Ordinal)) throw new InvalidOperationException();
+        if (saved.WriterRevision < 0 || saved.Run != run || saved.Database.Length != 51 || !saved.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) || !Guid.TryParseExact(saved.Database[19..], "N", out _) || !saved.Secrets.StartsWith(root + "/tmp/shop-secret-qualification-", StringComparison.Ordinal)) throw new InvalidOperationException();
         if (mode == "payment-audit")
         {
             using var keys = SecretFiles.Load(saved.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
@@ -89,7 +89,9 @@ public static class CutoverStageRuntime
             foreach (string directory in new[] { "payment", "payment-archives", "payment-verification" })
             { Directory.CreateDirectory(Path.Combine(root, directory), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); if (Directory.EnumerateFileSystemEntries(Path.Combine(root, directory)).Any()) throw new InvalidOperationException(); }
             await using (var policy = await sessions.BeginAsync(ct))
-            { await policy.ExecuteAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,allow_wallet_topup=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(context.BrandId)), ct); await policy.CommitAsync(ct); }
+            { await policy.QuerySingleAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,allow_wallet_topup=true,policy_version=policy_version+1 WHERE id=$1 AND active AND policy_version=$2 RETURNING policy_version", DbValue.Uuid(context.BrandId), DbValue.Bigint(saved.WriterRevision)), r => r.GetInt64(0), ct); await policy.CommitAsync(ct); }
+            saved = saved with { WriterRevision = checked(saved.WriterRevision + 1) };
+            Write(path, JsonSerializer.Serialize(saved, CutoverStageJson.Default.CutoverStageState), true);
             Guid payment = Guid.NewGuid(); var store = new PaymentEvidenceStore(sessions, secrets);
             _ = await store.CreateTopupAsync(context, CheckoutFixture.Actor(0), payment, new(10.25m, Currency.Usd), CryptoAsset.UsdtBsc, ct);
             string provider = PaymentSettlementFixture.Provider(payment);
@@ -142,6 +144,11 @@ public static class CutoverStageRuntime
             finally { CryptographicOperations.ZeroMemory(key); }
             return;
         }
+        string ready = Path.Combine(root, "ready.json");
+        if (File.Exists(ready)) { _ = ArchivePrivateFile.Read(ready, 1, 4096); File.Delete(ready); }
+        sessions = new WriterRegistry(sessions, [new(context, saved.WriterRevision)]).ForBrand(context);
+        await using (var admission = await sessions.BeginAsync(ct))
+        { await admission.AdmitWriterAsync(context, ct); await admission.CommitAsync(ct); }
         await using (var read = await sessions.BeginReadOnlyAsync(ct))
         {
             long active = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brands WHERE active"), r => r.GetInt64(0), ct);
@@ -190,8 +197,8 @@ public static class CutoverStageRuntime
                 }
                 if (command == "wallet")
                 {
-                    var accepted = await new CheckoutStore(sessions, secrets).PurchaseLocalAsync(context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10), ct);
-                    outcome = accepted.Outcome.ToString();
+                    try { outcome = (await new CheckoutStore(sessions, secrets).PurchaseLocalAsync(context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10), ct)).Outcome.ToString(); }
+                    catch (UnauthorizedAccessException) { outcome = "Rejected"; }
                 }
                 if (command == "wallet-paused")
                 {
