@@ -10,18 +10,30 @@ public sealed record PaymentSettlement(PaymentSettlementOutcome Outcome, Externa
 
 public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnapshot secrets, CatalogStore catalog)
 {
-    public async Task<PaymentSettlement> SettleAsync(BrandContext context, Guid payment,
+    public Task<PaymentSettlement> SettleAsync(BrandContext context, Guid payment,
+        Func<InvoiceExpectation, CancellationToken, Task<ProviderPaymentSnapshot>> lookup, CancellationToken ct = default) => SettleCoreAsync(context, payment, lookup, null, ct);
+    public Task<PaymentSettlement> SettleForBrandAsync(BrandContext context, long expectedRevision, Guid payment,
         Func<InvoiceExpectation, CancellationToken, Task<ProviderPaymentSnapshot>> lookup, CancellationToken ct = default)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
+        return SettleCoreAsync(context, payment, lookup, expectedRevision, ct);
+    }
+    private async Task<PaymentSettlement> SettleCoreAsync(BrandContext context, Guid payment,
+        Func<InvoiceExpectation, CancellationToken, Task<ProviderPaymentSnapshot>> lookup, long? writerRevision, CancellationToken ct)
+    {
         State before;
-        await using (var read = await sessions.BeginAsync(ct)) before = await LoadAsync(read, context, payment, ct);
+        await using (var read = await sessions.BeginAsync(ct))
+        {
+            if (writerRevision is long revision) await BrandWriterStore.RequireAsync(read, context, revision, ct);
+            before = await LoadAsync(read, context, payment, ct);
+        }
         if (before.Status == "settled") return new(PaymentSettlementOutcome.Replayed, ExternalSettlementRoute.AlreadyAccepted, before.Credit);
         if (!Ready(before)) return new(before.Status == "review" ? PaymentSettlementOutcome.Review : PaymentSettlementOutcome.Pending, ExternalSettlementRoute.Review);
         ProviderPaymentSnapshot remote = await lookup(Expectation(before), ct);
         await using var session = await sessions.BeginAsync(ct);
         try
         {
-            await LockAsync(session, context, before, ct);
+            await LockAsync(session, context, before, ct, writerRevision);
             State data = await LoadAsync(session, context, payment, ct);
             if (data.Status == "settled") return new(PaymentSettlementOutcome.Replayed, ExternalSettlementRoute.AlreadyAccepted, data.Credit);
             if (!Ready(data)) return new(data.Status == "review" ? PaymentSettlementOutcome.Review : PaymentSettlementOutcome.Pending, ExternalSettlementRoute.Review);
@@ -172,11 +184,12 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
     internal static Task FulfillmentAsync(DbSession session, Guid order, string status, string? review, CancellationToken ct) => session.ExecuteAsync(new DbStatement(
         "UPDATE shop.orders SET fulfillment_status=$1,review_code=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3", DbValue.Text(status),
         review is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Text) : DbValue.Text(review), DbValue.Uuid(order)), ct);
-    internal static async Task LockAsync(DbSession session, BrandContext context, State data, CancellationToken ct)
+    internal static async Task LockAsync(DbSession session, BrandContext context, State data, CancellationToken ct, long? writerRevision = null)
     {
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 FOR UPDATE) u", DbValue.Uuid(data.Member), DbValue.Uuid(context.BrandId)), r => r.GetInt64(0), ct);
         if (data.Product is Guid product) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
-        await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
+        if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
+        else await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE) b", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
         if (data.Order is Guid order) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE) o", DbValue.Uuid(order)), r => r.GetInt64(0), ct);
         await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.payments WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(data.Id)), r => r.GetInt64(0), ct);
     }
