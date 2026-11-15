@@ -10,13 +10,50 @@ public sealed class SupplierAttemptSchemaTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
+    public async Task ExportRequiresItsEarlierSameRequestSubmitAndKeepsTerminalEvidenceImmutable()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct), otherOrder = await SupplierFixture.AcceptAsync(f, 1, Ct);
+        Guid request, otherRequest, submit = Guid.NewGuid(), export = Guid.NewGuid();
+        await using (var read = await f.Sessions.BeginAsync(Ct))
+        {
+            request = await read.QuerySingleAsync(new DbStatement("SELECT id FROM shop.supplier_requests WHERE order_id=$1", DbValue.Uuid(order)), r => r.GetGuid(0), Ct);
+            otherRequest = await read.QuerySingleAsync(new DbStatement("SELECT id FROM shop.supplier_requests WHERE order_id=$1", DbValue.Uuid(otherOrder)), r => r.GetGuid(0), Ct);
+        }
+        await using (var seed = await f.Sessions.BeginAsync(Ct))
+        {
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,max_charge_amount) VALUES($1,$2,1,'submit',1.1)", DbValue.Uuid(submit), DbValue.Uuid(request)), Ct);
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,parent_submit_attempt_id) VALUES($1,$2,2,'export',$3)", DbValue.Uuid(export), DbValue.Uuid(request), DbValue.Uuid(submit)), Ct);
+            await seed.CommitAsync(Ct);
+        }
+        await using (var foreign = await f.Sessions.BeginAsync(Ct))
+        {
+            var error = await Assert.ThrowsAsync<DbOperationException>(() => foreign.ExecuteAsync(new DbStatement("INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,parent_submit_attempt_id) VALUES(gen_random_uuid(),$1,1,'export',$2)", DbValue.Uuid(otherRequest), DbValue.Uuid(submit)), Ct));
+            Assert.Equal(DbFailureKind.Constraint, error.Failure.Kind);
+        }
+        await using (var finish = await f.Sessions.BeginAsync(Ct))
+        {
+            await finish.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome='unknown',finished_at=CURRENT_TIMESTAMP,evidence_ref='protected:synthetic/export' WHERE id=$1", DbValue.Uuid(export)), Ct);
+            await finish.CommitAsync(Ct);
+        }
+        await using (var changed = await f.Sessions.BeginAsync(Ct))
+        {
+            var error = await Assert.ThrowsAsync<DbOperationException>(() => changed.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET evidence_ref='protected:synthetic/changed' WHERE id=$1", DbValue.Uuid(export)), Ct));
+            Assert.Equal(DbFailureKind.Constraint, error.Failure.Kind);
+        }
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE operation='export' AND outcome='unknown' AND parent_submit_attempt_id IS NOT NULL AND purchase_idempotency_key IS NULL AND max_charge_amount IS NULL AND admin_authorization_audit_id IS NULL", Ct));
+    }
+    [Fact]
     public async Task AttemptTableHasTypedColumnsUniqueKeyImmutableHistoryAndTriggerGuard()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await using var read = await f.Sessions.BeginAsync(Ct);
-        long columnCount = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM information_schema.columns WHERE table_schema='shop' AND table_name='supplier_request_attempts'"), r => r.GetInt64(0), Ct);
-        Assert.True(columnCount >= 15, "canonical attempt columns present");
+        var columns = await read.QueryManyAsync(new DbStatement("SELECT column_name||':'||coalesce(domain_name,data_type)||':'||is_nullable FROM information_schema.columns WHERE table_schema='shop' AND table_name='supplier_request_attempts' ORDER BY ordinal_position"), r => r.GetString(0), 16, Ct);
+        Assert.Equal(new[] { "id:uuid:NO", "supplier_request_id:uuid:NO", "attempt_no:bigint:NO", "operation:text:NO", "outcome:text:NO", "parent_submit_attempt_id:uuid:YES", "admin_authorization_audit_id:uuid:YES", "purchase_idempotency_key:short_text:YES", "max_charge_amount:finite_numeric:YES", "http_status:integer:YES", "error_code:short_text:YES", "remote_ref:short_text:YES", "evidence_ref:asset_ref:YES", "started_at:timestamp with time zone:NO", "finished_at:timestamp with time zone:YES" }, columns);
+        var requestColumns = await read.QueryManyAsync(new DbStatement("SELECT column_name::text FROM information_schema.columns WHERE table_schema='shop' AND table_name='supplier_requests' ORDER BY ordinal_position"), r => r.GetString(0), 26, Ct);
+        Assert.Equal(new[] { "id", "order_id", "requested_quantity", "product_supplier_source_id", "source_revision", "provider_code", "account_ref", "external_product_id", "external_variant_id", "local_intent_key", "remote_ref", "request_sha256", "status", "revision", "review_code", "next_check_at", "evidence_ref", "cost_baseline_amount", "cost_currency", "cost_quote_ref", "cost_observed_at", "approved_cost_ceiling", "approval_audit_id", "created_at", "updated_at" }, requestColumns);
         long uniqueKey = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM pg_indexes WHERE schemaname='shop' AND tablename='supplier_request_attempts' AND indexname='supplier_request_attempts_supplier_request_id_attempt_no_key'"), r => r.GetInt64(0), Ct);
         Assert.Equal(1L, uniqueKey);
         long deleteGuard = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM pg_trigger WHERE tgrelid='shop.supplier_request_attempts'::regclass AND tgname='supplier_request_attempts_no_delete'"), r => r.GetInt64(0), Ct);

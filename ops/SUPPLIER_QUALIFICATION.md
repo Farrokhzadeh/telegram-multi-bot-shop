@@ -1,5 +1,7 @@
 # Provider-neutral supplier qualification
 
+**Current T090 follow-up — 2026-11-15:** [T090 qualification](T090_QUALIFICATION.md) completes exact canonical schema qualification and the approved frozen legacy empty-set reconciliation. Fresh16 PostgreSQL cases and64 matching reused supplier cases pass;actual source schema/keyed commitments and T066-sealed archive plans verify zero supplier request/item/attempt/refund originals across all three snapshots. No supplier history is fabricated,no SQL/production code is changed,and no nonempty importer or live provider capability is qualified. T057/T091 and other remaining supplier/runtime/release gates stay open.
+
 2026-11-01. Owner-authorized offline continuation directly on main, with task-grouped commits and full execution checks at the offline phase checkpoint. Qualification: **PASS** — 550 tests (129 unit, 318 integration, 103 contract), zero failed/skipped tests, zero build warnings/errors, clean formatting, secret scan, locked restore, Compose render and five Linux Native AOT executables. Qualified source `6e9e2dec3f7b9e37db5d3f64aa92398bbb154232`; [CI 41355954708](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41355954708). T053–T056 and T058–T060 are complete. Total: **60/96 tasks, 36 unchecked**. T057 remains separately gated on per-provider evidence and is not implemented or qualified by a synthetic port. Reviewer checklist remains read-only at 92/126; constitution 3.0.0 remains active.
 
 ## Durable purchase and recovery
