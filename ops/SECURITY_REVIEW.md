@@ -2,7 +2,7 @@
 
 ## Offline checkpoint — 2026-11-15
 
-**T075 remains unchecked. 85/96 tasks are complete.** This checkpoint covers the configuration template and tested application boundaries. The [staging plan](../specs/001-multibrand-redesign/staging-plan.md) and [release identity contract](RELEASE_GATES.md) define the operational acceptance requirements.
+**T075 was unchecked at this checkpoint.** This checkpoint covers the configuration template and tested application boundaries. The [staging plan](../specs/001-multibrand-redesign/staging-plan.md) and [release identity contract](RELEASE_GATES.md) define the operational acceptance requirements.
 
 | Boundary | Verified offline | Operational evidence still needed |
 |---|---|---|
@@ -26,7 +26,7 @@ Two additional tests passed on authenticated disposable PostgreSQL 18. The restr
 
 The [legacy branch workflow](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/main/.github/workflows/deploy.yml) tests the pushed commit, builds revision-labeled images and deploys a checksummed release. The legacy `staging` branch deploys one Django instance. The legacy `main` branch deploys the three production instances. The owner-server inventory confirmed that the running legacy staging instance uses a distinct bot credential, PostgreSQL database and role, application keys, data mount and loopback web binding. Its application containers join the fleet network and its database uses the fleet PostgreSQL engine, as described in the [legacy fleet guide](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/main/docs/FLEET_DEPLOYMENT.md).
 
-The redesign staging plan requires a dedicated PostgreSQL process and network and three test brand bindings. The legacy deployment provides a reference for artifact identity checks and independent instance controls. The redesign's [normal host startup](../src/Platform.Core/HostBootstrap.cs) exits with configuration required. Its loopback API qualification and scoped private-history probe provide evidence only for their own entry points. Operational qualification needs a reviewed staging launcher and artifact that bind the redesign services to staging-only data, fake transports, private ingress and test recipients. Keep T075 open until those bindings pass the intended-environment checks.
+The redesign staging plan requires a dedicated PostgreSQL process and network and three test brand bindings. The legacy deployment provides a reference for artifact identity checks and independent instance controls. The redesign's [normal host startup](../src/Platform.Core/HostBootstrap.cs) exits with configuration required. Its loopback API qualification and scoped private-history probe provide evidence only for their own entry points. Operational qualification needs a reviewed staging launcher and artifact that bind the redesign services to staging-only data, fake transports, private ingress and test recipients. The deployed qualification below records those bindings.
 
 ## Disposable staging infrastructure checkpoint — 2026-11-15
 
@@ -46,9 +46,23 @@ Four focused integration checks passed on the owner server. The [three-brand pra
 
 The managed build completed with zero warnings and errors. The runner and database shared an isolated network namespace with loopback only and no published ports. All disposable databases and containers were removed. No external provider was contacted.
 
-This completes the simulated application checks. The normal multi-service staging deployment still needs its operational identity review, including the actual service accounts and grants, private routes, mounts and recipient configuration. T075 remains open for that review.
+This completed the simulated application checks before the deployed qualification below.
 
-## Next qualification step
+## Deployed synthetic staging qualification — 2026-11-15
+
+The owner-server staging project ran six containers on a dedicated internal Docker bridge with no default route or published ports. PostgreSQL 18.6 used its own volume and the canonical 28-table schema. The migration owner was separate from the service roles. Each bot's login saw only its own brand and member rows. The roles could lock the shared listing for callback processing, while actual product writes failed. Maintenance function ownership and grants were checked separately.
+
+Five managed service processes loaded their own protected key manifests. Each bot had access to its own receipt mount and brand key. Only the jobs service received the inventory key. Live container inspection verified the image IDs, nonroot service users, read-only mounts, and absence of production mounts. A scoped scan of container logs found none of the generated database, webhook, administrator, or recipient credentials.
+
+Private HTTPS requests verified per-service certificates. Three bot callbacks were accepted once each and replayed without creating extra activity. Foreign secrets, foreign bot identities, unapproved tester identities, and a route outside staging were rejected. The administrator endpoint accepted an active staging session and rejected anonymous, revoked, and bot credentials. The fake delivery endpoint accepted only the configured test DM and test staff destination and made no external network call. The preceding practice run covers the actual campaign worker and staff routing logic.
+
+The managed build passed without warnings, tracked source formatting passed, and deployed artifact hashes matched the protected identity manifest. The staging project stopped independently, with the original set of running containers unchanged. Staging resources remain provisioned and stopped.
+
+T075 is complete for the deployed synthetic environment. Native AOT deployment qualification, live Telegram identity verification, and cutover remain under their existing gates.
+
+The operator entry points are [provisioning](staging/provision_synthetic_stage.py) and [verification](staging/verify_synthetic_stage.py). Provisioning takes the reviewed managed Platform.Api output directory and the canonical migration path. It refuses an existing staging project or volume. Run verification while the staging project is up and its generated administrator session is current.
+
+## Future live-service identity review
 
 Review the protected operator identity manifest against the intended staging deployment before any live transport or cutover. Check the following bindings without publishing raw tokens, keys, passwords or identities.
 
@@ -59,4 +73,4 @@ Review the protected operator identity manifest against the intended staging dep
 | Secrets and ingress | Separate secret references and file permissions, admin origin, callback route and certificate identity, and rejection of production bindings. |
 | Media and release artifact | Receipt and fulfillment media roots, access controls and the reviewed artifact identity. |
 
-The current evidence supports proceeding with an isolated staging setup when separately authorized. T075 remains open until its intended-environment checks pass.
+External providers and live Telegram remain subject to their separate activation gates.

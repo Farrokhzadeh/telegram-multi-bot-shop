@@ -4,6 +4,9 @@ using Platform.Api;
 using Platform.Core;
 using Platform.Security;
 
+if (args is ["--serve-synthetic-staging", var role])
+    return await SyntheticStaging.RunAsync(role);
+
 if (args is not ["--serve-qualification"])
 {
     return HostBootstrap.Run(args, "Api");
