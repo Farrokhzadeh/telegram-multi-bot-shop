@@ -33,6 +33,17 @@ The one saved provider is Akunding, with an encrypted nonempty credential and on
 
 Literal source authority is `66371a23a1c8149dc5bdf89a0355aa689d454dba`, including `SupplierConnection`, `SupplierProductMapping` and `SupplierAvailabilitySnapshot`. The old one-to-one product mapping is historical configuration, not evidence that the new many-source model may select it automatically. Preserve the original source/configuration and retained keys; no credential, selected pointer, observation or operational row is imported or activated. T066's configuration commitments are distinct from its selected archive projections. T090's empty operational supplier histories remain separately qualified.
 
+## Akunding public contract follow-up — 2026-11-15
+
+| Requirement | [Official reseller API documentation](https://akunding.shop/api/docs) |
+|---|---|
+| Account identity | `GET /api/v1/me` returns the reseller shop's integer `user_id` and `api_key_prefix`. |
+| Product identity and stock | `GET /api/v1/products/{id}` returns the exact numeric `id`, integer `stock` and boolean `available`. The detail endpoint also returns sold-out products. |
+| Native cost | `your_price` is the account's one-unit price in USDT. `base_price` is public pricing, and `bulk_tiers` describes quantity pricing. |
+| Delivery scope | API orders accept a product ID and quantity and can return codes or accounts. The API excludes preorders and invites. The product object provides name, description, features and unit label. The exact item still requires FR-068 review before an eligibility fingerprint can be approved. |
+
+The existing [Akunding adapter](AKUNDING_SUPPLIER_ADAPTER.md) preserves USDT and requires explicit exact-product approval. The public contract supplies the field definitions. The current account identity, mapped product price, availability, delivery eligibility and applicable protected runtime proof remain open. **T093 and T094 remain unchecked.**
+
 ## Safety and remaining gate
 
 An isolated copy of the stopped PostgreSQL16 source was queried only through explicit READ ONLY transactions and the restricted reader. Original source bytes match the earlier qualified fingerprint. All 270 preexisting container configurations/images/mounts/states are unchanged; all four new actors are stopped. No original production database, bot or media was started or modified. Private records, identifiers, prices, encrypted credentials, keys and receipts remain on the owner server.
