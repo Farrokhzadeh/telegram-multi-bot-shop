@@ -16,6 +16,21 @@ Fresh execution passed **61 unit and 42 integration cases** on the owner server.
 
 The [configuration-only Compose template](compose/backend.compose.yaml) rendered with synthetic values. The render showed five distinct service UIDs, 15 distinct secret-file references, network disabled and no published ports. Each bot received its own brand key; the inventory key was scoped to the job service. The expected staging project label and private network name had no match during the host inventory lookup.
 
+## Host inventory and database grant follow-up — 2026-11-15
+
+The host inventory found no containers or network for the planned staging project, no running scoped staging rehearsal actors and no matching staging root in the inspected locations. The deployed identities, routes and destinations remain unverified.
+
+Two additional tests passed on authenticated disposable PostgreSQL 18. The restricted maintenance identity could delete eligible expired activity through the established cleanup path. PostgreSQL denied reads from wallet, order, payment and audit tables, private activity fields, unrelated writes and direct deletion of recent activity. The domain-fence test preserved the commerce relations and blocked cleanup of unproven activity. Container inspection confirmed that the runner shared only the disposable database's network namespace, the database had networking disabled, neither actor published ports, and both stopped. These results qualify the tested grant behavior. The actual staging function owner and grants still require comparison with the intended deployment.
+
 ## Next qualification step
 
-Review an operator-provided staging identity manifest for the database, service secret grants, three dedicated test bots, callback endpoints, staff destinations and media roots. Check the declared separation and deny cases in the intended environment before any live transport or cutover. This checkpoint used synthetic data and transports.
+Review the protected operator identity manifest against the intended staging deployment before any live transport or cutover. Check the following bindings without publishing raw tokens, keys, passwords or identities.
+
+| Binding | What to verify in the intended environment |
+|---|---|
+| Project, network and data | Container project and network identity, database server and role grants, migration owner, and separate data, asset and backup mounts. |
+| Bot and recipient scope | Dedicated test bot identity for each configured brand, test staff destination, and tester and admin allowlists. |
+| Secrets and ingress | Separate secret references and file permissions, admin origin, callback route and certificate identity, and rejection of production bindings. |
+| Media and release artifact | Receipt and fulfillment media roots, access controls and the reviewed artifact identity. |
+
+The current evidence supports proceeding with an isolated staging setup when separately authorized. T075 remains open until its intended-environment checks pass.
