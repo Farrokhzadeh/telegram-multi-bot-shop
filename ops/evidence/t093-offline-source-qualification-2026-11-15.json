@@ -1,0 +1,102 @@
+{
+  "all_new_actors_stopped": true,
+  "artifact_manifest_sha256": "8ccd971533cf9fec3ddad206a5eb1d514f57fe67a8b6ae8ffdfc62efd5a69659",
+  "base_main": "c0c6731dd41adf75a48714b55624a9a23a4d18f1",
+  "baseline_cases": 12,
+  "baseline_trx_sha256": "0ace6134cca7b6c8458c99f08184ba80ef28b61bf6f7fc865f91d364d35c4d25",
+  "ci_invoked": false,
+  "compile_inputs_verified": 410,
+  "focused_trx_sha256": "65c9cd4556369e5411bc96506f2019ac1b0085a593dc98a16138185a2d7ff8f2",
+  "fresh_selection_account_race_cases": 36,
+  "live_provider_operation_verified": false,
+  "operational_import_performed": false,
+  "original_source_bytes_unchanged": true,
+  "original_source_remained_stopped": true,
+  "preexisting_containers_unchanged": 270,
+  "production_code_changed": false,
+  "qualification_negative_guards": 6,
+  "release_ready": false,
+  "reused_canonical_schema_cases": 16,
+  "reused_schema_trx_sha256": "acb8179bce1cc063ad17f8ba745af0e06975af9c276427899d6586dfb156b433",
+  "review_checker_sha256": "54aba00f2b9d1e1dfae9a94e0da4b28bc5724946b18d9730823d2ed4cd3ffab5",
+  "scope": "T093_offline_canonical_selection_and_frozen_configuration_checkpoint",
+  "source_checker_sha256": "48cc5ba65c2b0b8a74ee45dadd9b7827633f7e7f49bca2f1b11feb03fc8848d7",
+  "sources": [
+    {
+      "frozen_schema_and_complete_commitments_verified": true,
+      "ordinal": 1,
+      "original_links_verified": true,
+      "profile": {
+        "connection_records": 1,
+        "credential_nonempty_records": 1,
+        "current_provider_cost_currency_verified": false,
+        "current_provider_identity_verified": false,
+        "documented_provider_codes": [
+          "akunding"
+        ],
+        "enabled_connection_records": 1,
+        "mapping_records": 1,
+        "original_links_verified": true,
+        "protected_credential_prefix_records": 1,
+        "recorded_account_identity_present": 0,
+        "snapshot_expired_records": 1,
+        "snapshot_fresh_30s_records": 0,
+        "snapshot_has_cost_columns": false,
+        "snapshot_has_currency_columns": false,
+        "snapshot_records": 1,
+        "unrecognized_provider_records": 0
+      },
+      "source_plan_bound_to_t066_execution_seal": true
+    },
+    {
+      "frozen_schema_and_complete_commitments_verified": true,
+      "ordinal": 2,
+      "original_links_verified": true,
+      "profile": {
+        "connection_records": 0,
+        "credential_nonempty_records": 0,
+        "current_provider_cost_currency_verified": false,
+        "current_provider_identity_verified": false,
+        "documented_provider_codes": [],
+        "enabled_connection_records": 0,
+        "mapping_records": 0,
+        "original_links_verified": true,
+        "protected_credential_prefix_records": 0,
+        "recorded_account_identity_present": 0,
+        "snapshot_expired_records": 0,
+        "snapshot_fresh_30s_records": 0,
+        "snapshot_has_cost_columns": false,
+        "snapshot_has_currency_columns": false,
+        "snapshot_records": 0,
+        "unrecognized_provider_records": 0
+      },
+      "source_plan_bound_to_t066_execution_seal": true
+    },
+    {
+      "frozen_schema_and_complete_commitments_verified": true,
+      "ordinal": 3,
+      "original_links_verified": true,
+      "profile": {
+        "connection_records": 0,
+        "credential_nonempty_records": 0,
+        "current_provider_cost_currency_verified": false,
+        "current_provider_identity_verified": false,
+        "documented_provider_codes": [],
+        "enabled_connection_records": 0,
+        "mapping_records": 0,
+        "original_links_verified": true,
+        "protected_credential_prefix_records": 0,
+        "recorded_account_identity_present": 0,
+        "snapshot_expired_records": 0,
+        "snapshot_fresh_30s_records": 0,
+        "snapshot_has_cost_columns": false,
+        "snapshot_has_currency_columns": false,
+        "snapshot_records": 0,
+        "unrecognized_provider_records": 0
+      },
+      "source_plan_bound_to_t066_execution_seal": true
+    }
+  ],
+  "sql_changed": false,
+  "task_complete": false
+}
