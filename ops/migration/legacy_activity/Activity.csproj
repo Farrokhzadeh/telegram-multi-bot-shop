@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+	</PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="../../../src/Platform.Migration/Platform.Migration.csproj" />
+		<Compile Include="../../../src/Platform.SchemaRunner/ArchivePrivateFile.cs" Link="ArchivePrivateFile.cs" />
+	</ItemGroup>
+</Project>

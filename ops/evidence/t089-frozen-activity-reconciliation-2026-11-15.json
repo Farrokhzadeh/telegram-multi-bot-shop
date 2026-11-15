@@ -1,0 +1,99 @@
+{
+  "activity_registry_version_unchanged": 6,
+  "all_new_actors_stopped": true,
+  "all_originals_have_typed_protected_dispositions": true,
+  "base_main": "d20a546cab07b8a5792dd970cb5cb79fcff6e998",
+  "baseline_cases": 12,
+  "build_errors": 0,
+  "build_warnings": 0,
+  "canonical_tables_unchanged": 28,
+  "ci_invoked": false,
+  "encrypted_originals_independently_decrypted_and_compared": true,
+  "existing_default_archive_families_unchanged": 20,
+  "final_review_script_sha256": "a4793993d7e45ce8564bb3293da54ccacfcfad190c99c72f60ba700006ea57fe",
+  "financial_obligations_verified": false,
+  "fresh_process_replay_byte_identical": true,
+  "independent_review_evidence_sha256": "f7b3268c37c6a5764528a3f7306dbe54e550b872d86185a6e3b1ac01f58d931c",
+  "new_native_aot_qualification": false,
+  "normal_host_activation_verified": false,
+  "operational_activity_fields_unchanged": 14,
+  "operational_events_imported": 0,
+  "operator_bundle_sha256": "02c039c583a16ba8c9af5cd7f7a0a76aac66f11fd67e69e17920ad8bf001e5fc",
+  "original_membership_maps_bound_to_t066_execution_seal": true,
+  "original_source_and_membership_commitments_matched": true,
+  "original_source_bytes_unchanged": true,
+  "original_times_and_references_preserved": true,
+  "preexisting_containers_unchanged": 244,
+  "production_release_separately_gated": true,
+  "release_ready": false,
+  "reuse_evidence_sha256": "39f7ac5e490b339b7f235a10e40d597916ad956ff76396055c73591d7c268ee6",
+  "reused_main_inputs_matched": 397,
+  "reused_passing_cases": 35,
+  "reused_unrelated_test_helper_differences": 4,
+  "review_script_sha256": "d299100e8c088b54a61fde6ca6eec9cf6d0e756496343599c39a935cc05311ba",
+  "scope": "T089_activity_verification_and_frozen_legacy_preservation_under_approved_quarantine",
+  "source_file_sha256": {
+    "ops/migration/legacy_activity/Activity.csproj": "7950f6afcfab51cba162b9614e635298955d489c340ddeb335cbb19d593cc53c",
+    "ops/migration/legacy_activity/Program.cs": "a60746c0195c3e90c3ce83eb21aae57335489e3db89d209159d8c96420682e8d",
+    "ops/migration/legacy_activity/packages.lock.json": "9cb0bf57832c5e356f824b7cfbc62fc23413203e0144b97d7cf20c64491057b1",
+    "src/Platform.Migration/ImportManifest.cs": "892271c3e95be73e1dd15e6d47ba468e85bfd201bf426362a964bb483ee6180c",
+    "src/Platform.Migration/LegacyActivityReconciliation.cs": "931ef90dbb0cddfe467def44ab271900da469dd9c903be841594e532d3421d5c",
+    "src/Platform.Migration/LegacySourceRecords.cs": "71909d418661f892d56ffe5433e1dbf1d5f6a40370929f37a33d0fda2b802cba",
+    "tests/Platform.UnitTests/LegacyActivityTests.cs": "70707bb5de61fd3b49da816c41dacd0371e2dbb6ff0eb3d932d32ebae8a0a285"
+  },
+  "source_rows": 88053,
+  "sources": [
+    {
+      "bound_membership_rows": 74403,
+      "exceptions": {
+        "UnboundMembership": 363,
+        "UnsupportedProducer": 7452,
+        "UnverifiedCheckout": 3833,
+        "UnverifiedInteraction": 63118
+      },
+      "operational_events_imported": 0,
+      "ordinal": 1,
+      "originals_reloaded": true,
+      "protected_exception_rows": 74766,
+      "release_ready": false,
+      "source_commitments_matched_before_after": true,
+      "source_rows": 74766
+    },
+    {
+      "bound_membership_rows": 83,
+      "exceptions": {
+        "UnboundMembership": 12,
+        "UnsupportedProducer": 0,
+        "UnverifiedCheckout": 0,
+        "UnverifiedInteraction": 83
+      },
+      "operational_events_imported": 0,
+      "ordinal": 2,
+      "originals_reloaded": true,
+      "protected_exception_rows": 95,
+      "release_ready": false,
+      "source_commitments_matched_before_after": true,
+      "source_rows": 95
+    },
+    {
+      "bound_membership_rows": 13128,
+      "exceptions": {
+        "UnboundMembership": 64,
+        "UnsupportedProducer": 1489,
+        "UnverifiedCheckout": 749,
+        "UnverifiedInteraction": 10890
+      },
+      "operational_events_imported": 0,
+      "ordinal": 3,
+      "originals_reloaded": true,
+      "protected_exception_rows": 13192,
+      "release_ready": false,
+      "source_commitments_matched_before_after": true,
+      "source_rows": 13192
+    }
+  ],
+  "synthetic_empty_replay_and_negative_cases": 9,
+  "task_complete": true,
+  "typed_disposition_verified": true,
+  "unit_cases": 258
+}

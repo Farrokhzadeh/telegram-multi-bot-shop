@@ -1,5 +1,7 @@
 # T088 implementation qualification
 
+**Current T089 follow-up — 2026-11-15:** [T089 qualification](T089_QUALIFICATION.md) completes the frozen-source preservation/quarantine and activity engineering verification scope. All88,053 actual legacy originals have independently checked encrypted preservation and typed protected dispositions;no operational tuple is invented. Its source-bound review supersedes the dated T089-open source gate below. Normal-host activation,whole-criterion/human acceptance and release remain separately gated.
+
 T088 is implementation-complete at `0150d5b373e9f7d8642f4c068e891e17ecb2d849`, [CI 41531368419](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/41531368419): **618 .NET tests (136 unit, 371 integration, 111 contract)**, **20 Python checks** and all five Linux Native AOT executables. Zero failed/skipped tests and zero build warnings/errors; formatting, locked restore, secret scan, Compose and evidence guards passed. Task count becomes **77/96 complete, 19 unchecked**. T089 remains open. This closes the implementation task, not protected legacy reconciliation, operational activation or full SC-040/SC-008 acceptance.
 
 | T088 requirement | Qualified implementation and evidence |

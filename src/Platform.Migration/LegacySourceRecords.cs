@@ -8,9 +8,10 @@ namespace Platform.Migration;
 public sealed record LegacySourceRecord(LegacyProjection Projection, string Id, string Body)
 {
     public static IReadOnlyList<LegacyProjection> Projections { get; } = Array.AsReadOnly<LegacyProjection>([LegacyProjection.OrderRecord, LegacyProjection.ProductRecord, LegacyProjection.DiscountRecord, LegacyProjection.PaymentAttempt, LegacyProjection.ManualDeposit, LegacyProjection.InventoryUnit, LegacyProjection.Delivery, LegacyProjection.DeliveryPart, LegacyProjection.PreorderBatch, LegacyProjection.PreorderPart, LegacyProjection.PreorderItem, LegacyProjection.SupplierFulfillment, LegacyProjection.SupplierItem, LegacyProjection.SupplierAttempt, LegacyProjection.SupplierRefundArchive, LegacyProjection.PreorderState, LegacyProjection.PreorderRefundArchive, LegacyProjection.ServiceJob, LegacyProjection.ZeroTransaction, LegacyProjection.DeliveryAttempt]);
-    public static LegacySourceRecord? CopyCandidate(string table, string id, string body)
+    public static LegacySourceRecord? CopyCandidate(string table, string id, string body) => CopyCandidate(table, id, body, false);
+    public static LegacySourceRecord? CopyCandidate(string table, string id, string body, bool includeActivity)
     {
-        var projection = Projections.Where(p => Table(p) == table).Select(p => (LegacyProjection?)p).SingleOrDefault();
+        var projection = (includeActivity ? Projections.Append(LegacyProjection.UserActivityRecord) : Projections).Where(p => Table(p) == table).Select(p => (LegacyProjection?)p).SingleOrDefault();
         if (projection is null) return null;
         using var document = JsonDocument.Parse(body); var value = document.RootElement;
         if (projection == LegacyProjection.InventoryUnit && (!value.TryGetProperty("order_id", out var order) || order.ValueKind == JsonValueKind.Null) || projection == LegacyProjection.ProductRecord && (!value.GetProperty("active").GetBoolean() || value.GetProperty("is_removed").GetBoolean()) || projection == LegacyProjection.ZeroTransaction && LegacyValues.Number(value, "amount") != 0) return null;
@@ -18,6 +19,7 @@ public sealed record LegacySourceRecord(LegacyProjection Projection, string Id, 
     }
     internal static string Table(LegacyProjection projection) => projection switch
     {
+        LegacyProjection.UserActivityRecord => "user_activity",
         LegacyProjection.SupplierFulfillment => "supplier_fulfillments",
         LegacyProjection.SupplierItem => "supplier_fulfillment_items",
         LegacyProjection.SupplierAttempt => "supplier_procurement_attempts",
