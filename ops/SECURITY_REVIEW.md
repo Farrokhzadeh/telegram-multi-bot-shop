@@ -28,6 +28,14 @@ The [legacy branch workflow](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/m
 
 The redesign staging plan requires a dedicated PostgreSQL process and network and three test brand bindings. The legacy deployment provides a reference for artifact identity checks and independent instance controls. The redesign's [normal host startup](../src/Platform.Core/HostBootstrap.cs) exits with configuration required. Its loopback API qualification and scoped private-history probe provide evidence only for their own entry points. Operational qualification needs a reviewed staging launcher and artifact that bind the redesign services to staging-only data, fake transports, private ingress and test recipients. Keep T075 open until those bindings pass the intended-environment checks.
 
+## Disposable staging infrastructure checkpoint — 2026-11-15
+
+A fresh owner-server probe ran PostgreSQL 18.6 in a dedicated Docker project with an internal isolated bridge, a dedicated data volume and zero published ports. The canonical migration matched the source blob on main and created all 28 tables under the restricted migration owner. The database contained three active synthetic brand identities. A restricted network client authenticated with its own credential and could read the three brand codes. PostgreSQL denied an incorrect password, credential ciphertext reads, order reads, schema creation and access to the maintenance function. The maintenance grant and both security-definer function owners and search paths were checked.
+
+Five nonroot container identities exercised the read-only mounts with generated test keys and synthetic receipt files. Each bot could read its own brand key and receipt. The other brand keys were absent from each bot's mounts and the other receipt files were unreadable. Only the job identity received the inventory key. These were container permission checks. The disposable containers, bridge and PostgreSQL volume were removed after execution, and the pre-existing running container set matched before and after.
+
+The existing [staging runner](../tests/Shared/CutoverStageRuntime.cs) explicitly enables one active brand. Its [prior rehearsal](evidence/t068-stage-delivery-interruption-2026-11-15.json) provides single-brand process evidence. T075 remains open for the three-brand application run with scoped callback routes, authenticated admin ingress, and verified test-only recipient routing. Three real Telegram bots are unnecessary for this simulated run.
+
 ## Next qualification step
 
 Review the protected operator identity manifest against the intended staging deployment before any live transport or cutover. Check the following bindings without publishing raw tokens, keys, passwords or identities.
