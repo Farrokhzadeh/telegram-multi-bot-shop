@@ -34,7 +34,19 @@ A fresh owner-server probe ran PostgreSQL 18.6 in a dedicated container with an 
 
 Five nonroot container identities exercised the read-only mounts with generated test keys and synthetic receipt files. Each bot could read its own brand key and receipt. The other brand keys were absent from each bot's mounts and the other receipt files were unreadable. Only the job identity received the inventory key. These were container permission checks. The disposable containers, bridge and PostgreSQL volume were removed after execution, and the pre-existing running container set matched before and after.
 
-The existing [staging runner](../tests/Shared/CutoverStageRuntime.cs) explicitly enables one active brand. Its [prior rehearsal](evidence/t068-stage-delivery-interruption-2026-11-15.json) provides single-brand process evidence. T075 remains open for the three-brand application run with scoped callback routes, authenticated admin ingress, and verified test-only recipient routing. Three real Telegram bots are unnecessary for this simulated run.
+The existing [staging runner](../tests/Shared/CutoverStageRuntime.cs) explicitly enables one active brand. Its [prior rehearsal](evidence/t068-stage-delivery-interruption-2026-11-15.json) provides single-brand process evidence. The three-brand application check is recorded below.
+
+## Three-brand practice run — 2026-11-15
+
+Four focused integration checks passed on the owner server. The [three-brand practice test](../tests/Platform.IntegrationTests/ThreeBrandStagingTests.cs) ran the real webhook verifier, writer-scoped update router, admin authorization middleware and campaign worker together. All three test brands shared one disposable database and had individually authenticated callback routes.
+
+- Each route rejected a foreign secret, a foreign bot identity and a correctly signed callback from an unapproved tester. An unknown route returned 404. Each approved callback was accepted once by its own brand and a replay produced no second activity record.
+- The admin endpoint rejected anonymous access, a callback secret presented as a bearer token and a revoked administrator session. An active administrator session was accepted.
+- The campaign worker used a fake transport restricted to the test recipient. Across the three brands it recorded one approved private delivery per brand and zero successful deliveries to the unapproved tester. The staff-routing regression also verified refusal of an unapproved staff chat.
+
+The managed build completed with zero warnings and errors. The runner and database shared an isolated network namespace with loopback only and no published ports. All disposable databases and containers were removed. No external provider was contacted.
+
+This completes the simulated application checks. The normal multi-service staging deployment still needs its operational identity review, including the actual service accounts and grants, private routes, mounts and recipient configuration. T075 remains open for that review.
 
 ## Next qualification step
 

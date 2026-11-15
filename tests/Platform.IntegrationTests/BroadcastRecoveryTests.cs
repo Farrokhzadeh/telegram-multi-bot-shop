@@ -234,6 +234,10 @@ public sealed class BroadcastRecoveryTests
         Assert.Equal(-10088, dispatch.ChatId);
         Assert.DoesNotContain(protectedValue, dispatch.Text!, StringComparison.Ordinal);
         await store.RecordNoticeAsync(f.Context(0), lease, new(NoticeOutcomeKind.Sent, 876), Ct);
+        await store.StaffNoticeAsync(actor, f.Context(0), request, audit, Guid.NewGuid(), true, -10099, Ct);
+        var unapproved = (await store.ClaimNoticeAsync(Guid.NewGuid(), Ct))!;
+        Assert.Null(await store.BeginNoticeAsync(f.Context(0), unapproved, TimeSpan.FromMilliseconds(100), -10088, Accounts, Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE recipient_kind='staff_chat' AND status='cancelled'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='admin_held'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
