@@ -1,6 +1,12 @@
 # Local-preorder qualification
 
-## Current T096 offline checkpoint — 2026-11-15
+## T096 completion — 2026-11-15
+
+**T096 is complete for the approved target and the three frozen legacy snapshots. 85/96 tasks are complete.** The owner confirmed that the current legacy bots never had a preorder product. The frozen-source and archive reconciliation and the cross-check of 4,916 orders corroborate that statement. There are no legacy preorder obligations to migrate in this scope, so nonempty historical replay is inapplicable to these snapshots. Any later source with genuine preorder history requires compatibility review and reconciliation before related import or DDL.
+
+All 31 managed local-preorder cases, 11 synthetic legacy-import cases and the focused Native AOT FIFO and crash-recovery probe passed. The full native smoke build on the owner server exceeded its memory budget; the earlier passing full Native AOT CI retains its documented scope. T096 completion applies to the local-preorder behavior and reviewed legacy data. Operational release and separate environment gates remain open.
+
+## T096 offline checkpoint — 2026-11-15
 
 **T096 remains unchecked. 84/96 tasks are complete.** The three frozen source copies were checked in isolated PostgreSQL 16 using a restricted reader and explicit read-only transactions. Before and after checks matched the full schema and keyed table commitments. The five preorder state, refund, delivery batch, batch-item and batch-part relations were empty in all three sources. An independent review verified their matching empty archive projections against the sealed T066 inputs and rejected six evidence mutations. This closes the reconciliation of those empty relations for the three frozen snapshots. They cannot exercise migration of an actual historical partial preorder.
 
