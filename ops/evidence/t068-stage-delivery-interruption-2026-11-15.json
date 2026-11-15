@@ -1,0 +1,56 @@
+{
+  "actual_manifest_and_delivery_workers_verified": true,
+  "artifact_manifest_sha256": "2d2b78107632b7b5c1ffe9a6c6ae68eec70289334590a74740b6b2751c43c089",
+  "base_main": "685a620d423a255cf0c5ada627b5c15d42c4060c",
+  "baseline_brand_context_cases": 12,
+  "changed_source_files": 2,
+  "checks": {
+    "host-final": 12,
+    "regression-final": 10
+  },
+  "delivery_acknowledgement_uses_durable_status": true,
+  "fake_credential_transport_only": true,
+  "fresh_offline_disposable_database_count": 0,
+  "full_host_transport_composition_verified": false,
+  "full_interruption_matrix_verified": false,
+  "functional_review_passed": true,
+  "historical_or_foreign_binding_denial_cases": 3,
+  "interrupted_request_retained_without_fabricated_result": true,
+  "main_inputs_including_embedded_schema": 408,
+  "missing_reviewed_proof_names": [
+    "accepted_target_effect_reverse_mapping",
+    "original_obligations_preserved_without_inferred_settlement",
+    "source_stock_identity_and_custody_proofs",
+    "target_stock_projection_and_segregation",
+    "uncertain_callback_delivery_disposition"
+  ],
+  "native_aot_publication_verified": false,
+  "new_actors_stopped": true,
+  "normal_host_activation_verified": false,
+  "one_active_staging_brand": true,
+  "preexisting_container_configs_mounts_images_unchanged": 231,
+  "preexisting_container_state_changes": 0,
+  "preexisting_container_states_unchanged": 231,
+  "previous_restart_owner_disposition_reused": true,
+  "protected_copy_rehearsal_verified": false,
+  "protected_input_record_sha256_rechecked": "7f227a4d4de2e64aecdea71e811ab79f38522c868e561b68ccd531091b8c9b6e",
+  "protected_input_review_sha256": "2032d0a19de3c5bfd0e7e0ca381d66b59e72fc04e8cc166497af26c741d0ba59",
+  "release_ready": false,
+  "resource_noninterference_verified": false,
+  "review_script_sha256": "5fd2c99253c251c799f3d39fe11265c872de1f2ade7478310239657c62b30277",
+  "same_brand_bot_api_payment_worker_verified": true,
+  "same_edit_target_and_manifest_generation_preserved": true,
+  "scope": "single staging brand manifest/delivery worker kill/restart, same-anchor recovery, uncertain-send suppression and historical/foreign binding denial",
+  "server_state_guard_passed": true,
+  "source_sha256": {
+    "tests/Platform.IntegrationTests/StageWriterHostTests.cs": "257b1ce25644fe7ba59fb2570c9ccc5df25b06dd065e02bd37a5817730e54801",
+    "tests/Shared/CutoverStageRuntime.cs": "ea428ea31f349aabf68fba7ad62c61f54a3b4e58812267fb0e46779316b7ab93"
+  },
+  "task_complete": false,
+  "test_trx_sha256": {
+    "host-final": "7aec4a651cdef5fa25b9bda3b22286e32970921a466db9a3f4695fd702c03243",
+    "regression-final": "7f3a0130a3172e64989c458a07cdb67f5fd8e77cfcd5bd7c996333eb465a1f03"
+  },
+  "uncertain_new_message_never_automatically_resent": true,
+  "unchanged_main_inputs": 406
+}

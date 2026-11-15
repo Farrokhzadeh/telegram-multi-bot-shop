@@ -1,3 +1,4 @@
+using Platform.Fulfillment;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -19,6 +20,7 @@ using Platform.Core;
 namespace Platform.Testing;
 
 public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, string Secrets, long WriterRevision = 0);
+public sealed record CutoverDeliveryAttempt(Guid Run, Guid Delivery, Guid Order, Guid Generation, Guid Job, long Attempt, long? Target, bool File, string PayloadSha256);
 public sealed record CutoverStageApi(Guid Run, string Address);
 public sealed record CutoverStockPlan(Guid Run, Guid Product, Guid Unit, string Credential);
 public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Cipher, string Plain);
@@ -26,6 +28,7 @@ public sealed record CutoverStageResult(string Operation, string Outcome, long O
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CutoverStageState))]
 [JsonSerializable(typeof(CutoverStageApi))]
+[JsonSerializable(typeof(CutoverDeliveryAttempt))]
 [JsonSerializable(typeof(CutoverStockPlan))]
 [JsonSerializable(typeof(CutoverStockBinding))]
 [JsonSerializable(typeof(CutoverStageResult))]
@@ -184,7 +187,7 @@ public static class CutoverStageRuntime
                 if (File.Exists(result)) continue;
                 byte[] bytes = ArchivePrivateFile.Read(request, 1, 128); string command;
                 try { command = new UTF8Encoding(false, true).GetString(bytes).Trim(); } finally { CryptographicOperations.ZeroMemory(bytes); }
-                if (command is not ("status" or "wallet" or "wallet-current" or "wallet-paused" or "telegram" or "payment" or "payment-worker" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
+                if (command is not ("status" or "wallet" or "wallet-current" or "wallet-paused" or "telegram" or "payment" or "payment-worker" or "manifest-worker" or "delivery-worker" or "delivery-held" or "delivery-unknown" or "delivery-recover" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
                 string outcome = command.StartsWith("fake_", StringComparison.Ordinal) ? "simulated" : "ready";
                 if (command == "payment")
                 {
@@ -212,6 +215,46 @@ public static class CutoverStageRuntime
                         {
                             using var provider = PaymentSettlementFixture.Client(request => request == "/v1/payment/" + key.Provider ? PaymentNoticeFixture.Body(key.Origin, quote: 10.25m, provider: key.Provider, asset: "usdtbsc") : throw new InvalidOperationException());
                             outcome = (await new PaymentVerificationWorker(sessions, new PaymentSettlementStore(sessions, secrets, catalog), provider).RunForBrandAsync(context, saved.WriterRevision, lease, ct))?.Outcome.ToString() ?? "Rejected";
+                        }
+                    }
+                    catch (UnauthorizedAccessException) { outcome = "Rejected"; }
+                }
+
+
+                if (command is "manifest-worker" or "delivery-worker" or "delivery-held" or "delivery-unknown" or "delivery-recover")
+                {
+                    try
+                    {
+                        var store = new DeliveryStore(sessions, secrets);
+                        if (command == "delivery-recover")
+                        {
+                            IReadOnlyList<Guid> deliveries;
+                            await using (var read = await sessions.BeginReadOnlyAsync(ct))
+                                deliveries = await read.QueryManyAsync(new DbStatement("SELECT d.id FROM shop.telegram_deliveries d WHERE d.brand_id=$1 AND d.user_id=$2 AND d.purpose='order_credentials' AND d.status='leased' AND EXISTS(SELECT 1 FROM shop.jobs j WHERE j.telegram_delivery_id=d.id AND j.status='leased' AND j.lease_until<=clock_timestamp()) ORDER BY d.id", DbValue.Uuid(context.BrandId), DbValue.Uuid(saved.User)), r => r.GetGuid(0), 64, ct);
+                            foreach (Guid delivery in deliveries) await store.RecoverExpiredAsync(context, delivery, ct);
+                            outcome = "Recovered";
+                        }
+                        else
+                        {
+                            JobLease? lease;
+                            await using (var claim = await sessions.BeginAsync(ct))
+                            { lease = await OutboxStore.ClaimAsync(claim, command == "manifest-worker" ? JobKind.PrepareManifest : JobKind.SendTelegram, Guid.NewGuid(), TimeSpan.FromSeconds(60), ct); await claim.CommitAsync(ct); }
+                            if (lease is null) outcome = "Idle";
+                            else if (command == "manifest-worker") outcome = await store.PrepareAsync(context, lease, ct) is null ? "PreparedWithoutSend" : "Prepared";
+                            else
+                            {
+                                await new LocalDeliveryWorker(store).RunAsync(context, lease, async (dispatch, token) =>
+                                {
+                                    if (dispatch.BotId != context.BotId || dispatch.ChatId != CheckoutFixture.Actor(0) || dispatch.IsFile || dispatch.Content.IsEmpty || dispatch.Content.Length > 4096) throw new InvalidOperationException();
+                                    var attempt = new CutoverDeliveryAttempt(run, dispatch.Id, dispatch.Order, dispatch.Generation, lease.Id, lease.Attempt, dispatch.TargetMessageId, dispatch.IsFile, Convert.ToHexStringLower(SHA256.HashData(dispatch.Content.Span)));
+                                    Write(Path.Combine(root, "dispatch-" + id.ToString("N") + ".json"), JsonSerializer.Serialize(attempt, CutoverStageJson.Default.CutoverDeliveryAttempt));
+                                    if (command == "delivery-unknown") return new DeliveryOutcome(DeliveryOutcomeKind.Unknown);
+                                    if (command == "delivery-held") { await Task.Delay(TimeSpan.FromMinutes(2), token); throw new InvalidOperationException(); }
+                                    return new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, dispatch.TargetMessageId ?? 761);
+                                }, ct);
+                                await using var read = await sessions.BeginReadOnlyAsync(ct);
+                                outcome = await read.QuerySingleAsync(new DbStatement("SELECT CASE status WHEN 'succeeded' THEN 'Delivered' WHEN 'uncertain' THEN 'Uncertain' WHEN 'retry' THEN 'Retry' WHEN 'failed' THEN 'Rejected' WHEN 'cancelled' THEN 'Suppressed' ELSE 'NoDispatch' END FROM shop.telegram_deliveries WHERE id=$1 AND brand_id=$2 AND user_id=$3", DbValue.Uuid(lease.Intent.OriginId!.Value), DbValue.Uuid(context.BrandId), DbValue.Uuid(saved.User)), r => r.GetString(0), ct);
+                            }
                         }
                     }
                     catch (UnauthorizedAccessException) { outcome = "Rejected"; }

@@ -1,3 +1,4 @@
+using Platform.Telegram;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Diagnostics;
@@ -278,6 +279,119 @@ public sealed class StageWriterHostTests
                 Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest' AND status='pending'"), r => r.GetInt64(0), Ct));
                 Assert.Equal(4L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries"), r => r.GetInt64(0), Ct));
             }
+            Guid status = Guid.NewGuid(); Request(status, "status"); var final = await Result(status, actor); Assert.Equal((1L, 1L, 1L), (final.Orders, final.Allocated, final.Debits)); await Stop(actor); actor.Dispose(); actor = null;
+        }
+        finally { await Cleanup(state, data, actor); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CredentialDeliveryCrashRetainsManifestAndNeverBlindlyResendsANewMessage(bool savedAnchor)
+    {
+        CutoverStageState? state = null; NpgsqlDataSource? data = null; Process? actor = null;
+        try
+        {
+            Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
+            var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions); using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true)); var store = new DeliveryStore(sessions, secrets);
+            actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);
+            if (savedAnchor)
+            {
+                await using var anchor = await sessions.BeginAsync(Ct);
+                await anchor.ExecuteAsync(new DbStatement("UPDATE shop.users SET flow_state='payment',flow_order_id=$1,flow_product_id=$2,flow_anchor_message_id=750,flow_expires_at=clock_timestamp()+INTERVAL '1 hour',flow_revision=flow_revision+1 WHERE id=$3", DbValue.Uuid(order), DbValue.Uuid(state.Product), DbValue.Uuid(state.User)), Ct);
+                byte[] secret = Enumerable.Repeat((byte)7, 32).ToArray(); using var verifier = new TelegramWebhookVerifier(context, secret);
+                var update = verifier.Verify([TelegramFixture.Header(secret)], TelegramFixture.Body("order", true, messageId: 750));
+                await OrderDeliveryRouter.RecordAnchorAsync(anchor, update, order, Ct); await anchor.CommitAsync(Ct);
+            }
+            Assert.Equal(new(false, 1), await controls.SetActiveAsync(owner, context, 0, false, Guid.NewGuid(), Ct));
+            string before = await WorkflowActivityQualification.DomainAsync(sessions, true, Ct);
+            Guid prepare = Guid.NewGuid(); Request(prepare, "manifest-worker"); Assert.Equal("Rejected", (await Result(prepare, actor)).Outcome); Assert.Equal(before, await WorkflowActivityQualification.DomainAsync(sessions, true, Ct));
+            Assert.Equal(new(true, 2), await controls.SetActiveAsync(owner, context, 1, true, Guid.NewGuid(), Ct));
+            before = await WorkflowActivityQualification.DomainAsync(sessions, true, Ct); Guid stale = Guid.NewGuid(); Request(stale, "manifest-worker"); Assert.Equal("Rejected", (await Result(stale, actor)).Outcome); Assert.Equal(before, await WorkflowActivityQualification.DomainAsync(sessions, true, Ct));
+            await Stop(actor); actor.Dispose(); actor = null; state = state with { WriterRevision = 2 }; CutoverStageRuntime.Write(Path.Combine(Root, "state.json"), JsonSerializer.Serialize(state, CutoverStageJson.Default.CutoverStageState), true);
+            string retained = Path.Combine(Root, "retained-results"); Directory.CreateDirectory(retained, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.Move(Path.Combine(Root, "results", prepare.ToString("N") + ".json"), Path.Combine(retained, prepare.ToString("N") + ".json"));
+            actor = Start(); await Ready(actor); Assert.Equal(savedAnchor ? "Prepared" : "PreparedWithoutSend", (await Result(prepare, actor)).Outcome);
+            if (!savedAnchor) await store.AuthorizeSendRecoveryAsync(context, owner, order, Guid.NewGuid(), Ct);
+            byte[] original = await store.ReadManifestAsync(context, CheckoutFixture.Actor(0), order, Ct);
+            Guid held = Guid.NewGuid(); Request(held, "delivery-held"); string heldPath = Path.Combine(Root, "dispatch-" + held.ToString("N") + ".json");
+            await Until(() => Task.FromResult(File.Exists(heldPath)), actor);
+            var attempted = JsonSerializer.Deserialize(File.ReadAllBytes(heldPath), CutoverStageJson.Default.CutoverDeliveryAttempt)!;
+            Assert.Equal(state.Run, attempted.Run); Assert.Equal(order, attempted.Order); Assert.Equal<long?>(savedAnchor ? 750L : null, attempted.Target); Assert.False(attempted.File); Assert.Equal(1L, attempted.Attempt);
+            actor.Kill(true); await actor.WaitForExitAsync(Ct).WaitAsync(TimeSpan.FromSeconds(10), Ct); Assert.NotEqual(0, actor.ExitCode); actor.Dispose(); actor = null;
+            Assert.False(File.Exists(Path.Combine(Root, "results", held.ToString("N") + ".json")));
+            string interrupted = Path.Combine(Root, "retained-interrupted"); Directory.CreateDirectory(interrupted, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute); File.Move(Path.Combine(Root, "requests", held.ToString("N") + ".request"), Path.Combine(interrupted, held.ToString("N") + ".request"));
+            await using (var expire = await sessions.BeginAsync(Ct))
+            { Assert.Equal(1, await expire.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET lease_until=clock_timestamp()-INTERVAL '1 second' WHERE id=$1 AND status='leased'", DbValue.Uuid(attempted.Job)), Ct)); await expire.CommitAsync(Ct); }
+            actor = Start(); await Ready(actor); Guid recover = Guid.NewGuid(); Request(recover, "delivery-recover"); Assert.Equal("Recovered", (await Result(recover, actor)).Outcome);
+            Guid retry = Guid.NewGuid(); Request(retry, "delivery-worker"); Assert.Equal(savedAnchor ? "Delivered" : "Idle", (await Result(retry, actor)).Outcome);
+            if (savedAnchor)
+            {
+                var completed = JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(Root, "dispatch-" + retry.ToString("N") + ".json")), CutoverStageJson.Default.CutoverDeliveryAttempt)!;
+                Assert.Equal(attempted.Delivery, completed.Delivery); Assert.Equal(attempted.Generation, completed.Generation); Assert.Equal(attempted.Job, completed.Job); Assert.Equal(attempted.PayloadSha256, completed.PayloadSha256); Assert.Equal(750L, completed.Target); Assert.Equal(2L, completed.Attempt);
+            }
+            Guid repeat = Guid.NewGuid(); Request(repeat, "delivery-worker"); Assert.Equal("Idle", (await Result(repeat, actor)).Outcome);
+            Assert.Equal(savedAnchor ? 2 : 1, Directory.GetFiles(Root, "dispatch-*.json").Length);
+            byte[] recovered = await store.ReadManifestAsync(context, CheckoutFixture.Actor(0), order, Ct); Assert.Equal(original, recovered); CryptographicOperations.ZeroMemory(original); CryptographicOperations.ZeroMemory(recovered);
+            await using (var read = await sessions.BeginReadOnlyAsync(Ct))
+            {
+                Assert.True(await read.QuerySingleAsync(new DbStatement("SELECT balance=90 FROM shop.wallets WHERE user_id=$1", DbValue.Uuid(state.User)), r => r.GetBoolean(0), Ct));
+                Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials' AND status=$1", DbValue.Text(savedAnchor ? "succeeded" : "uncertain")), r => r.GetInt64(0), Ct));
+                Assert.Equal(savedAnchor ? 1L : 0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'"), r => r.GetInt64(0), Ct));
+                Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest' AND status='succeeded'"), r => r.GetInt64(0), Ct));
+            }
+            Guid status = Guid.NewGuid(); Request(status, "status"); var final = await Result(status, actor); Assert.Equal((1L, 1L, 1L), (final.Orders, final.Allocated, final.Debits)); await Stop(actor); actor.Dispose(); actor = null;
+        }
+        finally { await Cleanup(state, data, actor); }
+    }
+
+    [Theory]
+    [InlineData("database")]
+    [InlineData("run")]
+    [InlineData("keys")]
+    public async Task StagingWriterRejectsHistoricalOrForeignBindingsBeforeReadiness(string mismatch)
+    {
+        CutoverStageState? state = null; NpgsqlDataSource? data = null;
+        try
+        {
+            Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
+            var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data);
+            string before = await WorkflowActivityQualification.DomainAsync(sessions, true, Ct);
+            var invalid = mismatch switch { "database" => state with { Database = "historical_read_only_copy" }, "run" => state with { Run = Guid.NewGuid() }, "keys" => state with { Secrets = "/outside-stage/original-keys" }, _ => throw new ArgumentException() };
+            CutoverStageRuntime.Write(Path.Combine(Root, "state.json"), JsonSerializer.Serialize(invalid, CutoverStageJson.Default.CutoverStageState), true);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(Ct); limit.CancelAfter(TimeSpan.FromSeconds(5));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => CutoverStageRuntime.RunAsync(Root, "serve", limit.Token));
+            Assert.False(File.Exists(Path.Combine(Root, "ready.json"))); Assert.False(File.Exists(Path.Combine(Root, "api.json")));
+            Assert.Equal(before, await WorkflowActivityQualification.DomainAsync(sessions, true, Ct));
+        }
+        finally { await Cleanup(state, data, null); }
+    }
+
+    [Fact]
+    public async Task CredentialWorkerReportsPersistedUncertaintyWithoutAnAutomaticSecondSend()
+    {
+        CutoverStageState? state = null; NpgsqlDataSource? data = null; Process? actor = null;
+        try
+        {
+            Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
+            var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data);
+            using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
+            var store = new DeliveryStore(sessions, secrets); var context = CheckoutFixture.ResolveContexts()[0];
+            actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);
+            Guid prepare = Guid.NewGuid(); Request(prepare, "manifest-worker"); Assert.Equal("PreparedWithoutSend", (await Result(prepare, actor)).Outcome);
+            await store.AuthorizeSendRecoveryAsync(context, await Admin(sessions), order, Guid.NewGuid(), Ct);
+            Guid unknown = Guid.NewGuid(); Request(unknown, "delivery-unknown"); Assert.Equal("Uncertain", (await Result(unknown, actor)).Outcome);
+            Guid repeat = Guid.NewGuid(); Request(repeat, "delivery-worker"); Assert.Equal("Idle", (await Result(repeat, actor)).Outcome);
+            Assert.Single(Directory.GetFiles(Root, "dispatch-*.json"));
+            await using (var read = await sessions.BeginReadOnlyAsync(Ct))
+            {
+                Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials' AND status='uncertain'"), r => r.GetInt64(0), Ct));
+                Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'"), r => r.GetInt64(0), Ct));
+            }
+            byte[] manifest = await store.ReadManifestAsync(context, CheckoutFixture.Actor(0), order, Ct); Assert.NotEmpty(manifest); CryptographicOperations.ZeroMemory(manifest);
             Guid status = Guid.NewGuid(); Request(status, "status"); var final = await Result(status, actor); Assert.Equal((1L, 1L, 1L), (final.Orders, final.Allocated, final.Debits)); await Stop(actor); actor.Dispose(); actor = null;
         }
         finally { await Cleanup(state, data, actor); }
