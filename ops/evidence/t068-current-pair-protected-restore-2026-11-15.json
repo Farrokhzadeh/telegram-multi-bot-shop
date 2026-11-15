@@ -1,0 +1,120 @@
+{
+  "base_main": "7a9f63daf542ed43d0f017719403132d02ec2df1",
+  "scope": "current one-brand staging pair plus protected frozen database preservation/restore; no protected operational writer activation",
+  "runtime_pair": {
+    "all_28_target_tables_compared_after_restore_and_restart": true,
+    "all_handoff_boundaries_verified": false,
+    "all_new_containers_stopped": true,
+    "base_main": "7a9f63daf542ed43d0f017719403132d02ec2df1",
+    "baseline_cases": 12,
+    "bundle_manifest_sha256": "0d84e1631b6a7fe035da63c19d7cd3f8475346981558e4fd5ea58d6481d606a0",
+    "changed_target_tables": [
+      "audit_events",
+      "bot_activity_events",
+      "fulfillments",
+      "inventory_items",
+      "jobs",
+      "orders",
+      "wallet_entries",
+      "wallets"
+    ],
+    "common_unit_allocations": {
+      "legacy": 0,
+      "target": 1
+    },
+    "controller_source_sha256": {
+      "cutover_fence.py": "0c9c02bb15816034f41f0161353e9a0d9549990ade7041d62245a3550087c936",
+      "cutover_inbox.py": "ce2d207dd2e8f3016830ce1417f3fb05737f17b70d44a914992046dca25d4235",
+      "cutover_legacy_runtime.py": "4054f0380f726b6ed1b41e26cc84e64e812700287dbe3688dc63c52a3dd4fdca",
+      "cutover_pair.py": "be52b59e74b14787105f17388e6ab33a57095e84b9d0586c078c865720dfe0bb",
+      "test_cutover_recovery_runtime.py": "29532fa38d3c62bd82cd7d1f422a30bcb9929fe35f3e020a57de09db2ef6cd6a"
+    },
+    "database_start_sequence": [
+      "legacy",
+      "legacy",
+      "target",
+      "target"
+    ],
+    "evidence_sha256": {
+      "guards.private.log": "ce695fb27a17a3f6db6582ddff60f885deb00765e55f37c6ec3b3ac91ca7c51c",
+      "probe-negative-guards.private.json": "f71dc7bf27bdf366b5452c3e1400a17ac980bebdf12e318e127061575e32c902",
+      "recovery-accepted.private.json": "5d703579475f6d6d48f43eb9b6104648b8e236e428b87ce15b263f8f17a11672",
+      "recovery-before.private.json": "657a17e8f11229358fa1467a2dd7577d957347333a4cf2ffb831312a5d23bb9c",
+      "recovery-docker-events.private.jsonl": "8552409c0c92d5c33b801e4a7c83828eec0183efe3ed6d45c801970a412b5b64",
+      "recovery-freeze-crash.exit": "cfeb3721a817579ed0f8bf7235b8b586be2d1f6426e5f7e4c3d3d62a3015f8d7",
+      "recovery-runtime-result.private.json": "fb54f765f8cfd29287e29f596f73291a0ef279a6ba0f138e63a3a040416819d0",
+      "rollback-backup-manifest.private.json": "fa32d9e039f038c488efa7414bfab52d31602dfce0a03f6bd209dfd6fa3ea81c"
+    },
+    "host_guard_cases": 50,
+    "live_phases": [
+      "source-owner-resumed-before-target-acceptance",
+      "source-interruption-left-all-target-tables-unchanged",
+      "post-acceptance-freeze-sigkill-recovered-without-old-writer",
+      "independent-restored-database-preserved-all-28-tables",
+      "target-restart-preserved-accepted-state-and-replay-fences"
+    ],
+    "main_compile_inputs_matched": 408,
+    "native_aot_publication_verified": false,
+    "overlapping_writer_databases": false,
+    "postacceptance_legacy_reverse_rejected": true,
+    "postacceptance_reverse_replay_to_legacy_verified": false,
+    "preacceptance_source_resume_verified": true,
+    "preexisting_containers_unchanged": 215,
+    "probe_negative_guards": 2,
+    "probe_source_sha256": {
+      "Probe.csproj": "39c8401d02169e51019412c7d68744841ee6caf9df293544d28140a8448d658b",
+      "Program.cs": "4b651705ff75d24c476a7a771315ec39d57eeb6d07efecceb2f3b7474cd9b8be"
+    },
+    "protected_copy_cutover_rollback_verified": false,
+    "qualified_artifact_manifest_sha256": "72cec7ad696c97283b8b870e06f1cdb20bc838743484b5a5ebbe372f7f6ba441",
+    "qualified_runtime_reused": true,
+    "release_ready": false,
+    "review_script_sha256": "de35442f8f1653fb774283f84cde7cd7c2dcb473b7fdc13f76f128aee25bb15a",
+    "scope": "current managed one-brand generated-copy pair preacceptance source resumption and postacceptance freeze/restore/target restart",
+    "source_copy_fingerprints_rechecked": true,
+    "task_complete": false
+  },
+  "protected_database_restore": {
+    "all_new_actors_stopped": true,
+    "backup_directory_fingerprint": "6b8783e29e135f3e2f19f6073a0d9a2f3da3ab9c60d5c30aed8bb98ff681fd00",
+    "copied_target_tables_matching_qualified_state": 28,
+    "initial_root_only_metadata_guard_rejected_before_copy": true,
+    "no_operational_inventory_fulfillment_job_or_delivery_rows": true,
+    "only_explicit_readonly_transactions": true,
+    "original_container_remained_stopped": true,
+    "private_receipts_sha256": {
+      "copied-result.private.json": "9f741e614cb45a3fb4a6f1c10fdaa387d91e8c14945e74aefbc26baf745f71be",
+      "restored-result.private.json": "fbeb9933cec9e4e5f4d569be42f33504f2afb32c1dc066ecf80b162d07d53bd4"
+    },
+    "protected_copy_writer_rehearsal_verified": false,
+    "protected_writer_execution": false,
+    "qualified_fingerprint_sha256": "8b618211d449084d14e0a6d3122feee1c17f037b06f296a0eb49438736c7a268",
+    "qualified_metadata_uid70_private_modes_verified": true,
+    "release_ready": false,
+    "restored_target_tables_matching_qualified_state": 28,
+    "scope": "copied frozen protected target read-only backup/restore preservation; no protected writer activation",
+    "script_sha256": "e701bf8ad4e2661027251fab3e56e65e7cd2e7d0ed2e77ef2b1183ae7ecf6b74",
+    "source_database_directory_unchanged": true,
+    "source_directory_fingerprint": "5dd43e70a654ad7c43010844176066788b1ee557567c64141c4d4126e9c08894",
+    "stock_custody_or_settlement_inferred": false,
+    "task_complete": false
+  },
+  "protected_database_independent_review": {
+    "actual_restricted_actor_commands_mounts_exits_verified": true,
+    "all_28_copied_and_restored_fingerprints_match_frozen_qualification": true,
+    "all_new_actors_stopped": true,
+    "backup_unchanged": true,
+    "no_financial_settlement_inference": true,
+    "no_operational_writer_or_stock_admission": true,
+    "original_container_never_started": true,
+    "private_log_receipts_verified": true,
+    "protected_report_sha256": "5c08597e71c584abb36348a6b70ba458b973d5b878eada4e75a7b071f371e229",
+    "release_ready": false,
+    "review_script_sha256": "8c3058f0f9cb42709f903ed8d479418c58837ef0e46e6962d7944feffc1b8e91",
+    "scope": "independent protected frozen database copy/restore evidence review",
+    "source_original_unchanged": true,
+    "task_complete": false
+  },
+  "task_complete": false,
+  "release_ready": false
+}

@@ -1,0 +1,1 @@
+if(args is not ["--cutover-stage","--root","/stage/target","--mode",var mode])return 78;try{await Platform.Testing.CutoverStageRuntime.RunAsync("/stage/target",mode);return 0;}catch(Exception error){Console.Error.WriteLine(error.GetType().Name);return 78;}
