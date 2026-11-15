@@ -3,6 +3,7 @@ from pathlib import Path
 import cutover_pair as pair
 if not __debug__: raise SystemExit(78)
 SIDES={"legacy","target"}
+TARGET_COMMANDS={"telegram","payment","wallet-current","payment-worker","manifest-worker","delivery-worker","delivery-held","delivery-unknown","delivery-recover"}
 def canonical(v): return json.dumps(v,sort_keys=True,separators=(",",":")).encode()
 def digest(v): return hashlib.sha256(canonical(v)).hexdigest()
 def model(root): return json.loads(pair.private(root/"pair.private.json"))
@@ -117,7 +118,7 @@ def consume_start(root,m,side):
 	assert s["phase"]=="granting" and s["intent"]==side and v=={"epoch":s["epoch"],"side":side,"manifest":digest(m),"run":m["run"]} and stopped(m)
 	destination=root/("consumed-permit-"+str(s["epoch"])+".private.json");assert not destination.exists();p.rename(destination);sync(root)
 def admit(root,side,epoch,command,request_id=None):
-	assert side in SIDES and command in {"wallet","wallet-paused","telegram","payment","status","fake_payment","fake_supplier","fake_telegram","fake_fx","fake_ai"} and (command not in {"telegram","payment"} or side=="target")
+	assert side in SIDES and command in ({"wallet","wallet-paused","status","fake_payment","fake_supplier","fake_telegram","fake_fx","fake_ai"}|TARGET_COMMANDS) and (command not in TARGET_COMMANDS or side=="target")
 	with lock(root):
 		m=model(root);s=chain(root,m)[-1];assert s["phase"]=="active" and s["owner"]==side and s["epoch"]==epoch
 		pair.validate(root,m)

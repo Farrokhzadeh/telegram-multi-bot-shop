@@ -59,4 +59,13 @@ class FenceTests(unittest.TestCase):
 	def test_manifest_or_replica_binding_drift_rejects_journal(self):
 		f=self.root/"legacy/stock-binding.json";x=json.loads(f.read_text());x["cipher"]="5"*64;f.write_text(json.dumps(x))
 		with self.assertRaises(AssertionError): fence.chain(self.root,self.m)
+	def test_target_worker_commands_reject_legacy_before_lock_or_publication(self):
+		for command in fence.TARGET_COMMANDS:
+			with self.subTest(command=command),patch.object(fence,"lock") as locked,self.assertRaises(AssertionError): fence.admit(self.root,"legacy",0,command)
+			locked.assert_not_called()
+		self.assertEqual(list((self.root/"fence-requests").iterdir()),[])
+	def test_target_worker_commands_use_normal_epoch_admission(self):
+		for command in fence.TARGET_COMMANDS:
+			with self.subTest(command=command),patch.object(fence,"lock",side_effect=RuntimeError("normal admission")) as locked,self.assertRaisesRegex(RuntimeError,"normal admission"): fence.admit(self.root,"target",0,command)
+			locked.assert_called_once_with(self.root)
 if __name__=="__main__": unittest.main()

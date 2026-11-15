@@ -44,8 +44,15 @@ def run(root):
 		before=snapshot(root);assert before["stock"]=={"legacy":0,"target":0} and before["rows"]["legacy"]==[1,1,1]
 		p.save(root/"recovery-before.private.json",f.sign(root,before));s=f.grant(root,"legacy",s["epoch"]);assert status("legacy",s["epoch"])["orders"]==1;s=f.freeze(root,s["epoch"])
 		held=event(201,"wallet-paused");assert f.stopped(m);s=f.grant(root,"legacy",s["epoch"]);assert status("legacy",s["epoch"])["orders"]==1;record("source-owner-resumed-before-target-acceptance")
+		requests_before=len(list((root/"fence-requests").iterdir()))
+		for command in f.TARGET_COMMANDS: denied(lambda command=command:f.admit(root,"legacy",s["epoch"],command))
+		assert len(list((root/"fence-requests").iterdir()))==requests_before
 		inbox.dispatch(root,held,"legacy",s["epoch"]);wait_for(lambda:(root/"legacy"/("held-"+held+".json")).is_file());s=f.freeze(root,s["epoch"]);after=snapshot(root);assert after==before and inbox.reconcile(root,held)["phase"]=="uncertain_do_not_retry";record("source-interruption-left-all-target-tables-unchanged")
 		accepted=event(202,"wallet");s=f.grant(root,"target",s["epoch"]);inbox.dispatch(root,accepted,"target",s["epoch"]);path=root/"target/results"/(accepted+".json");wait_for(path.is_file);assert normalized(json.loads(path.read_text()))["outcome"]=="Purchased";assert inbox.reconcile(root,accepted)["phase"]=="result_observed"
+		denied(lambda:f.admit(root,"target",s["epoch"]-1,"manifest-worker"))
+		for _ in range(2):
+			request=f.admit(root,"target",s["epoch"],"manifest-worker")["request"];result=root/"target/results"/(request+".json");wait_for(result.is_file);assert normalized(json.loads(result.read_text()))["outcome"]=="PreparedWithoutSend"
+		record("current-target-manifest-claims-fenced-and-preserved")
 		code="import os,signal,sys;from pathlib import Path;from unittest.mock import patch;import cutover_fence as f\nwith patch.object(f,'append',side_effect=lambda *a,**k:os.kill(os.getpid(),signal.SIGKILL)): f.freeze(Path(sys.argv[1]),int(sys.argv[2]))\n"
 		with (root/"recovery-freeze-crash.private.log").open("wb") as log: crash=subprocess.run([sys.executable,"-c",code,str(root),str(s["epoch"])],env={**os.environ,"PYTHONPATH":str(root/"tools")},stdout=log,stderr=subprocess.STDOUT,timeout=180)
 		(root/"recovery-freeze-crash.exit").write_text(str(crash.returncode)+"\n");assert crash.returncode==-signal.SIGKILL and f.stopped(m);denied(lambda:f.admit(root,"target",s["epoch"],"wallet"));s=f.recover(root);assert s["phase"]=="frozen" and s["owner"] is None;denied(lambda:f.grant(root,"legacy",s["epoch"]));record("post-acceptance-freeze-sigkill-recovered-without-old-writer")
