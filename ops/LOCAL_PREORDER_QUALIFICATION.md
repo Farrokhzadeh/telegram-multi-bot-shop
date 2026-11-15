@@ -14,6 +14,12 @@ A focused Linux Native AOT probe reused the existing preorder test implementatio
 
 **Remaining gate:** all three frozen backups have empty preorder-history relations and archive projections. Actual nonempty historical partial-order compatibility remains unqualified. T096 remains unchecked.
 
+### Historical order cross-check
+
+A read-only cross-check covered all 4,916 orders in the three frozen snapshots. The pinned legacy checkout records the preorder type in the order snapshot, and legacy queue accounting derives the allocated quantity from order-linked inventory. The review checked the order snapshots, matching payment snapshots, catalog links and assigned inventory. It found zero explicit preorder orders, zero orders linked to a preorder catalog entry and zero orders with a positive inventory assignment below the requested quantity. The before/after checks matched the frozen table commitments, and the isolated source container stopped after the review.
+
+The frozen snapshots therefore contain no evidenced historical partial preorder to replay. T096 stays open for the existing compatibility requirement.
+
 ## Authority and review
 
 The owner's continuing offline implementation authorization covers T095. The prior blanket classification of all remaining work as evidence-gated was too broad: local FIFO code can proceed against the already approved canonical target. T093 supplier observation/account/cost proof remains required before real adapters. T096 historical partial-order compatibility remains required before related source import or DDL. Neither is asserted by this checkpoint; no schema change, source import or live integration occurs.
