@@ -1,5 +1,11 @@
 # Local-preorder qualification
 
+## Current T096 offline checkpoint — 2026-11-15
+
+**T096 remains unchecked. 84/96 tasks are complete.** The three frozen source copies were checked in isolated PostgreSQL 16 using a restricted reader and explicit read-only transactions. Before and after checks matched the full schema and keyed table commitments. The five preorder state, refund, delivery batch, batch-item and batch-part relations were empty in all three sources. An independent review verified their matching empty archive projections against the sealed T066 inputs and rejected six evidence mutations. This closes the reconciliation of those empty relations for the three frozen snapshots. They cannot exercise migration of an actual historical partial preorder.
+
+Fresh managed qualification on an isolated authenticated PostgreSQL 18 target passed 29 local-preorder cases, including FIFO, hold/cancel races, whole allocation and lost-acknowledgement recovery. The test artifacts matched the earlier qualified build, and subsequent changes through this checkpoint were documentation-only. The two worker-process kill cases retain their earlier passing CI evidence below. The isolated checks do not establish full intended-environment qualification. No workflow was started for these checks.
+
 ## Authority and review
 
 The owner's continuing offline implementation authorization covers T095. The prior blanket classification of all remaining work as evidence-gated was too broad: local FIFO code can proceed against the already approved canonical target. T093 supplier observation/account/cost proof remains required before real adapters. T096 historical partial-order compatibility remains required before related source import or DDL. Neither is asserted by this checkpoint; no schema change, source import or live integration occurs.
