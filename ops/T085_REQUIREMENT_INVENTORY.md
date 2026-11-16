@@ -93,3 +93,9 @@ Integration DLL SHA-256 `24b90bd213c20e55ef4d8a371fb9d17701035531637cab319249681
 The qualified integration build was reused in an isolated PostgreSQL fixture. One existing synthetic test passed: 50 simultaneous duplicate wallet checkout requests across reconstructed service instances produced one purchase, 49 replays of the original order, one debit, one allocated item and one manifest job. The test process exited zero without OOM; the owned database was stopped. This checks duplicate service requests, not distinct concurrent Telegram callbacks or crypto evidence ordering.
 
 Test source Git blob `63a9e418e99b180d1ab730163724e7f39267509e`; integration DLL SHA-256 `24b90bd213c20e55ef4d8a371fb9d17701035531637cab31924968131b295ba9`; private TRX SHA-256 `a2dd9f246fe8cbf69c03a0c811a64825a7972ffedd48c61c94fe29122d0face7`. Private evidence: `/var/lib/teleg-cli/t085-concurrent-20261116/`. T085 remains unchecked.
+
+## Concurrent distinct external-payment orders
+
+Two concurrent bank and crypto checkout requests for the same synthetic membership left one awaiting order and one replacement cancellation. The original confirmation-pending order retained its evidence. No wallet entries or stock allocations were created. This run exercised checkout services directly and observed one scheduler outcome.
+
+The first run reached the order-state assertions and failed on three seeded opening wallet entries. With zero opening balances, the build passed with zero warnings and errors and the isolated PostgreSQL run passed **1/1**, without failures or skips. Both disposable databases were stopped. Test blob `26a0b37644dc604060a89fe2180a9af54805564e`, integration DLL SHA-256 `40ca86f5372528673a58c7cfc9a454f273217c86d134933617b5698575f6588b`, passed TRX SHA-256 `f1b711cc8ead692b3aae99f5d2df0840ee0a4b7a2369ce7a469b3346fa2122f9`, failed TRX SHA-256 `90bd527e38128e8948018de1ca456ca46bd57620a7fae8ae0f2936532c202964`. T085 remains open.

@@ -41,6 +41,35 @@ public sealed class PaymentExpiryTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }
+    [Fact]
+    public async Task ConcurrentExternalOrdersKeepOneAwaitingAndPreserveEvidenceObligation()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 3, ct: Ct);
+        var payments = new PaymentSettlementFixture(f);
+        await payments.EnableAsync(Ct);
+        await payments.EnableBankAsync(Ct);
+        var original = await payments.OrderAsync(ct: Ct);
+        await payments.CaptureAsync(original.Payment, original.Origin, original.Due, ct: Ct);
+        var service = new WalletCheckoutService(f.Sessions, f.Store, payments.Catalog);
+        var requests = new[] { new CheckoutRequest(OrderIds.New(), f.Product, 1, CheckoutPayment.Crypto), new CheckoutRequest(OrderIds.New(), f.Product, 1, CheckoutPayment.Bank) };
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var attempts = requests.Select(async request =>
+        {
+            await start.Task;
+            return await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
+        }).ToArray();
+        start.SetResult();
+        var results = await Task.WhenAll(attempts);
+        Assert.All(results, result => Assert.Equal(CheckoutOutcome.AwaitingPayment, result.Outcome));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='confirmation_pending' AND resolution_kind IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='cancelled' AND resolution_kind='replaced'", Ct));
+        Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.payments", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='allocated'", Ct));
+        await using var read = await f.Sessions.BeginAsync(Ct);
+        Assert.True(await read.QuerySingleAsync(new DbStatement("SELECT o.payment_status='confirmation_pending' AND p.first_payment_observed_at IS NOT NULL FROM shop.orders o JOIN shop.payments p ON p.order_id=o.id WHERE o.id=$1 AND p.id=$2", DbValue.Uuid(original.Order), DbValue.Uuid(original.Payment)), row => row.GetBoolean(0), Ct));
+    }
     [Theory]
     [InlineData(CheckoutPayment.Crypto, CheckoutPayment.Bank)]
     [InlineData(CheckoutPayment.Bank, CheckoutPayment.Crypto)]
