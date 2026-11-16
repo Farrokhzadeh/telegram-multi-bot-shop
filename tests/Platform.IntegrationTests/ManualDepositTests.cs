@@ -53,32 +53,66 @@ public sealed class ManualDepositTests
         }
     }
 
-    [Fact]
-    public async Task ConcurrentReceiptAndReplacementPreserveOriginalEvidenceAndOneAwaitingOrder()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task QueuedReceiptAndReplacementPreserveOriginalEvidenceAndCoupon(bool receiptFirst)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: Ct);
         var fixture = new PaymentSettlementFixture(f);
         await fixture.EnableBankAsync(Ct);
         await fixture.EnableAsync(Ct);
+        await using (var issue = await f.Sessions.BeginAsync(Ct))
+        {
+            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-RACE-COUPON", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
+            await issue.CommitAsync(Ct);
+        }
         var original = await fixture.BankOrderAsync(Ct);
         var replacement = new CheckoutRequest(OrderIds.New(), f.Product, 1, CheckoutPayment.Crypto);
-        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var submit = Task.Run(async () => { await gate.Task; return await fixture.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), original.Payment, "protected:synthetic/race-receipt", Ct); }, Ct);
-        var checkout = Task.Run(async () => { await gate.Task; return await new WalletCheckoutService(f.Sessions, f.Store, fixture.Catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), replacement, (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct); }, Ct);
-        gate.SetResult();
-        await Task.WhenAll(submit, checkout);
-        var receiptResult = await submit;
-        var checkoutResult = await checkout;
+        var query = new CatalogQuery(f.Product, 1, CheckoutPayment.Crypto);
+        var catalog = fixture.Catalog;
+        var prepared = await catalog.PrepareAsync(f.Context(0), CheckoutFixture.Actor(0), query, Ct);
+        BrandPolicySnapshot policy;
+        await using (var policyRead = await f.Sessions.BeginAsync(Ct)) policy = await BrandPolicyStore.ReadAsync(policyRead, f.Context(0), CheckoutFixture.Actor(0), Ct);
+        ChannelAccess access = (await BrandPolicy.CheckChannelsAsync(policy, CheckoutFixture.Actor(0), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct))!;
+        var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
+        await using var barrier = await f.Sessions.BeginAsync(Ct);
+        await barrier.ExecuteAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(f.Users[0])), Ct);
+        Task<ManualDepositOutcome>? submit = null;
+        Task<CheckoutResult>? checkout = null;
+        void StartReceipt() => submit = fixture.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), original.Payment, "protected:synthetic/race-receipt", Ct);
+        void StartCheckout() => checkout = service.AcceptAsync(f.Context(0), CheckoutFixture.Actor(0), replacement, prepared, access, Ct);
+        if (receiptFirst) StartReceipt(); else StartCheckout();
+        await WaitForUserLocksAsync(f, 1);
+        if (receiptFirst) StartCheckout(); else StartReceipt();
+        await WaitForUserLocksAsync(f, 2);
+        await barrier.CommitAsync(Ct);
+        await Task.WhenAll(submit!, checkout!);
+        var receiptResult = await submit!;
+        var checkoutResult = await checkout!;
         Assert.Equal(CheckoutOutcome.AwaitingPayment, checkoutResult.Outcome);
-        Assert.Contains(receiptResult, new[] { ManualDepositOutcome.Submitted, ManualDepositOutcome.LateReview });
+        Assert.Equal(receiptFirst ? ManualDepositOutcome.Submitted : ManualDepositOutcome.LateReview, receiptResult);
         await using var read = await f.Sessions.BeginAsync(Ct);
-        var old = await read.QuerySingleAsync(new DbStatement("SELECT o.payment_status,p.status,p.receipt_asset_ref,p.order_id FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id WHERE p.id=$1", DbValue.Uuid(original.Payment)), row => (OrderStatus: row.GetString(0), PaymentStatus: row.GetString(1), Receipt: row.GetString(2), Order: row.GetGuid(3)), Ct);
+        var old = await read.QuerySingleAsync(new DbStatement("SELECT o.payment_status,p.status,p.receipt_asset_ref,p.order_id,c.status FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id JOIN shop.discount_uses c ON c.order_id=o.id WHERE p.id=$1", DbValue.Uuid(original.Payment)), row => (OrderStatus: row.GetString(0), PaymentStatus: row.GetString(1), Receipt: row.GetString(2), Order: row.GetGuid(3), Claim: row.GetString(4)), Ct);
         Assert.Equal(original.Order, old.Order);
         Assert.Equal("protected:synthetic/race-receipt", old.Receipt);
-        Assert.Equal(receiptResult == ManualDepositOutcome.Submitted ? ("under_review", "observed") : ("cancelled", "review"), (old.OrderStatus, old.PaymentStatus));
+        Assert.Equal(receiptFirst ? ("under_review", "observed", "held") : ("cancelled", "review", "released"), (old.OrderStatus, old.PaymentStatus, old.Claim));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE order_id='" + replacement.OrderId.ToString("D") + "' AND status='held'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
+    }
+
+    private static async Task WaitForUserLocksAsync(CheckoutFixture f, int minimum)
+    {
+        DateTime limit = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < limit)
+        {
+            await using var command = f.Database.Data.CreateCommand("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT count(*) FROM (SELECT id FROM shop.users%'");
+            if ((long)(await command.ExecuteScalarAsync(Ct) ?? 0L) >= minimum) return;
+            await Task.Delay(50, Ct);
+        }
+        throw new TimeoutException("Synthetic user-lock contention was not observed.");
     }
 
     [Fact]
