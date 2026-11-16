@@ -14,3 +14,9 @@ Against a newly initialized isolated PostgreSQL fixture, focused VSTest executio
 | Private TRX | `b999f92051173455492014a27a583a1687666a0a473fa1d607b1e0d192424f39` |
 
 Private execution evidence and failed attempt: `/var/lib/teleg-cli/t085-payment-20261116/`. The test and build containers exited without OOM; the owned isolated database was stopped. No live external traffic, deployment, production mutation or GitHub Actions was authorized. T085 remains unchecked; see [requirement inventory](T085_REQUIREMENT_INVENTORY.md).
+
+## Current-build payment regression
+
+The same integration DLL was copied to a second isolated synthetic PostgreSQL fixture and verified by SHA-256. VSTest ran the four selected classes and passed **68/68, zero failed or skipped**: 26 `PaymentExpiryTests`, 20 `ExternalPaymentTests`, 15 `PaymentSettlementTests` and seven `PaymentStateMachineTests`. This includes the 11 focused network cases above and must not be added to that count as independent scenarios. The run took 4 minutes 14 seconds; the test process exited zero without OOM and the owned database was stopped.
+
+Private TRX SHA-256: `f9850cd695e9258e623dbde11c1763b2153b7c865d4ecf99caaf6c65352b0a31`. Private run directory: `/var/lib/teleg-cli/t085-regression-20261116/`. This is synthetic managed execution of those classes, not full T085, live invoice/merchant identity, an operating-system restart qualification or release readiness. Remaining matrix items in the inventory stay open.
