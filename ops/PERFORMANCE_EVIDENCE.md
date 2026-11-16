@@ -40,3 +40,26 @@ A separate resource-limited client on the private staging network sent 100 certi
 The native API and staging database were stopped independently afterward; all 13 legacy containers were still running. The original managed API container configuration was restored in the stopped state. No real external service, production data or production writer was used. The protected build and runtime checkpoint remains on the owner server.
 
 The comparable legacy baseline, representative target workload, peak RSS, resource headroom and bounded shared-server limits remain unqualified. Readiness traffic alone cannot establish them. An automatic review rejected an attempted legacy configuration inspection because the requested fields could reveal secrets; no such configuration was displayed. A safe synthetic baseline remains to be established without exposing configuration. The remaining-work list above continues to apply, except that the native API now has the limited results recorded here.
+
+## Isolated legacy and native resource continuation — 2026-11-16
+
+**Status: NOT QUALIFIED.** T076 remains unchecked; the T080 rehearsal has not started. The owner authorized a redacted legacy configuration inspection. Only environment variable names were extracted from static Python source inside the legacy image; no configuration values or production credentials were displayed.
+
+A separately started legacy image `sha256:21c5ebe985689ad40b7b4426e65193b71c5c6cf31e69dca1656ec372bca2a4b5` ran Django test settings with generated synthetic values, an isolated in-memory test database, no network, no production mounts and no bot. Its configuration check passed. Gunicorn used one worker and two threads, with 0.18 CPU, 112 MiB and 55 processes. A separate bounded client shared its network namespace and made 100 successful HTTP `/health/live/` requests. The first container-start-to-health sample was 54.648 seconds, including Docker start and repeated process-based polling. One load sample was 2.13% CPU and 80.08 MiB Docker container memory. At that instant the gunicorn processes reported 30,780 and 76,940 KiB RSS; summing process RSS double-counts shared pages. The native staging API's earlier sample was 2.973 seconds to readiness, 1.76% CPU and 24.56 MiB container memory; another idle process RSS sample was 38,952 KiB.
+
+These measurements compare limited health endpoints, not equivalent shop operations. Legacy used plain HTTP and an isolated test database; the native staging endpoint used HTTPS and its separate PostgreSQL instance. Startup probes and host contention also differed. Neither sample is a peak, a distribution or evidence of relative capacity under real buyer traffic. Do not use these numbers to infer checkout, job, bot or end-to-end production performance.
+
+The native runtime image ran three one-shot probes per executable under 0.18 CPU and 112 MiB. A small `wait4` measurement wrapper recorded elapsed time, child CPU time and maximum RSS. API, BotHost and JobHost used `--qualify` and returned applicationReady=false; SchemaRunner intentionally returned 78 with no arguments. These are short process probes rather than operational workloads:
+
+| Host | Elapsed range, seconds | CPU time range, seconds | Maximum RSS range, KiB |
+|---|---:|---:|---:|
+| API | 0.098–0.106 | 0.0179–0.0195 | 14,468–14,540 |
+| BotHost | 0.094–0.186 | 0.0106–0.0281 | 12,344–12,708 |
+| JobHost | 0.005–0.088 | 0.0045–0.0073 | 4,704–4,748 |
+| SchemaRunner | 0.091–0.103 | 0.0088–0.0236 | 7,700–8,080 |
+
+All five synthetic staging roles were subsequently run using the native API qualification artifact, with the dedicated staging database. A client sent 20 certificate-verified readiness requests per role; all 100 succeeded. One resource sample across the five service containers ranged from 14.54 to 26.25 MiB per container, with PostgreSQL at 43.27 MiB. While that client was active, observed host available memory was approximately 1,260 MiB. Stopping the synthetic bot-a container left the API, bot-b, bot-c, jobs and database responsive. All staging containers were stopped and the original managed staging configuration was restored; all 13 pre-existing legacy containers were still running.
+
+The first multi-role client was stopped after an operator noticed that the entire staging operator directory had been mounted read-only instead of just the test certificates. Its prescribed command only issued readiness requests, its network was the internal staging bridge, and no operator-file content appeared in its output; nonetheless the client had unnecessary access to synthetic staging operator files. The corrected client mounted only the five certificates. This mistake does not establish a secret-isolation pass for that initial client.
+
+The database volume uses Docker's local driver with no volume options or per-container storage option observed. Host free disk was about 5.7 GiB. Log rotation, memory, CPU and process caps exist, but no staging volume disk quota was established; database connection limits and production reserve under representative load also remain unqualified. No disk-exhaustion or other host-destructive test was run. A storage bound and connection/resource qualification, along with representative comparable workload evidence, are still needed before closing T076.
