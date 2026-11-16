@@ -58,13 +58,14 @@ def up():
 	loop=output('/sbin/losetup','--find','--show',str(IMAGE))
 	STATE.write_text(json.dumps({'loop':loop,'uuid':uuid,'image':str(IMAGE)}));STATE.chmod(0o600)
 	call('docker','volume','create','--driver','local','--opt','type=ext4','--opt','device='+loop,'--opt','o=nosuid,nodev,noexec',VOLUME,stdout=subprocess.DEVNULL)
-	services={'stage-db':{'volumes':[{'type':'volume','source':'bounded','target':'/var/lib/postgresql'}]}}
+	services={'stage-db':{'cpus':0.1,'volumes':[{'type':'volume','source':'bounded','target':'/var/lib/postgresql'}]}}
 	for role in ROLES:
-		services['stage-'+role]={'entrypoint':['/opt/t076/Platform.Api.native','--serve-synthetic-staging',role],'volumes':[str(NATIVE)+':/opt/t076/Platform.Api.native:ro']}
+		services['stage-'+role]={'cpus':0.1,'entrypoint':['/opt/t076/Platform.Api.native','--serve-synthetic-staging',role],'volumes':[str(NATIVE)+':/opt/t076/Platform.Api.native:ro']}
 	OVERRIDE.write_text(json.dumps({'services':services,'volumes':{'bounded':{'external':True,'name':VOLUME}}}));OVERRIDE.chmod(0o600)
 	config=json.loads(output('docker','compose','-f',str(BASE),'-f',str(OVERRIDE),'config','--format','json'))
 	mounts=[x for x in config['services']['stage-db']['volumes'] if x['target']=='/var/lib/postgresql']
 	require(len(mounts)==1 and mounts[0]['source']=='bounded','Database mount override failed')
+	require(all(float(v.get('cpus',0))==0.1 for v in config['services'].values()),'Staging CPU reserve guard failed')
 	compose('up','-d','--no-deps','--pull','never','stage-db')
 	for _ in range(40):
 		p=subprocess.run(['docker','exec','shop-staging-stage-db-1','pg_isready','-q','-h','127.0.0.1','-U','postgres','-d','shop_staging'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
