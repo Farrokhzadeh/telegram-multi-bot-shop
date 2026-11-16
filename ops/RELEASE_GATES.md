@@ -56,3 +56,9 @@ An identity mismatch, missing key/archive dependency, unreconciled balance/paid 
 Rollback preserves all brands' accepted money, committed work, original bindings and actual delivered evidence. A binary rollback cannot erase already accepted external effects; reconcile them explicitly. Keep old keys/images while any protected archive, backup or rollback procedure depends on them. No deletion or key retirement is performed in this batch.
 
 Customer delivery prefers editing the validated saved order message after complete-manifest authorization. Suppress known success; an uncertain new send retains an observable recovery state and protected manifest access. Missing/uneditable anchors and file/multi-part cases use explicit recovery; a release cannot silently turn uncertainty into a new purchase, charge or blind replacement message.
+
+## Synthetic staging backup checkpoint — 2026-11-16
+
+The guarded synthetic staging database and receipt fixtures were backed up and restored into separate disposable destinations. All 28 synthetic table row commitments and 1,264 column/constraint records matched; three receipt fixtures matched content, mode and ownership. See [T080 rehearsal](T080_STAGING_REHEARSAL.md) for exact bounds, artifact hashes and limits.
+
+T080 remains open. This checkpoint does not qualify actual source copies, provider identity, old-key escrow, original grants/owners, real media, brand writer ownership or operator release approval. The unbounded original staging route and production promotion remain outside the T076 guarded synthetic qualification.
