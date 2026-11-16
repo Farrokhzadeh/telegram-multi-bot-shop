@@ -87,3 +87,9 @@ The network-isolated build passed with zero warnings/errors; the test process ex
 The previously qualified cross-brand integration build was reused for a focused isolated-database run. **6/6 passed**, zero failed/skipped: original-membership customer payment reads and USD-credit reporting; independently authorized administrator HTTP reads and evidence/credential redaction; private staff admission without creating customer membership; two invalid customer destination cases; and cross-brand and same-brand foreign-member reference denial. This is scoped synthetic evidence, not a complete routing or provider qualification.
 
 Integration DLL SHA-256 `24b90bd213c20e55ef4d8a371fb9d17701035531637cab31924968131b295ba9`; private TRX SHA-256 `6369ac107224cd2a1afec6fa9ed613da6988f2fa9af47b1c38a66c26f901c00c`. Private evidence: `/var/lib/teleg-cli/t085-reads-20261116/`. T085 remains unchecked.
+
+## Concurrent duplicate checkout witness
+
+The qualified integration build was reused in an isolated PostgreSQL fixture. One existing synthetic test passed: 50 simultaneous duplicate wallet checkout requests across reconstructed service instances produced one purchase, 49 replays of the original order, one debit, one allocated item and one manifest job. The test process exited zero without OOM; the owned database was stopped. This checks duplicate service requests, not distinct concurrent Telegram callbacks or crypto evidence ordering.
+
+Test source Git blob `63a9e418e99b180d1ab730163724e7f39267509e`; integration DLL SHA-256 `24b90bd213c20e55ef4d8a371fb9d17701035531637cab31924968131b295ba9`; private TRX SHA-256 `a2dd9f246fe8cbf69c03a0c811a64825a7972ffedd48c61c94fe29122d0face7`. Private evidence: `/var/lib/teleg-cli/t085-concurrent-20261116/`. T085 remains unchecked.
