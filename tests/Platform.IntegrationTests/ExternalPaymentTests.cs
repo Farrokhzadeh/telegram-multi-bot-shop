@@ -136,6 +136,8 @@ public sealed class ExternalPaymentTests
     [Theory]
     [InlineData("usdtbsc", "10.4", "10.25", "finished")]
     [InlineData("trx", "10.4", "10.25", "finished")]
+    [InlineData("bnb", "10.4", "10.25", "finished")]
+    [InlineData("usdterc20", "10.4", "10.25", "finished")]
     [InlineData("usdttrc20", "11", "10.25", "finished")]
     [InlineData("usdttrc20", "1", "10.25", "finished")]
     [InlineData("usdttrc20", "10.4", "99", "finished")]

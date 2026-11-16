@@ -128,15 +128,18 @@ public sealed class PaymentExpiryTests
         await using var read = await f.Sessions.BeginAsync(Ct);
         Assert.Equal(1L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.payments WHERE network_asset=$1", DbValue.Text(asset)), r => r.GetInt64(0), Ct));
     }
-    [Fact]
-    public async Task RejectedNetworkAssetBlocksPaymentRow()
+    [Theory]
+    [InlineData("TRX")]
+    [InlineData("BNB")]
+    [InlineData("USDTERC20")]
+    public async Task RejectedNetworkAssetBlocksPaymentRow(string asset)
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
         await using var invalid = await f.Sessions.BeginAsync(Ct);
         var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("""
             INSERT INTO shop.payments(id,topup_user_id,payment_method,quote_currency,amount_due,idempotency_ref,network_asset)
-            VALUES (gen_random_uuid(),$1,'crypto','USD',5,'topup-bad-asset','TRX')
-            """, DbValue.Uuid(f.Users[0])), Ct));
+            VALUES (gen_random_uuid(),$1,'crypto','USD',5,'topup-bad-asset',$2)
+            """, DbValue.Uuid(f.Users[0]), DbValue.Text(asset)), Ct));
         Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
     }
     [Fact]
