@@ -19,7 +19,7 @@ public sealed class PreparedCheckoutTests
     [InlineData(10)]
     [InlineData(50)]
     [InlineData(100)]
-    public async Task WholeDiscountedLocalAcceptanceCommitsOneHoldAndOneExactDebitOrNoMoney(int percent)
+    public async Task WholeDiscountedLocalAcceptanceRedeemsWithOneExactDebitOrNoMoney(int percent)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: percent == 100 ? 0 : 100, stock: 11, ct: Ct);
         Guid coupon = await Coupon(f, percent, 10);
@@ -30,8 +30,8 @@ public sealed class PreparedCheckoutTests
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
         Assert.Equal(CheckoutOutcome.Purchased, (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct)).Outcome);
         Assert.Equal(CheckoutOutcome.Replayed, (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, (_, _, _) => throw new InvalidOperationException("Replay transport."), Ct)).Outcome);
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=10", Ct));
-        Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=10", Ct));
+        Assert.Equal(10L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
         Assert.Equal(10L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE release_authorized_at IS NOT NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'", Ct));
@@ -167,6 +167,25 @@ public sealed class PreparedCheckoutTests
     }
 
     [Fact]
+    public async Task DeferredRedemptionFailureRollsBackLocalAllocationCouponAndDebit()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 2, ct: Ct);
+        await Coupon(f, 50, 10);
+        await using (var install = f.Database.Data.CreateCommand("CREATE FUNCTION shop.public_test_redemption_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'public synthetic redemption failure' USING ERRCODE='23514'; END $$; CREATE CONSTRAINT TRIGGER public_test_redemption_failure AFTER UPDATE ON shop.discount_uses DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.status='redeemed') EXECUTE FUNCTION shop.public_test_redemption_failure()")) await install.ExecuteNonQueryAsync(Ct);
+        var request = Request(f, 2);
+        await Assert.ThrowsAsync<DbOperationException>(() => Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
+        await using (var remove = f.Database.Data.CreateCommand("DROP TRIGGER public_test_redemption_failure ON shop.discount_uses")) await remove.ExecuteNonQueryAsync(Ct);
+        Assert.Equal(CheckoutOutcome.Purchased, (await Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct)).Outcome);
+        Assert.Equal(2L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+    }
+
+    [Fact]
     public async Task ValidWalletCheckoutReplacesOnlyAnUnobservedPendingOrderAndCancelsItsExpiry()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 2, ct: Ct);
@@ -224,7 +243,7 @@ public sealed class PreparedCheckoutTests
         var results = await Task.WhenAll(Buy(0, a, accessA), Buy(3, b, accessB));
         Assert.Single(results, success => success);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='allocated'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }

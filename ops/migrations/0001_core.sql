@@ -1403,7 +1403,13 @@ BEGIN
     END IF;
     IF TG_TABLE_NAME='discount_uses' THEN
         IF NEW.status='redeemed' THEN
-            PERFORM require_true(o.release_authorized_at IS NOT NULL OR (o.order_kind='prepaid_units' AND o.fulfillment_status='completed'),'redemption_requires_complete_obligation');
+            PERFORM require_true(o.release_authorized_at IS NOT NULL OR (o.order_kind='prepaid_units' AND o.fulfillment_status='completed') OR
+                (o.order_kind='product_purchase' AND NOT o.is_preorder AND o.payment_status IN ('paid','not_required') AND o.payment_method IN ('wallet','no_payment_required')
+                    AND local_count=o.quantity AND (SELECT count(*) FROM fulfillments WHERE order_id=oid)=o.quantity
+                    AND NOT EXISTS(SELECT 1 FROM supplier_requests WHERE order_id=oid)
+                    AND (SELECT count(*) FROM fulfillments f JOIN inventory_items i ON i.assigned_fulfillment_id=f.id
+                        WHERE f.order_id=oid AND f.kind='local' AND f.status IN ('acquired','ready','released') AND i.state='allocated')=o.quantity),
+                'redemption_requires_complete_obligation');
         END IF;
     END IF;
     IF o.resolution_kind IN ('local_preorder_cancellation','immediate_crypto_shortage_credit','supplier_wallet_credit') THEN

@@ -46,7 +46,7 @@ public sealed class RegionalPricingTests
         bool unpaid = method != CheckoutPayment.Wallet && percent != 100;
         Assert.Equal(unpaid ? CheckoutOutcome.AwaitingPayment : CheckoutOutcome.Purchased,
             (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), valid, Member, Ct)).Outcome);
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE units_covered=10 AND status='held'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE units_covered=10 AND status='" + (unpaid ? "held" : "redeemed") + "'", Ct));
         Assert.Equal(unpaid ? 0L : 10L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='allocated'", Ct));
         Assert.Equal(percent == 100 ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='not_required' AND payment_method='no_payment_required' AND payment_due_at IS NULL", Ct));
         Assert.Equal(unpaid ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.payments", Ct));
@@ -75,7 +75,7 @@ public sealed class RegionalPricingTests
             await edit.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,max_total_uses,usage_adjustment_units,
                     redeemed_count_at_revision,held_units_at_revision,ends_at,active,product_id,eligible_user_id)
-                SELECT gen_random_uuid(),id,revision,$1,percent_off,max_total_uses,usage_adjustment_units,redeemed_count,3,ends_at,active,product_id,eligible_user_id FROM shop.discounts WHERE id=$2
+                SELECT gen_random_uuid(),id,revision,$1,percent_off,max_total_uses,usage_adjustment_units,redeemed_count,0,ends_at,active,product_id,eligible_user_id FROM shop.discounts WHERE id=$2
                 """, DbValue.Uuid(audit), DbValue.Uuid(coupon)), Ct);
             await edit.CommitAsync(Ct);
         }

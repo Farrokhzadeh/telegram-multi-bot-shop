@@ -23,7 +23,7 @@ public sealed class LocalDeliveryTests
     }
 
     [Fact]
-    public async Task CompleteManifestRedeemsTheWholeClaimAndEditsTheSavedPrivateOrderMessageOnce()
+    public async Task CompleteManifestKeepsCheckoutRedemptionAndEditsTheSavedPrivateOrderMessageOnce()
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 3, ct: Ct);
         await Coupon(f, 3);
@@ -159,7 +159,7 @@ public sealed class LocalDeliveryTests
     }
 
     [Fact]
-    public async Task HundredUnitPaidEntitlementRedeemsOneNineAndTwentyOnlyOnCompleteManifests()
+    public async Task HundredUnitPaidEntitlementRedeemsOneNineAndTwentyAtCompleteLocalAllocation()
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 1000, stock: 30, ct: Ct);
         var source = new CheckoutRequest(OrderIds.New(), f.Product, 100, CheckoutPayment.Wallet, CheckoutKind.PrepaidUnits);
@@ -167,7 +167,7 @@ public sealed class LocalDeliveryTests
         foreach (int qty in new[] { 1, 9, 20 })
         {
             Guid order = await Purchase(f, qty);
-            Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
+            Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
             await Store(f).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct);
         }
         Assert.Equal(30L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
@@ -201,6 +201,16 @@ public sealed class LocalDeliveryTests
         }
         Assert.Null(await Store(f).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), request.OrderId, Ct));
+        Guid coupon;
+        await using (var read = await f.Sessions.BeginAsync(Ct)) coupon = await read.QuerySingleAsync(new DbStatement("SELECT discount_id FROM shop.discount_uses WHERE order_id=$1", DbValue.Uuid(request.OrderId)), row => row.GetGuid(0), Ct);
+        await using (var early = await f.Sessions.BeginAsync(Ct))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new PricingStore(f.Sessions, f.Secrets).TransitionClaimAsync(early, f.Context(0), coupon, request.OrderId, true, Ct));
+        await using (var direct = await f.Sessions.BeginAsync(Ct))
+        {
+            await direct.ExecuteAsync(new DbStatement("UPDATE shop.discount_uses SET status='redeemed' WHERE order_id=$1", DbValue.Uuid(request.OrderId)), Ct);
+            await direct.ExecuteAsync(new DbStatement("UPDATE shop.discounts SET redeemed_count=redeemed_count+5 WHERE id=$1", DbValue.Uuid(coupon)), Ct);
+            await Assert.ThrowsAsync<DbOperationException>(() => direct.CommitAsync(Ct));
+        }
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", Ct));
@@ -229,7 +239,7 @@ public sealed class LocalDeliveryTests
     }
 
     [Fact]
-    public async Task OversizePreparationPersistsReviewWithoutReleaseRedemptionOrAnAutomaticRetryLoop()
+    public async Task OversizePreparationPersistsReviewWithoutReleaseOrAnAutomaticRetryLoop()
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 17, ct: Ct);
         await Coupon(f, 17);
@@ -246,8 +256,8 @@ public sealed class LocalDeliveryTests
         Assert.Null(await Store(f).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='requires_admin' AND review_code='credential_recovery' AND release_authorized_at IS NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest' AND status='failed' AND last_error_code='credential_recovery'", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=17", Ct));
-        Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=17", Ct));
+        Assert.Equal(17L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
     }
 

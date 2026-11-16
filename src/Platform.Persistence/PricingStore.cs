@@ -158,15 +158,20 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
             await LockBrandAsync(session, context, ct);
             await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.discounts WHERE id=$1 AND brand_id=$2 FOR UPDATE) d", DbValue.Uuid(discountId), DbValue.Uuid(context.BrandId)), row => row.GetInt64(0), ct);
             var order = await session.QuerySingleAsync(new DbStatement("""
-                SELECT o.id,o.payment_status,o.release_authorized_at IS NOT NULL,o.order_kind,o.fulfillment_status,o.resolution_kind
+                SELECT o.id,o.payment_status,o.release_authorized_at IS NOT NULL,o.order_kind,o.fulfillment_status,o.resolution_kind,
+                    o.order_kind='product_purchase' AND NOT o.is_preorder AND o.payment_method IN ('wallet','no_payment_required')
+                        AND (SELECT count(*) FROM shop.fulfillments f JOIN shop.inventory_items i ON i.assigned_fulfillment_id=f.id
+                            WHERE f.order_id=o.id AND f.kind='local' AND f.status IN ('acquired','ready','released') AND i.state='allocated')=o.quantity
+                        AND (SELECT count(*) FROM shop.fulfillments WHERE order_id=o.id)=o.quantity
+                        AND NOT EXISTS(SELECT 1 FROM shop.supplier_requests WHERE order_id=o.id)
                 FROM (SELECT 1) seed LEFT JOIN (SELECT o.* FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE o.id=$1 AND u.brand_id=$2 FOR UPDATE OF o) o ON true
-                """, DbValue.Uuid(orderId), DbValue.Uuid(context.BrandId)), row => row.IsDBNull(0) ? null : new ClaimState(row.GetString(1), row.GetBoolean(2), row.GetString(3), row.GetString(4), row.IsDBNull(5) ? null : row.GetString(5)), ct);
+                """, DbValue.Uuid(orderId), DbValue.Uuid(context.BrandId)), row => row.IsDBNull(0) ? null : new ClaimState(row.GetString(1), row.GetBoolean(2), row.GetString(3), row.GetString(4), row.IsDBNull(5) ? null : row.GetString(5), row.GetBoolean(6)), ct);
             if (order is null) Reject(session);
             CouponClaim? claim = await ReadClaimAsync(session, discountId, orderId, ct);
             if (claim is null) Reject(session);
             string target = redeem ? "redeemed" : "released";
             if (claim.Status == target) return false;
-            if (claim.Status != "held" || (redeem ? order.Payment is not ("paid" or "not_required") || !(order.Release || (order.Kind == "prepaid_units" && order.Fulfillment == "completed")) :
+            if (claim.Status != "held" || (redeem ? order.Payment is not ("paid" or "not_required") || !(order.Release || order.ImmediateLocal || (order.Kind == "prepaid_units" && order.Fulfillment == "completed")) :
                 order.Payment is not ("expired" or "cancelled") && order.Resolution is not ("local_preorder_cancellation" or "immediate_crypto_shortage_credit" or "supplier_wallet_credit"))) Reject(session);
             await session.ExecuteAsync(new DbStatement("UPDATE shop.discount_uses SET status=$1,transitioned_at=CURRENT_TIMESTAMP WHERE discount_id=$2 AND order_id=$3", DbValue.Text(target), DbValue.Uuid(discountId), DbValue.Uuid(orderId)), ct);
             if (redeem) await session.ExecuteAsync(new DbStatement("UPDATE shop.discounts SET redeemed_count=redeemed_count+$1 WHERE id=$2", DbValue.Bigint(claim.Units), DbValue.Uuid(discountId)), ct);
@@ -268,5 +273,5 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
     private sealed record ProtectedCode(byte[] Content, string Key);
     private sealed record Grant(Guid Id, decimal Percent);
     private sealed record ClaimOrder(int Quantity, string Currency, decimal UnitUsdt, decimal? UnitToman, bool Automatic, FxRate? Rate, decimal? Percent, int? Units, string Version, string Status, decimal Step);
-    private sealed record ClaimState(string Payment, bool Release, string Kind, string Fulfillment, string? Resolution);
+    private sealed record ClaimState(string Payment, bool Release, string Kind, string Fulfillment, string? Resolution, bool ImmediateLocal);
 }

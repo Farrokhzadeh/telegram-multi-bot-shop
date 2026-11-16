@@ -125,7 +125,11 @@ public sealed partial class CheckoutStore
         }
         if (prepared.Supply.RemoteUnits > 0) await catalog.BindSupplierAsync(session, context, prepared, request.OrderId, ct);
         await AcquireAsync(session, context, request.OrderId, stock, ct);
-        if (prepared.Supply.RemoteUnits == 0 && local == request.Quantity) await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, request.OrderId), request.OrderId, DateTime.UtcNow, ct);
+        if (prepared.Supply.RemoteUnits == 0 && local == request.Quantity)
+        {
+            if (!product.Preorder && terms.DiscountId is Guid discount) await pricing.TransitionClaimAsync(session, context, discount, request.OrderId, true, ct);
+            await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, request.OrderId), request.OrderId, DateTime.UtcNow, ct);
+        }
         else if (prepared.Supply.WaitingForLocalStock) await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.DrainLocalPreorders, request.ProductId), request.OrderId, DateTime.UtcNow, ct);
         return new(CheckoutOutcome.Purchased, request.OrderId);
     }

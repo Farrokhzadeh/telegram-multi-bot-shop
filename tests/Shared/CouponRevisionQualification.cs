@@ -11,7 +11,7 @@ public static class CouponRevisionQualification
     {
         await using var f = await CheckoutFixture.CreateAsync(users: 6, balance: 0, stock: 40, ct: ct);
         var actor = await f.AdminAsync(ct); Guid coupon = await Issue(f, actor, 100, ct);
-        Guid spent = await Buy(f, 30, ct); await Prepare(f, ct);
+        Guid spent = await Buy(f, 30, ct); await Prepare(f, ct); await Preorder(f, ct);
         Guid held = await Buy(f, 10, ct); string frozen = await Quotes(f, ct);
         var store = new PricingStore(f.Sessions, f.Secrets);
         var edit = new CouponOwnerEdit(12.5m, 0, 0, 2, null, DateTime.UtcNow.AddMinutes(-1), false, f.Product, f.Users[3]);
@@ -47,7 +47,7 @@ public static class CouponRevisionQualification
     public static async Task RaceAsync(CancellationToken ct = default)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 3, ct: ct);
-        var actor = await f.AdminAsync(ct); Guid coupon = await Issue(f, actor, 10, ct); await Buy(f, 3, ct);
+        var actor = await f.AdminAsync(ct); Guid coupon = await Issue(f, actor, 10, ct); await Preorder(f, ct); await Buy(f, 3, ct);
         string quote = await Quotes(f, ct); var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var redeem = Task.Run(async () => { await gate.Task; await Prepare(f, ct); }, ct);
         var edit = Task.Run(async () => { await gate.Task; await new PricingStore(f.Sessions, f.Secrets).EditAsync(f.Context(0), actor, coupon, 0, new(50, 0, 0, 0, null, null, false, f.Product, f.Users[0]), AuditReason.OperatorReview, Guid.NewGuid(), ct); }, ct);
@@ -75,6 +75,8 @@ public static class CouponRevisionQualification
         { try { await write.ExecuteAsync(new DbStatement("UPDATE shop.discounts SET percent_off=25,revision=revision+1 WHERE id=$1", DbValue.Uuid(coupon)), ct); await write.CommitAsync(ct); } catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { missing = true; } }
         Require(missing && await f.CountAsync("SELECT revision FROM shop.discounts", ct) == 1, "settings cannot commit without matching history");
     }
+    private static async Task Preorder(CheckoutFixture f, CancellationToken ct)
+    { await using var session = await f.Sessions.BeginAsync(ct); await session.ExecuteAsync(new DbStatement("UPDATE shop.products SET availability_policy='local_preorder' WHERE id=$1", DbValue.Uuid(f.Product)), ct); await session.CommitAsync(ct); }
     private static async Task<Guid> Issue(CheckoutFixture f, AuthenticatedAdmin actor, long cap, CancellationToken ct)
     {
         Guid coupon = Guid.NewGuid(); await using var session = await f.Sessions.BeginAsync(ct);
