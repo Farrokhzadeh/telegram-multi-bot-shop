@@ -67,18 +67,26 @@ def up():
 	print('Bounded synthetic staging started')
 
 def down():
-	check_file(STATE);check_file(OVERRIDE)
+	check_file(STATE)
 	s=json.loads(STATE.read_text());loop=s['loop']
 	require(s['image']==str(IMAGE) and loop.startswith('/dev/loop'),'Unexpected state identity')
 	require(output('/sbin/losetup','-n','-O','BACK-FILE',loop).splitlines()[0]==str(IMAGE),'Loop backing identity mismatch')
-	compose('stop','-t','10')
+	has_override=OVERRIDE.exists()
+	if has_override:
+		check_file(OVERRIDE);compose('stop','-t','10')
+	else:
+		require(not output('docker','ps','-q','--filter','label=com.docker.compose.project=shop-staging'),'Cannot clean partial state while staging runs')
 	cid=output('docker','ps','-aq','--filter','name=^/shop-staging-stage-db-1$')
-	if cid:
+	if cid and has_override:
 		require(output('docker','inspect','-f','{{index .Config.Labels "com.docker.compose.project"}}',cid)=='shop-staging','Database container identity mismatch')
 		call('docker','rm',cid,stdout=subprocess.DEVNULL)
-	call('docker','volume','rm',VOLUME,stdout=subprocess.DEVNULL)
+	v=subprocess.run(['docker','volume','inspect',VOLUME],capture_output=True,text=True)
+	if v.returncode==0:
+		options=json.loads(v.stdout)[0].get('Options') or {}
+		require(options.get('device')==loop and options.get('type')=='ext4','Bounded volume identity mismatch')
+		call('docker','volume','rm',VOLUME,stdout=subprocess.DEVNULL)
 	call('/sbin/losetup','-d',loop)
-	STATE.unlink();OVERRIDE.unlink()
+	STATE.unlink();OVERRIDE.unlink(missing_ok=True)
 	print('Bounded synthetic staging stopped')
 
 if __name__=='__main__':
