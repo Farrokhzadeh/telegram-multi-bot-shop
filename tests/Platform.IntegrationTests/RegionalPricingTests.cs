@@ -52,6 +52,25 @@ public sealed class RegionalPricingTests
         Assert.Equal(unpaid ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.payments", Ct));
     }
 
+    [Theory]
+    [InlineData(CheckoutPayment.Wallet)]
+    [InlineData(CheckoutPayment.Crypto)]
+    public async Task FixedTomanPricePreservesIndependentWalletAndCryptoAmounts(CheckoutPayment method)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 100, stock: 2, ct: Ct);
+        await Regional(f);
+        var request = new CheckoutRequest(OrderIds.New(), f.Product, 2, method);
+        var result = await Service(f).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct);
+        Assert.Equal(method == CheckoutPayment.Wallet ? CheckoutOutcome.Purchased : CheckoutOutcome.AwaitingPayment, result.Outcome);
+        await using var read = await f.Sessions.BeginAsync(Ct);
+        var order = await read.QuerySingleAsync(new DbStatement("SELECT currency,payment_method,unit_price_usdt::text,unit_price_toman::text,auto_price_toman_snapshot,quantity FROM shop.orders WHERE id=$1", DbValue.Uuid(request.OrderId)), row => (Currency: row.GetString(0), Method: row.GetString(1), Usdt: ExactDecimal.Parse(row.GetString(2)), Toman: ExactDecimal.Parse(row.GetString(3)), Auto: row.GetBoolean(4), Quantity: row.GetInt32(5)), Ct);
+        Assert.Equal(("USDT", method == CheckoutPayment.Wallet ? "wallet" : "crypto", 10m, 1000000m, false, 2), order);
+        Assert.Equal(20m, order.Usdt * order.Quantity);
+        Assert.Equal(2000000m, order.Toman * order.Quantity);
+        Assert.Equal(method == CheckoutPayment.Wallet ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-20", Ct));
+        Assert.Equal(method == CheckoutPayment.Crypto ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE quote_currency='USD' AND amount_due=20 AND payment_method='crypto'", Ct));
+    }
+
     [Fact]
     public async Task OwnerOvercommitAndExpiryEditsCannotInvalidateAnAlreadyProtectedWholeClaim()
     {
