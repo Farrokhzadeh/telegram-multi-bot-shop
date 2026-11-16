@@ -174,6 +174,73 @@ public sealed class ExternalPaymentTests
         await NoPosting(f);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task QueuedCryptoEvidenceAndReplacementPreserveOriginalPaymentAndMoney(bool evidenceFirst)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableAsync(Ct);
+        await fixture.EnableBankAsync(Ct);
+        await using (var issue = await f.Sessions.BeginAsync(Ct))
+        {
+            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-CRYPTO-RACE", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
+            await issue.CommitAsync(Ct);
+        }
+        var original = await fixture.OrderAsync(ct: Ct);
+        var replacement = new CheckoutRequest(OrderIds.New(), f.Product, 1, CheckoutPayment.Bank);
+        var catalog = fixture.Catalog;
+        var prepared = await catalog.PrepareAsync(f.Context(0), CheckoutFixture.Actor(0), new(f.Product, 1, CheckoutPayment.Bank), Ct);
+        BrandPolicySnapshot policy;
+        await using (var policyRead = await f.Sessions.BeginAsync(Ct)) policy = await BrandPolicyStore.ReadAsync(policyRead, f.Context(0), CheckoutFixture.Actor(0), Ct);
+        ChannelAccess access = (await BrandPolicy.CheckChannelsAsync(policy, CheckoutFixture.Actor(0), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct))!;
+        var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
+        var archive = new Archive();
+        using var notice = PaymentNoticeFixture.Notice(original.Origin, quote: original.Due, provider: PaymentSettlementFixture.Provider(original.Payment));
+        await using var barrier = await f.Sessions.BeginAsync(Ct);
+        await barrier.ExecuteAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(f.Users[0])), Ct);
+        Task<PaymentCapture>? capture = null;
+        Task<CheckoutResult>? checkout = null;
+        void StartEvidence() => capture = Store(f).CaptureAsync(f.Context(0), notice, archive.Save, Ct);
+        void StartCheckout() => checkout = service.AcceptAsync(f.Context(0), CheckoutFixture.Actor(0), replacement, prepared, access, Ct);
+        if (evidenceFirst) StartEvidence(); else StartCheckout();
+        await WaitForUserLocksAsync(f, 1);
+        if (evidenceFirst) StartCheckout(); else StartEvidence();
+        await WaitForUserLocksAsync(f, 2);
+        await barrier.CommitAsync(Ct);
+        await Task.WhenAll(capture!, checkout!);
+        Assert.Equal(PaymentCaptureOutcome.Ready, (await capture!).Outcome);
+        Assert.Equal(CheckoutOutcome.AwaitingPayment, (await checkout!).Outcome);
+        await using (var read = await f.Sessions.BeginAsync(Ct))
+        {
+            var old = await read.QuerySingleAsync(new DbStatement("SELECT o.payment_status,p.status,p.order_id,p.provider_payment_ref,p.first_payment_observed_at<=o.payment_due_at,c.status FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id JOIN shop.discount_uses c ON c.order_id=o.id WHERE p.id=$1", DbValue.Uuid(original.Payment)), row => (OrderStatus: row.GetString(0), PaymentStatus: row.GetString(1), Order: row.GetGuid(2), Provider: row.GetString(3), Timely: row.GetBoolean(4), Claim: row.GetString(5)), Ct);
+            Assert.Equal(original.Order, old.Order);
+            Assert.Equal(PaymentSettlementFixture.Provider(original.Payment), old.Provider);
+            Assert.True(old.Timely);
+            Assert.Equal(evidenceFirst ? ("confirmation_pending", "confirming", "held") : ("cancelled", "confirming", "released"), (old.OrderStatus, old.PaymentStatus, old.Claim));
+        }
+        Assert.Single(archive.Items);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+        var settled = await fixture.Store.SettleAsync(f.Context(0), original.Payment, PaymentSettlementFixture.Lookup, Ct);
+        Assert.Equal(evidenceFirst ? ExternalSettlementRoute.LocalGoods : ExternalSettlementRoute.LateCredit, settled.Route);
+        Assert.Equal(evidenceFirst ? 0L : 1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='late_crypto_credit' AND signed_amount=5", Ct));
+        Assert.Equal(evidenceFirst ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
+    }
+
+    private static async Task WaitForUserLocksAsync(CheckoutFixture f, int minimum)
+    {
+        DateTime limit = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < limit)
+        {
+            await using var command = f.Database.Data.CreateCommand("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT count(*) FROM (SELECT id FROM shop.users%'");
+            if ((long)(await command.ExecuteScalarAsync(Ct) ?? 0L) >= minimum) return;
+            await Task.Delay(50, Ct);
+        }
+        throw new TimeoutException("Synthetic user-lock contention was not observed.");
+    }
+
     [Fact]
     public async Task ArchiveFailureLeavesOriginalPaymentAndClockUntouchedAndCanBeRetried()
     {
