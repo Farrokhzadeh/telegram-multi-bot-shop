@@ -173,6 +173,38 @@ public sealed class PaymentExpiryTests
         Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
     }
     [Fact]
+    public async Task InternationalBrandRejectsBankCheckoutBeforeOrderOrPayment()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        var request = new CheckoutRequest(OrderIds.New(), f.Product, 1, CheckoutPayment.Bank);
+        await Assert.ThrowsAsync<PricingRejectedException>(() => new WalletCheckoutService(f.Sessions, f.Store, fixture.Catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.payments", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
+    }
+
+    [Fact]
+    public async Task BankOrderRejectsUsdPaymentWithoutChangingItsTomanOrigin()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableBankAsync(Ct);
+        var original = await fixture.BankOrderAsync(Ct);
+        await using (var invalid = await f.Sessions.BeginAsync(Ct))
+        {
+            var error = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("""
+                INSERT INTO shop.payments(id,order_id,payment_method,quote_currency,amount_due,idempotency_ref,bank_destination_ciphertext,bank_destination_key_id)
+                VALUES (gen_random_uuid(),$1,'bank','USD',10,'public-invalid-usd-card',$2,'current')
+                """, DbValue.Uuid(original.Order), DbValue.Binary([1, 2, 3])), Ct));
+            Assert.Equal(DbFailureKind.Constraint, error.Failure.Kind);
+        }
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE payment_method='bank' AND quote_currency='TOMAN' AND amount_due=1000000", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE payment_method='bank' AND quote_currency='USD'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
+    }
+
+    [Fact]
     public async Task WalletAndLedgerHaveNoCurrencyColumnAndOrdersHaveNoRedundantFields()
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
