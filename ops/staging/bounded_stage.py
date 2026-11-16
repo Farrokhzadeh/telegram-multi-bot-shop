@@ -37,6 +37,14 @@ def check_file(path):
 def up():
 	require(not STATE.exists() and not OVERRIDE.exists(),'Previous bounded state requires cleanup')
 	for p in (BASE,IMAGE,NATIVE): check_file(p)
+	base=json.loads(BASE.read_text())
+	require(base.get('name')=='shop-staging' and set(base['services'])=={'stage-db',*('stage-'+x for x in ROLES)},'Unexpected staging project')
+	for name,service in base['services'].items():
+		require(service.get('read_only') is True and service.get('restart')=='no' and service.get('cpus')==0.18 and service.get('pids_limit')==55 and not service.get('ports'),'Unsafe staging resource settings')
+		require(service.get('mem_limit')==('160m' if name=='stage-db' else '112m') and service.get('memswap_limit')==service.get('mem_limit'),'Unsafe staging memory limit')
+		require(service.get('logging',{}).get('options')=={'max-size':'1m','max-file':'2'},'Unsafe staging log limit')
+		if name!='stage-db': require(all(x.endswith(':ro') for x in service.get('volumes',[])),'Service writable mount rejected')
+	require(base['networks']['default'].get('internal') is True,'Staging network is not internal')
 	require(IMAGE.stat().st_size==512*1024*1024,'Unexpected bounded image size')
 	require(hashlib.sha256(NATIVE.read_bytes()).hexdigest()=='1f23ba0c6d1fb6bd00be4b1ecad88a5bcff303c65ed4348d6d5a3b9b9c816622','Native artifact identity mismatch')
 	require(shutil.disk_usage(WORK).free>=3*1024**3,'Insufficient host disk headroom')
