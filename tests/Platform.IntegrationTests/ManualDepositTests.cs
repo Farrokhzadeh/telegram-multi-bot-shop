@@ -1,6 +1,8 @@
 using System.Text;
+using Platform.Core;
 using Platform.Payments;
 using Platform.Persistence;
+using Platform.Telegram;
 using Platform.Testing;
 
 namespace Platform.IntegrationTests;
@@ -49,6 +51,34 @@ public sealed class ManualDepositTests
             Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='waiting_stock' AND resolution_kind IS NULL", Ct));
             Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
         }
+    }
+
+    [Fact]
+    public async Task ConcurrentReceiptAndReplacementPreserveOriginalEvidenceAndOneAwaitingOrder()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableBankAsync(Ct);
+        await fixture.EnableAsync(Ct);
+        var original = await fixture.BankOrderAsync(Ct);
+        var replacement = new CheckoutRequest(OrderIds.New(), f.Product, 1, CheckoutPayment.Crypto);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var submit = Task.Run(async () => { await gate.Task; return await fixture.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), original.Payment, "protected:synthetic/race-receipt", Ct); }, Ct);
+        var checkout = Task.Run(async () => { await gate.Task; return await new WalletCheckoutService(f.Sessions, f.Store, fixture.Catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), replacement, (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct); }, Ct);
+        gate.SetResult();
+        await Task.WhenAll(submit, checkout);
+        var receiptResult = await submit;
+        var checkoutResult = await checkout;
+        Assert.Equal(CheckoutOutcome.AwaitingPayment, checkoutResult.Outcome);
+        Assert.Contains(receiptResult, new[] { ManualDepositOutcome.Submitted, ManualDepositOutcome.LateReview });
+        await using var read = await f.Sessions.BeginAsync(Ct);
+        var old = await read.QuerySingleAsync(new DbStatement("SELECT o.payment_status,p.status,p.receipt_asset_ref,p.order_id FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id WHERE p.id=$1", DbValue.Uuid(original.Payment)), row => (OrderStatus: row.GetString(0), PaymentStatus: row.GetString(1), Receipt: row.GetString(2), Order: row.GetGuid(3)), Ct);
+        Assert.Equal(original.Order, old.Order);
+        Assert.Equal("protected:synthetic/race-receipt", old.Receipt);
+        Assert.Equal(receiptResult == ManualDepositOutcome.Submitted ? ("under_review", "observed") : ("cancelled", "review"), (old.OrderStatus, old.PaymentStatus));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
     }
 
     [Fact]
