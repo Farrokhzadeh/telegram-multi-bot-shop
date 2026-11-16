@@ -43,7 +43,7 @@
     <Compile Include="../Shared/SupplierFixture.cs" Link="Shared/SupplierFixture.cs" />
     <ProjectReference Include="../../src/Platform.Campaigns/Platform.Campaigns.csproj" />
     <Compile Include="../Shared/AdministrationPhaseQualification.cs" Link="Shared/AdministrationPhaseQualification.cs" />
-    <Compile Include="../../src/Platform.Api/*.cs" Exclude="../../src/Platform.Api/Program.cs" LinkBase="Api" />
+    <Compile Include="../../src/Platform.Api/*.cs" Exclude="../../src/Platform.Api/Program.cs;../../src/Platform.Api/SyntheticStaging.cs" LinkBase="Api" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <Compile Include="../Shared/ApiContractQualification.cs" Link="Shared/ApiContractQualification.cs" />
     <Compile Include="../Shared/BrandAdministrationQualification.cs" Link="Shared/BrandAdministrationQualification.cs" />
