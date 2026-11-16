@@ -174,6 +174,31 @@ public sealed class ExternalPaymentTests
         await NoPosting(f);
     }
 
+    [Fact]
+    public async Task SharedSigningKeyCannotSpoofOrReplayAnotherBrandsInvoice()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableAsync(Ct);
+        var first = await fixture.OrderAsync(user: 0, ct: Ct);
+        var second = await fixture.OrderAsync(user: 1, ct: Ct);
+        var archive = new Archive();
+        using (var spoof = PaymentNoticeFixture.Notice(first.Origin, quote: first.Due, provider: PaymentSettlementFixture.Provider(second.Payment)))
+            await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => Store(f).CaptureAsync(f.Context(0), spoof, archive.Save, Ct));
+        using var notice = PaymentNoticeFixture.Notice(first.Origin, quote: first.Due, provider: PaymentSettlementFixture.Provider(first.Payment));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).CaptureAsync(f.Context(1), notice, archive.Save, Ct));
+        Assert.Empty(archive.Items);
+        Assert.Equal(PaymentCaptureOutcome.Ready, (await Store(f).CaptureAsync(f.Context(0), notice, archive.Save, Ct)).Outcome);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).CaptureAsync(f.Context(1), notice, archive.Save, Ct));
+        Assert.Equal(PaymentCaptureOutcome.Replayed, (await Store(f).CaptureAsync(f.Context(0), notice, archive.Save, Ct)).Outcome);
+        Assert.Single(archive.Items);
+        await using var read = await f.Sessions.BeginAsync(Ct);
+        var other = await read.QuerySingleAsync(new DbStatement("SELECT status,ipn_payload_sha256 IS NULL,order_id FROM shop.payments WHERE id=$1", DbValue.Uuid(second.Payment)), row => (Status: row.GetString(0), NoEvidence: row.GetBoolean(1), Order: row.GetGuid(2)), Ct);
+        Assert.Equal(("awaiting", true, second.Order), other);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE status='confirming' AND amount_received=10", Ct));
+        await NoPosting(f);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
