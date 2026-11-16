@@ -62,6 +62,20 @@ public sealed class PaymentExpiryTests
         Assert.Equal(CheckoutOutcome.AwaitingPayment, firstRes.Outcome);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
+        Guid firstPayment;
+        await using (var read = await f.Sessions.BeginAsync(Ct)) firstPayment = await read.QuerySingleAsync(new DbStatement("SELECT id FROM shop.payments WHERE order_id=$1", DbValue.Uuid(firstReq.OrderId)), row => row.GetGuid(0), Ct);
+        if (firstMethod == CheckoutPayment.Crypto)
+        {
+            await using var bind = await f.Sessions.BeginAsync(Ct);
+            await new PaymentEvidenceStore(f.Sessions, f.Secrets).BindInvoiceAsync(bind, f.Context(0), CheckoutFixture.Actor(0), firstPayment, PaymentSettlementFixture.Provider(firstPayment), 10.4m, Ct);
+            await bind.CommitAsync(Ct);
+        }
+        async Task<(string Method, string Currency, decimal Due, string? Provider, byte[]? Card)> OriginalAsync()
+        {
+            await using var read = await f.Sessions.BeginAsync(Ct);
+            return await read.QuerySingleAsync(new DbStatement("SELECT payment_method,quote_currency,amount_due::text,provider_payment_ref,bank_destination_ciphertext FROM shop.payments WHERE id=$1 AND order_id=$2", DbValue.Uuid(firstPayment), DbValue.Uuid(firstReq.OrderId)), row => (row.GetString(0), row.GetString(1), ExactDecimal.Parse(row.GetString(2)), row.IsDBNull(3) ? null : row.GetString(3), row.IsDBNull(4) ? null : row.GetBinary(4)), Ct);
+        }
+        var original = await OriginalAsync();
         var secondReq = new CheckoutRequest(OrderIds.New(), f.Product, 1, secondMethod);
         var secondRes = await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), secondReq, (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
         Assert.Equal(CheckoutOutcome.AwaitingPayment, secondRes.Outcome);
@@ -69,6 +83,11 @@ public sealed class PaymentExpiryTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='cancelled' AND resolution_kind='replaced'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='released'", Ct));
+        var preserved = await OriginalAsync();
+        Assert.Equal((original.Method, original.Currency, original.Due, original.Provider), (preserved.Method, preserved.Currency, preserved.Due, preserved.Provider));
+        Assert.Equal(original.Card, preserved.Card);
+        if (firstMethod == CheckoutPayment.Crypto) Assert.Equal(PaymentSettlementFixture.Provider(firstPayment), preserved.Provider);
+        else Assert.NotNull(preserved.Card);
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }
     [Fact]
