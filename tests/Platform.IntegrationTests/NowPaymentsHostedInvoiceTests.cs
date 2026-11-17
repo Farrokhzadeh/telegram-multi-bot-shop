@@ -95,6 +95,21 @@ public sealed class NowPaymentsHostedInvoiceTests
         Assert.Equal(a, await hosted.IssueForOrderAsync(f.Context(0), CheckoutFixture.Actor(0), first, ct: Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => hosted.IssueForOrderAsync(f.Context(1), CheckoutFixture.Actor(1), first, ct: Ct));
         Assert.Equal(3, requests);
+        var messages = new PaymentInstructionStore(f.Sessions);
+        var initial = await messages.ClaimAsync(Guid.NewGuid(), Ct);
+        Assert.NotNull(initial);
+        var messenger = new PaymentMessageWorker(messages, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100));
+        bool dispatched = false;
+        await messenger.RunAsync(f.Context(0), initial, (message, _) =>
+        {
+            Assert.Equal(first, message.Order);
+            Assert.Equal(CheckoutFixture.Actor(0), message.ChatId);
+            Assert.Contains(a.CheckoutUrl.AbsoluteUri, message.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(b.CheckoutUrl.AbsoluteUri, message.Text, StringComparison.Ordinal);
+            dispatched = true;
+            return Task.FromResult(new PaymentMessageOutcome(PaymentMessageOutcomeKind.Sent, 501));
+        }, Ct);
+        Assert.True(dispatched);
         using var read = PaymentNoticeFixture.Verifier();
         VerifiedPaymentNotice MakeNotice(string invoice)
         {

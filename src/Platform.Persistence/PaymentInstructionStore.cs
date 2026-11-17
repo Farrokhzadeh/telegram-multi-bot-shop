@@ -6,7 +6,7 @@ public sealed partial class PaymentInstructionStore(DbSessionFactory sessions)
 {
     internal static async Task<Guid> EnqueueAsync(DbSession session, BrandContext context, Guid order, string cause, CancellationToken ct)
     {
-        if (cause is not ("created" or "expired" or "replaced" or "processing")) throw new ArgumentException("Invalid instruction cause.");
+        if (cause is not ("created" or "expired" or "replaced" or "processing" or "invoice")) throw new ArgumentException("Invalid instruction cause.");
         Guid id = await session.QuerySingleAsync(new DbStatement("""
             INSERT INTO shop.telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,target_message_id,dedupe_key,order_id)
             SELECT gen_random_uuid(),u.brand_id,'customer_dm',u.id,'order_status',CASE WHEN a.message IS NULL THEN 'send' ELSE 'edit' END,a.message,$1,o.id

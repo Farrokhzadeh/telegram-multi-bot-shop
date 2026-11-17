@@ -68,13 +68,14 @@ public sealed partial class PaymentInstructionStore
                 await OutboxStore.EnqueueAsync(session, JobIntent.Telegram(context.BrandId, redirected), redirected, DateTime.UtcNow, ct); await session.CommitAsync(ct); return null;
             }
         }
-        var current = await session.QuerySingleAsync(new DbStatement("SELECT payment_status,resolution_kind,payment_due_at,clock_timestamp() FROM shop.orders WHERE id=$1", DbValue.Uuid(data.Order)), r => (State: r.GetString(0), Resolution: r.IsDBNull(1) ? null : r.GetString(1), Due: r.GetUtc(2), Now: r.GetUtc(3)), ct);
+        var current = await session.QuerySingleAsync(new DbStatement("SELECT o.payment_status,o.resolution_kind,o.payment_due_at,clock_timestamp(),p.hosted_invoice_url FROM shop.orders o LEFT JOIN shop.payments p ON p.order_id=o.id AND p.idempotency_ref='order:'||o.id::text AND p.payment_method='crypto' WHERE o.id=$1", DbValue.Uuid(data.Order)), r => (State: r.GetString(0), Resolution: r.IsDBNull(1) ? null : r.GetString(1), Due: r.GetUtc(2), Now: r.GetUtc(3), Invoice: r.IsDBNull(4) ? null : r.GetString(4)), ct);
         if (current.State == "awaiting_payment" && current.Now > current.Due)
         { await DeferAsync(session, lease, id, 1, "expiry_pending", ct); await session.CommitAsync(ct); return null; }
         await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='cancelled',completed_at=clock_timestamp() WHERE telegram_delivery_id IN (SELECT id FROM shop.telegram_deliveries WHERE order_id=$1 AND purpose='order_status' AND id<>$2 AND status IN ('pending','retry')) AND status IN ('pending','retry')", DbValue.Uuid(data.Order), DbValue.Uuid(id)), ct);
         await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='cancelled',last_error_code='latest_projection' WHERE order_id=$1 AND purpose='order_status' AND id<>$2 AND status IN ('pending','retry')", DbValue.Uuid(data.Order), DbValue.Uuid(id)), ct);
         await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET eligibility_checked_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(id)), ct);
         string text = PaymentDeadlinePolicy.Text(data.Order, current.State, current.Resolution, current.Due, data.Language);
+        if (current.State == "awaiting_payment" && current.Invoice is string checkout) text += "\n" + checkout;
         await session.CommitAsync(ct); return new(id, data.Order, context.BotId, data.Chat, data.Target, text);
     }
     public async Task RecordAsync(BrandContext context, JobLease lease, PaymentMessageOutcome outcome, CancellationToken ct = default)

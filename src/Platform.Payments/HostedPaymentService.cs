@@ -14,6 +14,7 @@ public sealed class HostedPaymentService(PaymentEvidenceStore store, NowPayments
 
     private async Task<HostedPaymentInvoice> IssueAsync(BrandContext context, long actor, string origin, long? writerRevision, CancellationToken ct)
     {
+        NowPaymentsClient.RequireHostedCallback(callback);
         var intent = await store.ReserveHostedInvoiceAsync(context, actor, origin, writerRevision, ct);
         if (intent.CheckoutUrl is Uri checkout) return new(intent.Reference!, checkout);
         var issued = await provider.CreateHostedInvoiceAsync(intent.Origin, intent.UsdDue, intent.Network, callback, ct);

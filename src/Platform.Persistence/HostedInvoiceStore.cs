@@ -49,6 +49,8 @@ public sealed partial class PaymentEvidenceStore
                 DbValue.Text(reference), DbValue.Text(checkoutUrl.AbsoluteUri), DbValue.Uuid(payment)), ct);
         else if (data.HostedReference != reference || data.HostedUrl != checkoutUrl.AbsoluteUri) Reject(session);
         bool payable = !member.Blocked && !member.Banned && await IsPayableAsync(session, data, ct);
+        if (payable && data.HostedReference is null && data.Order is Guid payableOrder)
+            await PaymentInstructionStore.EnqueueAsync(session, context, payableOrder, "invoice", ct);
         await session.CommitAsync(ct);
         return payable;
     }

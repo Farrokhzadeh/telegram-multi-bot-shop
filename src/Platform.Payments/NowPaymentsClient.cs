@@ -30,9 +30,9 @@ public sealed class NowPaymentsClient : IDisposable
     {
         if (origin.Length < 7 || !Guid.TryParseExact(origin[(origin.IndexOf(':') + 1)..], "D", out Guid id) ||
             id == Guid.Empty || !(origin.StartsWith("order:", StringComparison.Ordinal) || origin.StartsWith("topup:", StringComparison.Ordinal)) ||
-            usdDue <= 0 || decimal.Round(usdDue, 2) != usdDue || !callback.IsAbsoluteUri ||
-            callback.Scheme != Uri.UriSchemeHttps || callback.IsLoopback || callback.UserInfo.Length != 0 || callback.Fragment.Length != 0)
+            usdDue <= 0 || decimal.Round(usdDue, 2) != usdDue)
             throw new PaymentNoticeRejectedException();
+        RequireHostedCallback(callback);
         string asset = network switch
         {
             CryptoAsset.UsdtTrc20 => "usdttrc20",
@@ -53,6 +53,12 @@ public sealed class NowPaymentsClient : IDisposable
         var request = new HttpRequestMessage(HttpMethod.Post, "https://api.nowpayments.io/v1/invoice") { Content = new ByteArrayContent(payload.ToArray()) };
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         return SendAsync(request, body => ReadInvoice(body, origin, usdDue, asset), ct);
+    }
+
+    internal static void RequireHostedCallback(Uri callback)
+    {
+        if (!callback.IsAbsoluteUri || callback.Scheme != Uri.UriSchemeHttps || callback.IsLoopback ||
+            callback.UserInfo.Length != 0 || callback.Fragment.Length != 0) throw new PaymentNoticeRejectedException();
     }
 
     private async Task<T> SendAsync<T>(HttpRequestMessage request, Func<ReadOnlyMemory<byte>, T> readBody, CancellationToken ct)
