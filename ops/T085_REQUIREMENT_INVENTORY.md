@@ -124,3 +124,19 @@ The authorized provider check issued three unpaid invoices in one merchant accou
 ## T085 scope decision — 2026-11-17
 
 The owner removed the hosted merchant-display inspection from T085. Earlier mentions of that inspection describe the previous task scope. No display result is claimed. The successful unpaid invoice run covers shared-account issuance. Synthetic signed callbacks and legacy finished callbacks cover binding logic and payload compatibility. Verification of a finished callback through the intended provider route and the final requirement-to-evidence review remain open.
+
+## Final T085 evidence review — 2026-11-17
+
+The owner closed the task scope around implementation, synthetic checks, and existing provider evidence. Hosted merchant display, live callback delivery to a deployed endpoint, and new bank-card duplication or holder-display inspection are outside this closeout. Each Iranian brand's choice of card remains with the operator. This record does not change staging or release authorization.
+
+| Requirement group | Reviewed evidence |
+| --- | --- |
+| Immutable payment method and original provider/destination, valid and invalid replacement, one awaiting order per membership with older protected obligations | PaymentExpiryTests method-switch, invalid-replacement and membership cases. Ordered receipt and crypto replacement cases and the concurrent distinct external-payment witness above. |
+| Due-date equality, evidence priority, restart, and original cancelled or expired message | Database-clock equality and expiry restart above. Durable encrypted receipt and process-kill recovery at `350a606`. Final bank receipt ordering cases preserve the original receipt and claim at the deadline or retain late staff review after expiry. Existing private payment message tests cover cancelled, expired, and stale edits. |
+| Held and redeemed limits, ten uses, immediate fully discounted local checkout | The terms and coupon regression and the immediate-redemption qualification verify cap, correction, exact debit or zero due, atomic redemption, and rollback. |
+| Fixed toman checkout, exact USD quote and ledger versus derived history | RegionalPricingTests covers independent wallet debit and crypto quote from fixed toman terms. The final historical import test checks the derived $12.50 order total against the exact original non-posting debit, including rejection of mismatched original evidence. Payment settlement tests compare the stored USD quote and token values independently. |
+| Standalone USD crypto top-up, exclusive origin, bank top-up and USD bank denial | ExternalPaymentTests and the origin and currency guards above. |
+| Hosted issuance, supported and rejected networks, shared-account spoof and replay, original wallet recovery | Three unpaid provider invoices across both supported networks. The 37 binding and callback cases and 13 delivery cases above, network rejection and original late-credit tests. Historical AccAbad callbacks support payload compatibility. |
+| Bank destination snapshot, compact schema, membership ownership, private customer and typed staff routing | Original encrypted bank destination survives rotation. The final schema check includes no redundant delivery chat ID or wallet/ledger currency column. Destination and relational guards cover separate staff routing, private customer routing, and foreign membership rejection. |
+
+The final build passed with zero warnings and errors on the fresh disposable schema. The focused closeout passed **21/21**, zero failures or skips. It covered both bank receipt/expiry orderings, historical exact-ledger and derived totals, fixed-toman totals, compact schema, and private customer/staff routing. The database and test actor stopped. T085 is complete in the owner-approved scope.

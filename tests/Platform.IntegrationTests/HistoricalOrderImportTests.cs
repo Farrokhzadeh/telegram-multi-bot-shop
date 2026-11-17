@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Platform.Core;
 using Platform.Migration;
 using Platform.Persistence;
 using Platform.Testing;
@@ -21,7 +22,7 @@ public sealed class HistoricalOrderImportTests
         await using var f = await CheckoutFixture.CreateAsync(users: 0, stock: 0, ct: ct);
         await MigrationQualification.EnableRoleAsync(f, ct);
         var wallet = MigrationQualification.Wallet() with { LegacyUser = "99001234" };
-        var order = Order(wallet); wallet = wallet with { History = wallet.History.Append(new LegacyHistoryRow(order.Source.Id, Guid.NewGuid(), -order.Source.Total, "USD", order.Source.CreatedAt, null)).ToArray() }; var manifest = Manifest(f, wallet, order);
+        var order = Order(wallet); Guid debit = Guid.NewGuid(); wallet = wallet with { History = wallet.History.Append(new LegacyHistoryRow(order.Source.Id, debit, -order.Source.Total, "USD", order.Source.CreatedAt, null)).ToArray() }; var manifest = Manifest(f, wallet, order);
         await new OpeningBalanceImportWorkflow(f.Sessions).ImportAsync(f.Context(0), manifest, wallet, ct);
         var importer = new HistoricalOrderImportWorkflow(f.Sessions);
         await importer.ImportAsync(f.Context(0), manifest, order, ct);
@@ -29,6 +30,15 @@ public sealed class HistoricalOrderImportTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE product_id IS NULL AND fulfillment_status='requires_admin' AND payment_status='paid' AND quantity=2 AND unit_price_usdt=6.25", ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.legacy_id_map WHERE source_key_kind='public_order_reference' AND legacy_id='ORD-ABC123ABC123'", ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE is_posting AND movement_kind='opening_balance'", ct));
+        await using (var amounts = await f.Sessions.BeginAsync(ct))
+        {
+            var actual = await amounts.QuerySingleAsync(new DbStatement("""
+                SELECT (o.quantity*o.unit_price_usdt)::text,w.signed_amount::text,w.is_posting
+                FROM shop.orders o JOIN shop.wallet_entries w ON w.user_id=o.user_id
+                WHERE w.id=$1 AND w.movement_kind='legacy_history'
+                """, DbValue.Uuid(debit)), row => (ExactDecimal.Parse(row.GetString(0)), ExactDecimal.Parse(row.GetString(1)), row.GetBoolean(2)), ct);
+            Assert.Equal((order.Source.Total, -order.Source.Total, false), actual);
+        }
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items", ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", ct));

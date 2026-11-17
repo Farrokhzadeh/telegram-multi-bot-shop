@@ -1,4 +1,5 @@
 using System.Text;
+using Npgsql;
 using Platform.Core;
 using Platform.Payments;
 using Platform.Persistence;
@@ -101,6 +102,63 @@ public sealed class ManualDepositTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE order_id='" + replacement.OrderId.ToString("D") + "' AND status='held'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReceiptAndExpiryPreserveOriginalEvidenceInBothOrderings(bool receiptFirst)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableBankAsync(Ct);
+        await using (var issue = await f.Sessions.BeginAsync(Ct))
+        {
+            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-RECEIPT-EXPIRY", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1), Guid.NewGuid(), Ct);
+            await issue.CommitAsync(Ct);
+        }
+        var order = await fixture.BankOrderAsync(Ct);
+        foreach (string sql in new[] {
+            "CREATE SCHEMA receipt_probe",
+            "CREATE TABLE receipt_probe.instant (utc timestamptz NOT NULL)",
+            "INSERT INTO receipt_probe.instant SELECT payment_due_at FROM shop.orders",
+            "CREATE FUNCTION receipt_probe.clock_timestamp() RETURNS timestamptz LANGUAGE sql VOLATILE AS 'SELECT utc FROM receipt_probe.instant'" })
+        {
+            await using var setup = f.Database.Data.CreateCommand(sql);
+            await setup.ExecuteNonQueryAsync(Ct);
+        }
+        var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN"))
+        {
+            Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database,
+            Options = "-c search_path=receipt_probe,pg_catalog,public"
+        };
+        await using var controlled = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        var sessions = new DbSessionFactory(controlled);
+        var manual = new ManualDepositService(sessions, new PaymentSettlementStore(sessions, f.Secrets, fixture.Catalog));
+        Task<ManualDepositOutcome> Submit() => manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), order.Payment, "protected:synthetic/expiry-receipt", Ct);
+        if (receiptFirst) Assert.Equal(ManualDepositOutcome.Submitted, await Submit());
+        await using (var advance = f.Database.Data.CreateCommand("UPDATE receipt_probe.instant SET utc=utc+INTERVAL '1 microsecond'"))
+            await advance.ExecuteNonQueryAsync(Ct);
+        JobLease? lease;
+        await using (var claim = await sessions.BeginAsync(Ct))
+        {
+            lease = await OutboxStore.ClaimAsync(claim, JobKind.ExpireOrderPayment, Guid.NewGuid(), TimeSpan.FromMinutes(1), Ct);
+            await claim.CommitAsync(Ct);
+        }
+        Assert.NotNull(lease);
+        PaymentExpiryOutcome result = await new PaymentExpiryService(sessions, f.Secrets).RunAsync(f.Context(0), lease, Ct);
+        Assert.Equal(receiptFirst ? PaymentExpiryOutcome.Protected : PaymentExpiryOutcome.Expired, result);
+        if (!receiptFirst) Assert.Equal(ManualDepositOutcome.LateReview, await Submit());
+        await using var read = await f.Sessions.BeginAsync(Ct);
+        var state = await read.QuerySingleAsync(new DbStatement("""
+            SELECT o.payment_status,p.status,p.receipt_asset_ref,c.status,p.first_payment_observed_at=o.payment_due_at
+            FROM shop.orders o JOIN shop.payments p ON p.order_id=o.id JOIN shop.discount_uses c ON c.order_id=o.id
+            WHERE o.id=$1 AND p.id=$2
+            """, DbValue.Uuid(order.Order), DbValue.Uuid(order.Payment)),
+            row => (row.GetString(0), row.GetString(1), row.GetString(2), row.GetString(3), row.GetBoolean(4)), Ct);
+        Assert.Equal(receiptFirst ? ("under_review", "observed", "protected:synthetic/expiry-receipt", "held", true) :
+            ("expired", "review", "protected:synthetic/expiry-receipt", "released", false), state);
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
     }
 
     private static async Task WaitForUserLocksAsync(CheckoutFixture f, int minimum)

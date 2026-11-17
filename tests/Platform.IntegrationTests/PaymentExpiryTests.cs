@@ -280,6 +280,7 @@ public sealed class PaymentExpiryTests
                 ((table_name IN ('orders','payments') AND column_name IN ('brand_id','telegram_id')) OR
                  (table_name IN ('wallets','wallet_entries') AND column_name='currency') OR
                  (table_name='orders' AND column_name='payable_usd') OR
+                 (table_name='telegram_deliveries' AND column_name IN ('chat_id','customer_chat_id','telegram_id')) OR
                  data_type IN ('json','jsonb','ARRAY','real','double precision'))
             """), r => r.GetInt64(0), Ct);
         Assert.Equal(0L, forbidden);
