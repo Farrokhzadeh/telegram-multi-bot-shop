@@ -120,3 +120,7 @@ The isolated build qualified **37/37** focused binding, archived-evidence, and s
 ## Shared-account unpaid invoice issuance and HTTPS checkout
 
 The authorized provider check issued three unpaid invoices in one merchant account with distinct invoice references. Two requested USDT TRC20 and one requested USDT BSC. All three returned the original USD quote, origin, and matching hosted invoice link. The trailing-slash URL redirected to HTTP in the server preview. The canonical HTTPS checkout path without the trailing slash returned HTTP 200 for all three. The client now emits that canonical path. The isolated checkout and payment-message suite passed **13/13**, zero failures and skips. No transfer or production callback change was made. The hosted merchant identity could not be verified from the initial page shell, and a finished provider callback remains unqualified.
+
+## T085 scope decision — 2026-11-17
+
+The owner removed the hosted merchant-display inspection from T085. Earlier mentions of that inspection describe the previous task scope. No display result is claimed. The successful unpaid invoice run covers shared-account issuance. Synthetic signed callbacks and legacy finished callbacks cover binding logic and payload compatibility. Verification of a finished callback through the intended provider route and the final requirement-to-evidence review remain open.
