@@ -25,7 +25,10 @@ public sealed record CutoverStageApi(Guid Run, string Address);
 public sealed record CutoverStockPlan(Guid Run, Guid Product, Guid Unit, string Credential);
 public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Cipher, string Plain);
 public sealed record CutoverStageResult(string Operation, string Outcome, long Orders, long Allocated, long Debits, bool Synthetic = true, bool ReleaseReady = false);
+public sealed record CutoverPilotResult(Guid Run, Guid Product, string Outcome, string? Title = null, int? Minimum = null, int? Maximum = null,
+    int? Quantity = null, decimal? Amount = null, string? Currency = null, Guid? Order = null);
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(CutoverPilotResult))]
 [JsonSerializable(typeof(CutoverStageState))]
 [JsonSerializable(typeof(CutoverStageApi))]
 [JsonSerializable(typeof(CutoverDeliveryAttempt))]
@@ -187,6 +190,12 @@ public static class CutoverStageRuntime
                 if (File.Exists(result)) continue;
                 byte[] bytes = ArchivePrivateFile.Read(request, 1, 128); string command;
                 try { command = new UTF8Encoding(false, true).GetString(bytes).Trim(); } finally { CryptographicOperations.ZeroMemory(bytes); }
+                if (command.StartsWith("pilot-", StringComparison.Ordinal))
+                {
+                    CutoverPilotResult pilot = await PilotAsync(id, command);
+                    Write(result, JsonSerializer.Serialize(pilot, CutoverStageJson.Default.CutoverPilotResult));
+                    continue;
+                }
                 if (command is not ("status" or "wallet" or "wallet-current" or "wallet-paused" or "telegram" or "payment" or "payment-worker" or "manifest-worker" or "delivery-worker" or "delivery-held" or "delivery-unknown" or "delivery-recover" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
                 string outcome = command.StartsWith("fake_", StringComparison.Ordinal) ? "simulated" : "ready";
                 if (command == "payment")
@@ -292,6 +301,62 @@ public static class CutoverStageRuntime
             }
             await Task.Delay(100, deadline.Token);
         }
+        async Task<CutoverPilotResult> PilotAsync(Guid id, string command)
+        {
+            const string quotePrefix = "pilot-quote:";
+            const string buyPrefix = "pilot-buy:";
+            long actor = CheckoutFixture.Actor(0);
+            var denied = new CutoverPilotResult(run, saved.Product, "Unavailable");
+            try
+            {
+                if (command == "pilot-catalog")
+                {
+                    var item = await catalog.GetForBrandAsync(context, saved.WriterRevision, actor, saved.Product, ct);
+                    return item is { CanPurchase: true, Wallet: true }
+                        ? new(run, saved.Product, "Available", item.Presentation.Title, item.Minimum, item.Maximum)
+                        : denied;
+                }
+                if (command.StartsWith(quotePrefix, StringComparison.Ordinal) &&
+                    int.TryParse(command.AsSpan(quotePrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int quantity) &&
+                    quantity is > 0 and <= 10000)
+                {
+                    var quote = await catalog.PrepareForBrandAsync(context, saved.WriterRevision, actor, new(saved.Product, quantity, CheckoutPayment.Wallet), ct);
+                    return quote.Quote.Terms.Payment == CheckoutPayment.Wallet
+                        ? new(run, saved.Product, "Quoted", quote.Quote.Terms.Product.Title, Quantity: quantity, Amount: quote.Quote.Payable.Amount,
+                            Currency: quote.Quote.Payable.Currency.ToString(), Order: id)
+                        : denied;
+                }
+                if (!command.StartsWith(buyPrefix, StringComparison.Ordinal) ||
+                    !Guid.TryParseExact(command.AsSpan(buyPrefix.Length), "N", out Guid order) || order == Guid.Empty || order == id)
+                    return denied;
+                string quotePath = Path.Combine(root, "results", order.ToString("N") + ".json");
+                if (!File.Exists(quotePath)) return denied;
+                var prior = JsonSerializer.Deserialize(ArchivePrivateFile.Read(quotePath, 1, 4096), CutoverStageJson.Default.CutoverPilotResult);
+                if (prior is not { Outcome: "Quoted", Quantity: int units, Amount: decimal expected } ||
+                    prior.Run != run || prior.Product != saved.Product || prior.Order != order || prior.Currency is null)
+                    return denied;
+                var store = new CheckoutStore(sessions, secrets);
+                CheckoutRequest request = new(order, saved.Product, units);
+                var replay = await store.ReplayForBrandAsync(context, saved.WriterRevision, actor, request, ct);
+                if (replay is not null) return prior with { Outcome = replay.Outcome.ToString(), Order = replay.OrderId };
+                var current = await catalog.PrepareForBrandAsync(context, saved.WriterRevision, actor, new(saved.Product, units, CheckoutPayment.Wallet), ct);
+                if (current.Quote.Terms.Payment != CheckoutPayment.Wallet || current.Quote.Payable.Amount != expected ||
+                    current.Quote.Payable.Currency.ToString() != prior.Currency)
+                    return denied with { Outcome = "QuoteChanged" };
+                BrandPolicySnapshot policy;
+                await using (var read = await sessions.BeginAsync(ct))
+                    policy = await BrandPolicyStore.ReadAsync(read, context, actor, ct);
+                var access = await BrandPolicy.CheckChannelsAsync(policy, actor, static (_, _, _) => Task.FromResult(ChannelMembership.Unknown), ct);
+                if (access is null) return denied;
+                var accepted = await new WalletCheckoutService(sessions, store, catalog).AcceptForBrandAsync(context, saved.WriterRevision, actor, request, current, access, ct);
+                return prior with { Outcome = accepted.Outcome.ToString(), Order = accepted.OrderId };
+            }
+            catch (Exception error) when (error is PricingRejectedException or DiscountQuantityException or UnauthorizedAccessException or JsonException)
+            {
+                return denied;
+            }
+        }
+
         async Task<CutoverStageResult> Result(string operation, string outcome)
         {
             await using var read = await sessions.BeginReadOnlyAsync(ct);

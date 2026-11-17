@@ -48,6 +48,14 @@ Reviewed main at `a4c4ae8`. The retained `shop-staging` API, bot and jobs contai
 
 Before enrolling participants, stage a reviewed candidate that exposes the customer catalog, quantity, quote and checkout in the test bot. Verify the operator smoke check and freeze the worksheet on the authorized isolated route with synthetic money and fulfillment inputs. The participant run and SC-008 result remain **NOT RUN**.
 
+### Wallet backend pilot — 2026-11-17
+
+An isolated synthetic stage actor now exposes catalog, wallet quote, and wallet confirmation through its private request files. `pilot-catalog` reads the staged product, `pilot-quote:<quantity>` records the displayed quote, and `pilot-buy:<quote-id>` accepts that quote through the brand-bound checkout service. Confirmation rechecks payable amount and currency. Replay returns the original order.
+
+The accabad-server build used 418 verified baseline inputs with two staging/test changes. Locked restore used `linux-x64`. Formatting and the final build passed with zero warnings or errors. All three focused process cases passed. The new case read the catalog, rejected a missing quote, displayed the two-unit price, accepted one order, restarted the actor and replayed the same confirmation. The final fixture contained one order, two allocations and one wallet debit. TRX SHA-256 `8941285c3b0a841ae6803be264f53dbcd270a9cfbd630f0fbcf8db78569f9b84`. The temporary test actor and isolated PostgreSQL were stopped after the run.
+
+The pilot currently uses operator request files. @testadbadbot still runs the legacy bot. The next step is to connect the staged checkout to an allowlisted private Telegram session and smoke-test that customer surface before enrolling participants. SC-008 remains **NOT RUN**.
+
 ## Observe one first attempt
 
 1. Give the participant only this neutral task in their assigned supported language: “Find the assigned product, choose the assigned quantity, review the price and finish checkout using the assigned payment route.” Use synthetic products, balances, stock and configured fake transports only in a separately authorized isolated setup.

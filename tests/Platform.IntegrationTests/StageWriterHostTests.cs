@@ -50,6 +50,53 @@ public sealed class StageWriterHostTests
         var result = JsonSerializer.Deserialize(File.ReadAllBytes(path), CutoverStageJson.Default.CutoverStageResult)!;
         Assert.True(result.Synthetic); Assert.False(result.ReleaseReady); return result;
     }
+    private static async Task<CutoverPilotResult> Pilot(string command, Process process)
+    {
+        Guid id = Guid.NewGuid();
+        Request(id, command);
+        string path = Path.Combine(Root, "results", id.ToString("N") + ".json");
+        await Until(() => Task.FromResult(File.Exists(path)), process);
+        return JsonSerializer.Deserialize(File.ReadAllBytes(path), CutoverStageJson.Default.CutoverPilotResult)!;
+    }
+
+    [Fact]
+    public async Task WalletPilotShowsCatalogAndQuoteThenAcceptsOnceAcrossRestart()
+    {
+        CutoverStageState? state = null;
+        Process? actor = null;
+        try
+        {
+            Prepare();
+            await CutoverStageRuntime.RunAsync(Root, "init", Ct);
+            state = State();
+            actor = Start();
+            await Ready(actor);
+            var item = await Pilot("pilot-catalog", actor);
+            Assert.Equal("Available", item.Outcome);
+            Assert.Equal(state.Product, item.Product);
+            Assert.Equal("Unavailable", (await Pilot("pilot-buy:" + Guid.NewGuid().ToString("N"), actor)).Outcome);
+            var quote = await Pilot("pilot-quote:2", actor);
+            Assert.Equal("Quoted", quote.Outcome);
+            Assert.Equal(20m, quote.Amount);
+            Assert.Equal("Usd", quote.Currency);
+            string confirm = "pilot-buy:" + Assert.IsType<Guid>(quote.Order).ToString("N");
+            Assert.Equal("Purchased", (await Pilot(confirm, actor)).Outcome);
+            await Stop(actor);
+            actor.Dispose();
+            actor = Start();
+            await Ready(actor);
+            var replay = await Pilot(confirm, actor);
+            Assert.Equal("Replayed", replay.Outcome);
+            Assert.Equal(quote.Order, replay.Order);
+            Guid status = Guid.NewGuid();
+            Request(status, "status");
+            var counts = await Result(status, actor);
+            Assert.Equal((1L, 2L, 1L), (counts.Orders, counts.Allocated, counts.Debits));
+            await Stop(actor);
+        }
+        finally { await Cleanup(state, null, actor); }
+    }
+
     private static async Task Stop(Process process)
     {
         Guid id = Guid.NewGuid(); Request(id, "stop"); await Result(id, process);
