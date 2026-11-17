@@ -217,6 +217,142 @@ public sealed class LocalDeliveryTests
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE release_authorized_at IS NOT NULL", Ct));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PaidSupplierShortfallRecoversOnlyTheVerifiedWholeOrder(bool file)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        var admin = await f.AdminAsync(Ct);
+        await using (var issue = await f.Sessions.BeginAsync(Ct))
+        {
+            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin,
+                new(Guid.NewGuid(), "PUBLIC-SUPPLIER-SHORTFALL", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await issue.CommitAsync(Ct);
+        }
+
+        long initialLedgerEntries = await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct);
+        Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
+        await Anchor(f, order, 307);
+        await Anchor(f, order, 307);
+        await using (var wrong = await f.Sessions.BeginAsync(Ct))
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => OrderDeliveryRouter.RecordAnchorAsync(wrong, Verified(f, 308), order, Ct));
+        var port = new SyntheticSupplier { Submit = _ => throw new TimeoutException() };
+        string credential = file ? new string('x', 900) : "public supplier credential";
+        byte[] wireContent = Encoding.UTF8.GetBytes(credential);
+        SupplierOutcome Goods(SupplierBinding binding, int count) => new(SupplierOutcomeKind.Completed, "public purchase",
+            binding.Currency, binding.Quantity, Enumerable.Range(0, count).Select(i => new SupplierItem("public item " + i,
+                SupplierItemDisposition.Customer, "code", wireContent)).ToArray(), "public protected response"u8);
+
+        var supplier = new SupplierRequestStore(f.Sessions, f.Secrets);
+        JobLease submit = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
+        var binding = await supplier.ReadAsync(f.Context(0), submit, Ct);
+        await new SupplierFulfillmentWorker(supplier, port, port).RunAsync(f.Context(0), submit, Ct);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='unknown'", Ct));
+
+        port.Lookup = b => Goods(b, 3);
+        await SupplierRecoveryTests.Due(f);
+        JobLease lookup = await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new SupplierRequestStore(f.Sessions, f.Secrets).ReadAsync(f.Context(1), lookup, Ct));
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), lookup, Ct);
+        foreach (JobKind kind in new[] { JobKind.ReconcileSupplier, JobKind.ExportSupplier, JobKind.ReconcileSupplier, JobKind.ExportSupplier })
+        {
+            await SupplierPartialQualification.ScheduleAsync(f, binding.RequestId, kind, Ct);
+            await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, kind, Ct), Ct);
+        }
+
+        Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE kind='supplier' AND status='acquired' AND delivered_content_key_id IS NOT NULL AND delivered_content <> convert_to('" + credential + "','UTF8') AND manifest_generation IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=5 AND status='partial_pending_admin'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE quantity=5 AND payment_status='paid' AND fulfillment_status='requires_admin' AND review_code='partial_acquisition' AND manifest_asset_ref IS NULL AND release_authorized_at IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'", Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).AuthorizeSendRecoveryAsync(f.Context(0), admin, order, Guid.NewGuid(), Ct));
+
+        port.Lookup = b => Goods(b, 5);
+        await SupplierPartialQualification.ScheduleAsync(f, binding.RequestId, JobKind.ExportSupplier, Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ExportSupplier, Ct), Ct);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
+        long revision = await SupplierPartialQualification.RevisionAsync(f, order, Ct);
+        Guid approval = Guid.NewGuid();
+        await supplier.ApproveCompleteAsync(admin, f.Context(0), order, binding.RequestId, revision, approval, "Public supplier shortfall review", Ct);
+        await supplier.ApproveCompleteAsync(admin, f.Context(0), order, binding.RequestId, revision, approval, "Public supplier shortfall review", Ct);
+        await Store(f).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct);
+        byte[] manifest = await Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct);
+        using var manifestStream = new MemoryStream(manifest);
+        using var reader = new BinaryReader(manifestStream);
+        Assert.Equal(1, reader.ReadInt32());
+        Assert.Equal(5, reader.ReadInt32());
+        for (int unit = 1; unit <= 5; unit++)
+        {
+            Assert.Equal(unit, reader.ReadInt32());
+            Assert.Equal("code", reader.ReadString());
+            Assert.Equal(credential, Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32())));
+        }
+        Assert.Equal(manifestStream.Length, manifestStream.Position);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(1), CheckoutFixture.Actor(0), order, Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(3), order, Ct));
+
+        if (file)
+        {
+            Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials'", Ct));
+            Guid recovery = Guid.NewGuid();
+            await Store(f).AuthorizeSendRecoveryAsync(f.Context(0), admin, order, recovery, Ct);
+            JobLease send = await Claim(f, JobKind.SendTelegram);
+            await new LocalDeliveryWorker(Store(f)).RunAsync(f.Context(0), send, (dispatch, _) =>
+            {
+                Assert.True(dispatch.IsFile);
+                Assert.True(dispatch.Content.Span.SequenceEqual(manifest));
+                return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Unknown));
+            }, Ct);
+            await using (var noRetry = await f.Sessions.BeginAsync(Ct))
+                Assert.Null(await OutboxStore.ClaimAsync(noRetry, JobKind.SendTelegram, Guid.NewGuid(), TimeSpan.FromSeconds(30), Ct));
+            await Store(f).RecordOutcomeAsync(f.Context(0), send, new(DeliveryOutcomeKind.Succeeded, 308), Ct);
+        }
+        else
+        {
+            JobLease edit = await Claim(f, JobKind.SendTelegram);
+            Guid delivery;
+            Guid generation;
+            byte[] content;
+            using (var dispatch = await Store(f).BeginAsync(f.Context(0), edit, Ct))
+            {
+                Assert.NotNull(dispatch);
+                Assert.Equal(307, dispatch.TargetMessageId);
+                delivery = dispatch.Id;
+                generation = dispatch.Generation;
+                content = dispatch.Content.ToArray();
+            }
+            await Expire(f, edit);
+            await Store(f).RecoverExpiredAsync(f.Context(0), delivery, Ct);
+            await new LocalDeliveryWorker(Store(f)).RunAsync(f.Context(0), await Claim(f, JobKind.SendTelegram), (dispatch, _) =>
+            {
+                Assert.Equal(generation, dispatch.Generation);
+                Assert.Equal(307, dispatch.TargetMessageId);
+                Assert.Equal(CheckoutFixture.Actor(0), dispatch.ChatId);
+                Assert.Equal(1001, dispatch.BotId);
+                Assert.True(dispatch.Content.Span.SequenceEqual(content));
+                return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 307));
+            }, Ct);
+        }
+
+        Assert.Equal(1, port.Submits);
+        Assert.All(port.Intents, intent => Assert.Equal(binding.Intent, intent));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE operation='submit'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-25", Ct));
+        Assert.Equal(initialLedgerEntries + 1, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='manual_fulfillment'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=5", Ct));
+        Assert.Equal(5L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
+        Assert.Equal(5L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='released'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(DISTINCT manifest_generation) FROM shop.fulfillments", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='order_credentials' AND status='succeeded'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE fulfillment_status='completed'", Ct));
+    }
+
     [Fact]
     public async Task OversizeManifestRequiresExplicitFileRecoveryInsteadOfAnAutomaticEditOrSend()
     {

@@ -106,7 +106,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             bool identity = SupplierRules.Identity(binding, result) is null;
             string? prior = attempt.ParentSubmit is Guid original ? await PurchaseReferenceAsync(session, original, ct) : null;
             if (prior is not null && result.PurchaseReference is not null && prior != result.PurchaseReference) { identity = false; review = "identity_mismatch"; }
-            if (!archived) review = "credential_recovery";
+            if (!archived && (result.Kind != SupplierOutcomeKind.Unknown || result.Evidence.Length > 0 || result.Items.Count > 0)) review = "credential_recovery";
             if (identity && archived && result.Items.Count > 0)
             {
                 if (await ExistingItemsMatchAsync(session, context, binding, result, ct)) await CaptureAsync(session, context, binding, result, ct);
@@ -198,7 +198,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     private async Task ReviewAsync(DbSession session, BrandContext context, SupplierBinding binding, string status, string review, Guid generation, string? evidence, CancellationToken ct)
     {
         await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status=$1,review_code=$2,evidence_ref=COALESCE($3,evidence_ref),updated_at=clock_timestamp() WHERE id=$4", DbValue.Text(status), DbValue.Text(review), AdminCommand.Text(evidence), DbValue.Uuid(binding.RequestId)), ct);
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='requires_admin',review_code=COALESCE(review_code,$1),revision=revision+1,updated_at=clock_timestamp() WHERE id=$2", DbValue.Text(review), DbValue.Uuid(binding.OrderId)), ct);
+        await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='requires_admin',review_code=CASE WHEN review_code='provider_unknown' AND $1='partial_acquisition' THEN $1 ELSE COALESCE(review_code,$1) END,revision=revision+1,updated_at=clock_timestamp() WHERE id=$2", DbValue.Text(review), DbValue.Uuid(binding.OrderId)), ct);
         await NoticeAsync(session, context, binding, generation, false, ct);
     }
     private async Task NoticeAsync(DbSession session, BrandContext context, SupplierBinding binding, Guid generation, bool bonus, CancellationToken ct)
