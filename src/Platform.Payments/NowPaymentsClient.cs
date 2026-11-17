@@ -109,7 +109,7 @@ public sealed class NowPaymentsClient : IDisposable
                 url.Query.TrimStart('?').Split('&').Count(part => part.StartsWith("iid=", StringComparison.Ordinal)) != 1 ||
                 !url.Query.TrimStart('?').Split('&').Contains("iid=" + id, StringComparer.Ordinal))
                 throw new PaymentNoticeRejectedException();
-            return new(id, url);
+            return new(id, new UriBuilder(url) { Path = "/payment" }.Uri);
         }
         catch (Exception error) when (error is JsonException or KeyNotFoundException or InvalidOperationException or FormatException or OverflowException)
         {

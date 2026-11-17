@@ -39,7 +39,7 @@ public sealed class NowPaymentsHostedInvoiceTests
         }));
         var result = await client.CreateHostedInvoiceAsync(Origin, 12.35m, network, Callback, Ct);
         Assert.Equal("1234", result.ProviderInvoice);
-        Assert.Equal("https://nowpayments.io/payment/?iid=1234", result.CheckoutUrl.AbsoluteUri);
+        Assert.Equal("https://nowpayments.io/payment?iid=1234", result.CheckoutUrl.AbsoluteUri);
         Assert.Equal(1, requests);
     }
 
