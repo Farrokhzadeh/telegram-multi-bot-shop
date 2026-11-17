@@ -1,5 +1,13 @@
 # T093 canonical supplier-source qualification
 
+## Owner-approved closeout — 2026-11-17
+
+**T093 is complete for the code and retained accabad-server evidence scope.** The current source-selection store, supplier-source schema and request bindings enforce one shared enabled selection for the same product, nullable variant uniqueness and immutable accepted source/account snapshots. The retained accabad-server receipts match the published hashes for 12 baseline, 36 selection/account/race and 16 schema cases. The source and independent review checker hashes and exit codes also match. The supplier-source table definitions and selection guards match the qualified checkpoint. The receipts record the November 15 runs.
+
+A retained November 15 Akunding receipt records two successful GETs with an owner-provided credential. It includes an account identity and stock, availability and a valid native price field for the exact numeric product in the frozen mapping. Akunding's price field is denominated in USDT. The retained copied-credential attempt is tied to the frozen source receipt and received HTTP 401 from the account endpoint. The successful receipt establishes a point-in-time observation under the owner-provided credential. Current provider readiness, usable runtime credentials and explicit exact-product eligibility require their separate evidence before activation. No provider request or new test run was needed for this closeout.
+
+## November 15 checkpoint
+
 **Offline checkpoint — 2026-11-15. T093 remains unchecked; 84/96 complete, 12 unchecked.** The canonical implementation and copied-source verification pass their stated scope. Current real provider/account/cost/eligibility evidence is still missing.
 
 [Generated source-bound review](evidence/t093-offline-source-qualification-2026-11-15.json) · [Selection implementation and historical evidence](SUPPLIER_SOURCE_SELECTION_QUALIFICATION.md) · [Canonical schema qualification](T090_QUALIFICATION.md)
@@ -52,6 +60,6 @@ Private checkpoint: `/var/lib/teleg-cli/t093-source-20261115/`. Checkers: `sourc
 
 The concrete next operation is saved privately as `proposed-provider-read.private.json`, initially unauthorized. It binds the exact copied connection/mapping and proposes at most three authenticated GETs, 15 seconds each, a 120-second total deadline, bounded responses, no retry/redirect, and only the existing account identity and exact mapped product. Official endpoint documentation must be verified first; missing keys, undocumented endpoints, ambiguous identity/currency or non-ready eligibility stop the check. No purchase, order export, credential rotation, mapping activation, deployment or production database/bot access is included.
 
-AGENTS.md retains separate authorization for real supplier calls, including read-only calls. Request that authorization only after this offline checkpoint is published. A successful read would qualify only its observed account/product scope; no remote idempotency, stable item recovery, purchase or release capability is inferred. Owner-approved option A remains unchanged: a fresh exact-source same-currency check within the inclusive 10% allowance may permit uncapped purchase under its separate gates; no false remotely enforced cap is asserted. Other providers retain their own gates.
+AGENTS.md retains separate authorization for real supplier calls, including read-only calls. The scoped closeout above uses retained evidence. A successful read would qualify only its observed account/product scope; no remote idempotency, stable item recovery, purchase or release capability is inferred. Owner-approved option A remains unchanged: a fresh exact-source same-currency check within the inclusive 10% allowance may permit uncapped purchase under its separate gates; no false remotely enforced cap is asserted. Other providers retain their own gates.
 
 Normal hosts fail closed. No CI, live provider operation, fresh Native AOT publication, financial settlement or production release is claimed. Reviewer checklist remains read-only and unchanged.
