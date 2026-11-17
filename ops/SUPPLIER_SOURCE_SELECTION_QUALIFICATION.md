@@ -1,5 +1,13 @@
 # T094 supplier source selection qualification
 
+## Owner-approved closeout — 2026-11-17
+
+**T094 is complete for the code and retained accabad-server evidence scope.** The current selection, catalog and credential-file stores retain the audited source selection and revision checks, exact-source refresh before checkout, and one protected account per provider. Accepted orders keep their original source, account and cost. The reviewed cases cover wallet, bank, crypto and zero-due acceptance, payment/source races and replay, unavailable or ineligible sources, the full-local exemption, and same-account credential-file rotation with a different account blocked before transport.
+
+The retained accabad-server receipts match the November 15 qualification. The unit receipt contains 12 baseline and 20 credential-file cases. The checkout, eligibility and catalog receipt contains 42 cases. The reused T093 and T090 receipts contain 36 selection/account/race and 16 schema cases. All passed. The review checker and prior frozen-source receipt hashes match. The later [payment and coupon checks](T085_IMMEDIATE_REDEMPTION_2026-11-16.md#payment-and-supplier-cross-check) and [paid supplier shortfall checks](SUPPLIER_QUALIFICATION.md#t092-paid-supplier-shortfall-recovery--2026-11-17) cover the later settlement and supplier-recovery changes. The as-run flags in the November 15 receipt record the earlier checkpoint.
+
+[The T093 retained Akunding evidence](T093_QUALIFICATION.md#owner-approved-closeout--2026-11-17) records availability and USDT price for the exact mapped product using the owner's credential. The copied legacy credential received HTTP 401. Current credentials, explicit exact-product eligibility, and deployed credential custody and rotation still require operational qualification before activation. This closeout reused tests and made no provider call or activation.
+
 ## Current T094 checkpoint — 2026-11-15
 
 **T094 remains unchecked; 84/96 complete, 12 unchecked.** This is final offline acceptance-matrix verification, not real-provider qualification. [Generated review](evidence/t094-offline-selection-qualification-2026-11-15.json) · [T093 actual-source findings and remaining gate](T093_QUALIFICATION.md).
@@ -26,7 +34,7 @@ All 274 preexisting container configurations/images/mounts/states and original s
 
 Private checkpoint: `/var/lib/teleg-cli/t094-selection-20261115/`; checkers `unit.py`, `run-tests.py`, `review.py`; ledger `unified-progress-20261115.md`. Source provenance and the proposed exact-account/product read plan remain under `/var/lib/teleg-cli/t093-source-20261115/`.
 
-**Remaining closure gate:** authoritative current account/product/native-cost/currency/eligibility evidence under T093/E2 and the applicable protected account/runtime proof. The earlier explicit T094 provider/runtime gate is retained. Passing generated credentials and synthetic transport responses cannot close it. AGENTS.md requires separate authorization for real supplier calls. The prepared plan permits only bounded read-only existing-account/exact-product observations after official endpoint verification; no purchase, rotation, mapping enablement, deployment or production bot/database access is included. Successful reads qualify only what was observed; further missing evidence remains blocked. Other providers retain separate gates.
+**Operational activation gate:** current account/product/native-cost/currency/eligibility evidence under E2 and the applicable protected account/runtime proof. The scoped engineering closeout is recorded above. Generated credentials and synthetic transport responses qualify the engineering paths. AGENTS.md requires separate authorization for real supplier calls. The prepared plan permits only bounded read-only existing-account/exact-product observations after official endpoint verification; no purchase, rotation, mapping enablement, deployment or production bot/database access is included. Successful reads qualify only what was observed; further missing evidence remains blocked. Other providers retain separate gates.
 
 Normal hosts remain fail closed. No CI or real supplier/payment/Telegram call, financial settlement, production operation or release is claimed. The reviewer checklist and constitution remain unchanged. Earlier dated evidence below retains its original scope and status.
 
