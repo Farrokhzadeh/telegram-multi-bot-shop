@@ -352,6 +352,9 @@ id uuid PRIMARY KEY,
     amount_received finite_numeric CHECK (amount_received >= 0),
     provider_code short_text,
     provider_payment_ref short_text,
+    hosted_invoice_started_at timestamptz,
+    hosted_invoice_ref short_text UNIQUE CHECK (hosted_invoice_ref ~ '^[0-9]{1,64}$'),
+    hosted_invoice_url asset_ref,
     idempotency_ref short_text NOT NULL UNIQUE,
     network_asset text CHECK (network_asset IN ('USDTTRC20','USDTBSC')),
     expected_network_amount finite_numeric CHECK (expected_network_amount > 0),
@@ -385,6 +388,10 @@ id uuid PRIMARY KEY,
     CHECK (pending_evidence_ciphertext IS NULL OR (evidence_asset_ref IS NULL AND order_id IS NOT NULL AND ipn_key_id IS NOT NULL AND first_payment_observed_at IS NOT NULL AND status IN ('confirming','review'))),
     CHECK (num_nonnulls(review_admin_id,reviewed_at,review_reason) IN (0,3)),
     CHECK (provider_payment_ref IS NULL OR provider_code IS NOT NULL),
+    CHECK (isfinite(hosted_invoice_started_at)),
+    CHECK (num_nonnulls(hosted_invoice_ref,hosted_invoice_url) IN (0,2)),
+    CHECK (hosted_invoice_started_at IS NULL OR (payment_method='crypto' AND provider_code IS NOT DISTINCT FROM 'nowpayments')),
+    CHECK (hosted_invoice_ref IS NULL OR hosted_invoice_started_at IS NOT NULL),
     CHECK ((payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination_ciphertext IS NULL) OR
            (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination_ciphertext IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)),
     CHECK (topup_user_id IS NULL OR payment_method='crypto'),
@@ -1135,6 +1142,12 @@ BEGIN
             NEW.network_asset,NEW.bank_destination_ciphertext,NEW.bank_destination_key_id,NEW.legacy_kind,NEW.created_at)
             IS NOT DISTINCT FROM ROW(OLD.id,OLD.order_id,OLD.topup_user_id,OLD.payment_method,OLD.quote_currency,OLD.amount_due,OLD.idempotency_ref,
             OLD.network_asset,OLD.bank_destination_ciphertext,OLD.bank_destination_key_id,OLD.legacy_kind,OLD.created_at),'payment_quote_origin_immutable');
+        IF OLD.hosted_invoice_started_at IS NOT NULL THEN
+            PERFORM require_true(NEW.hosted_invoice_started_at IS NOT DISTINCT FROM OLD.hosted_invoice_started_at,'hosted_invoice_attempt_immutable');
+        END IF;
+        IF OLD.hosted_invoice_ref IS NOT NULL THEN
+            PERFORM require_true(ROW(NEW.hosted_invoice_ref,NEW.hosted_invoice_url) IS NOT DISTINCT FROM ROW(OLD.hosted_invoice_ref,OLD.hosted_invoice_url),'hosted_invoice_identity_immutable');
+        END IF;
         IF OLD.provider_payment_ref IS NOT NULL THEN
             PERFORM require_true(ROW(NEW.provider_code,NEW.provider_payment_ref,NEW.expected_network_amount) IS NOT DISTINCT FROM ROW(OLD.provider_code,OLD.provider_payment_ref,OLD.expected_network_amount),'provider_identity_immutable');
         END IF;

@@ -12,15 +12,16 @@ public sealed class PaymentNoticeRejectedException : Exception
 public sealed class VerifiedPaymentNotice : IDisposable
 {
     internal VerifiedPaymentNotice(string key, string payment, string origin, string status, string currency, decimal quote, string asset,
-        decimal expected, decimal received, long? confirmations, byte[] body, byte[] rawHash, byte[] canonicalHash, byte[] signature)
+        decimal expected, decimal received, long? confirmations, byte[] body, byte[] rawHash, byte[] canonicalHash, byte[] signature, string? providerInvoice)
     {
-        KeyId = key; ProviderPayment = payment; Origin = origin; Status = status; QuoteCurrency = currency; QuoteAmount = quote; Asset = asset;
+        KeyId = key; ProviderPayment = payment; ProviderInvoice = providerInvoice; Origin = origin; Status = status; QuoteCurrency = currency; QuoteAmount = quote; Asset = asset;
         ExpectedTokens = expected; ReceivedTokens = received; Confirmations = confirmations; this.body = body; RawHash = rawHash; CanonicalHash = canonicalHash; Signature = signature;
     }
     private readonly byte[] body;
     private bool disposed;
     public string KeyId { get; }
     public string ProviderPayment { get; }
+    public string? ProviderInvoice { get; }
     public string Origin { get; }
     public string Status { get; }
     public string QuoteCurrency { get; }
@@ -66,6 +67,7 @@ public sealed class NowPaymentsIpnVerifier : IDisposable
                 finally { CryptographicOperations.ZeroMemory(expected); }
                 var root = document.RootElement;
                 string payment = Identifier(root.GetProperty("payment_id"));
+                string? invoice = root.TryGetProperty("invoice_id", out var invoiceId) && invoiceId.ValueKind != JsonValueKind.Null ? Identifier(invoiceId) : null;
                 string origin = Label(root.GetProperty("order_id"), 160);
                 string status = Label(root.GetProperty("payment_status"), 64);
                 string currency = Label(root.GetProperty("price_currency"), 16);
@@ -79,7 +81,7 @@ public sealed class NowPaymentsIpnVerifier : IDisposable
                     confirmations = n;
                 }
                 return new(keyId, payment, origin, status, currency, quote, asset, tokens, received, confirmations,
-                    body.ToArray(), SHA256.HashData(body.Span), SHA256.HashData(canonical), supplied.ToArray());
+                    body.ToArray(), SHA256.HashData(body.Span), SHA256.HashData(canonical), supplied.ToArray(), invoice);
             }
             finally { CryptographicOperations.ZeroMemory(canonical); CryptographicOperations.ZeroMemory(supplied); }
         }
