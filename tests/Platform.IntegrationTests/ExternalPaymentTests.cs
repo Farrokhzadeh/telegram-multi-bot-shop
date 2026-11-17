@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Npgsql;
 using Platform.Core;
+using Platform.Payments;
 using Platform.Persistence;
 using Platform.Security;
 using Platform.Telegram;
@@ -254,6 +255,61 @@ public sealed class ExternalPaymentTests
         Assert.Equal(evidenceFirst ? 1L : 0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExpiryDuringCryptoArchivePreservesOriginalFunds(bool archiveFirst)
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableAsync(Ct);
+        var order = await PaymentDeadlineQualification.SeedAsync(f, 0, true, ct: Ct, age: TimeSpan.FromMinutes(30) - TimeSpan.FromSeconds(12));
+        var archive = new Archive();
+        var offered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var notice = PaymentNoticeFixture.Notice(order.Origin, quote: order.Due, provider: PaymentSettlementFixture.Provider(order.Payment));
+        var capture = Store(f).CaptureAsync(f.Context(0), notice, async (item, ct) =>
+        {
+            offered.SetResult();
+            await release.Task.WaitAsync(TimeSpan.FromSeconds(25), ct);
+            return await archive.Save(item, ct);
+        }, Ct);
+        try
+        {
+            await offered.Task.WaitAsync(TimeSpan.FromSeconds(8), Ct);
+            if (archiveFirst)
+            {
+                release.SetResult();
+                Assert.Equal(PaymentCaptureOutcome.Ready, (await capture).Outcome);
+            }
+            JobLease? job = null;
+            var limit = DateTime.UtcNow.AddSeconds(16);
+            while (job is null && DateTime.UtcNow < limit)
+            {
+                await using var claim = await f.Sessions.BeginAsync(Ct);
+                job = await OutboxStore.ClaimAsync(claim, JobKind.ExpireOrderPayment, Guid.NewGuid(), TimeSpan.FromMinutes(1), Ct);
+                await claim.CommitAsync(Ct);
+                if (job is null) await Task.Delay(100, Ct);
+            }
+            Assert.NotNull(job);
+            var expired = await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(0), job, Ct);
+            Assert.Equal(PaymentExpiryOutcome.Protected, expired);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await capture;
+        }
+        Assert.Equal(PaymentCaptureOutcome.Ready, (await capture).Outcome);
+        Assert.Single(archive.Items);
+        await using (var read = await f.Sessions.BeginAsync(Ct))
+            Assert.True(await read.QuerySingleAsync(new DbStatement("SELECT p.order_id=o.id AND p.first_payment_observed_at<=o.payment_due_at FROM shop.orders o JOIN shop.payments p ON p.order_id=o.id WHERE o.id=$1 AND p.id=$2", DbValue.Uuid(order.Order), DbValue.Uuid(order.Payment)), row => row.GetBoolean(0), Ct));
+        var result = await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct);
+        Assert.Equal(ExternalSettlementRoute.LocalGoods, result.Route);
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='late_crypto_credit' AND signed_amount=10", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
+    }
+
     private static async Task WaitForUserLocksAsync(CheckoutFixture f, int minimum)
     {
         DateTime limit = DateTime.UtcNow.AddSeconds(20);
@@ -267,17 +323,39 @@ public sealed class ExternalPaymentTests
     }
 
     [Fact]
-    public async Task ArchiveFailureLeavesOriginalPaymentAndClockUntouchedAndCanBeRetried()
+    public async Task ArchiveFailureProtectsTheOrderAndAReplacementWorkerRecoversEvidence()
     {
-        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
-        await Enable(f);
-        var origin = await Order(f);
-        using var notice = PaymentNoticeFixture.Notice(origin.Origin);
-        await Assert.ThrowsAsync<IOException>(() => Store(f).CaptureAsync(f.Context(0), notice, (_, _) => throw new IOException("private archive detail"), Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE first_payment_observed_at IS NULL AND ipn_signature IS NULL AND status='awaiting'", Ct));
-        var archive = new Archive();
-        Assert.Equal(PaymentCaptureOutcome.Ready, (await Store(f).CaptureAsync(f.Context(0), notice, archive.Save, Ct)).Outcome);
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
+        var fixture = new PaymentSettlementFixture(f);
+        await fixture.EnableAsync(Ct);
+        var original = await fixture.OrderAsync(ct: Ct);
+        using (var notice = PaymentNoticeFixture.Notice(original.Origin, quote: original.Due, provider: PaymentSettlementFixture.Provider(original.Payment)))
+            await Assert.ThrowsAsync<IOException>(() => Store(f).CaptureAsync(f.Context(0), notice, (_, _) => throw new IOException(), Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE first_payment_observed_at IS NOT NULL AND pending_evidence_ciphertext IS NOT NULL AND evidence_asset_ref IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='confirmation_pending'", Ct));
         await NoPosting(f);
+        var replacement = await fixture.OrderAsync(ct: Ct);
+        Assert.NotEqual(original.Order, replacement.Order);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='confirmation_pending'", Ct));
+        var pending = await fixture.Store.SettleAsync(f.Context(0), original.Payment, (_, _) => throw new InvalidOperationException("Archived proof is required."), Ct);
+        Assert.Equal(PaymentSettlementOutcome.Pending, pending.Outcome);
+        var archive = new Archive();
+        var recovered = new PaymentEvidenceStore(new(f.Database.Data), f.Secrets);
+        await recovered.ResumeArchiveAsync(f.Context(1), original.Payment, (_, _) => throw new InvalidOperationException("Foreign evidence must not be archived."), ct: Ct);
+        JobLease? lease;
+        await using (var claim = await f.Sessions.BeginAsync(Ct))
+        {
+            lease = await OutboxStore.ClaimAsync(claim, JobKind.VerifyPayment, Guid.NewGuid(), TimeSpan.FromMinutes(1), Ct);
+            await claim.CommitAsync(Ct);
+        }
+        Assert.NotNull(lease);
+        using var provider = PaymentSettlementFixture.Client(_ => PaymentNoticeFixture.Body(original.Origin, quote: original.Due, provider: PaymentSettlementFixture.Provider(original.Payment)));
+        var worker = new PaymentVerificationWorker(f.Sessions, fixture.Store, provider,
+            (context, payment, revision, ct) => recovered.ResumeArchiveAsync(context, payment, archive.Save, revision, ct));
+        Assert.Equal(ExternalSettlementRoute.LocalGoods, (await worker.RunAsync(f.Context(0), lease, Ct))?.Route);
+        await recovered.ResumeArchiveAsync(f.Context(0), original.Payment, archive.Save, ct: Ct);
+        Assert.Single(archive.Items);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE evidence_asset_ref IS NOT NULL AND pending_evidence_ciphertext IS NULL", Ct));
     }
 
     [Fact]

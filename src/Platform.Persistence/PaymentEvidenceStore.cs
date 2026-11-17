@@ -104,8 +104,25 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
         }
         if (before.Method != "crypto" || before.Currency != "USD" || before.ProviderCode != "nowpayments" || before.Provider != notice.ProviderPayment || before.Expected is null) throw new PaymentNoticeRejectedException();
         byte[] encrypted = new BrandCipher(secrets).Encrypt(context, "payments", before.Id, "ipn_evidence", notice.Body.Span);
-        string asset = await archive(new(before.Id, context.BrandId, Convert.ToHexStringLower(notice.RawHash), secrets.CurrentBrandKeyId(context), encrypted), ct);
-        if (!asset.StartsWith("protected:", StringComparison.Ordinal) || asset.Length is < 12 or > 1024 || asset.Any(char.IsControl)) throw new PaymentNoticeRejectedException();
+        var proof = new ProtectedPaymentEvidence(before.Id, context.BrandId, Convert.ToHexStringLower(notice.RawHash), secrets.CurrentBrandKeyId(context), encrypted);
+        if (before.ArchivePending)
+            await ResumeArchiveAsync(context, before.Id, archive, writerRevision, ct);
+        if (before.OrderStatus == "awaiting_payment" && before.Deadline >= observedAt && Qualifies(before, notice))
+        {
+            var staged = await PersistAsync(context, notice, before, observedAt, null, proof, writerRevision, ct);
+            if (staged is not null)
+            {
+                await ResumeArchiveAsync(context, before.Id, archive, writerRevision, ct);
+                return staged;
+            }
+        }
+        string asset = await ArchiveAsync(archive, proof, ct);
+        return await PersistAsync(context, notice, before, observedAt, asset, proof, writerRevision, ct) ?? throw new PaymentNoticeRejectedException();
+    }
+
+    private async Task<PaymentCapture?> PersistAsync(BrandContext context, VerifiedPaymentNotice notice, Payment before, DateTime observedAt,
+        string? asset, ProtectedPaymentEvidence proof, long? writerRevision, CancellationToken ct)
+    {
         await using var session = await sessions.BeginAsync(ct);
         try
         {
@@ -115,7 +132,10 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
             if (before.Order is Guid order) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE) o", DbValue.Uuid(order)), r => r.GetInt64(0), ct);
             Payment data = await LoadAsync(session, context, before.Id, null, true, ct);
             if (data.Provider != notice.ProviderPayment || data.Origin != notice.Origin || data.Expected != before.Expected || data.Member != before.Member) Reject(session);
-            if (data.Canonical is not null && CryptographicOperations.FixedTimeEquals(data.Canonical, notice.CanonicalHash)) return new(PaymentCaptureOutcome.Replayed, data.Id);
+            if (data.Canonical is not null && CryptographicOperations.FixedTimeEquals(data.Canonical, notice.CanonicalHash))
+                return new(PaymentCaptureOutcome.Replayed, data.Id);
+            if (data.ArchivePending) throw new PaymentNoticeRejectedException();
+            if (asset is null && (data.OrderStatus != "awaiting_payment" || data.Deadline < observedAt)) return null;
             string expectedAsset = data.Asset switch { "USDTTRC20" => "usdttrc20", "USDTBSC" => "usdtbsc", _ => throw new PaymentNoticeRejectedException() };
             var decision = PaymentEvidencePolicy.Evaluate(new(data.Provider!, data.Origin, data.Due, expectedAsset, data.Expected!.Value), notice);
             DateTime now = await session.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
@@ -138,11 +158,12 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
                 UPDATE shop.payments SET status=$1,provider_status_code=$2,network_amount=CASE WHEN $15 THEN GREATEST(COALESCE(network_amount,0),$3) ELSE network_amount END,
                     provider_confirmations=CASE WHEN $4 IS NULL THEN provider_confirmations ELSE GREATEST(COALESCE(provider_confirmations,0),$4) END,first_payment_observed_at=$5,
                     confirmed_at=COALESCE(confirmed_at,$6),amount_received=CASE WHEN $7 THEN amount_due ELSE amount_received END,
-                    ipn_key_id=$8,ipn_signature=$9,ipn_payload_sha256=$10,ipn_verified_at=$11,evidence_asset_ref=$12,evidence_digest=$13
+                    ipn_key_id=$8,ipn_signature=$9,ipn_payload_sha256=$10,ipn_verified_at=$11,evidence_asset_ref=$12,evidence_digest=$13,pending_evidence_ciphertext=$16,pending_evidence_key_id=$17
                 WHERE id=$14
                 """, DbValue.Text(decision == PaymentEvidenceDecision.Review ? "review" : first is null ? "awaiting" : "confirming"), DbValue.Text(notice.Status), DbValue.Numeric(notice.ReceivedTokens),
                 notice.Confirmations is long n ? DbValue.Bigint(n) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint), Time(first), decision == PaymentEvidenceDecision.Ready ? DbValue.Utc(observedAt) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.TimestampTz),
-                DbValue.Boolean(decision == PaymentEvidenceDecision.Ready), DbValue.Text(notice.KeyId), DbValue.Binary(notice.Signature), DbValue.Binary(notice.CanonicalHash), DbValue.Utc(observedAt), DbValue.Text(asset), DbValue.Binary(notice.RawHash), DbValue.Uuid(data.Id), DbValue.Boolean(identity)), ct);
+                DbValue.Boolean(decision == PaymentEvidenceDecision.Ready), DbValue.Text(notice.KeyId), DbValue.Binary(notice.Signature), DbValue.Binary(notice.CanonicalHash), DbValue.Utc(observedAt), Asset(asset), DbValue.Binary(notice.RawHash), DbValue.Uuid(data.Id), DbValue.Boolean(identity),
+                asset is null ? DbValue.Binary(proof.Ciphertext.ToArray()) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bytea), Asset(asset is null ? proof.EncryptionKeyId : null)), ct);
             if (data.Order is Guid live && first is DateTime observed && data.Deadline is DateTime deadline && observed <= deadline && data.OrderStatus == "awaiting_payment")
             {
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='confirmation_pending',revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 AND payment_status='awaiting_payment'", DbValue.Uuid(live)), ct);
@@ -155,13 +176,57 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
+    public async Task ResumeArchiveAsync(BrandContext context, Guid payment, Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive,
+        long? writerRevision = null, CancellationToken ct = default)
+    {
+        ProtectedPaymentEvidence? proof;
+        await using (var read = await sessions.BeginAsync(ct))
+        {
+            await AdmitAsync(read, context, writerRevision, ct);
+            proof = await read.QuerySingleAsync<ProtectedPaymentEvidence?>(new DbStatement("""
+                SELECT p.evidence_digest,p.pending_evidence_key_id,p.pending_evidence_ciphertext
+                FROM (SELECT 1) seed LEFT JOIN (shop.payments p JOIN shop.orders o ON o.id=p.order_id
+                    JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id)
+                    ON p.id=$1 AND b.id=$2 AND b.bot_id=$3 AND p.pending_evidence_ciphertext IS NOT NULL
+                """, DbValue.Uuid(payment), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
+                row => row.IsDBNull(0) ? null : new(payment, context.BrandId, Convert.ToHexStringLower(row.GetBinary(0)), row.GetString(1), row.GetBinary(2)), ct);
+        }
+        if (proof is null) return;
+        string asset = await ArchiveAsync(archive, proof, ct);
+        await using var session = await sessions.BeginAsync(ct);
+        await AdmitAsync(session, context, writerRevision, ct);
+        await session.ExecuteAsync(new DbStatement("""
+            UPDATE shop.payments p SET evidence_asset_ref=$1,pending_evidence_ciphertext=NULL,pending_evidence_key_id=NULL
+            WHERE p.id=$2 AND p.evidence_digest=$3 AND p.pending_evidence_ciphertext IS NOT NULL
+            AND EXISTS (SELECT 1 FROM shop.orders o JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id
+                WHERE o.id=p.order_id AND b.id=$4 AND b.bot_id=$5)
+            """, DbValue.Text(asset), DbValue.Uuid(payment), DbValue.Binary(Convert.FromHexString(proof.Digest)), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), ct);
+        await session.CommitAsync(ct);
+    }
+
+    private static bool Qualifies(Payment payment, VerifiedPaymentNotice notice) =>
+        notice.ReceivedTokens > 0 && notice.QuoteCurrency == "usd" && payment.Due == notice.QuoteAmount &&
+        string.Equals(payment.Asset, notice.Asset, StringComparison.OrdinalIgnoreCase) && payment.Expected == notice.ExpectedTokens;
+    private static async Task<string> ArchiveAsync(Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, ProtectedPaymentEvidence proof, CancellationToken ct)
+    {
+        string asset = await archive(proof, ct);
+        if (!asset.StartsWith("protected:", StringComparison.Ordinal) || asset.Length is < 12 or > 1024 || asset.Any(char.IsControl)) throw new PaymentNoticeRejectedException();
+        return asset;
+    }
+    private static async Task AdmitAsync(DbSession session, BrandContext context, long? writerRevision, CancellationToken ct)
+    {
+        if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
+        else await session.AdmitWriterAsync(context, ct);
+    }
+    private static DbValue Asset(string? value) => value is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Text) : DbValue.Text(value);
+
     private static Task LockMemberAsync(DbSession session, BrandContext context, long actor, CancellationToken ct) =>
         session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(actor)), r => r.GetInt64(0), ct);
     private static async Task<Payment> LoadAsync(DbSession session, BrandContext context, Guid? payment, string? origin, bool locked, CancellationToken ct)
     {
         Payment? data = await session.QuerySingleAsync<Payment?>(new DbStatement("""
             SELECT p.id,p.member,p.order_id,p.payment_method,p.quote_currency,p.amount_due::text,p.network_asset,p.provider_payment_ref,p.expected_network_amount::text,
-                p.idempotency_ref,p.status,p.ipn_payload_sha256,p.first_payment_observed_at,p.confirmed_at,p.payment_due_at,p.order_status,p.provider_code FROM (SELECT 1) seed
+                p.idempotency_ref,p.status,p.ipn_payload_sha256,p.first_payment_observed_at,p.confirmed_at,p.payment_due_at,p.order_status,p.provider_code,p.pending_evidence_ciphertext IS NOT NULL FROM (SELECT 1) seed
             LEFT JOIN LATERAL (
                 SELECT p.*,u.id AS member,o.payment_due_at,o.payment_status AS order_status FROM shop.payments p LEFT JOIN shop.orders o ON o.id=p.order_id
                 JOIN shop.users u ON u.id=COALESCE(p.topup_user_id,o.user_id) JOIN shop.brands b ON b.id=u.brand_id
@@ -169,13 +234,13 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
             """ + (locked ? " FOR UPDATE OF p" : "") + ") p ON true", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId),
             payment is Guid id ? DbValue.Uuid(id) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid), origin is string text ? DbValue.Text(text) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Text)), r => r.IsDBNull(0) ? null :
                 new Payment(r.GetGuid(0), r.GetGuid(1), r.IsDBNull(2) ? null : r.GetGuid(2), r.GetString(3), r.GetString(4), ExactDecimal.Parse(r.GetString(5)), r.IsDBNull(6) ? "" : r.GetString(6), r.IsDBNull(7) ? null : r.GetString(7),
-                    r.IsDBNull(8) ? null : ExactDecimal.Parse(r.GetString(8)), r.GetString(9), r.GetString(10), r.IsDBNull(11) ? null : r.GetBinary(11), r.IsDBNull(12) ? null : r.GetUtc(12), r.IsDBNull(13) ? null : r.GetUtc(13), r.IsDBNull(14) ? null : r.GetUtc(14), r.IsDBNull(15) ? null : r.GetString(15), r.IsDBNull(16) ? null : r.GetString(16)), ct);
+                    r.IsDBNull(8) ? null : ExactDecimal.Parse(r.GetString(8)), r.GetString(9), r.GetString(10), r.IsDBNull(11) ? null : r.GetBinary(11), r.IsDBNull(12) ? null : r.GetUtc(12), r.IsDBNull(13) ? null : r.GetUtc(13), r.IsDBNull(14) ? null : r.GetUtc(14), r.IsDBNull(15) ? null : r.GetString(15), r.IsDBNull(16) ? null : r.GetString(16), r.GetBoolean(17)), ct);
         if (data is null) Reject(session);
         return data;
     }
     private static DbValue Time(DateTime? value) => value is DateTime time ? DbValue.Utc(time) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.TimestampTz);
     private sealed record Topup(Guid Member, decimal Amount, string Asset);
-    private sealed record Payment(Guid Id, Guid Member, Guid? Order, string Method, string Currency, decimal Due, string Asset, string? Provider, decimal? Expected, string Origin, string Status, byte[]? Canonical, DateTime? First, DateTime? Confirmed, DateTime? Deadline, string? OrderStatus, string? ProviderCode);
+    private sealed record Payment(Guid Id, Guid Member, Guid? Order, string Method, string Currency, decimal Due, string Asset, string? Provider, decimal? Expected, string Origin, string Status, byte[]? Canonical, DateTime? First, DateTime? Confirmed, DateTime? Deadline, string? OrderStatus, string? ProviderCode, bool ArchivePending);
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void Reject(DbSession session) { session.RejectApplication(); throw new UnauthorizedAccessException("Payment origin or evidence is unavailable."); }
 }

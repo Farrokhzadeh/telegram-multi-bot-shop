@@ -4,7 +4,8 @@ using Platform.Security;
 
 namespace Platform.Payments;
 
-public sealed class PaymentVerificationWorker(DbSessionFactory sessions, PaymentSettlementStore settlement, NowPaymentsClient provider)
+public sealed class PaymentVerificationWorker(DbSessionFactory sessions, PaymentSettlementStore settlement, NowPaymentsClient provider,
+    Func<BrandContext, Guid, long?, CancellationToken, Task>? resumeArchive = null)
 {
     public Task<PaymentSettlement?> RunAsync(BrandContext context, JobLease lease, CancellationToken ct = default) => RunCoreAsync(context, lease, null, ct);
     public Task<PaymentSettlement?> RunForBrandAsync(BrandContext context, long expectedRevision, JobLease lease, CancellationToken ct = default)
@@ -24,11 +25,12 @@ public sealed class PaymentVerificationWorker(DbSessionFactory sessions, Payment
         PaymentSettlement? result;
         try
         {
+            if (resumeArchive is not null) await resumeArchive(context, payment, writerRevision, ct);
             result = writerRevision is long expected
                 ? await settlement.SettleForBrandAsync(context, expected, payment, provider.LookupAsync, ct)
                 : await settlement.SettleAsync(context, payment, provider.LookupAsync, ct);
         }
-        catch (PaymentNoticeRejectedException) { result = null; }
+        catch (Exception error) when (error is PaymentNoticeRejectedException or IOException or TimeoutException or HttpRequestException) { result = null; }
         await using var complete = await sessions.BeginAsync(ct);
         if (writerRevision is long current) await BrandWriterStore.RequireAsync(complete, context, current, ct);
         if (result is null || result.Outcome == PaymentSettlementOutcome.Pending) await OutboxStore.RetryAsync(complete, lease, TimeSpan.FromSeconds(30), 100, JobError.Transient, ct);

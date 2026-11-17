@@ -204,7 +204,7 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
             SELECT p.id,COALESCE(p.topup_user_id,o.user_id),p.order_id,o.product_id,p.payment_method,p.status,p.amount_due::text,p.provider_payment_ref,
                 p.idempotency_ref,p.network_asset,p.expected_network_amount::text,p.network_amount::text,p.amount_received::text,p.provider_status_code,
                 p.ipn_payload_sha256,p.confirmed_at,p.first_payment_observed_at,o.payment_due_at,o.payment_status,o.order_kind,o.quantity,
-                o.fulfillment_kind_snapshot,o.local_first_snapshot,o.is_preorder,p.compensating_wallet_entry_id,p.provider_code,p.evidence_digest
+                o.fulfillment_kind_snapshot,o.local_first_snapshot,o.is_preorder,p.compensating_wallet_entry_id,p.provider_code,p.evidence_asset_ref
             FROM (SELECT 1) seed LEFT JOIN (shop.payments p LEFT JOIN shop.orders o ON o.id=p.order_id JOIN shop.users u ON u.id=COALESCE(p.topup_user_id,o.user_id)
                 JOIN shop.brands b ON b.id=u.brand_id) ON p.id=$1 AND b.id=$2 AND b.bot_id=$3
             """, DbValue.Uuid(payment), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.IsDBNull(0) ? null : new State(r.GetGuid(0), r.GetGuid(1), Id(r, 2), Id(r, 3), r.GetString(4), r.GetString(5), ExactDecimal.Parse(r.GetString(6)),
