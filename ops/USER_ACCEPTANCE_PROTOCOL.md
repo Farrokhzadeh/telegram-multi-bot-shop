@@ -12,6 +12,42 @@ Existing eligibility exclusions, consent declines and replacements may be applie
 
 The 60-person size is a protocol choice, not a new product requirement. A smaller authorized pilot may diagnose usability but cannot be presented as this completed acceptance run. Do not combine revisions or count repeated attempts by one person as additional participants.
 
+## Operator worksheet
+
+Copy this worksheet into the protected run record. Freeze the assignments before opening the candidate to participants.
+
+| Complete before the run | Record |
+| --- | --- |
+| Candidate and fixture | Run ID, source commit, executable digest, fixture digest, isolated deployment and synthetic transport identities |
+| Participant access | Verified test bot and allowlist for each assigned brand, supported routes and languages, staging authorization, private observer access |
+| Cohort and assignments | Recruitment frame, consent and eligibility checks, roster digest, replacement cutoff, frozen N, and one brand, language, device and route per participant |
+| Task cards | One synthetic product and quantity per assignment, exact quote and expected route endpoint in the observer record |
+| Session settings | Observation window and its start event, accommodations, operator, observer and reviewer |
+| Operator smoke check | Follow each enabled brand and route through the same customer surface in a disposable fixture. Confirm the endpoint and a fresh starting state before freezing the participant run. Record the checked candidate and fixture. |
+
+Use the same neutral task from the protocol for every route. Give participants their assigned product, quantity and route in their assigned language. Keep the expected quote and endpoint in the observer record.
+
+| Assigned route | What the observer must see |
+| --- | --- |
+| Wallet with synthetic balance | One accepted order with the correct brand, product, quantity and frozen price/currency. |
+| Bank transfer with synthetic instructions | One unpaid order with the correct terms, test instructions and payment deadline. End the attempt before transfer or receipt upload. |
+| Hosted crypto with a synthetic invoice | One unpaid order with the correct terms, test checkout instructions and invoice deadline. End the attempt before payment. |
+| Zero-due checkout if enabled for the candidate | One accepted order showing zero due, with the correct brand, product and quantity. No external invoice. |
+
+Freeze the route allocation across the three brands using only the intended enabled routes. Record omissions and the reason. Keep one first-attempt row per frozen participant in the protected record.
+
+| Participant code | Brand | New or returning | Language | Device | Assigned route | Elapsed time | Primary outcome | Deviation or incident reference |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| One row per participant | | | | | | | | |
+
+Use one outcome per row: independent success, assisted, wrong or duplicate checkout, abandoned, no-show, or technical failure. If several failure reasons apply, record one primary outcome and the other reasons as secondary observations. Reconcile the outcome counts to the frozen N before calculating the rate. In a 60-participant run, 57 independent successes and three unsuccessful attempts pass the numeric criterion. A run with 56 successes and four unsuccessful attempts fails it.
+
+### Readiness checkpoint — 2026-11-17
+
+Reviewed main at `a4c4ae8`. The retained `shop-staging` API, bot and jobs containers on accabad-server were stopped. The [synthetic staging host](../src/Platform.Api/SyntheticStaging.cs) exposes private qualification callbacks and fake delivery. The [BotHost entry point](../src/Platform.BotHost/Program.cs) exposes ingress qualification and private history modes. The reviewed entry points do not provide a participant-facing catalog-to-checkout session. The [T075 staging evidence](SECURITY_REVIEW.md#deployed-synthetic-staging-qualification--2026-11-15) remains useful for isolation and recipient controls.
+
+Before enrolling participants, stage a reviewed candidate that exposes the customer catalog, quantity, quote and checkout in the test bot. Verify the operator smoke check and freeze the worksheet on the authorized isolated route with synthetic money and fulfillment inputs. The participant run and SC-008 result remain **NOT RUN**.
+
 ## Observe one first attempt
 
 1. Give the participant only this neutral task in their assigned supported language: “Find the assigned product, choose the assigned quantity, review the price and finish checkout using the assigned payment route.” Use synthetic products, balances, stock and configured fake transports only in a separately authorized isolated setup.
