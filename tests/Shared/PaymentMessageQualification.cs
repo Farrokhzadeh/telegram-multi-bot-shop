@@ -39,7 +39,8 @@ public static class PaymentMessageQualification
         Require(fresh is not null && fresh.Order == next.Order && fresh.Text.Contains("Payment accepted", StringComparison.Ordinal) && !fresh.Text.Contains("Expired", StringComparison.Ordinal), "authoritative reread before dispatch");
         await store.RecordAsync(f.Context(0), pending, new(PaymentMessageOutcomeKind.Sent, 502), ct);
         Require(await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='cancelled' AND resolution_kind='replaced'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='expired'", ct) == 0, "no stale edit financial transition");
-        Require(await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE last_error_code='latest_projection' AND status='cancelled'", ct) == 1, "superseded unsent status coalesced");
+        Require(await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE last_error_code='latest_projection' AND status='cancelled' AND dedupe_key LIKE 'instruction-processing:%'", ct) == 1 &&
+            await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE last_error_code='latest_projection' AND status='cancelled' AND dedupe_key LIKE 'payment-status:%'", ct) == 1, "superseded processing and settlement notices coalesced");
         bool foreign = false;
         try { await store.ReadForSendAsync(f.Context(1), pending, ct); } catch (UnauthorizedAccessException) { foreign = true; }
         Require(foreign, "foreign status work rejected");

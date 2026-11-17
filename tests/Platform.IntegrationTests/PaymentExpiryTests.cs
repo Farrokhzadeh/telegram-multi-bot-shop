@@ -29,6 +29,43 @@ public sealed class PaymentExpiryTests
     [Fact]
     public async Task UncertainOldStatusEditRequiresExplicitCredentialRecoveryToANewSafeMessage() => await PaymentMessageQualification.CredentialOwnershipAsync(Ct, uncertain: true);
     [Fact]
+    public async Task TimelyCryptoEvidenceQueuesOnePrivateProcessingNotice()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
+        var payments = new PaymentSettlementFixture(f);
+        await payments.EnableAsync(Ct);
+        var order = await payments.OrderAsync(ct: Ct);
+        var instructions = new PaymentInstructionStore(f.Sessions);
+        var initial = await instructions.ClaimAsync(Guid.NewGuid(), Ct);
+        Assert.NotNull(initial);
+        var worker = new PaymentMessageWorker(instructions, TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(100));
+        await worker.RunAsync(f.Context(0), initial, (_, _) => Task.FromResult(new PaymentMessageOutcome(PaymentMessageOutcomeKind.Sent, 501)), Ct);
+        await payments.CaptureAsync(order.Payment, order.Origin, order.Due, ct: Ct);
+        await payments.CaptureAsync(order.Payment, order.Origin, order.Due, ct: Ct);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE dedupe_key LIKE 'instruction-processing:%' AND recipient_kind='customer_dm'", Ct));
+        await using (var ready = await f.Sessions.BeginAsync(Ct))
+        {
+            await ready.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET last_attempt_at=clock_timestamp()-INTERVAL '5 seconds' WHERE status='succeeded'"), Ct);
+            await ready.CommitAsync(Ct);
+        }
+        var processing = await instructions.ClaimAsync(Guid.NewGuid(), Ct);
+        Assert.NotNull(processing);
+        int sent = 0;
+        await worker.RunAsync(f.Context(0), processing, (message, _) =>
+        {
+            Assert.Equal(order.Order, message.Order);
+            Assert.Equal(CheckoutFixture.Actor(0), message.ChatId);
+            Assert.Equal(f.Context(0).BotId, message.BotId);
+            Assert.Equal(501L, message.TargetMessageId);
+            Assert.StartsWith("Payment received. We’re processing it.", message.Text, StringComparison.Ordinal);
+            sent++;
+            return Task.FromResult(new PaymentMessageOutcome(PaymentMessageOutcomeKind.Sent, 501));
+        }, Ct);
+        Assert.Equal(1, sent);
+        Assert.Null(await instructions.ClaimAsync(Guid.NewGuid(), Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+    }
+    [Fact]
     public async Task ReviewObligationCanCoexistWithOneIndependentPendingOrder()
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);

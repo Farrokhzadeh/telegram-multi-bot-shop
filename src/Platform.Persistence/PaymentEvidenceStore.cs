@@ -144,7 +144,10 @@ public sealed class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapsh
                 notice.Confirmations is long n ? DbValue.Bigint(n) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint), Time(first), decision == PaymentEvidenceDecision.Ready ? DbValue.Utc(observedAt) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.TimestampTz),
                 DbValue.Boolean(decision == PaymentEvidenceDecision.Ready), DbValue.Text(notice.KeyId), DbValue.Binary(notice.Signature), DbValue.Binary(notice.CanonicalHash), DbValue.Utc(observedAt), DbValue.Text(asset), DbValue.Binary(notice.RawHash), DbValue.Uuid(data.Id), DbValue.Boolean(identity)), ct);
             if (data.Order is Guid live && first is DateTime observed && data.Deadline is DateTime deadline && observed <= deadline && data.OrderStatus == "awaiting_payment")
+            {
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='confirmation_pending',revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 AND payment_status='awaiting_payment'", DbValue.Uuid(live)), ct);
+                await PaymentInstructionStore.EnqueueAsync(session, context, live, "processing", ct);
+            }
             await OutboxStore.EnqueueAsync(session, JobIntent.Payment(JobKind.VerifyPayment, context.BrandId, data.Id), eventId, now, ct);
             await session.CommitAsync(ct);
             return new(decision switch { PaymentEvidenceDecision.Ready => PaymentCaptureOutcome.Ready, PaymentEvidenceDecision.Review => PaymentCaptureOutcome.Review, _ => PaymentCaptureOutcome.Pending }, data.Id);

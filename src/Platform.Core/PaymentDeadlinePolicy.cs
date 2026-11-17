@@ -19,7 +19,8 @@ public static class PaymentDeadlinePolicy
             "expired" => fa ? "ناموفق/منقضی" : "Failed/Expired",
             "cancelled" when resolution == "replaced" => fa ? "لغو شد — جایگزین شده" : "Cancelled — replaced",
             "cancelled" => fa ? "لغو شد" : "Cancelled",
-            "under_review" or "confirmation_pending" => fa ? "پرداخت در حال بررسی است" : "Payment under review",
+            "confirmation_pending" => fa ? "پرداخت دریافت شد. در حال پردازش آن هستیم." : "Payment received. We’re processing it.",
+            "under_review" => fa ? "پرداخت در حال بررسی است" : "Payment under review",
             "paid" or "not_required" => fa ? "پرداخت تایید شده است" : "Payment accepted",
             _ => throw new ArgumentException("Unsupported payment instruction state.")
         };
