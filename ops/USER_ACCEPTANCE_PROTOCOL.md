@@ -56,6 +56,12 @@ The accabad-server build used 418 verified baseline inputs with two staging/test
 
 The pilot currently uses operator request files. @testadbadbot still runs the legacy bot. The next step is to connect the staged checkout to an allowlisted private Telegram session and smoke-test that customer surface before enrolling participants. SC-008 remains **NOT RUN**.
 
+### Private Telegram wallet pilot — 2026-11-17
+
+The [pilot controller](staging/wallet_pilot.py) connects one private, allowlisted Telegram chat to the synthetic stage actor. It presents the catalog item, quantity choices, exact wallet quote and order confirmation. The [polling entry point](staging/wallet_pilot_telegram.py) verifies the dedicated staging bot and refuses a configured webhook. It takes the bot credential and actor binding on standard input from the protected operator process. It never needs production data or an external payment route.
+
+An isolated accabad-server smoke connected the controller to the real staging checkout actor with simulated Telegram updates and responses. A wrong actor, group chat and stale message were rejected. A two-unit wallet checkout survived a lost confirmation response. The repeat showed the same order with one debit and two allocations. An operator then verified the dedicated staging bot and opened a bounded private pilot window with automatic restoration of the previous staging bot. This is one synthetic wallet route for one allowlisted tester. The full preregistered human cohort and SC-008 measurement remain **NOT RUN**.
+
 ## Observe one first attempt
 
 1. Give the participant only this neutral task in their assigned supported language: “Find the assigned product, choose the assigned quantity, review the price and finish checkout using the assigned payment route.” Use synthetic products, balances, stock and configured fake transports only in a separately authorized isolated setup.
