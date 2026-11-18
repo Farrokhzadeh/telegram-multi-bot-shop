@@ -11,6 +11,8 @@ public sealed class SyntheticSupplier : ISupplierAdapter, ISupplierEvidenceArchi
     public bool ProvenIntentLookup { get; set; } = true;
     public int Submits { get; private set; }
     public int Lookups { get; private set; }
+    public bool SupportsExport { get; set; } = true;
+    public int Exports { get; private set; }
     public int Archives { get; private set; }
     public decimal UnitCost { get; set; } = 1;
     public bool Enforced { get; set; } = true;
@@ -28,6 +30,8 @@ public sealed class SyntheticSupplier : ISupplierAdapter, ISupplierEvidenceArchi
     }
     public Task<SupplierOutcome> LookupAsync(SupplierBinding b, string? originalPurchaseReference, CancellationToken ct)
     { Lookups++; Intents.Add(b.Intent); return Task.FromResult(Lookup(b)); }
+    public Task<SupplierOutcome> ExportAsync(SupplierBinding b, string originalPurchaseReference, CancellationToken ct)
+    { Exports++; Intents.Add(b.Intent); return Task.FromResult(Lookup(b)); }
     public Task<string> StoreAsync(SupplierBinding b, Guid attempt, ReadOnlyMemory<byte> evidence, CancellationToken ct)
     {
         if (ArchiveFails) throw new InvalidOperationException("Public archive failure");

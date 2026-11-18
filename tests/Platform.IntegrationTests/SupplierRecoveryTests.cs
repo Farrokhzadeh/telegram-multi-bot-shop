@@ -82,6 +82,26 @@ public sealed class SupplierRecoveryTests
         Assert.Null(await ClaimOptional(f, JobKind.PrepareManifest));
     }
     [Fact]
+    public async Task UnsupportedExportDoesNotCallLookupOrRecordARemoteAttempt()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        await SupplierFixture.AcceptAsync(f, 2, Ct);
+        var port = new SyntheticSupplier { SupportsExport = false, Submit = b => SyntheticSupplier.Complete(b, customers: 1) };
+        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var worker = new SupplierFulfillmentWorker(store, port, port);
+        var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
+        Guid request = (await store.ReadAsync(f.Context(0), lease, Ct)).RequestId;
+        await worker.RunAsync(f.Context(0), lease, Ct);
+        await SupplierPartialQualification.ScheduleAsync(f, request, JobKind.ExportSupplier, Ct);
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ExportSupplier, Ct), Ct);
+        Assert.Equal((1, 0, 0), (port.Submits, port.Lookups, port.Exports));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='partial_pending_admin' AND remote_ref IS NOT NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='requires_admin' AND release_authorized_at IS NULL", Ct));
+        Assert.Null(await ClaimOptional(f, JobKind.PrepareManifest));
+    }
+    [Fact]
     public async Task CrashBeforeIntentReclaimsSameLocalJobWithoutInventingRemoteEffects()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);

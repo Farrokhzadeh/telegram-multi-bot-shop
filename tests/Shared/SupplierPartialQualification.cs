@@ -28,7 +28,9 @@ public static class SupplierPartialQualification
             await ScheduleAsync(f, request, kind, ct);
             await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, kind, ct), ct);
         }
-        if (port.Submits != 1 || await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", ct) != 3 ||
+        if (port.Submits != 1 || port.Lookups != 1 || port.Exports != 1 || await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts", ct) != 3 ||
+            await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE (attempt_no=1 AND operation='submit') OR (attempt_no=2 AND operation='status_lookup') OR (attempt_no=3 AND operation='export')", ct) != 3 ||
+            await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", ct) != 3 ||
             await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", ct) != 1 ||
             await f.CountAsync("SELECT count(*) FROM shop.orders WHERE review_code='partial_acquisition' AND release_authorized_at IS NULL", ct) != 1)
             throw new InvalidOperationException("Partial supplier replay released or duplicated goods.");

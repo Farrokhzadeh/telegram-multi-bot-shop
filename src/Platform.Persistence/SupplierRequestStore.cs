@@ -44,7 +44,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         return await session.QuerySingleAsync(new DbStatement("SELECT " + BindingColumns + " FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND b.id=$2 AND b.bot_id=$3",
             DbValue.Uuid(lease.Intent.OriginId!.Value), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), ReadBinding, ct);
     }
-    public async Task<SupplierAttempt?> BeginAsync(BrandContext context, JobLease lease, SupplierQuote? quote, CancellationToken ct = default, bool usesPurchaseKey = false, bool provenIntentLookup = false)
+    public async Task<SupplierAttempt?> BeginAsync(BrandContext context, JobLease lease, SupplierQuote? quote, CancellationToken ct = default, bool usesPurchaseKey = false, bool provenIntentLookup = false, bool supportsExport = false)
     {
         Require(context, lease);
         await using var session = await sessions.BeginAsync(ct);
@@ -71,14 +71,15 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             Guid? parent = submit ? null : await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.supplier_request_attempts WHERE supplier_request_id=$1 AND operation='submit' ORDER BY attempt_no DESC LIMIT 1", DbValue.Uuid(binding.RequestId)), r => r.GetGuid(0), ct);
             string? purchaseReference = parent is Guid original ? await PurchaseReferenceAsync(session, original, ct) : null;
             Guid attempt = AttemptId(lease.Id, lease.Attempt);
-            if (!submit && purchaseReference is null && !provenIntentLookup)
+            bool export = lease.Intent.Kind == JobKind.ExportSupplier;
+            if (!submit && (export ? !supportsExport || purchaseReference is null : purchaseReference is null && !provenIntentLookup))
             {
                 await OutboxStore.CompleteAsync(session, lease, ct);
                 if (state.Review is null) await ReviewAsync(session, context, binding, "unknown", "provider_unknown", attempt, null, ct);
                 await session.CommitAsync(ct); return null;
             }
             string? purchaseKey = submit && usesPurchaseKey ? "purchase:" + attempt.ToString("D") : null;
-            string operation = submit ? "submit" : lease.Intent.Kind == JobKind.ExportSupplier ? "export" : "status_lookup";
+            string operation = submit ? "submit" : export ? "export" : "status_lookup";
             await session.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,parent_submit_attempt_id,admin_authorization_audit_id,max_charge_amount,purchase_idempotency_key)
                 SELECT $1,$2,COALESCE(max(attempt_no),0)+1,$3,$4,$5,$6,$7 FROM shop.supplier_request_attempts WHERE supplier_request_id=$2

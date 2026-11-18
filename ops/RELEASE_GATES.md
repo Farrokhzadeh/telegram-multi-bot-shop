@@ -9,7 +9,7 @@ This document defines the release/identity contract. It does not provision stagi
 | Gate | Current scope | Evidence required before its stage |
 |---|---|---|
 | E1 Governance | Closed for constitutional alignment by the 2026-10-31 review | Preserve versioned owner authorization and risk/impact records; reanalyze material design changes |
-| E2 Provider contracts | Unqualified; source inventory/fakes only | Per-provider exact response/currency/evidence timing, ready-item scope, remote key/item recovery and enforceable cost cap before real adapter enablement or unattended procurement |
+| E2 Provider contracts | Public contracts reviewed; live admission closed | Per-provider exact response/currency/evidence timing, ready-item scope, remote key/item recovery and the approved fresh local price guard before real adapter enablement or unattended procurement |
 | E3 Legacy compatibility | Pinned code/DDL manifest and public synthetic cipher fixtures only | Authorized protected schema/migration/image comparison, real precision/denomination, identity/alias/cardinality/partial/prepaid/date liabilities, source ciphertext/old-key and archive-only refund reconciliation before affected import/compatibility freeze |
 | E4 Runtime | Foundation, forward-schema and transaction/money qualification are recorded in OFFLINE_QUALIFICATION.md, SCHEMA_QUALIFICATION.md and TRANSACTION_QUALIFICATION.md; full business runtime remains unqualified | Exact PostgreSQL, .NET/Npgsql/dependency and native executable identities; actual constraints, money, encryption, tenant, allocation, delivery, retention and crash tests for each implemented scope |
 | E5 Operational identity/privacy | No real bot, bank, provider-hosted checkout or staff destination inspected | Verified source/target bot IDs, public contacts, bank/merchant disclosure acceptance, staff authentication and private group routing before real messaging/payment activation |
@@ -70,3 +70,7 @@ T080 remains open. This checkpoint does not qualify actual source copies, provid
 ## One-brand staging decision and qualification — 2026-11-18
 
 The owner approved the limited synthetic canary with live suppliers disabled. [T081](T081_STAGING_CANARY.md#owner-approved-staging-closeout--2026-11-18) passed with the GitHub-built artifact, its matching synthetic schema and independent stop and rollback evidence. The canary was stopped and removed after the run. Production E6 remains a separate per-brand decision.
+
+## Supplier implementation closure — 2026-11-18
+
+The owner approved the [documentation-only task scope](../specs/001-multibrand-redesign/spec.md#owner-approved-documentation-only-supplier-qualification--2026-11-18). T057 and T091 completion covers offline implementation and safe administrator review. E2 provider activation and production release retain their provider-specific evidence and separate approval. The approved fresh local price guard remains valid for uncapped APIs when its other provider requirements are met.

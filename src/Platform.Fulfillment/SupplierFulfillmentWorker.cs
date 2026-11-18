@@ -18,13 +18,17 @@ public sealed class SupplierFulfillmentWorker(SupplierRequestStore store, ISuppl
             try { quote = await adapter.InspectAsync(binding, deadline.Token); }
             catch (Exception) { }
         }
-        var attempt = await store.BeginAsync(context, lease, quote, ct, adapter.UsesPurchaseKey, adapter.ProvenIntentLookup);
+        var attempt = await store.BeginAsync(context, lease, quote, ct, adapter.UsesPurchaseKey, adapter.ProvenIntentLookup, adapter.SupportsExport);
         if (attempt is null) return;
         SupplierOutcome result;
         try
         {
-            result = attempt.Operation == "submit" ? await adapter.SubmitAttemptAsync(binding, attempt.PurchaseKey, SupplierRules.UnitCeiling(binding), deadline.Token) :
-                await adapter.LookupAsync(binding, attempt.PurchaseReference, deadline.Token);
+            result = attempt.Operation switch
+            {
+                "submit" => await adapter.SubmitAttemptAsync(binding, attempt.PurchaseKey, SupplierRules.UnitCeiling(binding), deadline.Token),
+                "export" => await adapter.ExportAsync(binding, attempt.PurchaseReference!, deadline.Token),
+                _ => await adapter.LookupAsync(binding, attempt.PurchaseReference, deadline.Token)
+            };
         }
         catch (Exception) { result = Unknown(); }
         using (result)
