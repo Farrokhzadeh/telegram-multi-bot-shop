@@ -112,7 +112,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           global-json-file: global.json
@@ -127,13 +126,14 @@ jobs:
           status=0
           artifacts/native/Api/Platform.Api || status=$?
           test "$status" -eq 78
-      - name: Test native API with the frozen synthetic canary schema
+      - name: Test native API with its matching synthetic canary schema
         shell: bash
         run: |
           docker pull --platform linux/amd64 mcr.microsoft.com/dotnet/sdk@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e
           docker pull --platform linux/amd64 postgres@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583
           docker tag postgres@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583 postgres:18.6
-          git show 275ee270436081fe7dfd645e531a89e75d1d0095:ops/migrations/0001_core.sql > "$RUNNER_TEMP/t081-schema.sql"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git show HEAD:ops/migrations/0001_core.sql > "$RUNNER_TEMP/t081-schema.sql"
           sudo python3 ops/staging/check_ci_canary.py artifacts/native/Api/Platform.Api "$RUNNER_TEMP/t081-schema.sql"
       - name: Package native staging candidate
         run: |

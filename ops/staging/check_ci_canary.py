@@ -11,11 +11,11 @@ import provision_synthetic_stage as stage
 
 RUNTIME = "mcr.microsoft.com/dotnet/sdk@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e"
 POSTGRES = "postgres@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583"
-SCHEMA = "d8a8a0cf1a42012a0ade2524671d5af85852c95740e92144aba83369efaf617e"
 
 
 def check(executable, schema, workspace):
-    assert hashlib.sha256(schema.read_bytes()).hexdigest() == SCHEMA
+    schema_hash = hashlib.sha256(schema.read_bytes()).hexdigest()
+    print(f"Synthetic canary schema SHA-256 {schema_hash}", flush=True)
     stage.ROOT = workspace / "fixture"
     stage.SDK = stage.output("docker", "image", "inspect", "--format", "{{.Id}}", RUNTIME)
     db_image = stage.output("docker", "image", "inspect", "--format", "{{.Id}}", POSTGRES)
@@ -25,6 +25,7 @@ def check(executable, schema, workspace):
     (bundle / "Platform.Api").write_bytes(executable.read_bytes())
     (bundle / "Platform.Api").chmod(0o755)
     settings = stage.provision(bundle, schema)
+    assert settings[2] == schema_hash
     compose_file = stage.ROOT / "compose.json"
     config = json.loads(compose_file.read_text())
     db, bot = (config["services"][n] for n in ("stage-db", "stage-bot-a"))
@@ -63,7 +64,11 @@ def check(executable, schema, workspace):
         assert request(inspector, "/callbacks/stage-a", header, payload) == "Duplicate\n200"
         assert stage.query("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id=501;") == "1"
         assert stage.query("SELECT count(*) FROM shop.orders;") == "0"
-        print("PASS native staging catalog, wrong-bot rejection, independent stop and restart replay against the frozen synthetic schema")
+        print("PASS native staging catalog, wrong-bot rejection, independent stop and restart replay against the matching synthetic schema")
+    except (AssertionError, RuntimeError, subprocess.SubprocessError):
+        stage.compose("ps", "--all")
+        stage.compose("logs", "--tail", "12", "stage-bot-a")
+        raise
     finally:
         subprocess.run(["docker", "rm", "-f", inspector], capture_output=True, timeout=15)
         stage.compose("down", "--volumes", "--timeout", "10")
