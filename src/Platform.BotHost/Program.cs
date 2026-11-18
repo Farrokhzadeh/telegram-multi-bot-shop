@@ -15,8 +15,8 @@ if (args is ["--qualify-staging-history-telegram", "--token-file", var tokenFile
     return await StagingHistoryTelegramQualification.RunAsync(tokenFile, recipientFile, attemptFile);
 if (args is ["--staging-history-preflight", "--root", var preflightRoot])
 {
-	try { return await StagingHistoryRuntime.PreflightAsync(preflightRoot); }
-	catch (Exception) { Console.Error.WriteLine("Isolated staging history preflight rejected; no Telegram send attempted."); return 78; }
+    try { return await StagingHistoryRuntime.PreflightAsync(preflightRoot); }
+    catch (Exception) { Console.Error.WriteLine("Isolated staging history preflight rejected; no Telegram send attempted."); return 78; }
 }
 if (args is ["--staging-history-once", "--root", var runtimeRoot])
 {
