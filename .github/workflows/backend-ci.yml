@@ -3,11 +3,17 @@ on:
   push:
     branches: [main, 'impl/**']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy_staging:
+        description: Publish to Docker Hub and deploy to staging
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
-  group: backend-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_staging && 'akanti-staging' || format('backend-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 jobs:
   qualify:
     runs-on: ubuntu-24.04
@@ -159,3 +165,74 @@ jobs:
           path: artifacts/staging/Platform.Api-linux-x64.tar.gz
           if-no-files-found: error
           retention-days: 7
+  deploy-staging:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.deploy_staging
+    needs: [qualify, build-staging-api]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: akanti-staging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: staging-api-linux-x64-${{ github.sha }}
+          path: artifacts/staging-delivery
+      - name: Publish tested image to Docker Hub
+        id: publish
+        env:
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9][a-z0-9_-]*$ ]]
+          test -n "$DOCKERHUB_USERNAME"
+          test -n "$DOCKERHUB_TOKEN"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bundle=$(mktemp -d "$RUNNER_TEMP/akanti-image.XXXXXX")
+          tar -xzf artifacts/staging-delivery/Platform.Api-linux-x64.tar.gz -C "$bundle"
+          test "$(cat "$bundle/SOURCE_COMMIT")" = "$GITHUB_SHA"
+          (cd "$bundle" && sha256sum --check SHA256SUMS)
+          git show HEAD:ops/migrations/0001_core.sql | cmp - "$bundle/0001_core.sql"
+          repository="docker.io/$DOCKERHUB_NAMESPACE/akanti"
+          tag="$repository:git-$GITHUB_SHA"
+          docker build --platform linux/amd64 --file ops/staging/Dockerfile \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$tag" "$bundle"
+          docker run --rm --network none "$tag" --qualify
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d "$RUNNER_TEMP/akanti-docker.XXXXXX")
+          printf '%s\n' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin
+          docker push "$tag" | tee "$RUNNER_TEMP/akanti-push.log"
+          digest=$(sed -nE 's/^.*digest: (sha256:[a-f0-9]{64}) size: [0-9]+$/\1/p' "$RUNNER_TEMP/akanti-push.log")
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf 'image=%s@%s\n' "$repository" "$digest" >> "$GITHUB_OUTPUT"
+      - name: Pull and deploy on staging server
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          RELEASE_IMAGE: ${{ steps.publish.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$DEPLOY_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && (( DEPLOY_PORT <= 65535 ))
+          [[ "$RELEASE_IMAGE" =~ ^docker\.io/[a-z0-9][a-z0-9_-]*/akanti@sha256:[a-f0-9]{64}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/akanti-ssh.XXXXXX")
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          ssh -i "$ssh_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes \
+            -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 \
+            -- "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$RELEASE_IMAGE" "$GITHUB_SHA" \
+            < ops/staging/deploy-dockerhub.sh

@@ -6,7 +6,7 @@ The backend uses C# and .NET 10 Native AOT with PostgreSQL. It models payments, 
 
 ## Release status
 
-The approved implementation scope is 96/96 complete. The [latest qualified build](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44375416448) passed 1,266 tests, Native AOT smoke checks, and a one-brand synthetic canary. The API, bot, and job entry points currently support qualification only. The two paths below install and update disposable environments. Production deployment is blocked until the release gates pass. Live suppliers stay disabled.
+The approved implementation scope is 96/96 complete. The [latest qualified build](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44375416448) passed 1,266 tests, Native AOT smoke checks, and a one-brand synthetic canary. The API, bot, and job entry points currently support qualification only. The two paths below run the qualification build locally or deploy it to a staging server. Production deployment is blocked until the release gates pass. Live suppliers stay disabled.
 
 ## Method 1 — Start here
 
@@ -34,42 +34,27 @@ Run a local demo on a Linux x86-64 machine with Bash, `tar`, `sha256sum`, and `c
 
 **Update or roll back.** Download a newer successful build, stop the current process with `Ctrl+C`, and repeat the steps with the new SHA. The command creates a fresh directory each time. Keep the previous archive and SHA so you can run that build again if needed.
 
-## Method 2 — Operator canary
+## Method 2 — Deploy or update staging through GitHub Actions
 
-Use a dedicated disposable Linux x86-64 machine or VM with Git, Docker Engine, Docker Compose v2 or later, Python 3, OpenSSL, and `sudo`. This runs the same one-brand catalog canary as CI against disposable PostgreSQL. It uses fixed Compose and Docker resource names, so give it a dedicated Docker daemon.
+Akanti's staging workflow follows the legacy release sequence. GitHub tests the selected revision, packages the executable and matching SQL, pushes the image to Docker Hub, and connects by SSH. The server pulls by the image digest. It checks the new container before retiring the previous Akanti staging container.
 
-1. Clone this repository and, from the repository root, check out the exact SHA from the successful Actions run. Download and unzip its Linux x64 artifact as in Method 1. Keep `Platform.Api-linux-x64.tar.gz` in the repository root for the commands below. Compare the executable and schema SHA-256 values in the archive with those logged by the **Package native staging candidate** step of the run.
-2. Verify the package and run the canary with the image digests used by CI. Replace the example SHA with the full SHA for your artifact.
+### One-time setup
 
-   ```bash
-   (
-     set -euo pipefail
-     candidate=c75d4b1ed5e09d891ae485357de8f5de1bcc09c9
-     git switch --detach "$candidate"
-     test "$(git rev-parse HEAD)" = "$candidate"
-     tarball="$PWD/Platform.Api-linux-x64.tar.gz"
-     bundle=$(mktemp -d)
-     tar -xzf "$tarball" -C "$bundle"
-     test "$(cat "$bundle/SOURCE_COMMIT")" = "$candidate"
-     (cd "$bundle" && sha256sum --check SHA256SUMS)
-     git show "$candidate:ops/migrations/0001_core.sql" | cmp - "$bundle/0001_core.sql"
+1. Create a private Docker Hub repository named `akanti`. Give GitHub Actions a Docker Hub token with push access. Log in to Docker Hub on the server as the deployment account with a separate pull-only token.
+2. In the Akanti repository create a GitHub Actions environment named `akanti-staging`. Set variables `DOCKERHUB_NAMESPACE`, `DEPLOY_HOST`, `DEPLOY_USER`, and optionally `DEPLOY_PORT` (defaults to 22). Set secrets `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `DEPLOY_SSH_KEY`, and `DEPLOY_KNOWN_HOSTS`. Use the independently verified host key in known-hosts format.
+3. On the server, give that deployment account Docker access and an account-owned directory at `/var/lib/akanti-staging` with mode `0700`. The deployment needs Linux x86-64, Docker, Bash, `flock`, at least 3 GiB free disk, 1 GiB available RAM, and two CPUs. The server pulls the image and runs it.
 
-     sdk=mcr.microsoft.com/dotnet/sdk@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e
-     postgres=postgres@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583
-     sudo docker pull --platform linux/amd64 "$sdk"
-     sudo docker pull --platform linux/amd64 "$postgres"
-     sudo docker tag "$postgres" postgres:18.6
-     sudo python3 ops/staging/check_ci_canary.py "$bundle/Platform.Api" "$bundle/0001_core.sql"
-   )
-   ```
+### Each deploy or update
 
-3. Confirm the script reports `PASS native staging catalog`. The canary checks catalog access, rejection of the wrong bot, independent bot stop, and replay detection after restart. It removes its disposable services and volumes at teardown.
+1. Open [Offline backend qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml). Select **Run workflow** on `main` and enable **Publish to Docker Hub and deploy to staging**.
+2. Wait for **deploy-staging** to report the commit and image digest. The job runs the new container's local health probe. A failed replacement leaves the previous healthy container available.
+3. Record the digest and commit from each successful run. To roll back, invoke [the same deploy helper](ops/staging/deploy-dockerhub.sh) on the server with the previous `docker.io/<namespace>/akanti@sha256:<digest>` and its full commit SHA. The older image must still be available in Docker Hub.
 
-**Update or roll back.** Use a clean disposable VM for the next build, check out the new SHA, and repeat the canary with the new executable and its matching SQL. Retain the prior verified archive and hashes to rerun the previous canary. A production rollback after accepting payments or orders requires preserving and reconciling those effects.
+The current deployment runs Akanti's qualification API in an isolated container. It has no Telegram update receiver, database connection, or live provider credentials. Leave the legacy staging bot serving until Akanti has a qualified Telegram staging runtime and an exclusive handoff.
 
-## Production deployment and updates
+## Live staging and production
 
-Both paths need a qualified production runtime before they can serve real customers. Before an operator can schedule AccAbad's cutover, the release packet must include the exact deployment artifact and schema, a final balance and paid-order reconciliation, verified database and media restores with key recovery, and a handoff plan for the bot, callbacks, and stock. The handoff needs one writer and a recovery plan for effects accepted after the switch. Each brand requires an explicit release decision. [Release gates](ops/RELEASE_GATES.md) · [Single-brand cutover and rollback runbook](ops/BRAND_CUTOVER_RUNBOOK.md) · [Staging canary evidence](ops/T081_STAGING_CANARY.md)
+Serving real Telegram users requires a qualified Telegram receiver and job runtime. Before an operator can schedule AccAbad's cutover, the release packet must include the exact deployment artifact and schema, a final balance and paid-order reconciliation, verified database and media restores with key recovery, and a handoff plan for the bot, callbacks, and stock. The handoff needs one writer and a recovery plan for effects accepted after the switch. Each brand requires an explicit release decision. [Release gates](ops/RELEASE_GATES.md) · [Single-brand cutover and rollback runbook](ops/BRAND_CUTOVER_RUNBOOK.md) · [Staging canary evidence](ops/T081_STAGING_CANARY.md)
 
 ## Development and reference
 
