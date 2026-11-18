@@ -1,4 +1,6 @@
-# Multi-brand redesign — conversation handoff (updated 2026-11-17)
+# Multi-brand redesign — conversation handoff (updated 2026-11-18)
+
+**T079 completion — 2026-11-18:** **92/96 complete, 4 unchecked.** The owner waived the human cohort run and accepted the live staging wallet smoke and code qualification. The isolated backend recorded one paid test order, one allocated unit and one test-wallet debit. Three focused accabad-server cases passed, including checkout replay across restart. SC-008’s 95% human completion rate remains unmeasured. See the [closeout](../../ops/USER_ACCEPTANCE_PROTOCOL.md#owner-approved-closeout--2026-11-18).
 
 **T079 preparation — 2026-11-17:** The [operator worksheet](../../ops/USER_ACCEPTANCE_PROTOCOL.md#operator-worksheet) defines route endpoints, cohort assignment and first-attempt recording for SC-008. Accabad-server's synthetic app roles were stopped. The current staging and BotHost entry points do not expose a participant-facing catalog-to-checkout session. The next step is to stage and smoke-check that candidate on the authorized test route before freezing a participant run. SC-008 remains NOT RUN and T079 is unchecked.
 

@@ -1,6 +1,12 @@
 # Catalog-to-checkout user acceptance protocol
 
-T079 defines the SC-008 measurement protocol and result template. The criterion is **at least 95% of preselected participants complete the basic catalog-to-checkout journey without staff assistance**. Automated tests, synthetic buyers and AI-assisted attempts are not human participant evidence. Current result: **NOT RUN**. No participant recruitment, Telegram messages, live payments or staging changes are authorized by this document. Publish a completed result and obtain the required release decision before release.
+## Owner-approved closeout — 2026-11-18
+
+The owner accepted the [live Telegram wallet smoke](#live-telegram-wallet-smoke--2026-11-17) and the focused accabad-server code qualification, and waived the cohort run for the T079 closeout. The three focused cases passed, including checkout replay across restart. The live staging checkout produced one paid test order, one allocated unit and one test-wallet debit.
+
+**T079 is complete for this scope.** SC-008’s 95% human completion rate remains unmeasured. The protocol below records the design for any future cohort run.
+
+T079 defines the SC-008 measurement protocol and result template. The criterion is **at least 95% of preselected participants complete the basic catalog-to-checkout journey without staff assistance**. Automated tests, synthetic buyers and AI-assisted attempts are not human participant evidence. Current result: **NOT RUN**. No participant recruitment, Telegram messages, live payments or staging changes are authorized by this document. For a cohort run, publish the completed result. The release decision is recorded separately.
 
 ## Preregister the run
 
