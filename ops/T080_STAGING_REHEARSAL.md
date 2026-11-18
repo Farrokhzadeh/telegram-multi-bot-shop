@@ -1,6 +1,22 @@
-# T080 synthetic staging backup and restore rehearsal
+# T080 staging cutover and rollback rehearsal
 
-## Result — 2026-11-16
+## Isolated AccAbad checkpoint — 2026-11-18
+
+**T080 remains open.** The isolated writer handoff and rollback passed on accabad-server. The frozen provider-account identity remains unresolved. The rehearsal used the qualified T068 managed artifact and generated commerce fixtures in disposable source and target copies. The reviewed repository head was `bf6acf286ad3f64bf30148b994fc96b26d6a008e`.
+
+| Gate | Result |
+|---|---|
+| Synthetic backup and restore | Reused the November 16 database and receipt restore and rehashed both retained archives against the recorded digests. |
+| Legacy image and frozen schema | The rehearsal source used `sha256:77523faca5ee34d640cb98b9132ab8f649b0adf95aa104d1a974308fef8fc23d`, whose OCI revision matches AccAbad-Shop `66371a23a1c8149dc5bdf89a0355aa689d454dba`. Independently re-encoded the before/after schema of all three retained protected copies against their exact frozen plans. All match the T063 schema-v2 digest, with 56 tables and 86 migrations per source. The four selected T093 table commitments also match each frozen plan. |
+| Reconciliation | Rehashed the sealed [T066 receipt](T066_RECONCILIATION.md#complete-protected-copy-reconciliation--2026-11-12) and confirmed its independent review passed. It covers frozen balances, archive fidelity and preserved quarantine. The retained T068 protected copy and restore matched all 28 frozen target fingerprints. Historical settlement and operational admission remain gated. |
+| Legacy key recovery | The retained restricted AccAbad key file authenticated a frozen supplier ciphertext. The recovered bytes round-tripped and a generated wrong key was rejected. The retained file contains one legacy key. Previous rotation keys and wider escrow dependencies were outside the check. |
+| Writer handoff and rollback | Six phases and 52 guards passed. Separate verification matched the signed ownership journal to Docker events. Database starts were legacy, legacy, target, target, with zero overlap. Legacy resumed before target acceptance. After acceptance, the fence rejected legacy reopening, and recovery restored all 28 accepted target tables. Restart preserved one target allocation, zero legacy allocations and rejected replay. All four actors stopped and the final fence has no writer. |
+| Provider identity | The frozen source has one Akunding mapping and no stored account ID. Its copied credential received HTTP 401. A separate owner-provided credential returned an account identity and the mapped product, with no evidence binding that account to the frozen credential. See [T093](T093_QUALIFICATION.md#owner-approved-closeout--2026-11-17). |
+| Operator decision | A staging closeout with Akunding disabled and its frozen account unresolved requires explicit owner acceptance of that scope. Operational provider activation, production cutover and T081 release retain their separate approvals. |
+
+Private checkpoint is `/var/lib/teleg-cli/t068-pair-t080-20261118-889ff59277`. Rehearsal result SHA-256 is `8af16de8601546c687ca2ff4716f83a1881d010e6aa09afae17509aee5369cd1`. Writer event stream SHA-256 is `9df71c72175d00f408c25ffc47fd0a03368601346a53ae681e05eb6870552e1e`. No live provider calls or production writer changes were made.
+
+## Synthetic backup and restore result — 2026-11-16
 
 The authorized synthetic staging database and receipt-media backup/restore slice passed. **T080 remains open.** This rehearsal does not prove actual source import, provider identity, old-key escrow, production writer ownership, financial reconciliation or a release decision.
 
@@ -16,6 +32,6 @@ The three synthetic receipt-media files were archived separately under an 8 MiB 
 
 The restore container was stopped and removed, its disposable tmpfs discarded, staging stopped through the guarded operator and the loop device detached. All 13 pre-existing legacy containers remained running. The original T075 staging volume was not changed. The protected synthetic backup, comparison checkpoints and logs remain under the owner-server T080 checkpoint.
 
-## Remaining gates
+## Remaining gates at the November 16 checkpoint
 
 T080 still requires the applicable authorized source-copy and staging-destination rehearsal, exact source image/frozen schema and provider identity review, old-key escrow and retained dependency verification, brand writer ownership and operator approval under [release gates](RELEASE_GATES.md). Any identity or reconciliation failure remains a hard stop. The synthetic backup result does not authorize a live integration or production cutover.
