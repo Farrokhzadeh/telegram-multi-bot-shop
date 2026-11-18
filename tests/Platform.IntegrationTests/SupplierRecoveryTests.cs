@@ -61,6 +61,27 @@ public sealed class SupplierRecoveryTests
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE review_code IS NOT NULL OR release_authorized_at IS NOT NULL", Ct));
     }
     [Fact]
+    public async Task MissingSupplierLookupRouteKeepsUnknownOrderInAdminReviewWithoutAnotherAttempt()
+    {
+        await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
+        await SupplierFixture.ConfigureAsync(f, Ct);
+        await SupplierFixture.AcceptAsync(f, 1, Ct);
+        var port = new SyntheticSupplier { ProvenIntentLookup = false, Submit = _ => SyntheticSupplier.Unknown() };
+        var worker = new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets, -100777), port, port);
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await Due(f);
+        await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct), Ct);
+        Assert.Equal((1, 0, 1), (port.Submits, port.Lookups, port.Archives));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE operation='submit' AND outcome='unknown' AND evidence_ref IS NOT NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='requires_admin' AND review_code='provider_unknown' AND release_authorized_at IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE purpose='staff_supplier_case'", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='supplier_wallet_credit'", Ct));
+        Assert.Null(await ClaimOptional(f, JobKind.SubmitSupplier));
+        Assert.Null(await ClaimOptional(f, JobKind.ReconcileSupplier));
+        Assert.Null(await ClaimOptional(f, JobKind.PrepareManifest));
+    }
+    [Fact]
     public async Task CrashBeforeIntentReclaimsSameLocalJobWithoutInventingRemoteEffects()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);

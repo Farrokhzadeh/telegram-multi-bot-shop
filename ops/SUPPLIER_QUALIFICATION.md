@@ -88,3 +88,12 @@ The bounded owner-server build completed with zero warnings and errors. The fina
 **T092 closed for the owner-approved scope on 2026-11-17.** The reviewed Akunding and ProdSeller adapters use worker-driven status and export lookups bound to the original supplier request. There is no supplier webhook handler in this flow. The two paid-shortfall cases exercise customer Telegram callback replay against the saved order message, including rejection of a wrong anchor. The retained final and regression TRX hashes match the published receipt. Its completion flag records the earlier run checkpoint.
 
 The approved frozen copies contain no nonempty historical partial-delivery batch. Retained source delivery markers provide historical preservation evidence, and the passing synthetic partial and delivery-retry archive cases exercise preservation and suppression of redelivery. Real-provider behavior and reconciliation of any later nonempty source copy require their own evidence. No live provider call, GitHub Actions run or deployment was needed for this closeout.
+
+
+## T091 administrator fallback — 2026-11-18
+
+The owner approved administrator review for unresolved supplier outcomes or ambiguous delivered units. The worker now checks whether the original purchase can be addressed before recording a recovery attempt. If the adapter has no proven original-intent lookup and the original provider reference is absent, the local reconciliation job completes and the paid obligation remains in administrator review. The original submit intent and protected evidence are retained. No supplier lookup, additional purchase, delivery or automatic credit is produced on this path.
+
+The focused accabad-server build passed with zero compiler warnings/errors. All 30 synthetic PostgreSQL cases passed across supplier recovery, partial approval and administrator resolution, including the new missing-route regression. The build used a disposable copy of the prior T092 checkout and verified the three changed files against main before applying the patch. TRX SHA-256 is `7581ac063a76aa74c4b4af7121af498844350635c2e19d28697e4c3a44f6dc2f`. The first build attempt needed a locked offline restore. Both test actors stopped after a separate cleanup check corrected the wrapper's copied database label assumption. Logs and receipts are retained in the private T091 checkpoint on accabad-server.
+
+The qualification covers the offline fallback. T057 and T091 remain open for provider-specific operational proof and activation. No live supplier operation was performed.

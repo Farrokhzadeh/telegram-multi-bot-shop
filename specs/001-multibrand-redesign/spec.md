@@ -413,3 +413,9 @@ These decisions settle the feature-spec questions but do **not** constitute proo
 
 ## Owner-approved retained-wallet continuation — 2026-11-06
 Owner clarification for FR-035: legacy IRR balances are excluded from operational USD postings only under exact private per-account retention/manual handling. Preserve all original native-currency and zero history; convert or waive nothing. Incomplete old orders must remain read-only, with missing terms unknown and new fulfillment blocked. Imported legacy discounts remain inactive while original state and obligations are preserved.
+
+## Owner-approved supplier administrator review — 2026-11-18
+
+When an accepted supplier purchase has an unknown outcome, no documented way to find its original order, or delivered units that cannot be correlated safely, hold the paid order for an authenticated administrator. Preserve the original purchase intent, account and source binding, protected response evidence, paid entitlement and any verified allocations. Block automatic repurchase, fallback, credit and customer release while the relevant effects remain unresolved. An administrator must follow FR-080 and the complete-order release rules before resolving the case.
+
+Use supplier documentation and synthetic tests for the offline behavior. A local reconciliation job that has no documented original-order lookup route finishes without adding a remote attempt or rescheduling the same lookup. Verified read-only reconciliation may recover an original order when supported. Keep unknown product eligibility blocked before payable checkout. Operational provider admission and automatic recovery retain the provider-specific evidence and authorization gates in T057 and T091.
