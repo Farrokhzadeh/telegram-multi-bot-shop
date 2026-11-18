@@ -29,7 +29,7 @@ All 14 supplied entries were reviewed. Requests used the listed provider hosts a
 
 | Reference | GET path | Result | Note |
 |---|---|---|---|
-| `akunding` | `/api/v1/me` | HTTP 403 | Account check blocked. The mapped product was not requested. |
+| `akunding` | `/api/v1/me` and `/api/v1/products/{product_id}` | HTTP 200 on both | The first client returned HTTP 403. The standard curl retest matched the prior owner-supplied account and the exact mapped product. Stock, availability and price fields were present. |
 | `prodseller` | `/v1/balance` | HTTP 200 |  |
 | `canboso` | `/api/v2/telegram-buyer/orders` | HTTP 401 | Header-auth request rejected. The documented balance route requires a key in the URL. |
 | `roboticvn` | `/api/v2/wallet/balance` | HTTP 200 |  |
@@ -44,7 +44,7 @@ All 14 supplied entries were reviewed. Requests used the listed provider hosts a
 | `silvex-ai` | `/api/public/reseller/me` | HTTP 200 | The supplied API base, without `/me`, returned 404 with the header. |
 | `insightxpro` | `/api/v1/balance` | HTTP 200 |  |
 
-Akunding's result leaves [T080's historical identity gate](T080_STAGING_REHEARSAL.md#isolated-accabad-checkpoint--2026-11-18) open. The reading used account and balance endpoints where documented, with no purchase or payment calls.
+Akunding's current authenticated result leaves [T080's historical identity gate](T080_STAGING_REHEARSAL.md#isolated-accabad-checkpoint--2026-11-18) open because the frozen record lacks an account ID and its original credential received HTTP 401. The November 18 curl retest used the bearer authentication documented in Akunding's [OpenAPI schema](https://akunding.shop/api/openapi.json). No purchase or payment calls were made.
 
 ## Current supplier work
 
