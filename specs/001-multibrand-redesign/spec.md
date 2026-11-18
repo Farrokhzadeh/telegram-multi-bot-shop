@@ -1,4 +1,4 @@
-# Feature Specification: AccAbad Multi-Brand Commerce Redesign
+# Akanti (آکانتی) Multi-Brand Commerce Specification
 
 **Feature identifier**: `001-multibrand-redesign`  
 **Created**: 2026-10-26  

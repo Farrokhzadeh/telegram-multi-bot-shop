@@ -1,4 +1,4 @@
-# Implementation Plan: Multi-Brand Commerce Backend
+# Akanti (آکانتی) Multi-Brand Commerce Implementation Plan
 
 **Feature**: `001-multibrand-redesign` | **Date**: 2026-10-26 | **Spec**: [spec.md](spec.md)  
 **Specification repository**: `Farrokhzadeh/telegram-multi-bot-shop`, documentation baseline on `main`; imported from `Farrokhzadeh/AccAbad-Shop` at `7fcc4a7a35337405dd69195fc6c92474748c4513`. Current helper work uses `impl/003-transaction-money`, stacked on the qualified `impl/002-relational-baseline` branch.
