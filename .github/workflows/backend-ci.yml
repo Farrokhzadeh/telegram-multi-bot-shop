@@ -83,6 +83,43 @@ jobs:
         run: |
           python3 ops/ci/check-acceptance-evidence.py --results-root artifacts/test-results --output artifacts/acceptance/scenario-witnesses.json
           sha256sum artifacts/acceptance/*.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: offline-qualification-${{ github.sha }}
+          path: |
+            artifacts/acceptance/
+            artifacts/migration/
+            artifacts/contracts/
+            artifacts/native/SchemaRunner/Platform.SchemaRunner
+            artifacts/native/BotHost/Platform.BotHost
+            artifacts/test-results/
+            **/packages.lock.json
+          retention-days: 7
+  build-staging-api:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          global-json-file: global.json
+      - name: Install native compiler
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+      - name: Publish and smoke-test staging API
+        shell: bash
+        run: |
+          dotnet restore src/Platform.Api/Platform.Api.csproj -r linux-x64 --locked-mode
+          dotnet publish src/Platform.Api/Platform.Api.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/Api
+          artifacts/native/Api/Platform.Api --qualify
+          status=0
+          artifacts/native/Api/Platform.Api || status=$?
+          test "$status" -eq 78
       - name: Package native staging candidate
         run: |
           mkdir -p artifacts/staging
@@ -99,17 +136,4 @@ jobs:
           name: staging-api-linux-x64-${{ github.sha }}
           path: artifacts/staging/Platform.Api-linux-x64.tar.gz
           if-no-files-found: error
-          retention-days: 7
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: always()
-        with:
-          name: offline-qualification-${{ github.sha }}
-          path: |
-            artifacts/acceptance/
-            artifacts/migration/
-            artifacts/contracts/
-            artifacts/native/SchemaRunner/Platform.SchemaRunner
-            artifacts/native/BotHost/Platform.BotHost
-            artifacts/test-results/
-            **/packages.lock.json
           retention-days: 7
