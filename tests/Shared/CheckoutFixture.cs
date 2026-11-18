@@ -40,11 +40,11 @@ public sealed class CheckoutFixture : IAsyncDisposable
     public static long Actor(int user) => 7001 + user / 3;
     public LocalCheckoutRequest Request(int quantity = 1, decimal price = 10) => new(Guid.CreateVersion7(), Product, quantity, price);
 
-    public static async Task<CheckoutFixture> CreateAsync(int users = 3, decimal balance = 100, int stock = 1, CancellationToken ct = default, bool seedCatalog = true)
+    public static async Task<CheckoutFixture> CreateAsync(int users = 3, decimal balance = 100, int stock = 1, CancellationToken ct = default, bool seedCatalog = true, string? secretDirectory = null)
     {
         if (!seedCatalog && (users != 0 || stock != 0)) throw new ArgumentException();
         var database = await DisposablePostgres.CreateAsync(ct);
-        var files = new SyntheticSecretFiles();
+        var files = new SyntheticSecretFiles(secretDirectory);
         SecretSnapshot? secrets = null;
         try
         {

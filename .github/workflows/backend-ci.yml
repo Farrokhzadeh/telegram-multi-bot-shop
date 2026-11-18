@@ -73,6 +73,7 @@ jobs:
             -p:StageRuntimeDirectory="$PWD/tests/Platform.IntegrationTests/bin/Release/net10.0"
       - name: Test synthetic and disposable contracts
         env:
+          SHOP_CUTOVER_STAGE: synthetic-acc-abad-v1
           SHOP_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
         shell: bash
         run: |

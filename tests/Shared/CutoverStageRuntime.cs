@@ -59,7 +59,7 @@ public static class CutoverStageRuntime
         if (mode == "init")
         {
             if (File.Exists(path) || Directory.EnumerateFileSystemEntries(Path.Combine(root, "requests")).Any() || Directory.EnumerateFileSystemEntries(Path.Combine(root, "results")).Any()) throw new InvalidOperationException();
-            var f = await CheckoutFixture.CreateAsync(users: 1, stock: 3, ct: ct);
+            var f = await CheckoutFixture.CreateAsync(users: 1, stock: 3, ct: ct, secretDirectory: Path.Combine(root, "tmp"));
             if (!f.SecretRoot.StartsWith(root + "/tmp/shop-secret-qualification-", StringComparison.Ordinal)) throw new InvalidOperationException();
             await using (var edit = await f.Sessions.BeginAsync(ct))
             {

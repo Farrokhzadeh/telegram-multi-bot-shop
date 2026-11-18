@@ -10,10 +10,11 @@ public sealed class SyntheticSecretFiles : IDisposable
     public static readonly Guid BrandA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     public static readonly Guid BrandB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     public static readonly Guid Deployment = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
-    public string Root { get; } = Path.Combine(Path.GetTempPath(), "shop-secret-qualification-" + Guid.NewGuid().ToString("N"));
+    public string Root { get; }
 
-    public SyntheticSecretFiles()
+    public SyntheticSecretFiles(string? directory = null)
     {
+        Root = Path.Combine(directory ?? Path.GetTempPath(), "shop-secret-qualification-" + Guid.NewGuid().ToString("N"));
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("Linux qualification required.");
         Directory.CreateDirectory(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         foreach (var name in new[] { "a-current", "a-old", "b-current", "c-current", "inventory-current" })
