@@ -1,7 +1,9 @@
 import importlib.util
+import os
 import pathlib
 import tempfile
 import unittest
+from unittest.mock import patch
 
 path=pathlib.Path(__file__).resolve().parents[1]/"t064_history_mount_preflight.py"
 spec=importlib.util.spec_from_file_location("history_mount_preflight",path)
@@ -14,6 +16,14 @@ class CustomerHistoryMountPreflightTests(unittest.TestCase):
 		self.addCleanup(self.temp.cleanup)
 		self.root=pathlib.Path(self.temp.name)/"protected-source-history"
 		self.root.mkdir(mode=0o700)
+		original_stat=pathlib.Path.stat
+		def fixture_stat(path,*args,**kwargs):
+			info=original_stat(path,*args,**kwargs)
+			if path!=self.root:return info
+			fields=list(info)
+			fields[4]=0
+			return os.stat_result(fields)
+		self.enterContext(patch.object(pathlib.Path,"stat",fixture_stat))
 		self.data={name:{"mounts":[{"Source":"/opt/accabad-stage-data","Destination":"/app/data"}],
 			"privileged":False,"running":True,"image":module.STAGE_IMAGE if name=="accabad-staging-bot-1" else "unchanged-prod",
 			"readonly":True,"ipc":"private","pid":"","userns":"","network":module.NETWORKS[name],"capadd":None,"devices":None} for name in module.BOTS}
