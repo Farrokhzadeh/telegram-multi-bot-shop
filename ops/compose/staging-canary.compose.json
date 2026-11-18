@@ -1,0 +1,156 @@
+{
+	"name": "shop-t081-canary",
+	"services": {
+		"stage-db": {
+			"read_only": true,
+			"cap_drop": [
+				"ALL"
+			],
+			"security_opt": [
+				"no-new-privileges:true"
+			],
+			"restart": "no",
+			"pull_policy": "never",
+			"cpus": 0.1,
+			"pids_limit": 55,
+			"logging": {
+				"driver": "json-file",
+				"options": {
+					"max-size": "1m",
+					"max-file": "2"
+				}
+			},
+			"labels": {
+				"teleg.task": "T081",
+				"teleg.scope": "synthetic-catalog-canary"
+			},
+			"image": "sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583",
+			"user": "999:999",
+			"mem_limit": "128m",
+			"memswap_limit": "128m",
+			"environment": {
+				"POSTGRES_DB": "shop_staging",
+				"POSTGRES_PASSWORD_FILE": "/run/bootstrap/root-password",
+				"POSTGRES_INITDB_ARGS": "--auth-local=scram-sha-256 --auth-host=scram-sha-256"
+			},
+			"tmpfs": [
+				"/tmp:rw,nosuid,size=16m",
+				"/var/run/postgresql:rw,nosuid,size=8m,uid=999,gid=999"
+			],
+			"volumes": [
+				{
+					"type": "bind",
+					"source": "/var/lib/teleg-cli/shop-staging/bootstrap/root-password",
+					"target": "/run/bootstrap/root-password",
+					"read_only": true,
+					"bind": {
+						"create_host_path": false
+					}
+				},
+				{
+					"type": "volume",
+					"source": "bounded",
+					"target": "/var/lib/postgresql",
+					"volume": {
+						"nocopy": true
+					}
+				}
+			],
+			"command": [
+				"-c",
+				"shared_buffers=16MB",
+				"-c",
+				"max_connections=18",
+				"-c",
+				"work_mem=1MB"
+			]
+		},
+		"stage-bot-a": {
+			"read_only": true,
+			"cap_drop": [
+				"ALL"
+			],
+			"security_opt": [
+				"no-new-privileges:true"
+			],
+			"restart": "no",
+			"pull_policy": "never",
+			"cpus": 0.1,
+			"pids_limit": 55,
+			"logging": {
+				"driver": "json-file",
+				"options": {
+					"max-size": "1m",
+					"max-file": "2"
+				}
+			},
+			"labels": {
+				"teleg.task": "T081",
+				"teleg.scope": "synthetic-catalog-canary"
+			},
+			"image": "sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e",
+			"user": "10011:10011",
+			"init": true,
+			"mem_limit": "64m",
+			"memswap_limit": "64m",
+			"entrypoint": [
+				"/opt/t081/Platform.Api",
+				"--serve-synthetic-staging",
+				"bot-a"
+			],
+			"environment": {
+				"SHOP_STAGING_MODE": "isolated-synthetic-v1",
+				"SHOP_STAGING_DEPLOYMENT": "${SHOP_T081_DEPLOYMENT_ID:?Set the protected staging deployment identity}",
+				"DOTNET_PROCESSOR_COUNT": "1",
+				"DOTNET_EnableDiagnostics": "0"
+			},
+			"tmpfs": [
+				"/tmp:rw,nosuid,size=16m"
+			],
+			"volumes": [
+				{
+					"type": "bind",
+					"source": "/var/lib/teleg-cli/t076-aot-20261115/Platform.Api.published/Platform.Api",
+					"target": "/opt/t081/Platform.Api",
+					"read_only": true,
+					"bind": {
+						"create_host_path": false
+					}
+				},
+				{
+					"type": "bind",
+					"source": "/var/lib/teleg-cli/shop-staging/roles/bot-a",
+					"target": "/run/staging",
+					"read_only": true,
+					"bind": {
+						"create_host_path": false
+					}
+				},
+				{
+					"type": "bind",
+					"source": "/var/lib/teleg-cli/shop-staging/assets/a",
+					"target": "/run/receipt",
+					"read_only": true,
+					"bind": {
+						"create_host_path": false
+					}
+				}
+			]
+		}
+	},
+	"volumes": {
+		"bounded": {
+			"external": true,
+			"name": "shop-t076-bounded-stage"
+		}
+	},
+	"networks": {
+		"default": {
+			"name": "shop-t081-canary-private",
+			"internal": true,
+			"driver_opts": {
+				"com.docker.network.bridge.gateway_mode_ipv4": "isolated"
+			}
+		}
+	}
+}

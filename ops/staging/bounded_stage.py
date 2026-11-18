@@ -1,3 +1,4 @@
+import fcntl
 import hashlib
 import json
 import os
@@ -17,6 +18,10 @@ NATIVE=Path('/var/lib/teleg-cli/t076-aot-20261115/Platform.Api.published/Platfor
 VOLUME='shop-t076-bounded-stage'
 BASE=ROOT/'compose.json'
 ROLES=('api','bot-a','bot-b','bot-c','jobs')
+CANARY=Path(__file__).resolve().parents[1]/'compose/staging-canary.compose.json'
+CANARY_SHA='7ec8711cd74bfbffc405de25b8e922cea0e109058f5600aee4ca294b8ed41735'
+CANARY_PROJECT='shop-t081-canary'
+STAGING_PROJECT='shop-staging'
 
 def call(*args,**kw):
 	return subprocess.run(args,check=True,text=True,**kw)
@@ -27,14 +32,21 @@ def output(*args):
 def require(condition,message):
 	if not condition: raise RuntimeError(message)
 
-def compose(*args):
-	return call('docker','compose','-f',str(BASE),'-f',str(OVERRIDE),*args)
+def compose_args(deployment):
+	if deployment is None: return ('docker','compose','-f',str(BASE),'-f',str(OVERRIDE)),None
+	env={key:value for key,value in os.environ.items() if not key.startswith('COMPOSE_')}
+	env['SHOP_T081_DEPLOYMENT_ID']=deployment
+	return ('docker','compose','--env-file','/dev/null','-p',CANARY_PROJECT,'-f',str(OVERRIDE)),env
+
+def compose(*args,deployment=None,**kwargs):
+	command,env=compose_args(deployment)
+	return call(*command,*args,env=env,**kwargs)
 
 def check_file(path):
 	s=path.lstat()
 	require(stat.S_ISREG(s.st_mode) and s.st_uid==0 and s.st_nlink==1,'Unsafe protected file')
 
-def up():
+def up(canary=False):
 	require(not STATE.exists() and not OVERRIDE.exists(),'Previous bounded state requires cleanup')
 	for p in (BASE,IMAGE,NATIVE): check_file(p)
 	base=json.loads(BASE.read_text())
@@ -57,33 +69,47 @@ def up():
 	available=int(next(x for x in Path('/proc/meminfo').read_text().splitlines() if x.startswith('MemAvailable:')).split()[1])
 	require(available>=1048576,'Insufficient host memory headroom')
 	require(len(os.sched_getaffinity(0))>=2,'Insufficient host CPU capacity')
-	require(not output('docker','ps','-q','--filter','label=com.docker.compose.project=shop-staging'),'Staging project is already running')
+	for project in (STAGING_PROJECT,CANARY_PROJECT):
+		require(not output('docker','ps','-q','--filter','label=com.docker.compose.project='+project),'Staging project is already running')
+	project=CANARY_PROJECT if canary else STAGING_PROJECT
+	roles=('bot-a',) if canary else ROLES
+	deployment=None
+	if canary:
+		check_file(CANARY)
+		manifest=CANARY.read_bytes()
+		require(hashlib.sha256(manifest).hexdigest()==CANARY_SHA,'Canary manifest identity mismatch')
+		identity=ROOT/'operator/identity.json'
+		check_file(identity)
+		deployment=json.loads(identity.read_text())['deployment']
+		require(deployment==base['services']['stage-bot-a']['environment']['SHOP_STAGING_DEPLOYMENT'],'Canary deployment identity mismatch')
+		require(not output('docker','ps','-aq','--filter','label=com.docker.compose.project='+CANARY_PROJECT),'Previous canary needs cleanup')
 	require(subprocess.run(['docker','volume','inspect',VOLUME],capture_output=True).returncode!=0,'Bounded volume already exists')
 	require(not output('/sbin/losetup','-j',str(IMAGE)),'Image already attached')
 	uuid=output('/sbin/blkid','-s','UUID','-o','value',str(IMAGE))
 	require(uuid==sys.argv[2],'Bounded filesystem identity mismatch')
 	loop=output('/sbin/losetup','--find','--show',str(IMAGE))
-	STATE.write_text(json.dumps({'loop':loop,'uuid':uuid,'image':str(IMAGE)}));STATE.chmod(0o600)
+	STATE.write_text(json.dumps({'loop':loop,'uuid':uuid,'image':str(IMAGE),'deployment':deployment}));STATE.chmod(0o600)
 	call('docker','volume','create','--driver','local','--opt','type=ext4','--opt','device='+loop,'--opt','o=nosuid,nodev,noexec',VOLUME,stdout=subprocess.DEVNULL)
 	services={'stage-db':{'cpus':0.1,'mem_limit':'128m','memswap_limit':'128m','volumes':[{'type':'volume','source':'bounded','target':'/var/lib/postgresql'}]}}
 	for role in ROLES:
 		services['stage-'+role]={'cpus':0.1,'mem_limit':'64m','memswap_limit':'64m','entrypoint':['/opt/t076/Platform.Api.native','--serve-synthetic-staging',role],'volumes':[str(NATIVE)+':/opt/t076/Platform.Api.native:ro']}
-	OVERRIDE.write_text(json.dumps({'services':services,'volumes':{'bounded':{'external':True,'name':VOLUME}}}));OVERRIDE.chmod(0o600)
-	config=json.loads(output('docker','compose','-f',str(BASE),'-f',str(OVERRIDE),'config','--format','json'))
+	OVERRIDE.write_bytes(manifest if canary else json.dumps({'services':services,'volumes':{'bounded':{'external':True,'name':VOLUME}}}).encode());OVERRIDE.chmod(0o600)
+	config=json.loads(compose('config','--format','json',deployment=deployment,stdout=subprocess.PIPE).stdout)
+	require(set(config['services'])=={'stage-db',*('stage-'+role for role in roles)},'Unexpected staged service set')
 	mounts=[x for x in config['services']['stage-db']['volumes'] if x['target']=='/var/lib/postgresql']
 	require(len(mounts)==1 and mounts[0]['source']=='bounded','Database mount override failed')
 	require(all(float(v.get('cpus',0))==0.1 for v in config['services'].values()),'Staging CPU reserve guard failed')
 	require(all(int(v.get('mem_limit',0))==(134217728 if k=='stage-db' else 67108864) and v.get('memswap_limit')==v.get('mem_limit') for k,v in config['services'].items()),'Staging memory reserve guard failed')
-	compose('up','-d','--no-deps','--pull','never','stage-db')
+	compose('up','-d','--no-deps','--pull','never','stage-db',deployment=deployment)
 	for _ in range(40):
-		p=subprocess.run(['docker','exec','shop-staging-stage-db-1','pg_isready','-q','-h','127.0.0.1','-U','postgres','-d','shop_staging'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+		p=subprocess.run(['docker','exec',project+'-stage-db-1','pg_isready','-q','-h','127.0.0.1','-U','postgres','-d','shop_staging'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 		if p.returncode==0: break
 		time.sleep(1)
 	else: raise RuntimeError('Bounded database failed readiness')
-	compose('up','-d','--no-deps','--pull','never',*('stage-'+x for x in ROLES))
-	for role in ROLES:
+	compose('up','-d','--no-deps','--pull','never',*('stage-'+x for x in roles),deployment=deployment)
+	for role in roles:
 		for _ in range(60):
-			p=subprocess.run(['docker','exec','shop-staging-stage-'+role+'-1','curl','-ksS','--max-time','2','https://127.0.0.1:8443/ready'],capture_output=True,text=True)
+			p=subprocess.run(['docker','exec',project+'-stage-'+role+'-1','curl','-ksS','--max-time','2','https://127.0.0.1:8443/ready'],capture_output=True,text=True)
 			if p.returncode==0 and p.stdout==role: break
 			time.sleep(1)
 		else: raise RuntimeError('Synthetic service failed readiness: '+role)
@@ -92,16 +118,23 @@ def up():
 def down():
 	check_file(STATE)
 	s=json.loads(STATE.read_text());loop=s['loop']
+	deployment=s.get('deployment');project=CANARY_PROJECT if deployment is not None else STAGING_PROJECT
 	require(s['image']==str(IMAGE) and loop.startswith('/dev/loop'),'Unexpected state identity')
 	require(output('/sbin/losetup','-n','-O','BACK-FILE',loop).splitlines()[0]==str(IMAGE),'Loop backing identity mismatch')
 	has_override=OVERRIDE.exists()
 	if has_override:
-		check_file(OVERRIDE);compose('stop','-t','10')
+		check_file(OVERRIDE)
+		if deployment is None: compose('stop','-t','10')
+		else:
+			require(hashlib.sha256(OVERRIDE.read_bytes()).hexdigest()==CANARY_SHA,'Canary manifest identity mismatch')
+			compose('stop','-t','10','stage-bot-a',deployment=deployment)
+			compose('stop','-t','10','stage-db',deployment=deployment)
+			compose('rm','-f','stage-bot-a',deployment=deployment)
 	else:
-		require(not output('docker','ps','-q','--filter','label=com.docker.compose.project=shop-staging'),'Cannot clean partial state while staging runs')
-	cid=output('docker','ps','-aq','--filter','name=^/shop-staging-stage-db-1$')
+		require(not output('docker','ps','-q','--filter','label=com.docker.compose.project='+project),'Cannot clean partial state while staging runs')
+	cid=output('docker','ps','-aq','--filter','name=^/'+project+'-stage-db-1$')
 	if cid and has_override:
-		require(output('docker','inspect','-f','{{index .Config.Labels "com.docker.compose.project"}}',cid)=='shop-staging','Database container identity mismatch')
+		require(output('docker','inspect','-f','{{index .Config.Labels "com.docker.compose.project"}}',cid)==project,'Database container identity mismatch')
 		call('docker','rm',cid,stdout=subprocess.DEVNULL)
 	v=subprocess.run(['docker','volume','inspect',VOLUME],capture_output=True,text=True)
 	if v.returncode==0:
@@ -113,10 +146,12 @@ def down():
 	print('Bounded synthetic staging stopped')
 
 if __name__=='__main__':
-	if os.geteuid()!=0 or len(sys.argv) not in (2,3): raise SystemExit('Usage: bounded_stage.py up FILESYSTEM_UUID | down')
+	if os.geteuid()!=0 or len(sys.argv) not in (2,3,4): raise SystemExit('Usage: bounded_stage.py up FILESYSTEM_UUID [--canary] | down')
 	try:
-		if sys.argv[1]=='up' and len(sys.argv)==3: up()
-		elif sys.argv[1]=='down' and len(sys.argv)==2: down()
-		else: raise ValueError('Invalid operation')
+		with os.fdopen(os.open(WORK/'bounded.lock',os.O_CREAT|os.O_NOFOLLOW|os.O_RDWR,0o600),'r+') as lock:
+			fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+			if sys.argv[1]=='up' and (len(sys.argv)==3 or sys.argv[3:]==['--canary']): up(len(sys.argv)==4)
+			elif sys.argv[1]=='down' and len(sys.argv)==2: down()
+			else: raise ValueError('Invalid operation')
 	except (OSError,RuntimeError,ValueError,subprocess.CalledProcessError) as e:
 		print('Bounded staging rejected:',str(e),file=sys.stderr);raise SystemExit(1)
