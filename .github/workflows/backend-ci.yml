@@ -144,9 +144,15 @@ jobs:
             cd artifacts/native/Api
             sha256sum Platform.Api
           ) > artifacts/staging/SHA256SUMS
+          cp "$RUNNER_TEMP/t081-schema.sql" artifacts/staging/0001_core.sql
+          (
+            cd artifacts/staging
+            sha256sum 0001_core.sql >> SHA256SUMS
+            cat SHA256SUMS
+          )
           tar -czf artifacts/staging/Platform.Api-linux-x64.tar.gz \
             -C artifacts/native/Api Platform.Api \
-            -C "$PWD/artifacts/staging" SHA256SUMS SOURCE_COMMIT
+            -C "$PWD/artifacts/staging" SHA256SUMS SOURCE_COMMIT 0001_core.sql
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: staging-api-linux-x64-${{ github.sha }}
