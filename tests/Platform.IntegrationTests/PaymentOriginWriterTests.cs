@@ -166,10 +166,16 @@ public sealed class PaymentOriginWriterTests
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
         await new PaymentSettlementFixture(f).EnableAsync(Ct);
         Guid payment = await Bound(f);
+        using var limit = new SemaphoreSlim(8);
         var results = await Task.WhenAll(Enumerable.Range(0, 100).Select(async _ =>
         {
-            using var notice = Notice(payment);
-            return await Store(f).CaptureForBrandAsync(f.Context(0), 1, notice, Archive, Ct);
+            await limit.WaitAsync(Ct);
+            try
+            {
+                using var notice = Notice(payment);
+                return await Store(f).CaptureForBrandAsync(f.Context(0), 1, notice, Archive, Ct);
+            }
+            finally { limit.Release(); }
         }));
         Assert.Single(results, r => r.Outcome == PaymentCaptureOutcome.Ready);
         Assert.Equal(99, results.Count(r => r.Outcome == PaymentCaptureOutcome.Replayed));

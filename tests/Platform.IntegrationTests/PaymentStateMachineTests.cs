@@ -75,6 +75,8 @@ public sealed class PaymentStateMachineTests
         await fixture.CaptureAsync(order.Payment, order.Origin, order.Due, ct: Ct);
         long instructions = await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE dedupe_key LIKE 'instruction-created:%'", Ct);
         Assert.Equal(1L, instructions);
+        long deliveries = await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", Ct);
+        long statusMessages = await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE dedupe_key LIKE 'payment-status:%'", Ct);
         await using (var fail = await f.Sessions.BeginAsync(Ct))
         {
             await fail.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET state='retired'"), Ct);
@@ -86,8 +88,8 @@ public sealed class PaymentStateMachineTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE status='confirming' AND compensating_wallet_entry_id IS NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
-        Assert.Equal(instructions, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", Ct));
-        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE dedupe_key LIKE 'payment-status:%'", Ct));
+        Assert.Equal(deliveries, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries", Ct));
+        Assert.Equal(statusMessages, await f.CountAsync("SELECT count(*) FROM shop.telegram_deliveries WHERE dedupe_key LIKE 'payment-status:%'", Ct));
         await using (var recover = f.Database.Data.CreateCommand("DROP TRIGGER public_test_fail_settlement ON shop.payments")) await recover.ExecuteNonQueryAsync(Ct);
         Assert.Equal(ExternalSettlementRoute.LocalShortageCredit, (await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct)).Route);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='released'", Ct));

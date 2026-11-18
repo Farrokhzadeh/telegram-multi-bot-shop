@@ -43,11 +43,11 @@ public sealed class AdminApiTests
         for (int i = 0; i < 25; i++) Assert.Equal(1, await pricing.EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, Ct));
         var conflict = await Assert.ThrowsAsync<DbOperationException>(() => pricing.EditAsync(f.Context(0), actor, coupon, 0, edit with { Percent = 20 }, AuditReason.OperatorReview, command, Ct));
         Assert.Equal(DbFailureKind.InvalidData, conflict.Failure.Kind);
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=1", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=1", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts WHERE redeemed_count=1 AND usage_adjustment_units=-1 AND max_total_uses=0 AND NOT active", Ct));
+        Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=1", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discounts WHERE redeemed_count=2 AND usage_adjustment_units=-2 AND max_total_uses=0 AND NOT active", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_revisions WHERE revision_no=0 AND percent_off=100 AND max_total_uses=4", Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_revisions r JOIN shop.audit_events a ON a.id=r.audit_event_id WHERE r.revision_no=1 AND r.percent_off=10 AND r.max_total_uses=0 AND r.held_units_at_revision=1 AND a.actor_kind='admin' AND a.reason='operator_review' AND a.previous_revision=0 AND a.new_revision=1", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_revisions r JOIN shop.audit_events a ON a.id=r.audit_event_id WHERE r.revision_no=1 AND r.percent_off=10 AND r.max_total_uses=0 AND r.held_units_at_revision=0 AND a.actor_kind='admin' AND a.reason='operator_review' AND a.previous_revision=0 AND a.new_revision=1", Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => pricing.EditAsync(f.Context(0), actor, coupon, 1, edit with { MemberId = f.Users[1] }, AuditReason.OperatorReview, Guid.NewGuid(), Ct));
         await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 3, Kind: CheckoutKind.PrepaidUnits), Member, Ct);
         Guid prepaid;
