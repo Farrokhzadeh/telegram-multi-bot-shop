@@ -62,6 +62,12 @@ The [pilot controller](staging/wallet_pilot.py) connects one private, allowliste
 
 An isolated accabad-server smoke connected the controller to the real staging checkout actor with simulated Telegram updates and responses. A wrong actor, group chat and stale message were rejected. A two-unit wallet checkout survived a lost confirmation response. The repeat showed the same order with one debit and two allocations. An operator then verified the dedicated staging bot and opened a bounded private pilot window with automatic restoration of the previous staging bot. This is one synthetic wallet route for one allowlisted tester. The full preregistered human cohort and SC-008 measurement remain **NOT RUN**.
 
+### Live Telegram wallet smoke — 2026-11-17
+
+The allowlisted staging tester completed one private Telegram wallet checkout through the pilot. The tester saw the confirmation, and the polling process recorded completion. A read-only query against isolated PostgreSQL verified one paid order, one allocated unit and exactly one 10 USD test-wallet debit. Earlier windows produced no orders. The staging tester binding was corrected before the successful window. The legacy staging bot was restored and the temporary pilot actors and isolated database were stopped.
+
+This guided, one-participant wallet smoke is operational checkout evidence. The preregistered first-attempt cohort measurement remains **NOT RUN**.
+
 ## Observe one first attempt
 
 1. Give the participant only this neutral task in their assigned supported language: “Find the assigned product, choose the assigned quantity, review the price and finish checkout using the assigned payment route.” Use synthetic products, balances, stock and configured fake transports only in a separately authorized isolated setup.
