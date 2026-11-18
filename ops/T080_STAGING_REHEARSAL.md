@@ -1,8 +1,16 @@
 # T080 staging cutover and rollback rehearsal
 
+## Staging closeout — 2026-11-18
+
+**T080 is complete for the isolated AccAbad staging rehearsal.** The owner confirmed the frozen Akunding configuration was used only for testing in AccAbad. The [T090 frozen evidence](T090_QUALIFICATION.md) independently found zero supplier requests, attempts, items, refunds and corresponding archive projections in all three approved snapshots. The test mapping is retained as evidence and excluded from operational import, supplier activation and writer handoff. Frozen financial and historical exceptions retain their earlier quarantine dispositions.
+
+The separately authorized November 18 read check with the supplied credential returned HTTP 200 for the account and exact mapped product. The account matched the earlier successful owner-credential read. The original frozen credential returned HTTP 401 and the frozen configuration has no account ID. No account was assigned to that historical record. See the [redacted credential results](API_INVENTORY.md#read-only-credential-checks--2026-11-18).
+
+The verified staging scope covers the rehearsal below, including frozen source and key recovery evidence, acceptance reconciliation, exclusive writer ownership and rollback. T057 and T091 retain their live supplier gates. T081 and production release remain gated on a separate decision under [release gates](RELEASE_GATES.md).
+
 ## Isolated AccAbad checkpoint — 2026-11-18
 
-**T080 remains open.** The isolated writer handoff and rollback passed on accabad-server. The frozen provider-account identity remains unresolved. The rehearsal used the qualified T068 managed artifact and generated commerce fixtures in disposable source and target copies. The reviewed repository head was `bf6acf286ad3f64bf30148b994fc96b26d6a008e`.
+The isolated writer handoff and rollback passed on accabad-server. The frozen provider disposition is recorded above. The rehearsal used the qualified T068 managed artifact and generated commerce fixtures in disposable source and target copies. The reviewed repository head was `bf6acf286ad3f64bf30148b994fc96b26d6a008e`.
 
 | Gate | Result |
 |---|---|
@@ -12,7 +20,7 @@
 | Legacy key recovery | The retained restricted AccAbad key file authenticated a frozen supplier ciphertext. The recovered bytes round-tripped and a generated wrong key was rejected. The retained file contains one legacy key. Previous rotation keys and wider escrow dependencies were outside the check. |
 | Writer handoff and rollback | Six phases and 52 guards passed. Separate verification matched the signed ownership journal to Docker events. Database starts were legacy, legacy, target, target, with zero overlap. Legacy resumed before target acceptance. After acceptance, the fence rejected legacy reopening, and recovery restored all 28 accepted target tables. Restart preserved one target allocation, zero legacy allocations and rejected replay. All four actors stopped and the final fence has no writer. |
 | Provider identity | The frozen source has one Akunding mapping and no stored account ID. Its copied credential received HTTP 401. A separate owner-provided credential returned an account identity and the mapped product, with no evidence binding that account to the frozen credential. See [T093](T093_QUALIFICATION.md#owner-approved-closeout--2026-11-17). |
-| Operator decision | A staging closeout with Akunding disabled and its frozen account unresolved requires explicit owner acceptance of that scope. Operational provider activation, production cutover and T081 release retain their separate approvals. |
+| Operator scope | The authorized rehearsal was limited to isolated staging. The owner confirmed the historical Akunding mapping was test-only. |
 
 Private checkpoint is `/var/lib/teleg-cli/t068-pair-t080-20261118-889ff59277`. Rehearsal result SHA-256 is `8af16de8601546c687ca2ff4716f83a1881d010e6aa09afae17509aee5369cd1`. Writer event stream SHA-256 is `9df71c72175d00f408c25ffc47fd0a03368601346a53ae681e05eb6870552e1e`. No live provider calls or production writer changes were made.
 

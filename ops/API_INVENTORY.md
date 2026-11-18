@@ -44,7 +44,7 @@ All 14 supplied entries were reviewed. Requests used the listed provider hosts a
 | `silvex-ai` | `/api/public/reseller/me` | HTTP 200 | The supplied API base, without `/me`, returned 404 with the header. |
 | `insightxpro` | `/api/v1/balance` | HTTP 200 |  |
 
-Akunding's current authenticated result leaves [T080's historical identity gate](T080_STAGING_REHEARSAL.md#isolated-accabad-checkpoint--2026-11-18) open because the frozen record lacks an account ID and its original credential received HTTP 401. The November 18 curl retest used the bearer authentication documented in Akunding's [OpenAPI schema](https://akunding.shop/api/openapi.json). No purchase or payment calls were made.
+The owner confirmed Akunding was only tested in legacy AccAbad. [T080's staging closeout](T080_STAGING_REHEARSAL.md#staging-closeout--2026-11-18) preserves the frozen test mapping without importing it into operational configuration. The frozen record lacks an account ID and its original credential received HTTP 401. The November 18 curl retest used the bearer authentication documented in Akunding's [OpenAPI schema](https://akunding.shop/api/openapi.json). No purchase or payment calls were made.
 
 ## Current supplier work
 

@@ -62,3 +62,7 @@ Customer delivery prefers editing the validated saved order message after comple
 The guarded synthetic staging database and receipt fixtures were backed up and restored into separate disposable destinations. All 28 synthetic table row commitments and 1,264 column/constraint records matched; three receipt fixtures matched content, mode and ownership. See [T080 rehearsal](T080_STAGING_REHEARSAL.md) for exact bounds, artifact hashes and limits.
 
 T080 remains open. This checkpoint does not qualify actual source copies, provider identity, old-key escrow, original grants/owners, real media, brand writer ownership or operator release approval. The unbounded original staging route and production promotion remain outside the T076 guarded synthetic qualification.
+
+## Isolated staging closeout — 2026-11-18
+
+[T080](T080_STAGING_REHEARSAL.md#staging-closeout--2026-11-18) is complete for the isolated AccAbad rehearsal. The test-only Akunding mapping stays outside staging writer admission and operational import. E6 production promotion still requires a separate per-brand release decision and the applicable reconciliation and identity evidence.
