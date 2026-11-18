@@ -1,0 +1,58 @@
+{
+	"scope": "owner-approved-one-brand-synthetic-staging-canary",
+	"decision_date": "2026-11-18",
+	"source_commit": "4f28eadab3dd0d3487078b73d2c688e5a3118b51",
+	"github_actions_run": 44332373527,
+	"github_actions_artifact": 14439687979,
+	"github_archive_sha256": "f53db60dd9e1f220a06837bdb3b5864dbd5d26c488c86feb8057a7e18b205541",
+	"executable": {
+		"name": "Platform.Api",
+		"runtime": "linux-x64",
+		"sha256": "41a56053a60a0a58db063ea10c10a31927cbd36a7fd31d7148292c098babb13d"
+	},
+	"schema": {
+		"version": "0001",
+		"sha256": "99346348128e43d36ea28c390251e411f3afd1f9a341adb658ca03c764c6bf7c"
+	},
+	"project": "shop-t081-canary",
+	"network": {
+		"name": "shop-t081-canary-private",
+		"internal": true,
+		"published_ports": []
+	},
+	"services": {
+		"stage-db": {
+			"image": "sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583",
+			"cpu": 0.1,
+			"memory_mib": 160,
+			"pids": 55,
+			"storage": "disposable tmpfs",
+			"storage_limit_mib": 256
+		},
+		"stage-bot-a": {
+			"image": "sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e",
+			"cpu": 0.1,
+			"memory_mib": 64,
+			"pids": 55,
+			"brand": "stage-a"
+		}
+	},
+	"receipt": {
+		"backup_sha256": "24686fd5ce072de6c5334e6f84a8245f992701386703cc3c8d136031c6bd389a",
+		"catalog_callbacks": 1,
+		"disposable_services_removed": true,
+		"executable_sha256": "41a56053a60a0a58db063ea10c10a31927cbd36a7fd31d7148292c098babb13d",
+		"independent_stop_verified": true,
+		"live_transports": false,
+		"orders_created": 0,
+		"preexisting_running_containers_unchanged": 7,
+		"private_manifest_sha256": "fb5a1cafe759c2ee20584b70f038fb18d3d3955f88783dd869ddc0cd80351c8e",
+		"replay_deduplicated": true,
+		"rollback_tables_matched": 28,
+		"schema_sha256": "99346348128e43d36ea28c390251e411f3afd1f9a341adb658ca03c764c6bf7c",
+		"source_commit": "4f28eadab3dd0d3487078b73d2c688e5a3118b51",
+		"wrong_bot_rejected": true,
+		"redacted_receipt_sha256": "cd399e194d1aafd23e5641aa1578515db40350965302d50cec545608ac784f14"
+	},
+	"production_release_authorized": false
+}

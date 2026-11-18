@@ -66,3 +66,7 @@ T080 remains open. This checkpoint does not qualify actual source copies, provid
 ## Isolated staging closeout — 2026-11-18
 
 [T080](T080_STAGING_REHEARSAL.md#staging-closeout--2026-11-18) is complete for the isolated AccAbad rehearsal. The test-only Akunding mapping stays outside staging writer admission and operational import. E6 production promotion still requires a separate per-brand release decision and the applicable reconciliation and identity evidence.
+
+## One-brand staging decision and qualification — 2026-11-18
+
+The owner approved the limited synthetic canary with live suppliers disabled. [T081](T081_STAGING_CANARY.md#owner-approved-staging-closeout--2026-11-18) passed with the GitHub-built artifact, its matching synthetic schema and independent stop and rollback evidence. The canary was stopped and removed after the run. Production E6 remains a separate per-brand decision.

@@ -1,6 +1,18 @@
 # T081 AccAbad staging canary
 
-**Status — 2026-11-18:** one-brand synthetic catalog canary prepared. Startup remains on hold. Reviewed repository head `a4eb3ab8e7061bb1e4ba67002d5ad5fd3fa0c152`.
+## Owner-approved staging closeout — 2026-11-18
+
+**T081 is complete for the one-brand synthetic staging canary.** The owner approved the isolated run with live suppliers disabled. Accabad-server used the exact [GitHub Actions artifact](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44332373527/artifacts/14439687979) from `4f28eadab3dd0d3487078b73d2c688e5a3118b51`. The [qualification run](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44332373527) passed 258 unit, 857 integration and 149 contract tests, the Native AOT smoke suite and the matching-schema catalog canary. No build ran on accabad-server.
+
+The [release manifest](compose/staging-canary.release.json) pins the executable, schema and container images. The current artifact requires its own schema fingerprint. The rehearsal created a fresh disposable PostgreSQL on a 256 MiB tmpfs volume and started only the synthetic bot-a role on an internal network with unpublished ports. The prior T076 staging project and its database copy remained outside the rehearsal.
+
+The bot accepted one catalog callback, rejected the wrong bot and deduplicated replay after restart. Stopping the bot left the database responsive. With the bot stopped, a pre-canary backup was restored into a separate database in the isolated PostgreSQL instance. All 28 restored synthetic table fingerprints matched the pre-canary baseline. The check covered table data, with temporary restore ownership and grants outside scope. The canary created zero orders. All canary containers, the network and temporary storage were removed. The seven pre-existing running containers kept their identities, start times and restart counts.
+
+The protected Compose manifest, script, logs and redacted receipt are retained under `/var/lib/teleg-cli/t081-owner-canary-20261118`. The fixture and restored database were disposable. Disk met the guarded 3 GiB minimum at admission and was 3,064 MiB after cleanup. Recheck headroom before another run.
+
+Production deployment and cutover require a separate per-brand release decision. T057 and T091 retain their live supplier gates. The dated preparation record below describes the earlier T076 candidate.
+
+**Preparation checkpoint — 2026-11-18:** one-brand synthetic catalog canary prepared. Reviewed repository head `a4eb3ab8e7061bb1e4ba67002d5ad5fd3fa0c152`.
 
 ## Candidate and boundaries
 

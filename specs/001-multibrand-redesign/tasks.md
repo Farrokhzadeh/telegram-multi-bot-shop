@@ -1,5 +1,7 @@
 # Tasks: Multi-Brand Commerce Backend Redesign
 
+**T081 completion — 2026-11-18:** **94/96 complete, 2 unchecked.** The owner-approved one-brand synthetic staging canary passed start, independent stop, restart replay and rollback with the exact GitHub-built Native AOT candidate. See the [closeout](../../ops/T081_STAGING_CANARY.md#owner-approved-staging-closeout--2026-11-18).
+
 **T080 completion — 2026-11-18:** **93/96 complete, 3 unchecked.** The isolated rehearsal and rollback passed. The owner confirmed legacy Akunding was test-only. T081 retains its separate release decision. See the [closeout](../../ops/T080_STAGING_REHEARSAL.md#staging-closeout--2026-11-18).
 
 **T079 completion — 2026-11-18:** **92/96 complete, 4 unchecked.** The owner waived the cohort run and accepted the verified staging wallet checkout and code checks. See the [closeout](../../ops/USER_ACCEPTANCE_PROTOCOL.md#owner-approved-closeout--2026-11-18).
@@ -220,7 +222,7 @@ T063/T064/T066 offline record extension: [contract and remaining gates](../../op
 - [x] T078 Stress-test the order reference generator from T033 for concurrency and historical ID collision in `tests/Platform.IntegrationTests/OrderIdTests.cs`.
 - [x] T079 Define 95% catalog-to-checkout user acceptance sampling/measurement protocol and evidence template in `ops/USER_ACCEPTANCE_PROTOCOL.md`; publish the result before release. **Closed for the owner-approved staging qualification scope on 2026-11-18.** The live wallet smoke and focused accabad-server checks passed. The owner waived the cohort run. SC-008’s human completion rate remains unmeasured. See the [closeout](../../ops/USER_ACCEPTANCE_PROTOCOL.md#owner-approved-closeout--2026-11-18).
 - [x] T080 Rehearse only against authorized disposable source copies/staging destinations under staging-plan.md, without stopping actual production writers; confirm staging backup/restore, provider identity, old-key escrow, exact source image, frozen schema, brand writer ownership and operator approval in `ops/RELEASE_GATES.md`; hard-stop if any check fails. **Complete for the isolated AccAbad staging scope.** Test-only legacy Akunding configuration is excluded from operational admission. See the [rehearsal closeout](../../ops/T080_STAGING_REHEARSAL.md#staging-closeout--2026-11-18).
-- [ ] T081 Obtain explicit separate release decision and prepare immutable staging/canary manifests in `ops/compose/` after all gates; never auto-deploy production from a feature or task completion. **One-brand synthetic canary manifest prepared and rendered. Startup awaits guarded disk headroom and separate staging authorization.** See [T081 canary preparation](../../ops/T081_STAGING_CANARY.md).
+- [x] T081 Obtain explicit separate release decision and prepare immutable staging/canary manifests in `ops/compose/` after all gates; never auto-deploy production from a feature or task completion. **Complete for the owner-approved one-brand synthetic staging scope.** See the [rehearsal closeout](../../ops/T081_STAGING_CANARY.md#owner-approved-staging-closeout--2026-11-18).
 
 ## Payment deadline / lean-identity remediation (US8, must complete before release)
 
