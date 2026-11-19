@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Platform.Security;
 using Platform.Telegram;
 
@@ -15,6 +16,14 @@ internal static class IngressQualification
         using var verifier = new TelegramWebhookVerifier(context!, secret);
         string header = Convert.ToBase64String(secret).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         const string body = """{"update_id":1,"message":{"message_id":77,"from":{"id":7001,"is_bot":false},"chat":{"id":7001,"type":"private"},"text":"/start"}}""";
+        using var stagingPreview = JsonDocument.Parse(body);
+        using var foreignPreview = JsonDocument.Parse(body.Replace("7001", "7002", StringComparison.Ordinal));
+        using var groupPreview = JsonDocument.Parse(body.Replace("\"private\"", "\"group\"", StringComparison.Ordinal));
+        using var checkoutPreview = JsonDocument.Parse(body.Replace("/start", "/checkout", StringComparison.Ordinal));
+        if (!StagingPreviewCommand.Accepts(stagingPreview.RootElement, 7001) ||
+            StagingPreviewCommand.Accepts(foreignPreview.RootElement, 7001) ||
+            StagingPreviewCommand.Accepts(groupPreview.RootElement, 7001) ||
+            StagingPreviewCommand.Accepts(checkoutPreview.RootElement, 7001)) return 1;
         var update = verifier.Verify([header], System.Text.Encoding.UTF8.GetBytes(body));
         if (update.ActorId != 7001 || update.Context.BotId != 1001 || update.IsCallback) return 1;
         bool rejected = false;
