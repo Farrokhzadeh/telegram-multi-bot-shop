@@ -26,9 +26,11 @@ def request(root, command):
 	deadline = time.monotonic() + 8
 	while time.monotonic() < deadline:
 		try:
-			response = json.loads(private_text(result, 4096), parse_float=Decimal)
+			response = json.loads(private_text(result, 16384), parse_float=Decimal)
 			if not isinstance(response, dict) or not isinstance(response.get("outcome"), str):
 				raise ValueError("pilot response rejected")
+			if command.startswith("pilot-screen:"):
+				result.unlink(missing_ok=True)
 			return response
 		except FileNotFoundError:
 			time.sleep(0.1)
@@ -119,80 +121,230 @@ class WalletPilot:
 			text=text, reply_markup=reply_markup)
 
 class WalletShop(WalletPilot):
-	"""AccAbad-style navigation for the isolated staging shop."""
+	"""Customer screens from the AccAbad flow, backed by Akanti staging."""
+
+	labels = {
+		"home": ("Main menu", "منوی اصلی"), "catalog": ("Shop", "فروشگاه"),
+		"wallet": ("Wallet", "کیف پول"), "orders": ("Orders", "سفارش‌ها"),
+		"discounts": ("My discounts", "تخفیف‌های من"), "support": ("Support", "پشتیبانی"),
+		"language": ("Language", "زبان"), "balance": ("Balance", "موجودی"),
+		"joined": ("Joined", "عضویت"), "back": ("Back", "بازگشت"),
+		"next": ("Next", "بعدی"), "previous": ("Previous", "قبلی"),
+		"all": ("All", "همه"), "active": ("Active", "فعال"), "finished": ("Finished", "پایان‌یافته"),
+		"transactions": ("Transactions", "تراکنش‌ها"), "deposits": ("Payments", "پرداخت‌ها"),
+		"buying_help": ("Buying guide", "راهنمای خرید"), "support_orders": ("Order support", "پشتیبانی سفارش"),
+		"support_payments": ("Payment support", "پشتیبانی پرداخت"),
+		"empty": ("No records found.", "موردی پیدا نشد."), "out": ("Out of stock", "ناموجود"),
+		"buy": ("Buy", "خرید"), "quantity": ("Quantity", "تعداد"),
+		"quantity_help": ("Choose or enter a quantity.", "تعداد را انتخاب یا وارد کنید."),
+		"total": ("Total", "مبلغ کل"), "pay": ("Pay from test wallet", "پرداخت از کیف پول آزمایشی"),
+		"cancel": ("Cancel", "لغو"), "paid": ("Test wallet checkout complete.", "خرید آزمایشی انجام شد."),
+		"unavailable": ("Unavailable. Please try again from the shop.", "در دسترس نیست. از فروشگاه دوباره تلاش کنید."),
+		"items": ("View purchased item", "نمایش خرید"), "awaiting": ("Awaiting delivery or review.", "در انتظار تحویل یا بررسی."),
+		"status": ("Status", "وضعیت"), "amount": ("Amount", "مبلغ"),
+		"date": ("Date", "تاریخ"), "member": ("Telegram ID", "شناسه تلگرام"),
+		"help_text": ("Open Shop, choose a product and quantity, then confirm checkout. Find the order and item under Orders.",
+					  "فروشگاه را باز کنید، محصول و تعداد را انتخاب کنید و خرید را تأیید کنید. سفارش و محصول در بخش سفارش‌ها هستند."),
+		"ready": ("Ready", "آماده"), "completed": ("Completed", "تکمیل شده"),
+		"waiting_stock": ("Waiting for stock", "در انتظار موجودی"), "requires_admin": ("Needs review", "نیازمند بررسی"),
+		"purchase_debit": ("Purchase", "خرید"), "admin_adjustment": ("Wallet adjustment", "اصلاح موجودی"),
+		"opening_balance": ("Opening balance", "موجودی اولیه"), "wallet_topup": ("Top-up", "افزایش موجودی"),
+		"settled": ("Settled", "تسویه‌شده"), "review": ("In review", "در حال بررسی"),
+		"awaiting_payment": ("Awaiting payment", "در انتظار پرداخت"), "expired": ("Expired", "منقضی"),
+		"cancelled": ("Cancelled", "لغوشده"), "bank": ("Bank transfer", "انتقال بانکی"), "crypto": ("Crypto", "رمزارز"),
+	}
+
+	def __init__(self, actor, call, checkout):
+		super().__init__(actor, call, checkout)
+		self.language = "en"
+		self.list_origin = "orders:all:0"
+
+	def label(self, key):
+		return self.labels.get(key, (key.replace("_", " ").capitalize(),) * 2)[self.language == "fa"]
 
 	def update(self, event):
 		message = event.get("message")
-		if message and self.authorized(message, message.get("from", {})):
-			command = (message.get("text") or "").strip()
-			commands = {"/start": "home", "/menu": "home", "/wallet": "wallet", "/orders": "orders"}
-			name = command.removesuffix("@testadbadbot")
-			if name in commands:
-				self.show(commands[name], new_message=True)
+		if message:
+			if not self.authorized(message, message.get("from", {})):
 				return
+			words = (message.get("text") or "").strip().lower().split(maxsplit=1)
+			if not words:
+				return
+			command = words[0].removesuffix("@testadbadbot")
+			pages = {"/start": "home", "/menu": "home", "/profile": "home", "/help": "home", "/shop": "catalog",
+					 "/checkoutpilot": "catalog", "/orders": "orders:all:0", "/wallet": "wallet", "/support": "support",
+					 "/cancel": "catalog"}
+			if command in pages:
+				self.open(pages[command], new_message=True)
+			elif self.screen == "quantity" and words[0].isdecimal() and len(words[0]) <= 5:
+				self.quote_quantity(int(words[0]))
+			return
 
 		query = event.get("callback_query") or {}
 		message = query.get("message") or {}
-		if self.anchor is not None and self.authorized(message, query.get("from", {})) and message.get("message_id") == self.anchor:
-			data = query.get("data", "")
-			if data in ("t079:home", "t079:catalog", "t079:wallet", "t079:orders"):
-				self.call("answerCallbackQuery", callback_query_id=query["id"])
-				self.show(data[5:])
-				return
-			if data.startswith("t079:reveal:") and self.screen in ("orders", "receipt", "items"):
-				order = data[12:]
-				if re.fullmatch(r"[0-9a-f]{32}", order):
-					self.call("answerCallbackQuery", callback_query_id=query["id"])
-					self.show_items(order)
-					return
-		super().update(event)
+		data = query.get("data", "")
+		if self.anchor is None or message.get("message_id") != self.anchor or not data.startswith("t079:") or not self.authorized(message, query.get("from", {})):
+			return
+		self.call("answerCallbackQuery", callback_query_id=query["id"])
+		self.open(data[5:])
 
-	def show(self, page, new_message=False):
-		home = [("Main menu", "home")]
-		if page == "home":
-			text = "Akanti (آکانتی) staging shop"
-			rows = [[("Shop", "catalog")], [("Orders", "orders"), ("Wallet", "wallet")]]
-		elif page == "catalog":
-			item = self.checkout("pilot-catalog")
-			text = "Shop"
-			rows = []
-			if item["outcome"] == "Available":
-				self.quantities = tuple(n for n in (1, 2) if item["minimum"] <= n <= item["maximum"])
-				text += "\n" + item["title"]
-				if self.quantities:
-					rows.append([("Select product", "item")])
-			else:
-				text += "\nThe test product is out of stock."
-			rows.append(home)
-		elif page == "wallet":
-			wallet = self.checkout("pilot-wallet")
-			text = "Test wallet\nBalance: " + str(wallet["balance"]) + " USD"
-			rows = [home]
-		elif page == "orders":
-			orders = self.checkout("pilot-orders")["orders"]
-			text = "Orders" if orders else "Orders\nNo orders yet."
-			rows = [[(f"{o['title'][:34]} × {o['quantity']} · {o['id'][-8:]}", "reveal:" + uuid.UUID(o["id"]).hex)] for o in orders]
-			rows.append(home)
+	def open(self, destination, new_message=False):
+		parts = destination.split(":")
+		page = parts[0]
+		if new_message or page in ("home", "wallet", "language", "support"):
+			profile = self.checkout("pilot-screen:home")["home"]
+			self.language = "fa" if profile["language"].startswith("fa") else "en"
 		else:
-			raise ValueError("Unknown shop screen")
+			profile = None
+		l = self.label
+		home = (l("home"), "home")
+		if page == "home":
+			text = (f"Akanti (آکانتی)\n{l('balance')}: {profile['balance']} USD"
+					f"\n{l('orders')}: {profile['orders']}\n{l('member')}: {self.actor}\n{l('joined')}: {profile['joined'][:10]}")
+			rows = [[(l("catalog"), "catalog")], [(l("orders"), "orders:all:0")],
+					[(l("wallet"), "wallet"), (l("discounts"), "discounts:0")],
+					[(l("support"), "support"), (l("language"), "language")]]
+		elif page in ("wallet", "language", "support"):
+			text = l(page)
+			if page == "wallet":
+				text += f"\n{l('balance')}: {profile['balance']} USD"
+				rows = [[(l("transactions"), "transactions:0"), (l("deposits"), "deposits:0")], [home]]
+			elif page == "language":
+				rows = [[("فارسی", "setlang:fa"), ("English", "setlang:en")], [home]]
+			else:
+				if profile["contact"]:
+					text += "\n@" + profile["contact"]
+				rows = [[(l("support_orders"), "support_orders:all:0"), (l("support_payments"), "support_payments:0")],
+						[(l("buying_help"), "buying_help")], [home]]
+		elif page == "setlang" and self.screen == "language" and len(parts) == 2 and parts[1] in ("en", "fa"):
+			self.checkout("pilot-screen:language:" + parts[1])
+			self.open("home")
+			return
+		elif page == "buying_help":
+			text, rows = l("help_text"), [[(l("back"), "support"), (l("catalog"), "catalog")], [home]]
+		elif page in ("catalog", "product", "quantity"):
+			item = self.checkout("pilot-catalog")
+			text, rows = self.product_screen(page, item)
+		elif page in ("orders", "transactions", "deposits", "discounts", "support_orders", "support_payments"):
+			text, rows = self.history_screen(page, parts[1:])
+		elif page in ("order", "payment", "reveal") and len(parts) == 2 and re.fullmatch(r"[0-9a-f]{32}", parts[1]):
+			text, rows = self.detail_screen(page, parts[1])
+		elif page == "qty" and self.screen == "quantity" and len(parts) == 2 and parts[1].isascii() and parts[1].isdecimal():
+			self.quote_quantity(int(parts[1]))
+			return
+		elif page == "pay" and self.screen == "confirm" and self.quote:
+			accepted = self.checkout("pilot-buy:" + self.quote)
+			if accepted["outcome"] in ("Purchased", "Replayed"):
+				self.show_receipt(accepted["order"])
+				self.completed = True
+				return
+			text, rows = l("unavailable"), [[(l("catalog"), "catalog"), home]]
+		else:
+			return
 		self.render(text, rows, new_message)
 		self.screen = page
 		self.quote = None
 
-	def show_receipt(self, order):
-		prepared = self.checkout("manifest-worker")
-		rows = [[("Orders", "orders"), ("Main menu", "home")]]
-		if prepared["outcome"] in ("Prepared", "PreparedWithoutSend"):
-			rows.insert(0, [("View item", "reveal:" + uuid.UUID(order).hex)])
-		self.render("Test wallet checkout complete.\nOrder: " + order, rows)
-		self.screen = "receipt"
+	def product_screen(self, page, item):
+		l = self.label
+		back = [(l("back"), "catalog"), (l("home"), "home")]
+		if page == "catalog":
+			rows = [[(item["title"][:55], "product")]] if item.get("title") else []
+			return l("catalog"), rows + [[(l("home"), "home")]]
+		if not item.get("title"):
+			return l("unavailable"), [back]
+		text = item["title"]
+		if item.get("description"):
+			text += "\n" + item["description"][:1700]
+		text += f"\n{l('amount')}: {item['amount']} USD"
+		if item["outcome"] != "Available":
+			return text + "\n" + l("out"), [back]
+		if page == "product":
+			return text, [[(l("buy"), "quantity")], back]
+		btns = [(str(n), f"qty:{n}") for n in range(item["minimum"], min(item["maximum"], item["minimum"] + 4) + 1)]
+		return text + "\n" + l("quantity_help"), [btns, [(l("back"), "product"), (l("home"), "home")]]
 
-	def show_items(self, order):
-		released = self.checkout("pilot-reveal:" + order)
-		items = released.get("items") if released["outcome"] == "Items" else None
-		text = "Test delivery\n" + "\n".join(items) if items else "The item is awaiting delivery or review."
-		self.render(text, [[("Orders", "orders"), ("Main menu", "home")]])
-		self.screen = "items"
+	def quote_quantity(self, quantity):
+		l = self.label
+		if not 1 <= quantity <= 10000:
+			return
+		quote = self.checkout("pilot-quote:" + str(quantity))
+		if quote["outcome"] != "Quoted":
+			self.render(l("unavailable"), [[(l("back"), "quantity"), (l("catalog"), "catalog")]])
+			return
+		self.quote = uuid.UUID(quote["order"]).hex
+		self.render(f"{l('quantity')}: {quote['quantity']}\n{l('total')}: {quote['amount']} {quote['currency'].upper()}",
+					[[(l("pay"), "pay")], [(l("back"), "quantity"), (l("cancel"), "catalog")]])
+		self.screen = "confirm"
+
+	def history_screen(self, destination, args):
+		l = self.label
+		source = {"support_orders": "orders", "support_payments": "deposits"}.get(destination, destination)
+		if len(args) != (2 if source == "orders" else 1):
+			raise ValueError("Invalid history page")
+		filter_name, raw_page = args if source == "orders" else ("all", args[0])
+		if filter_name not in ("all", "active", "finished") or not re.fullmatch(r"[0-9]{1,6}", raw_page):
+			raise ValueError("Invalid history page")
+		page = int(raw_page)
+		data = self.checkout(f"pilot-screen:list:{source.title()}:{filter_name}:{page}")["page"]
+		rows = []
+		if source == "orders":
+			rows.append([(f"✓ {l(name)}" if name == filter_name else l(name), f"{destination}:{name}:0")
+						 for name in ("all", "active", "finished")])
+		text = l(destination)
+		entries = data["entries"]
+		if not entries:
+			text += "\n" + l("empty")
+		for entry in entries:
+			reference = uuid.UUID(entry["id"]).hex
+			if source == "orders":
+				rows.append([(f"{entry['title'][:34]} × {entry['quantity']} · {reference[-8:]}", "order:" + reference)])
+			elif source == "deposits":
+				rows.append([(f"{l(entry['title'])} · {entry['amount']} {entry['currency']} · {l(entry['status'])}", "payment:" + reference)])
+			else:
+				title = l(entry["title"]) if source == "transactions" else entry["title"]
+				text += f"\n{entry['created'][:10]} · {title[:60]} · {entry['amount']} {entry['currency']}"
+		prefix = f"{destination}:{filter_name}:" if source == "orders" else f"{destination}:"
+		pagination = []
+		if page > 0:
+			pagination.append((l("previous"), prefix + str(page - 1)))
+		if data["hasNext"]:
+			pagination.append((l("next"), prefix + str(page + 1)))
+		if pagination:
+			rows.append(pagination)
+		back = "support" if destination.startswith("support_") else "wallet" if source in ("transactions", "deposits") else "home"
+		home = (l("home"), "home")
+		rows.append([home] if back == "home" else [(l("back"), back), home])
+		self.list_origin = prefix + str(page)
+		return text, rows
+
+	def detail_screen(self, page, reference):
+		l = self.label
+		list_type = "Deposits" if page == "payment" else "Orders"
+		if page == "reveal":
+			result = self.checkout("pilot-reveal:" + reference)
+			rows = [[(l("back"), "order:" + reference), (l("home"), "home")]]
+			return "\n".join(result["items"]) if result["outcome"] == "Items" else l("awaiting"), rows
+		entry = self.checkout(f"pilot-screen:detail:{list_type}:{reference}").get("entry")
+		rows = [[(l("back"), self.list_origin), (l("home"), "home")]]
+		if not entry:
+			return l("empty"), rows
+		title = l(entry["title"]) if page == "payment" else entry["title"]
+		text = f"{title}\n{entry['id']}\n{l('status')}: {l(entry['status'])}\n{l('date')}: {entry['created'][:10]}"
+		if entry.get("quantity"):
+			text += f"\n{l('quantity')}: {entry['quantity']}"
+		if entry.get("amount") is not None:
+			text += f"\n{l('amount')}: {entry['amount']} {entry['currency']}"
+		if page == "order" and entry["status"] in ("ready", "delivering", "completed"):
+			rows.insert(0, [(l("items"), "reveal:" + reference)])
+		return text, rows
+
+	def show_receipt(self, order):
+		self.checkout("manifest-worker")
+		l = self.label
+		self.list_origin = "orders:all:0"
+		self.render(f"{l('paid')}\n{order}", [[(l("orders"), "order:" + uuid.UUID(order).hex)], [(l("home"), "home")]])
+		self.screen = "receipt"
 
 	def render(self, text, rows, new_message=False):
 		markup = {"inline_keyboard": [buttons(*row)["inline_keyboard"][0] for row in rows]}
@@ -201,4 +353,3 @@ class WalletShop(WalletPilot):
 			self.anchor = message["message_id"]
 		else:
 			self.edit(text, markup)
-

@@ -28,7 +28,8 @@ public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Cipher,
 public sealed record CutoverStageResult(string Operation, string Outcome, long Orders, long Allocated, long Debits, bool Synthetic = true, bool ReleaseReady = false);
 public sealed record CutoverPilotResult(Guid Run, Guid Product, string Outcome, string? Title = null, int? Minimum = null, int? Maximum = null,
     int? Quantity = null, decimal? Amount = null, string? Currency = null, Guid? Order = null,
-    decimal? Balance = null, IReadOnlyList<CutoverPilotOrder>? Orders = null, IReadOnlyList<string>? Items = null);
+    decimal? Balance = null, IReadOnlyList<CutoverPilotOrder>? Orders = null, IReadOnlyList<string>? Items = null,
+    CustomerHome? Home = null, CustomerScreenPage? Page = null, CustomerScreenEntry? Entry = null, string? Description = null);
 public sealed record CutoverPilotOrder(Guid Id, string Title, int Quantity, string Status);
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CutoverPilotResult))]
@@ -197,6 +198,7 @@ public static class CutoverStageRuntime
                 {
                     CutoverPilotResult pilot = await PilotAsync(id, command);
                     Write(result, JsonSerializer.Serialize(pilot, CutoverStageJson.Default.CutoverPilotResult));
+                    if (command.StartsWith("pilot-screen:", StringComparison.Ordinal)) File.Delete(request);
                     continue;
                 }
                 if (command is not ("status" or "wallet" or "wallet-current" or "wallet-paused" or "telegram" or "payment" or "payment-worker" or "manifest-worker" or "delivery-worker" or "delivery-held" or "delivery-unknown" or "delivery-recover" or "stop" or "fake_payment" or "fake_supplier" or "fake_telegram" or "fake_fx" or "fake_ai")) throw new InvalidOperationException();
@@ -312,6 +314,29 @@ public static class CutoverStageRuntime
             var denied = new CutoverPilotResult(run, saved.Product, "Unavailable");
             try
             {
+                if (command.StartsWith("pilot-screen:", StringComparison.Ordinal))
+                {
+                    var screens = new CustomerScreens(sessions);
+                    string[] parts = command.Split(':');
+                    if (parts is [_, "home"])
+                        return new(run, saved.Product, "Home", Home: await screens.HomeAsync(context, actor, ct));
+                    if (parts is [_, "language", "fa" or "en"])
+                    {
+                        await screens.SetLanguageAsync(context, actor, parts[2], ct);
+                        return new(run, saved.Product, "Home", Home: await screens.HomeAsync(context, actor, ct));
+                    }
+                    if (parts is [_, "detail", "Orders" or "Deposits", var rawId] &&
+                        Guid.TryParseExact(rawId, "N", out Guid itemId))
+                    {
+                        var entry = await screens.DetailAsync(context, actor, Enum.Parse<CustomerScreenList>(parts[2]), itemId, ct);
+                        return entry is null ? denied : new(run, saved.Product, "Detail", Entry: entry);
+                    }
+                    if (parts is [_, "list", "Orders" or "Transactions" or "Deposits" or "Discounts", "all" or "active" or "finished", var number] &&
+                        int.TryParse(number, NumberStyles.None, CultureInfo.InvariantCulture, out int page))
+                        return new(run, saved.Product, "Page", Page: await screens.ListAsync(context, actor,
+                            Enum.Parse<CustomerScreenList>(parts[2]), parts[3], page, ct));
+                    return denied;
+                }
                 if (command == "pilot-wallet")
                 {
                     await using var read = await sessions.BeginReadOnlyAsync(ct);
@@ -360,9 +385,10 @@ public static class CutoverStageRuntime
                 if (command == "pilot-catalog")
                 {
                     var item = await catalog.GetForBrandAsync(context, saved.WriterRevision, actor, saved.Product, ct);
-                    return item is { CanPurchase: true, Wallet: true }
-                        ? new(run, saved.Product, "Available", item.Presentation.Title, item.Minimum, item.Maximum)
-                        : denied;
+                    return item is null ? denied : new(run, saved.Product,
+                        item is { CanPurchase: true, Wallet: true } ? "Available" : "OutOfStock",
+                        item.Presentation.Title, item.Minimum, item.Maximum, Amount: item.UnitUsdt, Currency: "USD",
+                        Description: item.Presentation.Description);
                 }
                 if (command.StartsWith(quotePrefix, StringComparison.Ordinal) &&
                     int.TryParse(command.AsSpan(quotePrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int quantity) &&
@@ -399,7 +425,7 @@ public static class CutoverStageRuntime
                 var accepted = await new WalletCheckoutService(sessions, store, catalog).AcceptForBrandAsync(context, saved.WriterRevision, actor, request, current, access, ct);
                 return prior with { Outcome = accepted.Outcome.ToString(), Order = accepted.OrderId };
             }
-            catch (Exception error) when (error is PricingRejectedException or DiscountQuantityException or UnauthorizedAccessException or JsonException or IOException)
+            catch (Exception error) when (error is PricingRejectedException or DiscountQuantityException or UnauthorizedAccessException or JsonException or IOException or ArgumentOutOfRangeException)
             {
                 return denied;
             }
