@@ -1,12 +1,12 @@
 # Akanti (آکانتی)
 
-Akanti is a multi-brand commerce backend for Telegram shops. Each brand has its own bot, customer memberships, wallets, orders, and payment settings. Brands can share a product catalog and stock pool. AccAbad (`acc-abad`) is the first planned migration brand.
+Akanti is a multi-brand commerce backend for Telegram shops. Each brand has its own bot, customer memberships, wallets, orders, and payment settings. Brands can share a product catalog and stock pool. AccAbad (`acc-abad`) is the first brand Akanti will replace.
 
 The backend uses C# and .NET 10 Native AOT with PostgreSQL. It models payments, inventory, durable jobs, and delivery in a 28-table relational schema. Operator workflows are implemented in the backend. A graphical admin panel is outside the current scope.
 
 ## Release status
 
-The approved implementation scope is 96/96 complete. The [latest qualified build](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44375416448) passed 1,266 tests, Native AOT smoke checks, and a one-brand synthetic canary. The API, bot, and job entry points currently support qualification only. The two paths below run the qualification build locally or deploy it to a staging server. Production deployment is blocked until the release gates pass. Live suppliers stay disabled.
+Spec Kit records 96/96 tasks complete for the approved backend scope. The [staging image qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44502732355) passed 1,268 tests, Native AOT checks, and a one-brand synthetic canary. The separately operated staging bot can browse a synthetic product and use a test wallet. Akanti still needs the customer and operator workflows wired into the deployed runtime before it can replace AccAbad.
 
 ## Method 1 — Start here
 
@@ -50,7 +50,19 @@ Akanti's staging workflow follows the legacy release sequence. GitHub tests the 
 2. Wait for **deploy-staging** to report the commit and image digest. The job runs the new container's local health probe. A failed replacement leaves the previous healthy container available.
 3. Record the digest and commit from each successful run. To roll back, invoke [the same deploy helper](ops/staging/deploy-dockerhub.sh) on the server with the previous `docker.io/<namespace>/akanti@sha256:<digest>` and its full commit SHA. The older image must still be available in Docker Hub.
 
-The current deployment runs Akanti's qualification API in an isolated container. It has no Telegram update receiver, database connection, or live provider credentials. Leave the legacy staging bot serving until Akanti has a qualified Telegram staging runtime and an exclusive handoff.
+This workflow updates the isolated qualification API. The Telegram staging checkout runs separately with a synthetic catalog and wallet.
+
+## AccAbad replacement acceptance
+
+Use AccAbad’s customer and operator behavior as the reference. Run the supported flows through Akanti’s staging Telegram bot and workers, using isolated data and test transactions. Record the exact image and the evidence for each flow. The backend test suite and the wallet pilot cover narrower scopes.
+
+| Workflow | Staging acceptance | AccAbad source |
+|---|---|---|
+| Start and navigation | Start, return to the menu, change language, and open the catalog, profile, orders, and support with the expected buttons. | [Command registration](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/management/commands/runbot.py) · [Keyboards](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/keyboards.py) |
+| Catalog and checkout | Browse the migrated catalog, select a product and quantity, see the final price, and complete checkout. Replaying a confirmation creates one order and one debit. | [Customer menus](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/customer_flows.py) · [Purchase UI](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/customer_purchase_ui.py) |
+| Wallet funding and payments | See the balance and transactions, submit a receipt or follow a test invoice, and verify that approval or replay credits the wallet once. | [Customer menus](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/customer_flows.py) · [Deposit UI](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/deposit_ui.py) · [Payments](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/payments.py) |
+| Delivery and order history | Receive a test item in Telegram, find the same order in history, and verify that restart or retry never sends it twice. Keep ambiguous delivery in review. | [Order delivery](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/order_delivery.py) · [Customer menus](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/customer_flows.py) |
+| Support and operator actions | Follow the supported customer help paths. Verify receipt decisions, inventory and order actions, and the corresponding customer notifications. | [Customer menus](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/customer_flows.py) · [Admin flows](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/admin_flows.py) · [Staff notifications](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/staff_notifications.py) |
 
 ## Live staging and production
 
