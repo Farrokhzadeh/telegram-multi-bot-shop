@@ -56,8 +56,8 @@ internal static class WalletCopyQualification
             }
             if (batch == Guid.Empty || observed.Kind != DateTimeKind.Utc) throw new MigrationRejectedException();
             await SourceCopyInspection.RunAsync(sourceConnection, sourcePlan, Path.Combine(directory, "source-start-" + Guid.NewGuid().ToString("N") + ".json"), ct);
-            string identityNamespace = staging ? "protected-staging-wallet-copy-brand-v1:" : "protected-wallet-copy-brand-v1:";
-            Guid brand = new(SHA256.HashData(Encoding.UTF8.GetBytes(identityNamespace + identity.Brand)).AsSpan(0, 16));
+            Guid brand = staging ? StagingWalletSnapshot.TargetBrand :
+                new Guid(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + identity.Brand)).AsSpan(0, 16));
             var registry = new BotBrandRegistry([new("protected-wallet-copy", "qualification", brand, 101, batch, 1, true)]);
             if (!registry.TryResolveAuthenticated("protected-wallet-copy", new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "qualification")], "protected-wallet-copy")), out var context)) throw new MigrationRejectedException();
             await using var sourceData = new NpgsqlSlimDataSourceBuilder(sourceConnection).Build(); await using var targetData = new NpgsqlSlimDataSourceBuilder(targetConnection).Build();

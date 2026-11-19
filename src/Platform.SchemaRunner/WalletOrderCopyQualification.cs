@@ -14,11 +14,17 @@ internal static class WalletOrderCopyQualification
     internal static long SharedBotId(string source) => source switch { "acc-abad" => 1101, "kuala" => 1102, "zikotech" => 1103, _ => throw new MigrationRejectedException() };
     internal static async Task<WalletOrderCopyResult> RunAsync(string connection, string directory, BrandContext context, SecretSnapshot secrets, LegacySourceReader source, VerifiedImportManifest archive, VerifiedImportManifest wallet, IReadOnlyList<LegacyWalletSnapshot> wallets, IReadOnlyList<ArchivedLegacyRecord> records, string registerPath, Func<string, string> read, CancellationToken ct, bool shared = false)
     {
+        bool staging = StagingWalletSnapshot.Matches(archive);
+        if (staging && (shared || !StagingWalletSnapshot.Matches(wallet) ||
+            Environment.GetEnvironmentVariable("SHOP_ALLOW_STAGING_LEGACY_IMPORT") != "1")) throw new MigrationRejectedException();
+        string marker = staging ? StagingWalletSnapshot.OrderTargetMarker :
+            shared ? SharedMarker : "teleg-wallet-order-qualification:" + archive.SnapshotDigest;
+        string retentionReference = staging ? StagingWalletSnapshot.RetentionReference : "protected:wallet-copy/original-native-history";
         var options = new NpgsqlConnectionStringBuilder(connection); var destination = SchemaManifest.ForQualification(connection);
         if (options.IncludeErrorDetail || options.LogParameters || options.Enlist || options.Multiplexing) throw new MigrationRejectedException();
         await using var data = new NpgsqlSlimDataSourceBuilder(connection).Build();
         await using (var check = data.CreateCommand("SELECT current_database()=$1 AND current_user='shop_test_runner' AND current_setting('server_version_num')::integer=180006 AND pg_get_userbyid(datdba)='shop_test_runner' AND shobj_description(oid,'pg_database')=$2 FROM pg_database WHERE datname=current_database()"))
-        { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue(shared ? SharedMarker : "teleg-wallet-order-qualification:" + archive.SnapshotDigest); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
+        { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue(marker); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
         var files = new LegacyArchiveFiles(directory, secrets);
         if (!OperatingSystem.IsLinux()) throw new MigrationRejectedException();
         string zeroDirectory = Path.Combine(directory, shared ? "teleg-history-archive-shared-catalog" : "teleg-history-archive-direct-catalog"); Directory.CreateDirectory(zeroDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -54,7 +60,7 @@ internal static class WalletOrderCopyQualification
             return (await files.ReadAsync(context, archive, row.Target, token)).Evidence;
         }
         Task<ReadOnlyMemory<byte>> ReadRetention(string reference, CancellationToken token)
-        { if (reference != "protected:wallet-copy/original-native-history") throw new MigrationRejectedException(); return Task.FromResult<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(read(registerPath))); }
+        { if (reference != retentionReference) throw new MigrationRejectedException(); return Task.FromResult<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes(read(registerPath))); }
         var workflow = new ImportWorkflow(source, sessions); var report = new LegacyRecordReconciliationReport(data, secrets);
         var first = await workflow.ImportWalletOrdersAsync(context, secrets, plan, ReadArchive, ReadRetention, report, ct);
         var replay = await workflow.ImportWalletOrdersAsync(context, secrets, plan, ReadArchive, ReadRetention, report, ct);

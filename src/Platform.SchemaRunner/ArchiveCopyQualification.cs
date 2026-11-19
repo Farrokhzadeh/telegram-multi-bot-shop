@@ -23,10 +23,16 @@ internal static class ArchiveCopyQualification
         if (!Path.IsPathFullyQualified(directory) || !Directory.Exists(directory) || !Path.GetFileName(directory).StartsWith("teleg-history-archive-", StringComparison.Ordinal) || new DirectoryInfo(directory).LinkTarget is not null || (File.GetUnixFileMode(directory) & (UnixFileMode)63) != 0 || !Path.IsPathFullyQualified(receipt) || Path.GetDirectoryName(receipt) != directory || !receipt.EndsWith(".receipt.json", StringComparison.Ordinal) || File.Exists(receipt) || registerText.Length > 67108864 || legacyText.Length > 16384 || !Path.IsPathFullyQualified(walletPath) || new FileInfo(walletPath).Length > 16777216 || new FileInfo(walletPath).LinkTarget is not null || (File.GetUnixFileMode(walletPath) & (UnixFileMode)63) != 0) throw new MigrationRejectedException();
         byte[] walletBytes = await File.ReadAllBytesAsync(walletPath, ct), register = Encoding.UTF8.GetBytes(registerText);
         using var sourcePlan = JsonDocument.Parse(plan); var sourceRoot = sourcePlan.RootElement;
-        string archiveHash = sourceRoot.GetProperty("archive_sha256").GetString()!, database = sourceRoot.GetProperty("database").GetString()!, brandName = WalletCopyQualification.SourceBrand(database, archiveHash);
+        string archiveHash = sourceRoot.GetProperty("archive_sha256").GetString()!, database = sourceRoot.GetProperty("database").GetString()!;
+        bool staging = database == StagingWalletSnapshot.Database;
+        if (staging && (shared || archiveHash != StagingWalletSnapshot.ArchiveSha256 ||
+            Environment.GetEnvironmentVariable("SHOP_ALLOW_STAGING_LEGACY_IMPORT") != "1")) throw new MigrationRejectedException();
+        string brandName = staging ? StagingWalletSnapshot.Brand : WalletCopyQualification.SourceBrand(database, archiveHash);
+        string retentionReference = staging ? StagingWalletSnapshot.RetentionReference : "protected:wallet-copy/original-native-history";
         var wallet = VerifiedImportManifest.Open("protected:history-archive/verified-wallet-plan", SHA256.HashData(walletBytes), walletBytes);
-        if (wallet.SourceBrand != brandName || wallet.SnapshotDigest != archiveHash || wallet.SourceSchemaDigest != sourceRoot.GetProperty("schema_sha256").GetString() || wallet.SourceRevision != "66371a23a1c8149dc5bdf89a0355aa689d454dba") throw new MigrationRejectedException();
-        Guid brand = new(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + brandName)).AsSpan(0, 16));
+        if (wallet.SourceBrand != brandName || wallet.SnapshotDigest != archiveHash || wallet.SourceSchemaDigest != sourceRoot.GetProperty("schema_sha256").GetString() || (staging ? !StagingWalletSnapshot.Matches(wallet) : wallet.SourceRevision != "66371a23a1c8149dc5bdf89a0355aa689d454dba")) throw new MigrationRejectedException();
+        Guid brand = staging ? StagingWalletSnapshot.TargetBrand :
+            new Guid(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + brandName)).AsSpan(0, 16));
         if (wallet.TargetBrand != brand) throw new MigrationRejectedException();
         using var stateDocument = JsonDocument.Parse(walletState); var stateRoot = stateDocument.RootElement;
         if (stateRoot.GetProperty("version").GetInt32() != 1 || stateRoot.GetProperty("batch").GetGuid() != wallet.Batch) throw new MigrationRejectedException();
@@ -68,7 +74,7 @@ internal static class ArchiveCopyQualification
             await SourceCopyInspection.RunAsync(connection, plan, Path.Combine(directory, "source-start-" + Guid.NewGuid().ToString("N") + ".json"), ct, visit: Collect);
             var options = new NpgsqlConnectionStringBuilder(connection); await using var data = new NpgsqlSlimDataSourceBuilder(connection).Build();
             var source = new LegacySourceReader(data, new(options.Host!, options.Port, options.Database!, options.Username!));
-            var retained = LegacyWalletRetention.OpenAll("protected:wallet-copy/original-native-history", SHA256.HashData(register), register, brandName, archiveHash);
+            var retained = LegacyWalletRetention.OpenAll(retentionReference, SHA256.HashData(register), register, brandName, archiveHash);
             var wallets = await source.PlanWalletsAsync(Convert.FromHexString(wallet.SourceSchemaDigest), wallet.Batch, brand, retained, observed, ct);
             foreach (var member in wallets) foreach (var proof in member.Proofs(brand)) wallet.Require(proof);
             if (wallets.Count != wallet.Proofs.Count(p => p.Projection == LegacyProjection.User) || wallets.Sum(r => r.Proofs(brand).Count) != wallet.Proofs.Count) throw new MigrationRejectedException();

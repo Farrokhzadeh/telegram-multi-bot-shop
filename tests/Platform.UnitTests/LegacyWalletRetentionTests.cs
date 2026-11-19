@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Migration;
+using Platform.Persistence;
 namespace Platform.UnitTests;
 
 public sealed class LegacyWalletRetentionTests
@@ -31,6 +32,29 @@ public sealed class LegacyWalletRetentionTests
         Assert.Throws<MigrationRejectedException>(() => LegacyWalletRetention.OpenAll("protected:synthetic/retention", hash, bytes, StagingWalletSnapshot.Brand, StagingWalletSnapshot.ArchiveSha256));
         Assert.Throws<MigrationRejectedException>(() => LegacyWalletRetention.OpenAll(StagingWalletSnapshot.RetentionReference, hash, bytes, StagingWalletSnapshot.Brand, Archive));
     }
+    [Fact]
+    public void StagingHistoryRequiresTheExactSnapshotRevisionAndTargetBrand()
+    {
+        var target = SchemaManifest.ForQualification("Host=127.0.0.1;Database=shop_qualification_0123456789abcdef0123456789abcdef;Username=shop_test_runner");
+        VerifiedImportManifest Build(string brand, Guid targetBrand, string revision, string snapshot)
+        {
+            var proof = new LegacyMapProof(LegacyProjection.User, "101", Guid.NewGuid(), targetBrand, new byte[32]);
+            byte[] bytes = VerifiedImportManifest.EncodePlan(target, brand, targetBrand, revision, new byte[32],
+                "protected:synthetic/staging-snapshot", Convert.FromHexString(snapshot), Guid.NewGuid(), [proof]);
+            return VerifiedImportManifest.Open("protected:synthetic/staging-manifest", SHA256.HashData(bytes), bytes);
+        }
+
+        var brand = StagingWalletSnapshot.Brand;
+        var targetBrand = StagingWalletSnapshot.TargetBrand;
+        var revision = StagingWalletSnapshot.LegacyRevision;
+        var snapshot = StagingWalletSnapshot.ArchiveSha256;
+        Assert.True(StagingWalletSnapshot.Matches(Build(brand, targetBrand, revision, snapshot)));
+        Assert.False(StagingWalletSnapshot.Matches(Build("kuala", targetBrand, revision, snapshot)));
+        Assert.False(StagingWalletSnapshot.Matches(Build(brand, Guid.NewGuid(), revision, snapshot)));
+        Assert.False(StagingWalletSnapshot.Matches(Build(brand, targetBrand, new string('a', 40), snapshot)));
+        Assert.False(StagingWalletSnapshot.Matches(Build(brand, targetBrand, revision, Archive)));
+    }
+
     [Theory]
     [InlineData("\"version\":2", "\"version\":1,\"version\":2")]
     [InlineData("\"source_users\":2", "\"source_users\":3")]

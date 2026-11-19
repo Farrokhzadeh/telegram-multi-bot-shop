@@ -45,7 +45,7 @@ public sealed class HistoricalOrderImportWorkflow(DbSessionFactory sessions)
     public async Task ImportAsync(BrandContext context, VerifiedImportManifest manifest, LegacyHistoricalOrder row, CancellationToken ct = default)
     {
         var terms = row.Terms(); var proofs = row.Proofs(context.BrandId);
-        if (manifest.TargetBrand != context.BrandId || manifest.SourceRevision != "66371a23a1c8149dc5bdf89a0355aa689d454dba" ||
+        if (manifest.TargetBrand != context.BrandId || (manifest.SourceRevision != "66371a23a1c8149dc5bdf89a0355aa689d454dba" && !StagingWalletSnapshot.Matches(manifest)) ||
             !manifest.Proofs.Any(p => p.Projection == LegacyProjection.User && p.Target == row.User && p.LegacyId == row.Source.UserId.ToString(CultureInfo.InvariantCulture))) throw new MigrationRejectedException();
         foreach (var proof in proofs) manifest.Require(proof);
         await using var session = await sessions.BeginAsync(ct);

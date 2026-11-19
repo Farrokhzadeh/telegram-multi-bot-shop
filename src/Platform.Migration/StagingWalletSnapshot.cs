@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace Platform.Migration;
 
 public static class StagingWalletSnapshot
@@ -7,4 +9,11 @@ public static class StagingWalletSnapshot
     public const string ArchiveSha256 = "b861a77aac8fd9ddcd32cca1624cbb13844fbe5933109489ff31c237ee5ddf53";
     public const string LegacyRevision = "5752ec9c21e49b93e1d7d9f0b95bb8a7d713737d";
     public const string RetentionReference = "protected:staging-wallet-copy/original-native-history";
+    public const string OrderTargetMarker = "teleg-staging-wallet-order-qualification:" + ArchiveSha256;
+
+    public static Guid TargetBrand { get; } = new(SHA256.HashData("protected-staging-wallet-copy-brand-v1:acc-abad"u8).AsSpan(0, 16));
+
+    public static bool Matches(VerifiedImportManifest manifest) =>
+        manifest.SourceBrand == Brand && manifest.TargetBrand == TargetBrand &&
+        manifest.SourceRevision == LegacyRevision && manifest.SnapshotDigest == ArchiveSha256;
 }
