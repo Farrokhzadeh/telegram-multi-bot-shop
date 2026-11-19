@@ -60,16 +60,28 @@ internal static class IngressQualification
         using var http = new HttpClient(fake);
         const string token = "12345:" + "public-synthetic-qualification-only";
         using var request = new StringReader(token + "\n" + """
-            {"method":"getUpdates","parameters":{"offset":41,"timeout":0,"allowed_updates":["message"]}}
+            {"method":"getMe","parameters":{}}
+            {"method":"getWebhookInfo","parameters":{}}
+            {"method":"getUpdates","parameters":{"offset":41,"timeout":0,"allowed_updates":["message","callback_query"]}}
             {"method":"sendMessage","parameters":{"chat_id":7001,"text":"Synthetic acknowledgement","protect_content":true,"reply_markup":{"inline_keyboard":[[{"text":"Orders","callback_data":"orders"}]]}}}
+            {"method":"editMessageText","parameters":{"chat_id":7001,"message_id":99,"text":"Edited"}}
+            {"method":"answerCallbackQuery","parameters":{"callback_query_id":"public-synthetic"}}
             """);
         using var response = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
         if (await StagingTelegramPipe.RunAsync(request, response, http) != 0) return false;
         using var lines = new StringReader(response.ToString());
+        using var me = JsonDocument.Parse(lines.ReadLine()!);
+        using var webhook = JsonDocument.Parse(lines.ReadLine()!);
         using var updates = JsonDocument.Parse(lines.ReadLine()!);
         using var sent = JsonDocument.Parse(lines.ReadLine()!);
-        return updates.RootElement.GetProperty("result")[0].GetProperty("future_field").GetBoolean() &&
+        using var edited = JsonDocument.Parse(lines.ReadLine()!);
+        using var callback = JsonDocument.Parse(lines.ReadLine()!);
+        return me.RootElement.GetProperty("result").GetProperty("is_bot").GetBoolean() &&
+            webhook.RootElement.GetProperty("result").GetProperty("url").GetString() == "" &&
+            updates.RootElement.GetProperty("result")[0].GetProperty("future_field").GetBoolean() &&
             sent.RootElement.GetProperty("result").GetProperty("message_id").GetInt32() == 99 &&
+            edited.RootElement.GetProperty("result").GetProperty("message_id").GetInt32() == 99 &&
+            callback.RootElement.GetProperty("result").GetBoolean() &&
             fake.Polls == 1 && fake.Sends == 1;
     }
 
@@ -80,23 +92,35 @@ internal static class IngressQualification
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-            var data = payload.RootElement;
+            string path = request.RequestUri!.AbsolutePath;
             string body;
-            if (request.RequestUri!.AbsolutePath.EndsWith("/getUpdates", StringComparison.Ordinal) &&
-                data.GetProperty("offset").GetInt32() == 41)
+            if (path.EndsWith("/getMe", StringComparison.Ordinal))
+                body = """{"ok":true,"result":{"id":12345,"is_bot":true,"username":"testadbadbot","first_name":"Synthetic"}}""";
+            else if (path.EndsWith("/getWebhookInfo", StringComparison.Ordinal))
+                body = """{"ok":true,"result":{"url":"","has_custom_certificate":false,"pending_update_count":0}}""";
+            else
             {
-                Polls++;
-                body = """{"ok":true,"result":[{"update_id":41,"future_field":true}]}""";
+                using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+                var data = payload.RootElement;
+                if (path.EndsWith("/getUpdates", StringComparison.Ordinal) && data.GetProperty("offset").GetInt32() == 41)
+                {
+                    Polls++;
+                    body = """{"ok":true,"result":[{"update_id":41,"future_field":true}]}""";
+                }
+                else if (path.EndsWith("/sendMessage", StringComparison.Ordinal) && data.GetProperty("chat_id").GetInt64() == 7001 &&
+                    data.GetProperty("protect_content").GetBoolean() &&
+                    data.GetProperty("reply_markup").GetProperty("inline_keyboard")[0][0].GetProperty("callback_data").GetString() == "orders")
+                {
+                    Sends++;
+                    body = """{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""";
+                }
+                else if (path.EndsWith("/editMessageText", StringComparison.Ordinal) && data.GetProperty("message_id").GetInt32() == 99)
+                    body = """{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""";
+                else if (path.EndsWith("/answerCallbackQuery", StringComparison.Ordinal) &&
+                    data.GetProperty("callback_query_id").GetString() == "public-synthetic")
+                    body = """{"ok":true,"result":true}""";
+                else throw new InvalidOperationException();
             }
-            else if (request.RequestUri.AbsolutePath.EndsWith("/sendMessage", StringComparison.Ordinal) &&
-                data.GetProperty("chat_id").GetInt64() == 7001 && data.GetProperty("protect_content").GetBoolean() &&
-                data.GetProperty("reply_markup").GetProperty("inline_keyboard")[0][0].GetProperty("callback_data").GetString() == "orders")
-            {
-                Sends++;
-                body = """{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""";
-            }
-            else throw new InvalidOperationException();
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")

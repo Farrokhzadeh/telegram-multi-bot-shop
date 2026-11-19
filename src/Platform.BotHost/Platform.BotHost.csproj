@@ -3,8 +3,12 @@
     <IsAotCompatible>true</IsAotCompatible>
     <OutputType>Exe</OutputType>
     <PublishAot>true</PublishAot>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104;IL3053</WarningsNotAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Telegram.Bot supplies generated JSON metadata but uses serializer overloads that trigger AOT analysis warnings.
+         Keep its warnings visible and exercise its request and reply types in the published ingress smoke. -->
+    <IlcArg Include="--singlewarnassembly:Telegram.Bot" />
     <ProjectReference Include="../Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../Platform.Security/Platform.Security.csproj" />
     <ProjectReference Include="../Platform.Telegram/Platform.Telegram.csproj" />
