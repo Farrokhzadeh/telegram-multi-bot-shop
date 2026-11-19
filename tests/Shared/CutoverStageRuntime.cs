@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Platform.Api;
 using Platform.Payments;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,7 +27,9 @@ public sealed record CutoverStockPlan(Guid Run, Guid Product, Guid Unit, string 
 public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Cipher, string Plain);
 public sealed record CutoverStageResult(string Operation, string Outcome, long Orders, long Allocated, long Debits, bool Synthetic = true, bool ReleaseReady = false);
 public sealed record CutoverPilotResult(Guid Run, Guid Product, string Outcome, string? Title = null, int? Minimum = null, int? Maximum = null,
-    int? Quantity = null, decimal? Amount = null, string? Currency = null, Guid? Order = null);
+    int? Quantity = null, decimal? Amount = null, string? Currency = null, Guid? Order = null,
+    decimal? Balance = null, IReadOnlyList<CutoverPilotOrder>? Orders = null, IReadOnlyList<string>? Items = null);
+public sealed record CutoverPilotOrder(Guid Id, string Title, int Quantity, string Status);
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CutoverPilotResult))]
 [JsonSerializable(typeof(CutoverStageState))]
@@ -309,6 +312,51 @@ public static class CutoverStageRuntime
             var denied = new CutoverPilotResult(run, saved.Product, "Unavailable");
             try
             {
+                if (command == "pilot-wallet")
+                {
+                    await using var read = await sessions.BeginReadOnlyAsync(ct);
+                    decimal balance = await read.QuerySingleAsync(new DbStatement("SELECT balance::text FROM shop.wallets WHERE user_id=$1",
+                        DbValue.Uuid(saved.User)), row => decimal.Parse(row.GetString(0), CultureInfo.InvariantCulture), ct);
+                    return new(run, saved.Product, "Wallet", Balance: balance);
+                }
+                if (command == "pilot-orders")
+                {
+                    await using var read = await sessions.BeginReadOnlyAsync(ct);
+                    var orders = await read.QueryManyAsync(new DbStatement("""
+                        SELECT id,product_title_snapshot,quantity,fulfillment_status
+                        FROM shop.orders WHERE user_id=$1 ORDER BY created_at DESC,id DESC LIMIT 5
+                        """, DbValue.Uuid(saved.User)),
+                        row => new CutoverPilotOrder(row.GetGuid(0), row.GetString(1), row.GetInt32(2), row.GetString(3)), 5, ct);
+                    return new(run, saved.Product, "Orders", Orders: orders);
+                }
+                const string revealPrefix = "pilot-reveal:";
+                if (command.StartsWith(revealPrefix, StringComparison.Ordinal) &&
+                    Guid.TryParseExact(command.AsSpan(revealPrefix.Length), "N", out Guid reveal))
+                {
+                    byte[] manifest = await new DeliveryStore(sessions, secrets).ReadManifestAsync(context, actor, reveal, ct);
+                    try
+                    {
+                        using var stream = new MemoryStream(manifest, writable: false);
+                        using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
+                        if (reader.ReadInt32() != 1) return denied;
+                        int count = reader.ReadInt32();
+                        if (count is < 1 or > 3) return denied;
+                        var items = new List<string>(count);
+                        const string synthetic = "public synthetic credential ";
+                        for (int unit = 1; unit <= count; unit++)
+                        {
+                            if (reader.ReadInt32() != unit || reader.ReadString() != "text" ||
+                                reader.ReadInt32() != synthetic.Length + 36) return denied;
+                            string value = Encoding.UTF8.GetString(reader.ReadBytes(synthetic.Length + 36));
+                            if (!value.StartsWith(synthetic, StringComparison.Ordinal) ||
+                                !Guid.TryParseExact(value.AsSpan(synthetic.Length), "D", out _)) return denied;
+                            items.Add(value);
+                        }
+                        if (stream.Position != stream.Length) return denied;
+                        return new(run, saved.Product, "Items", Order: reveal, Items: items);
+                    }
+                    finally { CryptographicOperations.ZeroMemory(manifest); }
+                }
                 if (command == "pilot-catalog")
                 {
                     var item = await catalog.GetForBrandAsync(context, saved.WriterRevision, actor, saved.Product, ct);
@@ -351,7 +399,7 @@ public static class CutoverStageRuntime
                 var accepted = await new WalletCheckoutService(sessions, store, catalog).AcceptForBrandAsync(context, saved.WriterRevision, actor, request, current, access, ct);
                 return prior with { Outcome = accepted.Outcome.ToString(), Order = accepted.OrderId };
             }
-            catch (Exception error) when (error is PricingRejectedException or DiscountQuantityException or UnauthorizedAccessException or JsonException)
+            catch (Exception error) when (error is PricingRejectedException or DiscountQuantityException or UnauthorizedAccessException or JsonException or IOException)
             {
                 return denied;
             }

@@ -104,12 +104,101 @@ class WalletPilot:
 		elif choice == "pay" and self.screen == "confirm":
 			accepted = self.checkout("pilot-buy:" + self.quote)
 			if accepted["outcome"] in ("Purchased", "Replayed"):
-				self.edit("Test wallet checkout complete.\nOrder: " + accepted["order"], buttons())
+				self.show_receipt(accepted["order"])
 				self.completed = True
 			else:
 				self.edit("Checkout unavailable. Open /checkoutpilot to try again.", buttons())
-			self.screen = "closed"
+				self.screen = "closed"
+
+	def show_receipt(self, order):
+		self.edit("Test wallet checkout complete.\nOrder: " + order, buttons())
+		self.screen = "closed"
 
 	def edit(self, text, reply_markup):
 		self.call("editMessageText", chat_id=self.actor, message_id=self.anchor,
 			text=text, reply_markup=reply_markup)
+
+class WalletShop(WalletPilot):
+	"""AccAbad-style navigation for the isolated staging shop."""
+
+	def update(self, event):
+		message = event.get("message")
+		if message and self.authorized(message, message.get("from", {})):
+			command = (message.get("text") or "").strip()
+			commands = {"/start": "home", "/menu": "home", "/wallet": "wallet", "/orders": "orders"}
+			name = command.removesuffix("@testadbadbot")
+			if name in commands:
+				self.show(commands[name], new_message=True)
+				return
+
+		query = event.get("callback_query") or {}
+		message = query.get("message") or {}
+		if self.anchor is not None and self.authorized(message, query.get("from", {})) and message.get("message_id") == self.anchor:
+			data = query.get("data", "")
+			if data in ("t079:home", "t079:catalog", "t079:wallet", "t079:orders"):
+				self.call("answerCallbackQuery", callback_query_id=query["id"])
+				self.show(data[5:])
+				return
+			if data.startswith("t079:reveal:") and self.screen in ("orders", "receipt", "items"):
+				order = data[12:]
+				if re.fullmatch(r"[0-9a-f]{32}", order):
+					self.call("answerCallbackQuery", callback_query_id=query["id"])
+					self.show_items(order)
+					return
+		super().update(event)
+
+	def show(self, page, new_message=False):
+		home = [("Main menu", "home")]
+		if page == "home":
+			text = "Akanti (آکانتی) staging shop"
+			rows = [[("Shop", "catalog")], [("Orders", "orders"), ("Wallet", "wallet")]]
+		elif page == "catalog":
+			item = self.checkout("pilot-catalog")
+			text = "Shop"
+			rows = []
+			if item["outcome"] == "Available":
+				self.quantities = tuple(n for n in (1, 2) if item["minimum"] <= n <= item["maximum"])
+				text += "\n" + item["title"]
+				if self.quantities:
+					rows.append([("Select product", "item")])
+			else:
+				text += "\nThe test product is out of stock."
+			rows.append(home)
+		elif page == "wallet":
+			wallet = self.checkout("pilot-wallet")
+			text = "Test wallet\nBalance: " + str(wallet["balance"]) + " USD"
+			rows = [home]
+		elif page == "orders":
+			orders = self.checkout("pilot-orders")["orders"]
+			text = "Orders" if orders else "Orders\nNo orders yet."
+			rows = [[(f"{o['title'][:34]} × {o['quantity']} · {o['id'][-8:]}", "reveal:" + uuid.UUID(o["id"]).hex)] for o in orders]
+			rows.append(home)
+		else:
+			raise ValueError("Unknown shop screen")
+		self.render(text, rows, new_message)
+		self.screen = page
+		self.quote = None
+
+	def show_receipt(self, order):
+		prepared = self.checkout("manifest-worker")
+		rows = [[("Orders", "orders"), ("Main menu", "home")]]
+		if prepared["outcome"] in ("Prepared", "PreparedWithoutSend"):
+			rows.insert(0, [("View item", "reveal:" + uuid.UUID(order).hex)])
+		self.render("Test wallet checkout complete.\nOrder: " + order, rows)
+		self.screen = "receipt"
+
+	def show_items(self, order):
+		released = self.checkout("pilot-reveal:" + order)
+		items = released.get("items") if released["outcome"] == "Items" else None
+		text = "Test delivery\n" + "\n".join(items) if items else "The item is awaiting delivery or review."
+		self.render(text, [[("Orders", "orders"), ("Main menu", "home")]])
+		self.screen = "items"
+
+	def render(self, text, rows, new_message=False):
+		markup = {"inline_keyboard": [buttons(*row)["inline_keyboard"][0] for row in rows]}
+		if new_message:
+			message = self.call("sendMessage", chat_id=self.actor, text=text, reply_markup=markup, protect_content=True)
+			self.anchor = message["message_id"]
+		else:
+			self.edit(text, markup)
+
