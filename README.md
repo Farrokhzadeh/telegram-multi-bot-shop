@@ -2,13 +2,13 @@
 
 Akanti is a multi-brand commerce backend for Telegram shops. Each brand has its own bot, customer memberships, wallets, orders, and payment settings. Brands can share a product catalog and stock pool. AccAbad (`acc-abad`) is the first brand Akanti will replace.
 
-The backend uses C# and .NET 10 Native AOT with PostgreSQL. It models payments, inventory, durable jobs, and delivery in a 28-table relational schema. Operator workflows are implemented in the backend. A graphical admin panel is outside the current scope.
+The backend uses C# and .NET 10 Native AOT with PostgreSQL. It models payments, inventory, durable jobs, and delivery in a 28-table relational schema. The [admin API guide](docs/ADMIN_API.md) explains how to get the OpenAPI contract and start a frontend.
 
 ## Release status
 
-Spec Kit records 96/96 tasks complete for the approved backend scope. The [staging image qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44502732355) passed 1,268 tests, Native AOT checks, and a one-brand synthetic canary. The separately operated staging bot can browse a synthetic product and use a test wallet. Akanti still needs the customer and operator workflows wired into the deployed runtime before it can replace AccAbad.
+Spec Kit records 96/96 tasks complete for the approved backend scope. The [staging image qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44502732355) passed 1,268 tests, Native AOT checks, and a one-brand synthetic canary. The staging Telegram bot can browse a synthetic product and use a test wallet. Akanti still needs the customer and operator workflows wired into the deployed runtime before it can replace AccAbad.
 
-## Method 1 — Start here
+## Method 1 — Run or update the local demo
 
 Run a local demo on a Linux x86-64 machine with Bash, `tar`, `sha256sum`, and `curl`. It needs no database, bot token, or payment credentials.
 
@@ -36,21 +36,29 @@ Run a local demo on a Linux x86-64 machine with Bash, `tar`, `sha256sum`, and `c
 
 ## Method 2 — Deploy or update staging through GitHub Actions
 
-Akanti's staging workflow follows the legacy release sequence. GitHub tests the selected revision, packages the executable and matching SQL, pushes the image to Docker Hub, and connects by SSH. The server pulls by the image digest. It checks the new container before retiring the previous Akanti staging container.
+**If staging is already configured, push to `main`.** The same workflow qualifies that commit, publishes the image to Docker Hub, and deploys it over SSH. Open the [Actions run](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml) and wait for **deploy-staging** to pass.
+
+The staging server pulls the image by digest and checks the API locally. Where the Telegram shop is registered, it also starts the shop and waits for a successful Telegram poll. The server uses the GitHub-built image directly.
 
 ### One-time setup
 
-1. Create a private Docker Hub repository named `akanti`. Give GitHub Actions a Docker Hub token with push access. Log in to Docker Hub on the server as the deployment account with a separate pull-only token.
+1. Create a private Docker Hub repository named `akanti`. Its owner is the `DOCKERHUB_NAMESPACE`, usually your Docker Hub username. Give GitHub Actions a Docker Hub token with push access. Log in to Docker Hub on the server as the deployment account with a separate pull-only token.
 2. In the Akanti repository create a GitHub Actions environment named `akanti-staging`. Set variables `DOCKERHUB_NAMESPACE`, `DEPLOY_HOST`, `DEPLOY_USER`, and optionally `DEPLOY_PORT` (defaults to 22). Set secrets `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `DEPLOY_SSH_KEY`, and `DEPLOY_KNOWN_HOSTS`. Use the independently verified host key in known-hosts format.
 3. On the server, give that deployment account Docker access and an account-owned directory at `/var/lib/akanti-staging` with mode `0700`. The deployment needs Linux x86-64, Docker, Bash, `flock`, at least 3 GiB free disk, 1 GiB available RAM, and two CPUs. The server pulls the image and runs it.
 
-### Each deploy or update
+### Redeploy, verify, or roll back
 
-1. Push to `main`. After the tests and build pass, [Offline backend qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml) deploys to staging automatically. For a manual redeploy of `main`, select **Run workflow** and enable **Publish to Docker Hub and deploy to staging**.
-2. Wait for **deploy-staging** to report the commit and image digest. The job runs the new container's local health probe. A failed replacement leaves the previous healthy container available.
-3. Record the digest and commit from each successful run. To roll back, invoke [the same deploy helper](ops/staging/deploy-dockerhub.sh) on the server with the previous `docker.io/<namespace>/akanti@sha256:<digest>` and its full commit SHA. The older image must still be available in Docker Hub and contain the Telegram runtime if the shop is registered.
+1. For a manual redeploy, open **Offline backend qualification**, select **Run workflow** on `main`, and enable **Publish to Docker Hub and deploy to staging**. Pull requests and pushes to implementation branches only run qualification and build checks.
+2. A successful **deploy-staging** job reports the exact commit and image digest. For a registered shop it also reports that the staging Telegram bot is healthy. If a new poller fails, the deploy script attempts to restart the previous runtime and fails the job.
+3. Keep the commit and digest for each successful run. To restore a previous compatible image, run [the deploy helper](ops/staging/deploy-dockerhub.sh) on the server as the deployment account:
 
-The workflow updates the isolated qualification API and any existing Telegram shop registered on the staging server. That shop keeps its own staging database, Telegram credentials and wallet data. The shop deployment reads the protected staging root, active runtime and baseline schema from `shop-root`, `shop-active` and `shop-schema` in `/var/lib/akanti-staging`.
+   ```bash
+   bash ops/staging/deploy-dockerhub.sh 'docker.io/<namespace>/akanti@sha256:<digest>' '<full-commit-sha>'
+   ```
+
+   The image must still be available in Docker Hub and contain the Telegram runtime if the shop is registered.
+
+The workflow serves the isolated qualification API on a new installation. Telegram updates require an existing, separately provisioned test bot and shop database. The deployment uses protected `shop-root`, `shop-active` and `shop-schema` files in `/var/lib/akanti-staging` to identify that runtime. Updates retain the staging database, Telegram credentials, cursor and wallet data. If the bundled schema differs, apply the matching staging migration before deploying.
 
 ## AccAbad replacement acceptance
 
@@ -64,7 +72,7 @@ Use AccAbad’s customer and operator behavior as the reference. Run the support
 | Delivery and order history | Receive a test item in Telegram, find the same order in history, and verify that restart or retry never sends it twice. Keep ambiguous delivery in review. | [Order delivery](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/order_delivery.py) · [Customer menus](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/customer_flows.py) |
 | Support and operator actions | Follow the supported customer help paths. Verify receipt decisions, inventory and order actions, and the corresponding customer notifications. | [Customer menus](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/customer_flows.py) · [Admin flows](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/admin_flows.py) · [Staff notifications](https://github.com/Farrokhzadeh/AccAbad-Shop/blob/66371a23a1c8149dc5bdf89a0355aa689d454dba/apps/bot/staff_notifications.py) |
 
-## Live staging and production
+## Production cutover
 
 Serving real Telegram users requires a qualified Telegram receiver and job runtime. Before an operator can schedule AccAbad's cutover, the release packet must include the exact deployment artifact and schema, a final balance and paid-order reconciliation, verified database and media restores with key recovery, and a handoff plan for the bot, callbacks, and stock. The handoff needs one writer and a recovery plan for effects accepted after the switch. Each brand requires an explicit release decision. [Release gates](ops/RELEASE_GATES.md) · [Single-brand cutover and rollback runbook](ops/BRAND_CUTOVER_RUNBOOK.md) · [Staging canary evidence](ops/T081_STAGING_CANARY.md)
 
