@@ -80,19 +80,21 @@ public sealed class UpdateRouterTests
         Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events"), row => row.GetInt64(0), Ct));
     }
 
-    [Fact]
-    public async Task SingleBotOwnerExcludesCompetingConsumerWithoutBlockingOtherBrand()
+    [Theory]
+    [InlineData("/menu")]
+    [InlineData("/shop")]
+    public async Task SingleBotOwnerExcludesCompetingConsumerWithoutBlockingOtherBrand(string command)
     {
         await using var fixture = await Menus();
         var router = Router(fixture, () => throw new InvalidOperationException());
         await using (var owner = await fixture.Sessions.BeginAsync(Ct))
         {
             Assert.True(await BotConsumerOwnership.TryAcquireAsync(owner, fixture.Contexts[0], Ct));
-            Assert.Equal(UpdateRouteCode.Busy, (await router.RouteAsync(Command(fixture, 0, 10), Ct)).Code);
-            Assert.Equal(UpdateRouteCode.Menu, (await router.RouteAsync(Command(fixture, 1, 10), Ct)).Code);
+            Assert.Equal(UpdateRouteCode.Busy, (await router.RouteAsync(Command(fixture, 0, 10, command), Ct)).Code);
+            Assert.Equal(UpdateRouteCode.Menu, (await router.RouteAsync(Command(fixture, 1, 10, command), Ct)).Code);
         }
-        var first = await router.RouteAsync(Command(fixture, 0, 10), Ct);
-        var repeated = await router.RouteAsync(Command(fixture, 0, 10), Ct);
+        var first = await router.RouteAsync(Command(fixture, 0, 10, command), Ct);
+        var repeated = await router.RouteAsync(Command(fixture, 0, 10, command), Ct);
         Assert.Equal(UpdateRouteCode.Menu, first.Code);
         Assert.Equal(UpdateRouteCode.Duplicate, repeated.Code);
         Assert.Equal(first.FlowRevision, repeated.FlowRevision);
@@ -181,10 +183,10 @@ public sealed class UpdateRouterTests
         using var verifier = new TelegramWebhookVerifier(fixture.Contexts[0], Secret);
         return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body("v1|" + revision + "|" + action + "|" + target.ToString("N"), true, updateId, actor, actor, messageId: messageId));
     }
-    private static VerifiedTelegramUpdate Command(BrandFixture fixture, int brand, long updateId)
+    private static VerifiedTelegramUpdate Command(BrandFixture fixture, int brand, long updateId, string command)
     {
         using var verifier = new TelegramWebhookVerifier(fixture.Contexts[brand], Secret);
-        return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body("/menu", updateId: updateId));
+        return verifier.Verify([TelegramFixture.Header(Secret)], TelegramFixture.Body(command, updateId: updateId));
     }
     private static async Task<BrandFixture> Menus()
     {

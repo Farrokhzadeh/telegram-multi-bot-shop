@@ -62,7 +62,7 @@ class WalletPilot:
 			if not self.authorized(message, message.get("from", {})):
 				return
 			command = message.get("text", "").split(maxsplit=1)
-			if not command or command[0] not in ("/start", "/checkoutpilot", "/checkoutpilot@testadbadbot"):
+			if not command or command[0] not in ("/start", "/shop", "/shop@testadbadbot", "/checkoutpilot", "/checkoutpilot@testadbadbot"):
 				return
 			if self.screen == "confirm":
 				return

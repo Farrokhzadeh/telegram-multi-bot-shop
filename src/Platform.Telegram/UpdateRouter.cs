@@ -215,7 +215,7 @@ public sealed class UpdateRouter
         _ => update.Value switch
         {
             "/start" => ("navigation", "start", UpdateRouteCode.Started),
-            "/menu" => ("navigation", "catalog_open", UpdateRouteCode.Menu),
+            "/menu" or "/shop" => ("navigation", "catalog_open", UpdateRouteCode.Menu),
             "/support" => ("support", "support_open", UpdateRouteCode.Support),
             "/discounts" => ("discount", "discounts_open", UpdateRouteCode.Discounts),
             _ => throw new TelegramIngressRejectedException()

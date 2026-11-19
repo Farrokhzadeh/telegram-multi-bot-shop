@@ -11,6 +11,7 @@ public sealed class TelegramIngressTests
     [Theory]
     [InlineData("/start")]
     [InlineData("/menu")]
+    [InlineData("/shop")]
     [InlineData("/support")]
     [InlineData("/discounts")]
     [InlineData("/orders")]

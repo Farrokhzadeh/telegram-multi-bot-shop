@@ -85,7 +85,7 @@ public sealed class TelegramWebhookVerifier : IDisposable
                 value = message.TryGetProperty("text", out JsonElement text) ? text.GetString() ?? throw new TelegramIngressRejectedException() :
                     message.TryGetProperty("caption", out JsonElement caption) ? caption.GetString() ?? throw new TelegramIngressRejectedException() : "";
                 if (value.Length > 4096 || (string.IsNullOrWhiteSpace(value) && assetRef is null) || (assetRef is not null && value.StartsWith('/'))) throw new TelegramIngressRejectedException();
-                if (value.StartsWith('/') && value is not ("/start" or "/menu" or "/support" or "/discounts") && !CustomerHistoryCommandRouter.TryParsePage(value, out _) &&
+                if (value.StartsWith('/') && value is not ("/start" or "/menu" or "/shop" or "/support" or "/discounts") && !CustomerHistoryCommandRouter.TryParsePage(value, out _) &&
                     !(value.Length == 82 && value.StartsWith("/bind ", StringComparison.Ordinal)) && !IsSupportCommand(value)) throw new TelegramIngressRejectedException();
             }
             long actorId = Number(sender, "id", true);
