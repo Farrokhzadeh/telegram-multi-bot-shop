@@ -63,6 +63,23 @@ class LegacyIrrRegisterTests(unittest.TestCase):
         with self.subTest(body=body), patch.dict(MODULE.SOURCE.ASSETS.BRANDS, {'prod1': ('acc-abad', 'iran', 'hash', 5)}), patch.object(MODULE.SOURCE.ASSETS, 'digest', return_value='hash'), patch.object(MODULE.subprocess, 'run') as run:
           run.return_value.returncode = 0; run.return_value.stdout = body
           with self.assertRaises(ValueError): MODULE.extract('prod1', archive)
+  def test_staging_register_keeps_the_staging_marker_and_rejects_mixed_sources(self):
+    with tempfile.TemporaryDirectory() as folder:
+      archive = pathlib.Path(folder) / 'staging.dump'; archive.write_bytes(b'PGDMP')
+      register = pathlib.Path(folder) / 'register.json'
+      identity = ('acc-abad', 'iran', 'staging-hash', 5)
+      history = b'COPY public.transactions (id, user_id, amount, currency, created_at) FROM stdin;\nIRR-ONE\t99001234\t-1.50\tIRR\t2024-01-01 00:00:00+00\n\\.\n'
+      with patch.object(MODULE.SOURCE, 'STAGING_SOURCE', identity), patch.object(MODULE.SOURCE.ASSETS, 'digest', return_value='staging-hash'), patch.object(MODULE.subprocess, 'run') as run:
+        run.return_value.returncode = 0
+        run.return_value.stdout = decoded('staging') + history
+        with self.assertRaises(ValueError): MODULE.extract('staging', archive, True)
+        run.return_value.stdout = decoded('staging').replace(b'\tproduction\n', b'\tstaging\n') + history
+        first = MODULE.preserve(register, {'staging': archive}, True)
+        self.assertEqual(first, MODULE.preserve(register, {'staging': archive}, True))
+        self.assertEqual('staging', first['sources'][0]['source'])
+        self.assertEqual(1, first['sources'][0]['preserved_irr_history'])
+        self.assertEqual(0, first['operational_postings'])
+        with self.assertRaises(ValueError): MODULE.preserve(register, {'staging': archive, 'prod1': archive}, True)
   def test_changed_archive_rejects_before_or_after_decode(self):
     with tempfile.TemporaryDirectory() as folder:
       archive = pathlib.Path(folder) / 'copy.dump'; archive.write_bytes(b'PGDMP')

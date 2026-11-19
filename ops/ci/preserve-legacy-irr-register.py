@@ -16,7 +16,7 @@ POLICY = 'manual_preservation_no_posting_conversion_or_waiver_v1'
 HISTORY_POLICY = 'manual_irr_and_original_nonposting_history_v2'
 
 def extract(instance, archive, retain_history=False):
-  brand, _, digest, size = SOURCE.ASSETS.BRANDS[instance]
+  (brand, _, digest, size), stage, _ = SOURCE.source_snapshot(instance)
   if archive.is_symlink() or not archive.is_file() or archive.stat().st_size != size or SOURCE.ASSETS.digest(archive) != digest:
     raise ValueError()
   with archive.open('rb') as stream:
@@ -28,7 +28,7 @@ def extract(instance, archive, retain_history=False):
   if set(counts) != retained:
     raise ValueError()
   identities = tables['deployment_identity']
-  if len(identities) != 1 or identities[0].get('id') != '1' or identities[0].get('instance_id') != instance or identities[0].get('deployment_stage') != 'production':
+  if len(identities) != 1 or identities[0].get('id') != '1' or identities[0].get('instance_id') != instance or identities[0].get('deployment_stage') != stage:
     raise ValueError()
   entries, wallets, seen = [], [], set()
   for row in tables['users']:
@@ -53,7 +53,7 @@ def extract(instance, archive, retain_history=False):
   return value
 
 def preserve(destination, sources, retain_history=False):
-  if set(sources) != set(SOURCE.ASSETS.BRANDS):
+  if set(sources) != set(SOURCE.ASSETS.BRANDS) and not (set(sources) == {'staging'} and retain_history):
     raise ValueError()
   parent = destination.parent
   if parent.resolve() != parent or not parent.is_dir() or stat.S_IMODE(parent.stat().st_mode) != 0o700 or parent.stat().st_uid != os.geteuid() or destination.is_symlink():
@@ -89,11 +89,12 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--register', type=pathlib.Path, required=True)
   parser.add_argument('--retain-history', action='store_true')
-  for instance in SOURCE.ASSETS.BRANDS:
-    parser.add_argument('--' + instance, type=pathlib.Path, required=True)
+  for instance in (*SOURCE.ASSETS.BRANDS, 'staging'):
+    parser.add_argument('--' + instance, type=pathlib.Path)
   args = parser.parse_args()
   try:
-    print(json.dumps(preserve(args.register, {instance: getattr(args, instance) for instance in SOURCE.ASSETS.BRANDS}, args.retain_history), sort_keys=True, indent=2))
+    sources = {instance: getattr(args, instance) for instance in (*SOURCE.ASSETS.BRANDS, 'staging') if getattr(args, instance) is not None}
+    print(json.dumps(preserve(args.register, sources, args.retain_history), sort_keys=True, indent=2))
     return 0
   except Exception:
     print('Legacy IRR preservation rejected; retain protected inputs for review.', file=sys.stderr)

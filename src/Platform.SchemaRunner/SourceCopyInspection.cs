@@ -13,9 +13,12 @@ internal static class SourceCopyInspection
         if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 8 || root.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() != 8) throw new MigrationRejectedException();
         string host = root.GetProperty("socket").GetString() ?? throw new MigrationRejectedException(), database = root.GetProperty("database").GetString() ?? throw new MigrationRejectedException(), archive = root.GetProperty("archive_sha256").GetString() ?? throw new MigrationRejectedException();
         var options = new NpgsqlConnectionStringBuilder(connection);
+        bool staging = database == StagingWalletSnapshot.Database;
+        string revision = staging ? StagingWalletSnapshot.LegacyRevision : "66371a23a1c8149dc5bdf89a0355aa689d454dba";
+        if (staging && (Environment.GetEnvironmentVariable("SHOP_ALLOW_STAGING_LEGACY_IMPORT") != "1" || archive != StagingWalletSnapshot.ArchiveSha256)) throw new MigrationRejectedException();
         if (!Path.IsPathFullyQualified(host) || Path.GetFileName(host) != "socket" || Path.GetFileName(Path.GetDirectoryName(host))?.StartsWith("teleg-source-qualification-", StringComparison.Ordinal) != true ||
-            options.Host != host || options.Port != 5432 || options.Database != database || database is not ("teleg_source_prod1" or "teleg_source_prod2" or "teleg_source_prod3") || options.Username != "teleg_source_reader" || options.IncludeErrorDetail || options.LogParameters || options.Multiplexing || options.Enlist ||
-            archive.Length != 64 || !archive.All(char.IsAsciiHexDigit) || root.GetProperty("source_revision").GetString() != "66371a23a1c8149dc5bdf89a0355aa689d454dba") throw new MigrationRejectedException();
+            options.Host != host || options.Port != 5432 || options.Database != database || (!staging && database is not ("teleg_source_prod1" or "teleg_source_prod2" or "teleg_source_prod3")) || options.Username != "teleg_source_reader" || options.IncludeErrorDetail || options.LogParameters || options.Multiplexing || options.Enlist ||
+            archive.Length != 64 || !archive.All(char.IsAsciiHexDigit) || root.GetProperty("source_revision").GetString() != revision) throw new MigrationRejectedException();
         byte[] schema = Convert.FromHexString(root.GetProperty("schema_sha256").GetString() ?? throw new MigrationRejectedException()), key = Convert.FromHexString(root.GetProperty("commitment_key").GetString() ?? throw new MigrationRejectedException());
         try
         {
@@ -24,6 +27,11 @@ internal static class SourceCopyInspection
             {
                 command.Parameters.AddWithValue(database); command.Parameters.AddWithValue(root.GetProperty("server_version").GetInt32()); command.Parameters.AddWithValue("teleg-offline-copy:" + archive);
                 if (await command.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException();
+            }
+            if (staging)
+            {
+                await using var marker = data.CreateCommand("SELECT count(*)=1 AND bool_and(id=1 AND instance_id='staging' AND deployment_stage='staging') FROM public.deployment_identity");
+                if (await marker.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException();
             }
             var expected = root.GetProperty("tables").EnumerateArray().Select(t => new LegacySourceTableExpectation(t.GetProperty("table").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("key").GetString() ?? throw new MigrationRejectedException(), t.GetProperty("count").GetInt64(), Convert.FromHexString(t.GetProperty("commitment").GetString() ?? throw new MigrationRejectedException()))).ToArray();
             var reader = new LegacySourceReader(data, new(host, 5432, database, "teleg_source_reader"));

@@ -7,9 +7,10 @@ namespace Platform.Migration;
 public sealed class LegacyWalletRetention
 {
     private readonly byte[] digest;
+    private readonly string sourceRevision;
     private readonly Dictionary<string, LegacyRetainedTransaction> history;
-    private LegacyWalletRetention(string reference, byte[] digest, string source, string archive, string user, decimal balance, Dictionary<string, LegacyRetainedTransaction> history)
-    { Reference = reference; this.digest = digest; SourceBrand = source; ArchiveDigest = archive; LegacyUser = user; OriginalIrr = balance; this.history = history; }
+    private LegacyWalletRetention(string reference, byte[] digest, string source, string archive, string revision, string user, decimal balance, Dictionary<string, LegacyRetainedTransaction> history)
+    { Reference = reference; this.digest = digest; SourceBrand = source; ArchiveDigest = archive; sourceRevision = revision; LegacyUser = user; OriginalIrr = balance; this.history = history; }
     public string Reference { get; }
     public ReadOnlyMemory<byte> Digest => digest;
     public string SourceBrand { get; }
@@ -34,14 +35,21 @@ public sealed class LegacyWalletRetention
             using var document = JsonDocument.Parse(body.ToArray()); var root = document.RootElement; RequireUnique(root);
             if (root.GetProperty("version").GetInt32() != 2 || root.GetProperty("policy").GetString() != "manual_irr_and_original_nonposting_history_v2") throw new MigrationRejectedException();
             var sources = root.GetProperty("sources").EnumerateArray().ToArray();
-            if (sources.Length != 3 || sources.Select(s => s.GetProperty("source").GetString()).Distinct().Count() != 3 || sources.Select(s => s.GetProperty("brand").GetString()).Distinct().Count() != 3 || sources.Any(s => (s.GetProperty("source").GetString(), s.GetProperty("brand").GetString()) is not (("prod1", "acc-abad") or ("prod2", "kuala") or ("prod3", "zikotech")))) throw new MigrationRejectedException();
+            bool staging = reference == StagingWalletSnapshot.RetentionReference;
+            string revision = staging ? StagingWalletSnapshot.LegacyRevision : "66371a23a1c8149dc5bdf89a0355aa689d454dba";
+            if (staging)
+            {
+                if (sources.Length != 1 || sources[0].GetProperty("source").GetString() != "staging" ||
+                    sourceBrand != StagingWalletSnapshot.Brand || archiveDigest != StagingWalletSnapshot.ArchiveSha256) throw new MigrationRejectedException();
+            }
+            else if (sources.Length != 3 || sources.Select(s => s.GetProperty("source").GetString()).Distinct().Count() != 3 || sources.Select(s => s.GetProperty("brand").GetString()).Distinct().Count() != 3 || sources.Any(s => (s.GetProperty("source").GetString(), s.GetProperty("brand").GetString()) is not (("prod1", "acc-abad") or ("prod2", "kuala") or ("prod3", "zikotech")))) throw new MigrationRejectedException();
             var source = sources.Single(s => s.GetProperty("brand").GetString() == sourceBrand);
             if (source.GetProperty("archive_sha256").GetString() != archiveDigest) throw new MigrationRejectedException();
             byte[] digest = expectedDigest.ToArray(); var wallets = new Dictionary<string, LegacyWalletRetention>(StringComparer.Ordinal);
             foreach (var wallet in source.GetProperty("wallets").EnumerateArray())
             {
                 string user = Identity(wallet.GetProperty("legacy_user_id").GetString());
-                if (!wallets.TryAdd(user, new(reference, digest, sourceBrand, archiveDigest, user, ExactDecimal.Parse(wallet.GetProperty("original_irr_amount").GetString()!), new(StringComparer.Ordinal)))) throw new MigrationRejectedException();
+                if (!wallets.TryAdd(user, new(reference, digest, sourceBrand, archiveDigest, revision, user, ExactDecimal.Parse(wallet.GetProperty("original_irr_amount").GetString()!), new(StringComparer.Ordinal)))) throw new MigrationRejectedException();
             }
             if (wallets.Count != source.GetProperty("source_users").GetInt32()) throw new MigrationRejectedException();
             var identities = new HashSet<string>(StringComparer.Ordinal);
@@ -71,7 +79,7 @@ public sealed class LegacyWalletRetention
     }
     internal void Require(VerifiedImportManifest manifest)
     {
-        if (SourceBrand != manifest.SourceBrand || ArchiveDigest != manifest.SnapshotDigest || manifest.SourceRevision != "66371a23a1c8149dc5bdf89a0355aa689d454dba") throw new MigrationRejectedException();
+        if (SourceBrand != manifest.SourceBrand || ArchiveDigest != manifest.SnapshotDigest || manifest.SourceRevision != sourceRevision) throw new MigrationRejectedException();
     }
     internal void RequireRow(string user, decimal other, IReadOnlyList<LegacyHistoryRow> rows)
     {

@@ -32,7 +32,12 @@ internal static class WalletCopyQualification
         {
             using var planDocument = JsonDocument.Parse(sourcePlan); var plan = planDocument.RootElement;
             string database = plan.GetProperty("database").GetString() ?? throw new MigrationRejectedException(), host = plan.GetProperty("socket").GetString() ?? throw new MigrationRejectedException();
-            if (!Sources.TryGetValue(database, out var identity) || plan.GetProperty("archive_sha256").GetString() != identity.Archive) throw new MigrationRejectedException();
+            bool staging = database == StagingWalletSnapshot.Database;
+            var identity = staging ? (Brand: StagingWalletSnapshot.Brand, Archive: StagingWalletSnapshot.ArchiveSha256) :
+                Sources.TryGetValue(database, out var historical) ? historical : throw new MigrationRejectedException();
+            if (plan.GetProperty("archive_sha256").GetString() != identity.Archive) throw new MigrationRejectedException();
+            string retentionReference = staging ? StagingWalletSnapshot.RetentionReference : "protected:wallet-copy/original-native-history";
+            string revision = staging ? StagingWalletSnapshot.LegacyRevision : "66371a23a1c8149dc5bdf89a0355aa689d454dba";
             var sourceOptions = new NpgsqlConnectionStringBuilder(sourceConnection); var targetOptions = new NpgsqlConnectionStringBuilder(targetConnection); var destination = SchemaManifest.ForQualification(targetConnection);
             if (sourceOptions.Host != host || sourceOptions.Database != database || sourceOptions.Username != "teleg_source_reader" || sourceOptions.Port != 5432 || sourceOptions.IncludeErrorDetail || sourceOptions.LogParameters || sourceOptions.Enlist || sourceOptions.Multiplexing || targetOptions.IncludeErrorDetail || targetOptions.LogParameters || targetOptions.Enlist || targetOptions.Multiplexing || !Path.IsPathFullyQualified(host) || Path.GetFileName(host) != "socket" || Path.GetFileName(Path.GetDirectoryName(host))?.StartsWith("teleg-source-qualification-", StringComparison.Ordinal) != true) throw new MigrationRejectedException();
             byte[] schema = Convert.FromHexString(plan.GetProperty("schema_sha256").GetString() ?? throw new MigrationRejectedException());
@@ -51,16 +56,17 @@ internal static class WalletCopyQualification
             }
             if (batch == Guid.Empty || observed.Kind != DateTimeKind.Utc) throw new MigrationRejectedException();
             await SourceCopyInspection.RunAsync(sourceConnection, sourcePlan, Path.Combine(directory, "source-start-" + Guid.NewGuid().ToString("N") + ".json"), ct);
-            Guid brand = new(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + identity.Brand)).AsSpan(0, 16));
+            string identityNamespace = staging ? "protected-staging-wallet-copy-brand-v1:" : "protected-wallet-copy-brand-v1:";
+            Guid brand = new(SHA256.HashData(Encoding.UTF8.GetBytes(identityNamespace + identity.Brand)).AsSpan(0, 16));
             var registry = new BotBrandRegistry([new("protected-wallet-copy", "qualification", brand, 101, batch, 1, true)]);
             if (!registry.TryResolveAuthenticated("protected-wallet-copy", new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "qualification")], "protected-wallet-copy")), out var context)) throw new MigrationRejectedException();
             await using var sourceData = new NpgsqlSlimDataSourceBuilder(sourceConnection).Build(); await using var targetData = new NpgsqlSlimDataSourceBuilder(targetConnection).Build();
             await using (var check = targetData.CreateCommand("SELECT current_database()=$1 AND current_user='shop_test_runner' AND current_setting('server_version_num')::integer=180006 AND pg_get_userbyid(datdba)='shop_test_runner' AND shobj_description(oid,'pg_database')=$2 FROM pg_database WHERE datname=current_database()"))
-            { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue("teleg-wallet-qualification:" + identity.Archive); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
-            var retained = LegacyWalletRetention.OpenAll("protected:wallet-copy/original-native-history", SHA256.HashData(register), register, identity.Brand, identity.Archive);
+            { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue((staging ? "teleg-staging-wallet-qualification:" : "teleg-wallet-qualification:") + identity.Archive); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
+            var retained = LegacyWalletRetention.OpenAll(retentionReference, SHA256.HashData(register), register, identity.Brand, identity.Archive);
             var source = new LegacySourceReader(sourceData, new(host, 5432, database, "teleg_source_reader"));
             var rows = await source.PlanWalletsAsync(schema, batch, brand, retained, observed, ct);
-            byte[] body = VerifiedImportManifest.EncodePlan(destination, identity.Brand, brand, "66371a23a1c8149dc5bdf89a0355aa689d454dba", schema, "protected:wallet-copy/source-archive", Convert.FromHexString(identity.Archive), batch, rows.SelectMany(r => r.Proofs(brand)), rows.Sum(r => r.BalanceUsd));
+            byte[] body = VerifiedImportManifest.EncodePlan(destination, identity.Brand, brand, revision, schema, "protected:wallet-copy/source-archive", Convert.FromHexString(identity.Archive), batch, rows.SelectMany(r => r.Proofs(brand)), rows.Sum(r => r.BalanceUsd));
             if (File.Exists(manifestPath)) { if (new FileInfo(manifestPath).LinkTarget is not null || (File.GetUnixFileMode(manifestPath) & (UnixFileMode)63) != 0 || !CryptographicOperations.FixedTimeEquals(SHA256.HashData(await File.ReadAllBytesAsync(manifestPath, ct)), SHA256.HashData(body))) throw new MigrationRejectedException(); }
             else await WriteAsync(manifestPath, body, ct);
             var manifest = VerifiedImportManifest.Open("protected:wallet-copy/" + batch.ToString("N"), SHA256.HashData(body), body);
@@ -69,7 +75,7 @@ internal static class WalletCopyQualification
             var sessions = new DbSessionFactory(targetData);
             await SeedAsync(sessions, brand, identity.Brand, ct);
             async Task<ReadOnlyMemory<byte>> ReadRetention(string reference, CancellationToken token)
-            { if (!OperatingSystem.IsLinux() || reference != "protected:wallet-copy/original-native-history" || new FileInfo(registerPath).LinkTarget is not null || (File.GetUnixFileMode(registerPath) & (UnixFileMode)63) != 0) throw new MigrationRejectedException(); return await File.ReadAllBytesAsync(registerPath, token); }
+            { if (!OperatingSystem.IsLinux() || reference != retentionReference || new FileInfo(registerPath).LinkTarget is not null || (File.GetUnixFileMode(registerPath) & (UnixFileMode)63) != 0) throw new MigrationRejectedException(); return await File.ReadAllBytesAsync(registerPath, token); }
             var workflow = new ImportWorkflow(source, sessions);
             var first = await workflow.ImportWalletsAsync(context!, manifest, rows, ReadRetention, ct);
             var replay = await workflow.ImportWalletsAsync(context!, manifest, rows, ReadRetention, ct);
@@ -83,7 +89,7 @@ internal static class WalletCopyQualification
                 if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.users"), r => r.GetInt64(0), ct) != rows.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallets"), r => r.GetInt64(0), ct) != rows.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map"), r => r.GetInt64(0), ct) != manifest.Proofs.Count) throw new MigrationRejectedException();
             }
             await SourceCopyInspection.RunAsync(sourceConnection, sourcePlan, Path.Combine(directory, "source-end-" + Guid.NewGuid().ToString("N") + ".json"), ct);
-            if (!retained.First().Value.Matches((await ReadRetention("protected:wallet-copy/original-native-history", ct)).Span)) throw new MigrationRejectedException();
+            if (!retained.First().Value.Matches((await ReadRetention(retentionReference, ct)).Span)) throw new MigrationRejectedException();
             await WriteAsync(receipt, JsonBody(w => { w.WriteString("scope", "protected_copy_wallet_projection_only"); w.WriteString("source_brand", identity.Brand); w.WriteString("archive_sha256", identity.Archive); w.WriteNumber("accounts", rows.Count); w.WriteNumber("retained_reversed_membership_clocks", rows.Count(r => r.SourceClock is not null)); w.WriteNumber("opening_postings", aggregate.OpeningPostings); w.WriteNumber("nonposting_usd_history", aggregate.NonPostingHistory); w.WriteNumber("manual_irr_accounts", first.ManualIrrAccounts); w.WriteNumber("retained_history", first.RetainedHistoryRows); w.WriteNumber("retained_irr_history", first.RetainedIrrHistory); w.WriteNumber("retained_zero_history", first.RetainedZeroHistory); w.WriteBoolean("matched", true); w.WriteBoolean("replay_identical", true); w.WriteBoolean("source_unchanged", true); w.WriteBoolean("release_ready", false); w.WriteBoolean("history_orders_imported", false); w.WriteBoolean("target_reencryption_executed", false); }), ct);
         }
         finally { CryptographicOperations.ZeroMemory(register); }

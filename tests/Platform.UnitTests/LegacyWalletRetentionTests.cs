@@ -18,6 +18,19 @@ public sealed class LegacyWalletRetentionTests
         Assert.Equal(1L, rows["101"].IrrHistoryRows); Assert.Equal(1L, rows["102"].ZeroHistoryRows); Assert.Equal(1L, rows["101"].HistoryRows);
         Assert.Equal("LegacyWalletRetention [redacted]", rows["101"].ToString()); Assert.DoesNotContain("1234", rows["101"].ToString(), StringComparison.Ordinal);
     }
+    [Fact]
+    public void StagingWalletRegisterRequiresThePinnedSnapshotAndItsOwnScope()
+    {
+        string staging = Body.Replace("\"source\":\"prod1\"", "\"source\":\"staging\"", StringComparison.Ordinal)
+            .Replace(Archive, StagingWalletSnapshot.ArchiveSha256, StringComparison.Ordinal)
+            .Replace(",{\"source\":\"prod2\",\"brand\":\"kuala\"},{\"source\":\"prod3\",\"brand\":\"zikotech\"}", "", StringComparison.Ordinal);
+        byte[] bytes = Encoding.UTF8.GetBytes(staging), hash = SHA256.HashData(bytes);
+        var wallets = LegacyWalletRetention.OpenAll(StagingWalletSnapshot.RetentionReference, hash, bytes, StagingWalletSnapshot.Brand, StagingWalletSnapshot.ArchiveSha256);
+        Assert.Equal(2, wallets.Count);
+        Assert.True(wallets["101"].ManualIrrBalance);
+        Assert.Throws<MigrationRejectedException>(() => LegacyWalletRetention.OpenAll("protected:synthetic/retention", hash, bytes, StagingWalletSnapshot.Brand, StagingWalletSnapshot.ArchiveSha256));
+        Assert.Throws<MigrationRejectedException>(() => LegacyWalletRetention.OpenAll(StagingWalletSnapshot.RetentionReference, hash, bytes, StagingWalletSnapshot.Brand, Archive));
+    }
     [Theory]
     [InlineData("\"version\":2", "\"version\":1,\"version\":2")]
     [InlineData("\"source_users\":2", "\"source_users\":3")]
