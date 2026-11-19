@@ -25,6 +25,7 @@ public sealed class CustomerScreensTests
         var summary = await screens.HomeAsync(brand, owner, ct);
         Assert.Equal(1L, summary.Orders);
         Assert.Equal(90m, summary.Balance);
+        Assert.Equal(10m, summary.Spent);
         var list = await screens.ListAsync(brand, owner, CustomerScreenList.Orders, "all", 0, ct);
         Assert.Equal(order.OrderId!.Value, Assert.Single(list.Entries).Id);
         var detail = await screens.DetailAsync(brand, owner, CustomerScreenList.Orders, order.OrderId!.Value, ct);

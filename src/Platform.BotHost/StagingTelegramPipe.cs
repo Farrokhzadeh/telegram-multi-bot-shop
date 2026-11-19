@@ -4,6 +4,7 @@ using Platform.Telegram;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Requests;
+using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.ReplyMarkups;
 
@@ -65,11 +66,14 @@ internal static class StagingTelegramPipe
             "getUpdates" => TelegramTransport.GetUpdatesAsync(token, http, Number(args, "offset", 0), Number(args, "limit", 100),
                 Number(args, "timeout", 0), args.GetProperty("allowed_updates").EnumerateArray().Select(UpdateKind).ToArray(), ct),
             "sendMessage" => TelegramTransport.ReadRawResultAsync(token, http, (client, cancel) =>
-                client.SendMessage(PrivateChat(args), Text(args, "text"), replyMarkup: Keyboard(args),
-                    protectContent: args.TryGetProperty("protect_content", out var protect) && protect.GetBoolean(), cancellationToken: cancel), ct),
+                client.SendMessage(PrivateChat(args), Text(args, "text"), parseMode: Formatting(args), replyMarkup: Keyboard(args),
+                    protectContent: Protected(args), cancellationToken: cancel), ct),
+            "sendRichMessage" => TelegramTransport.ReadRawResultAsync(token, http, (client, cancel) =>
+                client.SendRichMessage(PrivateChat(args), RichMessage(args) ?? throw new ArgumentException(),
+                    replyMarkup: Keyboard(args), protectContent: Protected(args), cancellationToken: cancel), ct),
             "editMessageText" => TelegramTransport.ReadRawResultAsync(token, http, (client, cancel) =>
-                client.EditMessageText(PrivateChat(args), args.GetProperty("message_id").GetInt32(), Text(args, "text"),
-                    replyMarkup: Keyboard(args), cancellationToken: cancel), ct),
+                client.EditMessageText(PrivateChat(args), args.GetProperty("message_id").GetInt32(), OptionalText(args, "text"),
+                    parseMode: Formatting(args), replyMarkup: Keyboard(args), richMessage: RichMessage(args), cancellationToken: cancel), ct),
             "answerCallbackQuery" => TelegramTransport.ReadRawResultAsync(token, http, (client, cancel) =>
                 client.SendRequest(new AnswerCallbackQueryRequest { CallbackQueryId = Text(args, "callback_query_id") }, cancel), ct),
             _ => throw new ArgumentException()
@@ -94,9 +98,42 @@ internal static class StagingTelegramPipe
     private static string Text(JsonElement args, string name) =>
         args.GetProperty(name).GetString() ?? throw new ArgumentException();
 
+    private static string? OptionalText(JsonElement args, string name) =>
+        args.TryGetProperty(name, out var value) ? value.GetString() : null;
+
+    private static bool Protected(JsonElement args) =>
+        args.TryGetProperty("protect_content", out var value) && value.GetBoolean();
+
+    private static ParseMode Formatting(JsonElement args) => OptionalText(args, "parse_mode") switch
+    {
+        null => ParseMode.None,
+        "HTML" => ParseMode.Html,
+        _ => throw new ArgumentException()
+    };
+
+    private static InputRichMessage? RichMessage(JsonElement args) =>
+        args.TryGetProperty("rich_message", out var markup)
+            ? new InputRichMessage { Html = Text(markup, "html"), IsRtl = markup.TryGetProperty("is_rtl", out var rtl) && rtl.GetBoolean() }
+            : null;
+
     private static InlineKeyboardMarkup? Keyboard(JsonElement args) =>
         args.TryGetProperty("reply_markup", out var markup)
             ? new InlineKeyboardMarkup(markup.GetProperty("inline_keyboard").EnumerateArray().Select(row =>
-                row.EnumerateArray().Select(button => InlineKeyboardButton.WithCallbackData(Text(button, "text"), Text(button, "callback_data"))).ToArray()).ToArray())
+                row.EnumerateArray().Select(Button).ToArray()).ToArray())
             : null;
+
+    private static InlineKeyboardButton Button(JsonElement args)
+    {
+        var button = InlineKeyboardButton.WithCallbackData(Text(args, "text"), Text(args, "callback_data"));
+        button.IconCustomEmojiId = OptionalText(args, "icon_custom_emoji_id");
+        button.Style = OptionalText(args, "style") switch
+        {
+            null => null,
+            "primary" => KeyboardButtonStyle.Primary,
+            "success" => KeyboardButtonStyle.Success,
+            "danger" => KeyboardButtonStyle.Danger,
+            _ => throw new ArgumentException()
+        };
+        return button;
+    }
 }

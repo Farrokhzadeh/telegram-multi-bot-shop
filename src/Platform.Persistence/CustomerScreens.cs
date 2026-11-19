@@ -3,7 +3,7 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed record CustomerHome(string Language, string Brand, decimal Balance, long Orders, DateTime Joined, string? Contact);
+public sealed record CustomerHome(string Language, string Brand, decimal Balance, long Orders, decimal Spent, DateTime Joined, string? Contact);
 public sealed record CustomerScreenEntry(Guid Id, string Title, string Status, decimal? Amount, string? Currency, DateTime Created, int? Quantity = null);
 public sealed record CustomerScreenPage(IReadOnlyList<CustomerScreenEntry> Entries, bool HasNext);
 public enum CustomerScreenList { Orders, Transactions, Deposits, Discounts }
@@ -15,10 +15,11 @@ public sealed class CustomerScreens(DbSessionFactory sessions)
         await using var session = await sessions.BeginAsync(ct);
         BrandPolicySnapshot policy = await BrandPolicyStore.ReadAsync(session, context, actor, ct);
         return await session.QuerySingleAsync(new DbStatement("""
-            SELECT u.first_seen_at,COALESCE(w.balance,0)::text,(SELECT count(*) FROM shop.orders o WHERE o.user_id=u.id)
+            SELECT u.first_seen_at,COALESCE(w.balance,0)::text,(SELECT count(*) FROM shop.orders o WHERE o.user_id=u.id),
+                COALESCE((SELECT sum(-e.signed_amount) FROM shop.wallet_entries e WHERE e.user_id=u.id AND e.movement_kind='purchase_debit'),0)::text
             FROM shop.users u LEFT JOIN shop.wallets w ON w.user_id=u.id WHERE u.id=$1
             """, DbValue.Uuid(policy.MemberId)), row =>
-                new CustomerHome(policy.Language, policy.PublicName, Amount(row.GetString(1)), row.GetInt64(2), row.GetUtc(0), policy.PublicContact), ct);
+                new CustomerHome(policy.Language, policy.PublicName, Amount(row.GetString(1)), row.GetInt64(2), Amount(row.GetString(3)), row.GetUtc(0), policy.PublicContact), ct);
     }
 
     public async Task SetLanguageAsync(BrandContext context, long actor, string language, CancellationToken ct = default)

@@ -64,7 +64,8 @@ internal static class IngressQualification
             {"method":"getWebhookInfo","parameters":{}}
             {"method":"getUpdates","parameters":{"offset":41,"timeout":0,"allowed_updates":["message","callback_query"]}}
             {"method":"sendMessage","parameters":{"chat_id":7001,"text":"Synthetic acknowledgement","protect_content":true,"reply_markup":{"inline_keyboard":[[{"text":"Orders","callback_data":"orders"}]]}}}
-            {"method":"editMessageText","parameters":{"chat_id":7001,"message_id":99,"text":"Edited"}}
+            {"method":"sendRichMessage","parameters":{"chat_id":7001,"rich_message":{"html":"<h3>Shop</h3><table><tr><td>Item</td></tr></table>","is_rtl":true},"reply_markup":{"inline_keyboard":[[{"text":"Shop","style":"success","icon_custom_emoji_id":"6082290027532918112","callback_data":"shop"}]]}}}
+            {"method":"editMessageText","parameters":{"chat_id":7001,"message_id":99,"rich_message":{"html":"<h3>Edited</h3>","is_rtl":true}}}
             {"method":"answerCallbackQuery","parameters":{"callback_query_id":"public-synthetic"}}
             """);
         using var response = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
@@ -74,12 +75,14 @@ internal static class IngressQualification
         using var webhook = JsonDocument.Parse(lines.ReadLine()!);
         using var updates = JsonDocument.Parse(lines.ReadLine()!);
         using var sent = JsonDocument.Parse(lines.ReadLine()!);
+        using var rich = JsonDocument.Parse(lines.ReadLine()!);
         using var edited = JsonDocument.Parse(lines.ReadLine()!);
         using var callback = JsonDocument.Parse(lines.ReadLine()!);
         return me.RootElement.GetProperty("result").GetProperty("is_bot").GetBoolean() &&
             webhook.RootElement.GetProperty("result").GetProperty("url").GetString() == "" &&
             updates.RootElement.GetProperty("result")[0].GetProperty("future_field").GetBoolean() &&
             sent.RootElement.GetProperty("result").GetProperty("message_id").GetInt32() == 99 &&
+            rich.RootElement.GetProperty("result").GetProperty("message_id").GetInt32() == 99 &&
             edited.RootElement.GetProperty("result").GetProperty("message_id").GetInt32() == 99 &&
             callback.RootElement.GetProperty("result").GetBoolean() &&
             fake.Polls == 1 && fake.Sends == 1;
@@ -114,7 +117,12 @@ internal static class IngressQualification
                     Sends++;
                     body = """{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""";
                 }
-                else if (path.EndsWith("/editMessageText", StringComparison.Ordinal) && data.GetProperty("message_id").GetInt32() == 99)
+                else if (path.EndsWith("/sendRichMessage", StringComparison.Ordinal) &&
+                    data.GetProperty("rich_message").GetProperty("is_rtl").GetBoolean() &&
+                    data.GetProperty("reply_markup").GetProperty("inline_keyboard")[0][0].GetProperty("style").GetString() == "success")
+                    body = """{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""";
+                else if (path.EndsWith("/editMessageText", StringComparison.Ordinal) && data.GetProperty("message_id").GetInt32() == 99 &&
+                    data.GetProperty("rich_message").GetProperty("html").GetString() == "<h3>Edited</h3>")
                     body = """{"ok":true,"result":{"message_id":99,"chat":{"id":7001,"type":"private"}}}""";
                 else if (path.EndsWith("/answerCallbackQuery", StringComparison.Ordinal) &&
                     data.GetProperty("callback_query_id").GetString() == "public-synthetic")

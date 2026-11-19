@@ -6,6 +6,9 @@ import re
 import stat
 import time
 import uuid
+from html import escape
+
+import accabad_presentation as appearance
 
 
 def private_text(path, limit):
@@ -158,6 +161,8 @@ class WalletShop(WalletPilot):
 		super().__init__(actor, call, checkout)
 		self.language = "en"
 		self.list_origin = "orders:all:0"
+		self.name = ""
+		self.username = ""
 
 	def label(self, key):
 		return self.labels.get(key, (key.replace("_", " ").capitalize(),) * 2)[self.language == "fa"]
@@ -167,6 +172,9 @@ class WalletShop(WalletPilot):
 		if message:
 			if not self.authorized(message, message.get("from", {})):
 				return
+			sender = message["from"]
+			self.name = sender.get("first_name") or ""
+			self.username = sender.get("username") or ""
 			words = (message.get("text") or "").strip().lower().split(maxsplit=1)
 			if not words:
 				return
@@ -188,6 +196,9 @@ class WalletShop(WalletPilot):
 		self.call("answerCallbackQuery", callback_query_id=query["id"])
 		self.open(data[5:])
 
+	def copy(self, key, *args, **fields):
+		return appearance.copy(self.language, key, *args, **fields)
+
 	def open(self, destination, new_message=False):
 		parts = destination.split(":")
 		page = parts[0]
@@ -197,39 +208,42 @@ class WalletShop(WalletPilot):
 		else:
 			profile = None
 		l = self.label
-		home = (l("home"), "home")
+		home = (self.copy("b_home"), "home")
 		if page == "home":
-			text = (f"Akanti (آکانتی)\n{l('balance')}: {profile['balance']} USD"
-					f"\n{l('orders')}: {profile['orders']}\n{l('member')}: {self.actor}\n{l('joined')}: {profile['joined'][:10]}")
-			rows = [[(l("catalog"), "catalog")], [(l("orders"), "orders:all:0")],
-					[(l("wallet"), "wallet"), (l("discounts"), "discounts:0")],
-					[(l("support"), "support"), (l("language"), "language")]]
+			text = appearance.home(self.language, profile, self.actor, self.name, self.username)
+			rows = [[(self.copy("b_shop"), "catalog", "success")], [(self.copy("b_orders"), "orders:all:0", "primary")],
+					[(self.copy("b_wallet"), "wallet"), (self.copy("b_my_discounts"), "discounts:0")],
+					[(self.copy("b_sup"), "support"), (self.copy("b_lang"), "language")]]
 		elif page in ("wallet", "language", "support"):
 			text = l(page)
 			if page == "wallet":
-				text += f"\n{l('balance')}: {profile['balance']} USD"
-				rows = [[(l("transactions"), "transactions:0"), (l("deposits"), "deposits:0")], [home]]
+				text = appearance.wallet(self.language, profile["balance"])
+				rows = [[(self.copy("b_tx"), "transactions:0"), (self.copy("ui_deposits"), "deposits:0")], [home]]
 			elif page == "language":
-				rows = [[("فارسی", "setlang:fa"), ("English", "setlang:en")], [home]]
+				rows = [[(self.copy("language_fa"), "setlang:fa"), (self.copy("language_en"), "setlang:en")], [home]]
 			else:
+				text = self.copy("ui_support_choose")
 				if profile["contact"]:
 					text += "\n@" + profile["contact"]
-				rows = [[(l("support_orders"), "support_orders:all:0"), (l("support_payments"), "support_payments:0")],
-						[(l("buying_help"), "buying_help")], [home]]
+				rows = [[(self.copy("ui_support_order"), "support_orders:all:0"), (self.copy("ui_support_payment"), "support_payments:0")],
+						[(self.copy("ui_buying_help"), "buying_help")], [home]]
 		elif page == "setlang" and self.screen == "language" and len(parts) == 2 and parts[1] in ("en", "fa"):
 			self.checkout("pilot-screen:language:" + parts[1])
 			self.open("home")
 			return
 		elif page == "buying_help":
-			text, rows = l("help_text"), [[(l("back"), "support"), (l("catalog"), "catalog")], [home]]
+			text, rows = self.copy("ui_buying_guide"), [[(l("back"), "support"), (l("catalog"), "catalog")], [home]]
 		elif page in ("catalog", "product", "quantity"):
 			item = self.checkout("pilot-catalog")
 			text, rows = self.product_screen(page, item)
+		elif page == "custom":
+			text, rows = l("quantity_help"), [[(self.copy("b_back"), "quantity"), home]]
+			page = "quantity"
 		elif page in ("orders", "transactions", "deposits", "discounts", "support_orders", "support_payments"):
 			text, rows = self.history_screen(page, parts[1:])
 		elif page in ("order", "payment", "reveal") and len(parts) == 2 and re.fullmatch(r"[0-9a-f]{32}", parts[1]):
 			text, rows = self.detail_screen(page, parts[1])
-		elif page == "qty" and self.screen == "quantity" and len(parts) == 2 and parts[1].isascii() and parts[1].isdecimal():
+		elif page == "qty" and self.screen in ("product", "quantity") and len(parts) == 2 and parts[1].isascii() and parts[1].isdecimal():
 			self.quote_quantity(int(parts[1]))
 			return
 		elif page == "pay" and self.screen == "confirm" and self.quote:
@@ -246,35 +260,49 @@ class WalletShop(WalletPilot):
 		self.quote = None
 
 	def product_screen(self, page, item):
-		l = self.label
-		back = [(l("back"), "catalog"), (l("home"), "home")]
+		home = (self.copy("b_home"), "home")
 		if page == "catalog":
-			rows = [[(item["title"][:55], "product")]] if item.get("title") else []
-			return l("catalog"), rows + [[(l("home"), "home")]]
+			rows = []
+			if item.get("title"):
+				title = escape(item["title"][:43])
+				if item["outcome"] != "Available":
+					title += " · " + self.label("out")
+				rows.append([(title, "product")])
+			return appearance.catalog(self.language, item), rows + [[(self.copy("store_refresh"), "catalog")], [home]]
+		back = [(self.copy("b_back"), "catalog"), home]
 		if not item.get("title"):
-			return l("unavailable"), [back]
-		text = item["title"]
-		if item.get("description"):
-			text += "\n" + item["description"][:1700]
-		text += f"\n{l('amount')}: {item['amount']} USD"
+			return self.label("unavailable"), [back]
+		title = escape(item["title"])
+		description = escape((item.get("description") or "---")[:1500])
 		if item["outcome"] != "Available":
-			return text + "\n" + l("out"), [back]
+			return appearance.Screen(self.copy("p_out_stock", title, description)), [back]
+		stock = item.get("stock", item["maximum"])
+		text = appearance.Screen(self.copy("p_det", title, item["amount"], "", stock, description)
+								 + "\n\n" + self.copy("ui_quantity") + "\n" + self.copy("discount_auto"))
+		limit = min(stock, item["maximum"])
 		if page == "product":
-			return text, [[(l("buy"), "quantity")], back]
-		btns = [(str(n), f"qty:{n}") for n in range(item["minimum"], min(item["maximum"], item["minimum"] + 4) + 1)]
-		return text + "\n" + l("quantity_help"), [btns, [(l("back"), "product"), (l("home"), "home")]]
+			rows = [[(self.copy("buy_one"), "qty:1", "success")]] if item["minimum"] <= 1 <= limit else []
+			if limit > 1 or not rows:
+				rows.append([(self.copy("buy_more"), "quantity")])
+			return text, rows + [back]
+		numbers = [(str(n), f"qty:{n}") for n in (2, 3, 5, 10) if item["minimum"] <= n <= limit]
+		rows = [numbers] if numbers else []
+		return text, rows + [[(self.copy("b_cqty"), "custom")], [(self.copy("b_back"), "product"), home]]
 
 	def quote_quantity(self, quantity):
-		l = self.label
 		if not 1 <= quantity <= 10000:
 			return
 		quote = self.checkout("pilot-quote:" + str(quantity))
 		if quote["outcome"] != "Quoted":
-			self.render(l("unavailable"), [[(l("back"), "quantity"), (l("catalog"), "catalog")]])
+			self.render(self.label("unavailable"), [[(self.copy("b_back"), "quantity"), (self.copy("b_shop"), "catalog")]])
 			return
 		self.quote = uuid.UUID(quote["order"]).hex
-		self.render(f"{l('quantity')}: {quote['quantity']}\n{l('total')}: {quote['amount']} {quote['currency'].upper()}",
-					[[(l("pay"), "pay")], [(l("back"), "quantity"), (l("cancel"), "catalog")]])
+		balance = self.checkout("pilot-wallet")["balance"]
+		text = self.copy("pay", quote["quantity"], escape(quote.get("title") or ""), quote["amount"], "")
+		text += "\n\n" + self.copy("ui_wallet_available", appearance.dollars(balance), "")
+		self.render(appearance.Screen(text),
+			[[(self.copy("ui_pay_usdt", appearance.dollars(quote["amount"])), "pay", "success")],
+			 [(self.copy("b_back"), "product"), (self.copy("b_cancel"), "catalog")]])
 		self.screen = "confirm"
 
 	def history_screen(self, destination, args):
@@ -294,16 +322,29 @@ class WalletShop(WalletPilot):
 		text = l(destination)
 		entries = data["entries"]
 		if not entries:
-			text += "\n" + l("empty")
+			if source in ("orders", "transactions"):
+				text = appearance.Screen(self.copy("ord_mt" if source == "orders" else "tx_mt"))
+			else:
+				text += "\n" + l("empty")
+		records = []
 		for entry in entries:
 			reference = uuid.UUID(entry["id"]).hex
 			if source == "orders":
-				rows.append([(f"{entry['title'][:34]} × {entry['quantity']} · {reference[-8:]}", "order:" + reference)])
+				rows.append([(f"{escape(entry['title'][:34])} × {entry['quantity']} · {reference[-8:]}", "order:" + reference)])
+				records.append((escape(entry["title"][:65]), str(entry["quantity"]), escape(l(entry["status"]))))
 			elif source == "deposits":
 				rows.append([(f"{l(entry['title'])} · {entry['amount']} {entry['currency']} · {l(entry['status'])}", "payment:" + reference)])
+			elif source == "transactions":
+				amount = entry["amount"]
+				sign = "+" if amount > 0 else "-"
+				records.append(f"{'➕' if amount > 0 else '➖'} {sign}{appearance.dollars(abs(amount))} USDT • 🕒 <i>{entry['created'][:10]}</i>\n🏷 <code>{reference[-8:]}</code>\n📝 {escape(l(entry['title']))}")
 			else:
-				title = l(entry["title"]) if source == "transactions" else entry["title"]
-				text += f"\n{entry['created'][:10]} · {title[:60]} · {entry['amount']} {entry['currency']}"
+				text += f"\n{entry['created'][:10]} · {entry['title'][:60]} · {entry['amount']} {entry['currency']}"
+		if records and source == "transactions":
+			text = appearance.Screen(self.copy("tx", "\n-----------------------\n".join(records)))
+		elif records and source == "orders":
+			headings = [self.copy("store_product"), l("quantity"), l("status")]
+			text = appearance.Screen("<h3>" + self.copy("b_orders") + "</h3>" + appearance.table(headings, records))
 		prefix = f"{destination}:{filter_name}:" if source == "orders" else f"{destination}:"
 		pagination = []
 		if page > 0:
@@ -313,7 +354,7 @@ class WalletShop(WalletPilot):
 		if pagination:
 			rows.append(pagination)
 		back = "support" if destination.startswith("support_") else "wallet" if source in ("transactions", "deposits") else "home"
-		home = (l("home"), "home")
+		home = (self.copy("b_home"), "home")
 		rows.append([home] if back == "home" else [(l("back"), back), home])
 		self.list_origin = prefix + str(page)
 		return text, rows
@@ -336,20 +377,24 @@ class WalletShop(WalletPilot):
 		if entry.get("amount") is not None:
 			text += f"\n{l('amount')}: {entry['amount']} {entry['currency']}"
 		if page == "order" and entry["status"] in ("ready", "delivering", "completed"):
-			rows.insert(0, [(l("items"), "reveal:" + reference)])
+			rows.insert(0, [(self.copy("ui_reveal"), "reveal:" + reference)])
+			if entry.get("amount") is not None:
+				text = appearance.Screen(self.copy("receipt_compact", product=escape(entry["title"]),
+					quantity=entry["quantity"], total=appearance.dollars(entry["amount"]) + " USDT",
+					id=escape(entry["id"]), date=escape(entry["created"][:10])))
 		return text, rows
 
 	def show_receipt(self, order):
 		self.checkout("manifest-worker")
 		l = self.label
 		self.list_origin = "orders:all:0"
-		self.render(f"{l('paid')}\n{order}", [[(l("orders"), "order:" + uuid.UUID(order).hex)], [(l("home"), "home")]])
+		reference = uuid.UUID(order).hex
+		text, rows = self.detail_screen("order", reference)
+		self.render(text, rows)
 		self.screen = "receipt"
 
 	def render(self, text, rows, new_message=False):
-		markup = {"inline_keyboard": [buttons(*row)["inline_keyboard"][0] for row in rows]}
+		markup = {"inline_keyboard": [[appearance.button(*item) for item in row] for row in rows]}
+		message = appearance.present(self.call, self.actor, None if new_message else self.anchor, text, markup, self.language == "fa")
 		if new_message:
-			message = self.call("sendMessage", chat_id=self.actor, text=text, reply_markup=markup, protect_content=True)
 			self.anchor = message["message_id"]
-		else:
-			self.edit(text, markup)

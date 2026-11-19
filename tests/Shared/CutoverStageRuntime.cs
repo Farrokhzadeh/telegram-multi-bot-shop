@@ -29,7 +29,7 @@ public sealed record CutoverStageResult(string Operation, string Outcome, long O
 public sealed record CutoverPilotResult(Guid Run, Guid Product, string Outcome, string? Title = null, int? Minimum = null, int? Maximum = null,
     int? Quantity = null, decimal? Amount = null, string? Currency = null, Guid? Order = null,
     decimal? Balance = null, IReadOnlyList<CutoverPilotOrder>? Orders = null, IReadOnlyList<string>? Items = null,
-    CustomerHome? Home = null, CustomerScreenPage? Page = null, CustomerScreenEntry? Entry = null, string? Description = null);
+    CustomerHome? Home = null, CustomerScreenPage? Page = null, CustomerScreenEntry? Entry = null, string? Description = null, long? Stock = null, string? Icon = null);
 public sealed record CutoverPilotOrder(Guid Id, string Title, int Quantity, string Status);
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(CutoverPilotResult))]
@@ -388,7 +388,7 @@ public static class CutoverStageRuntime
                     return item is null ? denied : new(run, saved.Product,
                         item is { CanPurchase: true, Wallet: true } ? "Available" : "OutOfStock",
                         item.Presentation.Title, item.Minimum, item.Maximum, Amount: item.UnitUsdt, Currency: "USD",
-                        Description: item.Presentation.Description);
+                        Description: item.Presentation.Description, Stock: item.LocalStock, Icon: item.Presentation.Icon);
                 }
                 if (command.StartsWith(quotePrefix, StringComparison.Ordinal) &&
                     int.TryParse(command.AsSpan(quotePrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int quantity) &&

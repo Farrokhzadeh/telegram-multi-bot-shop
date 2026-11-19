@@ -23,6 +23,7 @@ public sealed record SupplierCatalogResult(SupplierCatalogStatus Status, int Qua
 public sealed record CatalogQuery(Guid ProductId, int Quantity, CheckoutPayment Payment, CheckoutKind Kind = CheckoutKind.ProductPurchase);
 public sealed record CatalogItem(Guid ProductId, ProductPresentation Presentation, decimal UnitUsdt, decimal? UnitToman, bool AutoToman, CatalogAvailability Availability, int Minimum, int Maximum, bool Wallet, bool Crypto, bool Bank)
 {
+    public long LocalStock { get; init; }
     public bool CanPurchase => Availability == CatalogAvailability.Available && (Wallet || Crypto || Bank);
 }
 public sealed record CheckoutSupply(int LocalUnits, int RemoteUnits, bool WaitingForLocalStock, string Kind);
@@ -81,7 +82,7 @@ public sealed class CatalogStore
         if (state is null) return null;
         var display = CheckoutQuote.Create(new(state.UnitUsdt, state.UnitToman, state.AutoToman, state.FxEnabled, state.Fx, state.MaximumFxAge), state.Presentation, 1, CheckoutPayment.Wallet, [], state.Now);
         return new(productId, state.Presentation, state.UnitUsdt, display.Terms.UnitToman, state.AutoToman,
-            Supply(state, state.Minimum) is null ? CatalogAvailability.OutOfStock : CatalogAvailability.Available, state.Minimum, state.Maximum, state.Wallet, state.Crypto, state.Bank && state.Market == "iran");
+            Supply(state, state.Minimum) is null ? CatalogAvailability.OutOfStock : CatalogAvailability.Available, state.Minimum, state.Maximum, state.Wallet, state.Crypto, state.Bank && state.Market == "iran") { LocalStock = state.Local };
     }
 
     public async Task<CheckoutQuote> QuoteAsync(BrandContext context, long verifiedActorId, CatalogQuery query, CancellationToken ct = default) =>
