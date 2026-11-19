@@ -63,8 +63,15 @@
         "type": "Project",
         "dependencies": {
           "Platform.Core": "[1.0.0, )",
-          "Platform.Persistence": "[1.0.0, )"
+          "Platform.Persistence": "[1.0.0, )",
+          "Telegram.Bot": "[22.10.4, )"
         }
+      },
+      "Telegram.Bot": {
+        "type": "CentralTransitive",
+        "requested": "[22.10.4, )",
+        "resolved": "22.10.4",
+        "contentHash": "Pup2NGR/gLAS+3o1yTdUsDFAASlcv94U2d1oEmojGXR5dSaweHoSkSsfwdTOepFEnK/8JCBuqiig0T+efwY4kg=="
       }
     },
     "net10.0/linux-x64": {

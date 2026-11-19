@@ -1,10 +1,12 @@
 using System.Globalization;
-using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Npgsql;
 using Platform.Telegram;
+using Telegram.Bot;
+using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Exceptions;
 
 namespace Platform.BotHost;
 
@@ -95,13 +97,12 @@ internal static class StagingPreviewBot
                 connection.Enlist || connection.LogParameters) throw new UnauthorizedAccessException();
             await using var database = new NpgsqlSlimDataSourceBuilder(connection.ConnectionString).Build();
             await CheckDatabaseAsync(database, ct);
-            using var handler = new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false };
-            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(38), MaxResponseContentBufferSize = 1048576 };
-            using (var me = await CallAsync(http, token, "getMe", [], ct))
-                if (me.RootElement.GetProperty("result").GetProperty("id").GetInt64() != expectedBot ||
-                    me.RootElement.GetProperty("result").GetProperty("username").GetString() != TestBot) throw new UnauthorizedAccessException();
-            using (var hook = await CallAsync(http, token, "getWebhookInfo", [], ct))
-                if (hook.RootElement.GetProperty("result").GetProperty("url").GetString() != "") throw new UnauthorizedAccessException();
+            using var http = TelegramTransport.CreateHttpClient(TimeSpan.FromSeconds(38));
+            var client = TelegramTransport.Create(token, http);
+            var me = await client.GetMe(ct);
+            if (me.Id != expectedBot || !me.IsBot || me.Username != TestBot) throw new UnauthorizedAccessException();
+            var hook = await client.GetWebhookInfo(ct);
+            if (hook.Url != "") throw new UnauthorizedAccessException();
             byte[] key = ReadPrivate(Path.Combine(root, "inbox-key"), 32);
             try
             {
@@ -128,18 +129,6 @@ internal static class StagingPreviewBot
         if (await command.ExecuteScalarAsync(ct) is not true) throw new UnauthorizedAccessException();
     }
 
-    private static async Task<JsonDocument> CallAsync(HttpClient http, string token, string method,
-        KeyValuePair<string, string>[] fields, CancellationToken ct)
-    {
-        using var content = new FormUrlEncodedContent(fields);
-        using var response = await http.PostAsync("https://api.telegram.org/bot" + token + "/" + method, content, ct);
-        response.EnsureSuccessStatusCode();
-        var json = JsonDocument.Parse(await response.Content.ReadAsByteArrayAsync(ct), new JsonDocumentOptions { MaxDepth = 24 });
-        if (json.RootElement.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True) return json;
-        json.Dispose();
-        throw new InvalidOperationException();
-    }
-
     private static async Task PollAsync(HttpClient http, string token, long tester, NpgsqlDataSource database, AesGcm inbox, string state, string ready, CancellationToken ct)
     {
         var cursor = Path.Combine(state, "next-offset");
@@ -147,51 +136,48 @@ internal static class StagingPreviewBot
         var sender = new CustomerHistoryTelegramSender(http);
         while (!ct.IsCancellationRequested)
         {
-            JsonDocument batch;
+            JsonElement batch;
             try
             {
-                batch = await CallAsync(http, token, "getUpdates", [new("offset", next.ToString(CultureInfo.InvariantCulture)),
-                    new("limit", "12"), new("timeout", "25"), new("allowed_updates", "[\"message\",\"callback_query\"]")], ct);
+                batch = await TelegramTransport.GetUpdatesAsync(token, http, checked((int)next), 12, 25,
+                    [UpdateType.Message, UpdateType.CallbackQuery], ct);
             }
-            catch (HttpRequestException error) when (error.StatusCode is null or HttpStatusCode.TooManyRequests || (int)error.StatusCode.GetValueOrDefault() >= 500)
+            catch (RequestException error) when (TelegramTransport.StatusCode(error) is null or 429 or >= 500)
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
                 continue;
             }
-            using (batch)
+            if (!File.Exists(ready))
             {
-                if (!File.Exists(ready))
+                WritePrivate(ready, "isolated-staging-preview"u8);
+                Console.WriteLine("Akanti staging Telegram preview ready.");
+            }
+            foreach (var record in batch.EnumerateArray())
+            {
+                long id = record.GetProperty("update_id").GetInt64();
+                if (id <= 0 || id >= long.MaxValue) throw new InvalidOperationException();
+                if (id < next) continue;
+                var captured = Path.Combine(state, id.ToString(CultureInfo.InvariantCulture) + ".capture");
+                if (!File.Exists(captured))
                 {
-                    WritePrivate(ready, "isolated-staging-preview"u8);
-                    Console.WriteLine("Akanti staging Telegram preview ready.");
-                }
-                foreach (var record in batch.RootElement.GetProperty("result").EnumerateArray())
-                {
-                    long id = record.GetProperty("update_id").GetInt64();
-                    if (id <= 0 || id >= long.MaxValue) throw new InvalidOperationException();
-                    if (id < next) continue;
-                    var captured = Path.Combine(state, id.ToString(CultureInfo.InvariantCulture) + ".capture");
-                    if (!File.Exists(captured))
+                    if (Directory.EnumerateFiles(state, "*.capture").Take(2048).Count() >= 2048) throw new InvalidOperationException();
+                    byte[] body = Encoding.UTF8.GetBytes(record.GetRawText());
+                    try
                     {
-                        if (Directory.EnumerateFiles(state, "*.capture").Take(2048).Count() >= 2048) throw new InvalidOperationException();
-                        byte[] body = Encoding.UTF8.GetBytes(record.GetRawText());
-                        try
-                        {
-                            byte[] encoded = new byte[28 + body.Length];
-                            RandomNumberGenerator.Fill(encoded.AsSpan(0, 12));
-                            inbox.Encrypt(encoded.AsSpan(0, 12), body, encoded.AsSpan(28), encoded.AsSpan(12, 16));
-                            WritePrivate(captured, encoded);
-                        }
-                        finally { CryptographicOperations.ZeroMemory(body); }
+                        byte[] encoded = new byte[28 + body.Length];
+                        RandomNumberGenerator.Fill(encoded.AsSpan(0, 12));
+                        inbox.Encrypt(encoded.AsSpan(0, 12), body, encoded.AsSpan(28), encoded.AsSpan(12, 16));
+                        WritePrivate(captured, encoded);
                     }
-                    next = id + 1;
-                    WritePrivate(cursor, Encoding.ASCII.GetBytes(next.ToString(CultureInfo.InvariantCulture)), replace: true);
-                    if (!StagingPreviewCommand.Accepts(record, tester)) continue;
-                    await CheckDatabaseAsync(database, ct);
-                    var message = new CustomerHistoryMessage("Akanti (آکانتی) staging is online. This private preview uses the isolated staging database. Checkout and delivery are pending.");
-                    var outcome = await sender.SendAsync(token, tester, message, ct);
-                    Console.WriteLine(outcome.State == CustomerHistorySendState.Confirmed ? "Private staging reply confirmed." : "Private staging reply requires review.");
+                    finally { CryptographicOperations.ZeroMemory(body); }
                 }
+                next = id + 1;
+                WritePrivate(cursor, Encoding.ASCII.GetBytes(next.ToString(CultureInfo.InvariantCulture)), replace: true);
+                if (!StagingPreviewCommand.Accepts(record, tester)) continue;
+                await CheckDatabaseAsync(database, ct);
+                var message = new CustomerHistoryMessage("Akanti (آکانتی) staging is online. This private preview uses the isolated staging database. Checkout and delivery are pending.");
+                var outcome = await sender.SendAsync(token, tester, message, ct);
+                Console.WriteLine(outcome.State == CustomerHistorySendState.Confirmed ? "Private staging reply confirmed." : "Private staging reply requires review.");
             }
         }
     }

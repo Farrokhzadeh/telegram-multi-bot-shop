@@ -1,43 +1,11 @@
 from pathlib import Path
-from urllib import error, request as http
 import json
 import os
 import sys
 import time
 from wallet_pilot import WalletPilot, request
 
-
-class NoRedirect(http.HTTPRedirectHandler):
-	def redirect_request(self, req, fp, code, msg, headers, newurl):
-		return None
-
-
-def transport(token):
-	opener = http.build_opener(http.ProxyHandler({}), NoRedirect())
-	base = "https://api.telegram.org/bot" + token + "/"
-
-	def call(method, **params):
-		request_body = json.dumps(params, separators=(",", ":")).encode()
-		req = http.Request(base + method, request_body, {"Content-Type": "application/json"}, method="POST")
-		try:
-			with opener.open(req, timeout=15) as response:
-				raw = response.read(65537)
-		except error.HTTPError as exc:
-			if method == "editMessageText" and exc.code == 400:
-				data = json.loads(exc.read(4096))
-				if data.get("description", "").startswith("Bad Request: message is not modified"):
-					return True
-			raise OSError("staging Telegram request rejected") from None
-		except (error.URLError, TimeoutError):
-			raise OSError("staging Telegram request incomplete") from None
-		if len(raw) > 65536:
-			raise ValueError("staging Telegram response too large")
-		data = json.loads(raw)
-		if data.get("ok") is not True:
-			raise OSError("staging Telegram unsuccessful response")
-		return data["result"]
-
-	return call
+from telegram_transport import TelegramTransport
 
 
 def main():
@@ -46,7 +14,7 @@ def main():
 	token, actor = binding["token"], binding["actor"]
 	if not isinstance(token, str) or not 20 < len(token) <= 100 or type(actor) is not int or actor <= 0:
 		raise ValueError("staging binding rejected")
-	call = transport(token)
+	call = TelegramTransport(token)
 	bot = call("getMe")
 	if bot.get("is_bot") is not True or bot.get("username", "").casefold() != "testadbadbot" or call("getWebhookInfo")["url"]:
 		raise ValueError("dedicated staging polling bot required")

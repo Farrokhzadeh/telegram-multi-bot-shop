@@ -16,10 +16,7 @@
         "type": "Direct",
         "requested": "[10.0.3, )",
         "resolved": "10.0.3",
-        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w==",
-        "dependencies": {
-          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
-        }
+        "contentHash": "7nb5YzXuvWWJxB0J8DiyL3we+X4FOctZrt0fIBnucOIaIevFEEwGQVZKtiu9olXdlNAK1eNgqSral6r/jlhI4w=="
       },
       "xunit.runner.visualstudio": {
         "type": "Direct",
@@ -50,19 +47,6 @@
         "type": "Transitive",
         "resolved": "18.11.0",
         "contentHash": "MhN9wpvL1Es4hfIYslrsVgIsUdDFxuOBTbAl9mGIMvFo8PP5CLf4DrGdNrfwWSyn0lqi6sssm+I/qkkLL3MU+g=="
-      },
-      "Microsoft.Extensions.DependencyInjection.Abstractions": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA=="
-      },
-      "Microsoft.Extensions.Logging.Abstractions": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "FU/IfjDfwaMuKr414SSQNTIti/69bHEMb+QKrskRb26oVqpx3lNFXMjs/RC9ZUuhBhcwDM2BwOgoMw+PZ+beqQ==",
-        "dependencies": {
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
-        }
       },
       "Microsoft.Testing.Extensions.Telemetry": {
         "type": "Transitive",
@@ -200,7 +184,8 @@
         "type": "Project",
         "dependencies": {
           "Platform.Core": "[1.0.0, )",
-          "Platform.Persistence": "[1.0.0, )"
+          "Platform.Persistence": "[1.0.0, )",
+          "Telegram.Bot": "[22.10.4, )"
         }
       },
       "platform.fulfillment": {
@@ -232,6 +217,12 @@
           "Platform.Persistence": "[1.0.0, )",
           "Platform.Security": "[1.0.0, )"
         }
+      },
+      "Telegram.Bot": {
+        "type": "CentralTransitive",
+        "requested": "[22.10.4, )",
+        "resolved": "22.10.4",
+        "contentHash": "Pup2NGR/gLAS+3o1yTdUsDFAASlcv94U2d1oEmojGXR5dSaweHoSkSsfwdTOepFEnK/8JCBuqiig0T+efwY4kg=="
       }
     },
     "net10.0/linux-x64": {

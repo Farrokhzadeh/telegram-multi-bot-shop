@@ -6,7 +6,7 @@ import sys
 import time
 
 from wallet_pilot import WalletShop, request
-from wallet_pilot_telegram import transport
+from telegram_transport import TelegramTransport
 
 
 def run(config, state, target):
@@ -15,7 +15,7 @@ def run(config, state, target):
     tester = int((config / "tester-id").read_text())
     if not token.startswith(f"{bot_id}:") or tester <= 0:
         raise ValueError("Invalid staging bot binding")
-    call = transport(token)
+    call = TelegramTransport(token)
     bot = call("getMe")
     if (bot["id"] != bot_id or bot["username"] != "testadbadbot" or
             bot["is_bot"] is not True or call("getWebhookInfo")["url"]):

@@ -70,6 +70,9 @@ Serving real Telegram users requires a qualified Telegram receiver and job runti
 
 ## Development and reference
 
+Akanti uses `Telegram.Bot` for Telegram API requests. For the Python staging scripts, set `AKANTI_TELEGRAM_BOT_HOST` to the absolute path of the executable `Platform.BotHost` from the same build. The scripts pass Telegram requests to that executable over local pipes.
+
+
 - Use the SDK pinned in [global.json](global.json). The [qualification workflow](.github/workflows/backend-ci.yml) specifies locked restore, formatting checks, disposable PostgreSQL tests, and Native AOT builds.
 - Start with the [functional spec](specs/001-multibrand-redesign/spec.md), [architecture plan](specs/001-multibrand-redesign/plan.md), [schema contract](specs/001-multibrand-redesign/schema-contract.md), and [implementation tasks](specs/001-multibrand-redesign/tasks.md).
 - Read the [operator handoff](specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md) for qualification history and the [supplier matrix](specs/001-multibrand-redesign/contracts/supplier-provider-matrix.md) for approved provider scope.

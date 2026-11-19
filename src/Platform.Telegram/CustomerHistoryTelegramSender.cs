@@ -1,6 +1,7 @@
 using System.Globalization;
-using System.Net;
 using System.Text.Json;
+using Telegram.Bot;
+using Telegram.Bot.Exceptions;
 
 namespace Platform.Telegram;
 
@@ -29,33 +30,22 @@ public sealed class CustomerHistoryTelegramSender(HttpClient http)
             privateChat <= 0 || message is null || message.ParseMode is not null || message.HasActionButtons ||
             string.IsNullOrWhiteSpace(message.Text) || message.Text.Length > 3500)
             throw new ArgumentException("Historical Telegram send scope rejected.");
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri("https://api.telegram.org/bot" + token + "/sendMessage"));
-        request.Content = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["chat_id"] = privateChat.ToString(CultureInfo.InvariantCulture),
-            ["text"] = message.Text,
-            ["disable_notification"] = "true",
-            ["protect_content"] = "true"
-        });
         try
         {
-            using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500)
-                return new(CustomerHistorySendState.Unknown);
-            await using var body = await response.Content.ReadAsStreamAsync(ct);
-            using var json = await JsonDocument.ParseAsync(body, new JsonDocumentOptions { MaxDepth = 12 }, ct);
-            var root = json.RootElement;
-            if (response.IsSuccessStatusCode &&
-                root.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True &&
-                root.TryGetProperty("result", out var result) &&
-                result.TryGetProperty("message_id", out var messageId) && messageId.TryGetInt64(out long id) && id > 0 &&
+            var result = await TelegramTransport.ReadRawResultAsync(token, http,
+                (client, cancel) => client.SendMessage(privateChat, message.Text, disableNotification: true,
+                    protectContent: true, cancellationToken: cancel), ct);
+            if (result.TryGetProperty("message_id", out var messageId) && messageId.TryGetInt64(out long id) && id > 0 &&
                 result.TryGetProperty("chat", out var chat) &&
                 chat.TryGetProperty("id", out var recipient) && recipient.TryGetInt64(out long recipientId) && recipientId == privateChat &&
                 chat.TryGetProperty("type", out var type) && type.GetString() == "private")
                 return new(CustomerHistorySendState.Confirmed, id);
-            return new(response.IsSuccessStatusCode ? CustomerHistorySendState.Unknown : CustomerHistorySendState.Rejected);
+            return new(CustomerHistorySendState.Unknown);
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or IOException or JsonException or InvalidOperationException)
+        catch (RequestException exception) when (exception.InnerException is not (JsonException or ApiRequestException) &&
+            TelegramTransport.StatusCode(exception) is >= 400 and < 500 and not 429)
+        { return new(CustomerHistorySendState.Rejected); }
+        catch (Exception exception) when (exception is RequestException or OperationCanceledException or IOException or JsonException or InvalidOperationException)
         { return new(CustomerHistorySendState.Unknown); }
     }
 }

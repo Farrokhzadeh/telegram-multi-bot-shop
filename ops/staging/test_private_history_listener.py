@@ -1,5 +1,6 @@
 import importlib.util,pathlib,tempfile,time,unittest
 from unittest.mock import patch
+from telegram_transport import TelegramError
 spec=importlib.util.spec_from_file_location('listener',pathlib.Path(__file__).with_name('private_history_listener.py'));listener=importlib.util.module_from_spec(spec);spec.loader.exec_module(listener)
 class ListenerTests(unittest.TestCase):
 	def update(self):return {'update_id':2,'message':{'message_id':3,'date':int(time.time()),'from':{'id':101,'is_bot':False},'chat':{'id':101,'type':'private'},'text':'/orders'}}
@@ -34,7 +35,7 @@ class ListenerTests(unittest.TestCase):
 			with self.assertRaises(TimeoutError):listener.poll('synthetic',{})
 			self.assertEqual(api.call_count,3)
 	def test_poll_does_not_retry_http_rejection(self):
-		with patch.object(listener,'api',side_effect=listener.urllib.error.HTTPError('synthetic',409,'conflict',None,None)) as api:
-			with self.assertRaises(listener.urllib.error.HTTPError):listener.poll('synthetic',{})
+		with patch.object(listener,'api',side_effect=TelegramError(409)) as api:
+			with self.assertRaises(TelegramError):listener.poll('synthetic',{})
 			self.assertEqual(api.call_count,1)
 if __name__=='__main__':unittest.main()

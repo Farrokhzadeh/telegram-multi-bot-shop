@@ -1,7 +1,8 @@
 using System.Globalization;
-using System.Text.Json;
 using Platform.Security;
 using Platform.Telegram;
+using Telegram.Bot;
+using Telegram.Bot.Types.Enums;
 
 namespace Platform.BotHost;
 
@@ -16,13 +17,6 @@ internal static class StagingHistoryTelegramQualification
         var content = File.ReadAllText(path).Trim();
         if (content.Length is < 1 or > 256 || content.Length > max || content.Any(char.IsControl)) throw new UnauthorizedAccessException();
         return content;
-    }
-    private static async Task<JsonDocument> GetAsync(HttpClient http, string url, CancellationToken ct)
-    {
-        using var reply = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-        if (!reply.IsSuccessStatusCode) throw new UnauthorizedAccessException();
-        await using var body = await reply.Content.ReadAsStreamAsync(ct);
-        return await JsonDocument.ParseAsync(body, new JsonDocumentOptions { MaxDepth = 16 }, ct);
     }
     internal static async Task<int> RunAsync(string tokenPath, string recipientPath, string attemptPath, CancellationToken ct = default)
     {
@@ -40,22 +34,13 @@ internal static class StagingHistoryTelegramQualification
             if (!dir.Exists || dir.LinkTarget is not null || !dir.Name.StartsWith("staging-telegram-history-", StringComparison.Ordinal) ||
                 (File.GetUnixFileMode(parent) & (UnixFileMode)63) != 0 || File.Exists(attemptPath))
                 throw new UnauthorizedAccessException();
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
-            string api = "https://api.telegram.org/bot" + token + "/";
-            using (var identity = await GetAsync(http, api + "getMe", ct))
-            {
-                var bot = identity.RootElement.GetProperty("result");
-                if (!identity.RootElement.GetProperty("ok").GetBoolean() || !bot.GetProperty("is_bot").GetBoolean() ||
-                    !string.Equals(bot.GetProperty("username").GetString(), "testadbadbot", StringComparison.OrdinalIgnoreCase))
-                    throw new UnauthorizedAccessException();
-            }
-            using (var identity = await GetAsync(http, api + "getChat?chat_id=" + recipient, ct))
-            {
-                var chat = identity.RootElement.GetProperty("result");
-                if (!identity.RootElement.GetProperty("ok").GetBoolean() || chat.GetProperty("type").GetString() != "private" ||
-                    chat.GetProperty("id").GetInt64() != chatId)
-                    throw new UnauthorizedAccessException();
-            }
+            using var http = TelegramTransport.CreateHttpClient(TimeSpan.FromSeconds(12));
+            var client = TelegramTransport.Create(token, http);
+            var bot = await client.GetMe(ct);
+            if (!bot.IsBot || !string.Equals(bot.Username, "testadbadbot", StringComparison.OrdinalIgnoreCase))
+                throw new UnauthorizedAccessException();
+            var chat = await client.GetChat(chatId, ct);
+            if (chat.Id != chatId || chat.Type != ChatType.Private) throw new UnauthorizedAccessException();
             var order = new CustomerHistoricalOrder("STAGE-SYNTHETIC-002", new DateTime(2024, 2, 1, 12, 0, 0, DateTimeKind.Utc), 2, 600000m, "IRR", null, null, true);
             var draft = CustomerHistoryMessageRenderer.Render(new CustomerHistoricalPage([order], null));
             if (draft.Count != 1 || draft[0].ParseMode is not null || draft[0].HasActionButtons) throw new UnauthorizedAccessException();

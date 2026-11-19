@@ -1,4 +1,5 @@
-import argparse,fcntl,json,os,pathlib,re,signal,subprocess,time,urllib.error,urllib.request
+import argparse,fcntl,json,os,pathlib,re,signal,subprocess,time
+from telegram_transport import TelegramTransport
 STAGE='accabad-staging-bot-1'
 def run(args,timeout=30):
 	return subprocess.run(args,capture_output=True,text=True,check=True,timeout=timeout).stdout
@@ -11,19 +12,13 @@ def write_new(path,data):
 def approved(update,actor,since):
 	m=update.get('message',{});a=m.get('from',{});c=m.get('chat',{})
 	return type(update.get('update_id')) is int and update['update_id']>0 and type(m.get('message_id')) is int and m['message_id']>0 and a.get('id')==actor and a.get('is_bot') is False and c.get('id')==actor and c.get('type')=='private' and m.get('text')=='/orders' and type(m.get('date')) is int and since<=m['date']<=int(time.time())+30
-def api(token,method,values=None):
-	request=urllib.request.Request('https://api.telegram.org/bot'+token+'/'+method,data=json.dumps(values or {}).encode(),headers={'Content-Type':'application/json'})
-	with urllib.request.urlopen(request,timeout=25) as response:
-		body=response.read(1048577)
-	if len(body)>1048576:raise ValueError('Telegram response too large')
-	data=json.loads(body)
-	if data.get('ok') is not True:raise ValueError('Telegram request rejected')
-	return data['result']
-def poll(token,values):
+def api(client,method,values=None):
+	return client(method,**(values or {}))
+def poll(client,values):
 	for attempt in range(3):
-		try:return api(token,'getUpdates',values)
-		except (TimeoutError,urllib.error.URLError) as error:
-			if isinstance(error,urllib.error.HTTPError) or attempt==2:raise
+		try:return api(client,'getUpdates',values)
+		except TimeoutError:
+			if attempt==2:raise
 			print('WAIT: receive timeout; retrying command reception only.',flush=True);time.sleep(1)
 def runtime(args,deliver=False):
 	root='/app/data/teleg-staging-history-'+args.brand+'-20261111'
@@ -42,7 +37,8 @@ def main():
 	if env.get('INSTANCE_ID')!='staging' or stage['Config']['Labels'].get('com.docker.compose.project')!='accabad-staging' or not stage['State']['Running']:raise ValueError('Staging container rejected')
 	token=env.get('BOT_TOKEN','')
 	if not re.fullmatch(str(binding['botId'])+r':[A-Za-z0-9_-]{20,120}',token):raise ValueError('Token binding rejected')
-	identity=api(token,'getMe');webhook=api(token,'getWebhookInfo')
+	client=TelegramTransport(token)
+	identity=api(client,'getMe');webhook=api(client,'getWebhookInfo')
 	if identity.get('id')!=binding['botId'] or identity.get('username')!='testadbadbot' or webhook.get('url'):raise ValueError('Exclusive polling unavailable')
 	output=runtime(args)
 	if not output.startswith('PASS: isolated staging private history preflight;'):raise ValueError('Runtime preflight failed')
@@ -60,7 +56,7 @@ def main():
 		while time.monotonic()<deadline:
 			values={'timeout':15,'limit':100,'allowed_updates':['message']}
 			if offset is not None:values['offset']=offset
-			updates=poll(token,values)
+			updates=poll(client,values)
 			if not isinstance(updates,list):raise ValueError('Polling response rejected')
 			for update in updates:
 				uid=update.get('update_id')
@@ -71,7 +67,7 @@ def main():
 				output=runtime(args,True)
 				if not output.startswith('PASS: isolated authenticated private historical response confirmed;'):raise ValueError('Runtime result uncertain')
 				receipt['telegram_response_confirmed']=True
-				api(token,'getUpdates',{'offset':uid+1,'timeout':0,'limit':1,'allowed_updates':['message']})
+				api(client,'getUpdates',{'offset':uid+1,'timeout':0,'limit':1,'allowed_updates':['message']})
 				print('PASS: one real private history response confirmed; no automatic resend.',flush=True)
 				return 0
 		print('STOP: listener expired without an approved command.',flush=True);return 2

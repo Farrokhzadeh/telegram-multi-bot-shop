@@ -3,6 +3,8 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Platform.Security;
 using System.Text;
+using System.Text.Json;
+using Telegram.Bot.Types.Enums;
 using Platform.Telegram;
 
 namespace Platform.ContractTests;
@@ -48,7 +50,8 @@ public sealed class CustomerHistoryTelegramSenderTests
         var result = await sender.SendAsync(StageOnlySyntheticToken, verified, new("Historical orders (read-only)"), TestContext.Current.CancellationToken);
         Assert.Equal(CustomerHistorySendState.Confirmed, result.State);
         Assert.Equal(1, stub.Calls);
-        Assert.Contains("chat_id=7001", stub.Posted!, StringComparison.Ordinal);
+        using var request = JsonDocument.Parse(stub.Posted!);
+        Assert.Equal(7001L, request.RootElement.GetProperty("chat_id").GetInt64());
     }
     [Fact]
     public async Task SendsOneScopedPlaintextMessageAndRequiresExactPrivateChatAcknowledgement()
@@ -61,12 +64,14 @@ public sealed class CustomerHistoryTelegramSenderTests
         Assert.Equal(99L, result.MessageId);
         Assert.Equal(1, fake.Calls);
         Assert.EndsWith("/sendMessage", fake.Target!.AbsolutePath, StringComparison.Ordinal);
-        Assert.Contains("chat_id=7001", fake.Posted!, StringComparison.Ordinal);
-        Assert.Contains("600000+IRR", fake.Posted!, StringComparison.Ordinal);
-        Assert.Contains("disable_notification=true", fake.Posted!, StringComparison.Ordinal);
-        Assert.Contains("protect_content=true", fake.Posted!, StringComparison.Ordinal);
-        Assert.DoesNotContain("parse_mode", fake.Posted!, StringComparison.Ordinal);
-        Assert.DoesNotContain("reply_markup", fake.Posted!, StringComparison.Ordinal);
+        using var request = JsonDocument.Parse(fake.Posted!);
+        var posted = request.RootElement;
+        Assert.Equal(7001L, posted.GetProperty("chat_id").GetInt64());
+        Assert.Contains("600000 IRR", posted.GetProperty("text").GetString()!, StringComparison.Ordinal);
+        Assert.True(posted.GetProperty("disable_notification").GetBoolean());
+        Assert.True(posted.GetProperty("protect_content").GetBoolean());
+        Assert.False(posted.TryGetProperty("parse_mode", out _));
+        Assert.False(posted.TryGetProperty("reply_markup", out _));
         Assert.Equal("CustomerHistorySendOutcome [redacted]", result.ToString());
     }
     [Theory]
@@ -84,7 +89,7 @@ public sealed class CustomerHistoryTelegramSenderTests
         Assert.Equal(1, fake.Calls);
     }
     [Theory]
-    [InlineData(429, "")]
+    [InlineData(429, """{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":1}}""")]
     [InlineData(502, "")]
     [InlineData(400, """{"ok":false}""")]
     public async Task RemoteRejectionNeverAutoretries(int status, string body)
@@ -104,6 +109,20 @@ public sealed class CustomerHistoryTelegramSenderTests
         Assert.Equal(CustomerHistorySendState.Unknown, result.State);
         Assert.Equal(1, fake.Calls);
     }
+    [Fact]
+    public async Task PollingRetainsUnmodeledPropertiesAndUsesTheExplicitOffset()
+    {
+        var fake = new Stub("""{"ok":true,"result":[{"update_id":35,"future_field":{"value":"original"}}]}""");
+        using var http = new HttpClient(fake);
+        var result = await TelegramTransport.GetUpdatesAsync(StageOnlySyntheticToken, http, 34, 12, 25,
+            [UpdateType.Message, UpdateType.CallbackQuery], TestContext.Current.CancellationToken);
+        Assert.Equal("original", result[0].GetProperty("future_field").GetProperty("value").GetString());
+        Assert.Equal(1, fake.Calls);
+        using var request = JsonDocument.Parse(fake.Posted!);
+        Assert.Equal(34, request.RootElement.GetProperty("offset").GetInt32());
+        Assert.Equal(25, request.RootElement.GetProperty("timeout").GetInt32());
+    }
+
     [Fact]
     public async Task InvalidRecipientTokenOrActionBearingMessageFailsBeforeNetwork()
     {

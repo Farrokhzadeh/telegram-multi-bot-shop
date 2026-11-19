@@ -3,6 +3,7 @@
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Telegram.Bot" />
     <ProjectReference Include="../Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../Platform.Persistence/Platform.Persistence.csproj" />
   </ItemGroup>

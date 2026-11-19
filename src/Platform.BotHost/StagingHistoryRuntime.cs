@@ -120,7 +120,7 @@ internal static class StagingHistoryRuntime
                 expected.ToString(CultureInfo.InvariantCulture) + "; no Telegram sends.");
             return 0;
         }
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+        using var http = TelegramTransport.CreateHttpClient(TimeSpan.FromSeconds(12));
         var pipeline = new CustomerHistoryDeliveryPipeline(router, new CustomerHistoryTelegramSender(http));
         var runtime = new CustomerHistoryPrivateRuntime(verifier, pipeline, token!, actor,
             Path.Combine(root, "teleg-history-attempts"));

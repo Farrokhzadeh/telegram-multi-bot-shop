@@ -1,5 +1,6 @@
 using Platform.Core;
 using Platform.BotHost;
+using Platform.Telegram;
 
 if (args is ["--staging-history-init", "--root", var stageRoot, "--actor", var stageActor, "--bot", var stageBot])
 {
@@ -23,6 +24,11 @@ if (args is ["--staging-history-once", "--root", var runtimeRoot])
     try { return await StagingHistoryRuntime.RunAsync(runtimeRoot); }
     catch (Exception) { Console.Error.WriteLine("Isolated private history request rejected or outcome uncertain; no automatic retry."); return 78; }
 }
+if (args is ["--staging-telegram-stdio"])
+{
+    using var http = TelegramTransport.CreateHttpClient(TimeSpan.FromSeconds(25));
+    return await StagingTelegramPipe.RunAsync(Console.In, Console.Out, http);
+}
 if (args is ["--serve-staging-preview", "--root", var stagingRoot]) return await StagingPreviewBot.RunAsync(stagingRoot);
-if (args is ["--qualify-ingress"]) return IngressQualification.Run();
+if (args is ["--qualify-ingress"]) return await IngressQualification.RunAsync();
 return HostBootstrap.Run(args, "BotHost");
