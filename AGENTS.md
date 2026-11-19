@@ -13,7 +13,7 @@
 
 ## Execution
 
-- Work directly on main; never create branches. Batch related validated changes by task. Use `[skip ci]` on commits, never start CI until the owner explicitly lifts the restriction, and verify no workflow starts.
+- Work directly on main; never create branches. Batch related validated changes by task. The owner authorizes build and test CI whenever the work requires it. Use `[skip ci]` for changes that do not need a new run. Deployment and cutover retain their separate authorization.
 - Work without subagents unless the owner explicitly requests delegation.
 - Map existing implementation and evidence to the task's remaining gates before coding. Reuse functions, dependencies, qualified builds, pinned test images and isolated restores only when inputs, scope and freshness match.
 - Before expensive work, check access, tool availability, disk/memory, backup readability, required keys, isolated database connectivity and workspace hazards. Validate representative synthetic cases with the intended image, UID, mounts, authentication, resource limits and empty-data/directory cases before protected execution.
