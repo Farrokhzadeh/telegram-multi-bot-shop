@@ -12,8 +12,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_staging && 'akanti-staging' || format('backend-{0}', github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  group: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_staging)) && 'akanti-staging' || format('backend-{0}', github.ref) }}
+  cancel-in-progress: false
 jobs:
   qualify:
     runs-on: ubuntu-24.04
@@ -177,7 +177,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   deploy-staging:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.deploy_staging
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_staging))
     needs: [qualify, build-staging-api]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -190,6 +190,10 @@ jobs:
         with:
           name: staging-api-linux-x64-${{ github.sha }}
           path: artifacts/staging-delivery
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: offline-qualification-${{ github.sha }}
+          path: artifacts/qualified-delivery
       - name: Publish tested image to Docker Hub
         id: publish
         env:
@@ -208,6 +212,10 @@ jobs:
           test "$(cat "$bundle/SOURCE_COMMIT")" = "$GITHUB_SHA"
           (cd "$bundle" && sha256sum --check SHA256SUMS)
           git show HEAD:ops/migrations/0001_core.sql | cmp - "$bundle/0001_core.sql"
+          install -m 0555 artifacts/qualified-delivery/artifacts/native/AotSmoke/Platform.AotSmoke "$bundle/Platform.AotSmoke"
+          install -d "$bundle/shop"
+          install -m 0444 ops/staging/{accabad_presentation,telegram_transport,wallet_pilot,wallet_shop_telegram}.py "$bundle/shop/"
+          install -m 0555 ops/staging/deploy-shop-runtime.sh "$bundle/deploy-shop-runtime.sh"
           repository="docker.io/$DOCKERHUB_NAMESPACE/akanti"
           tag="$repository:git-$GITHUB_SHA"
           docker build --platform linux/amd64 --file ops/staging/Dockerfile \

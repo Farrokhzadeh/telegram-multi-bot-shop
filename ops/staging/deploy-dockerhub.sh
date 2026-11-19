@@ -56,6 +56,11 @@ if (( ! ready )); then
     exit 1
 fi
 
+if [[ -f $work/shop-root ]]; then
+    docker exec "$candidate" cat /app/deploy-shop-runtime.sh > "$work/deploy-shop-runtime.sh"
+    bash "$work/deploy-shop-runtime.sh" "$image" "$commit" "$candidate"
+fi
+
 created=0
 previous=$(docker ps -a --filter "label=$label" --format '{{.Names}}')
 for name in $previous; do

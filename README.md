@@ -46,11 +46,11 @@ Akanti's staging workflow follows the legacy release sequence. GitHub tests the 
 
 ### Each deploy or update
 
-1. Open [Offline backend qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml). Select **Run workflow** on `main` and enable **Publish to Docker Hub and deploy to staging**.
+1. Push to `main`. After the tests and build pass, [Offline backend qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml) deploys to staging automatically. For a manual redeploy of `main`, select **Run workflow** and enable **Publish to Docker Hub and deploy to staging**.
 2. Wait for **deploy-staging** to report the commit and image digest. The job runs the new container's local health probe. A failed replacement leaves the previous healthy container available.
-3. Record the digest and commit from each successful run. To roll back, invoke [the same deploy helper](ops/staging/deploy-dockerhub.sh) on the server with the previous `docker.io/<namespace>/akanti@sha256:<digest>` and its full commit SHA. The older image must still be available in Docker Hub.
+3. Record the digest and commit from each successful run. To roll back, invoke [the same deploy helper](ops/staging/deploy-dockerhub.sh) on the server with the previous `docker.io/<namespace>/akanti@sha256:<digest>` and its full commit SHA. The older image must still be available in Docker Hub and contain the Telegram runtime if the shop is registered.
 
-This workflow updates the isolated qualification API. The Telegram staging checkout runs separately with a synthetic catalog and wallet.
+The workflow updates the isolated qualification API and any existing Telegram shop registered on the staging server. That shop keeps its own staging database, Telegram credentials and wallet data. The shop deployment reads the protected staging root, active runtime and baseline schema from `shop-root`, `shop-active` and `shop-schema` in `/var/lib/akanti-staging`.
 
 ## AccAbad replacement acceptance
 
