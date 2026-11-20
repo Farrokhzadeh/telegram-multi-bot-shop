@@ -118,3 +118,16 @@ The guarded staging database's writes are capped; service receipt mounts are rea
 ## Managed .NET comparison baseline
 
 Use Native AOT source revision `020e5996006c8867b1d64e24a31f174ce344c4c4` from [qualification run 44706879853](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44706879853). The managed CI comparison rebuilds the baseline and verifies the schema matches. It runs the same isolated bot-a catalog canary, restart and replay for both modes with the same PostgreSQL fixture, CPU and memory limits, and docs disabled. The build artifact records the bot container’s idle and peak bytes and percentage changes in `runtime-memory.json`. This is a single-role synthetic comparison. No new measurements are claimed here before the paired run succeeds.
+
+## EF Core admin catalog comparison — 2026-11-20
+
+Compared the managed baseline at `831b719` with the EF Core catalog implementation under .NET SDK 10.0.403 and disposable PostgreSQL 18.6. Each cohort used three fresh integration-test processes with four logical processors configured, identical two-product fixtures, and 48 authenticated requests through `GET /v1/admin/products` covering first, final, and empty pages.
+
+Idle RSS was sampled immediately before the first catalog request. Peak RSS was read after the request sequence. Medians include the integration host and test harness. PostgreSQL ran in a separate process.
+
+| Process RSS | Before EF Core | With EF Core | Change |
+|---|---:|---:|---:|
+| Idle | 105.2 MiB | 105.4 MiB | +0.2% |
+| Peak | 105.8 MiB | 134.6 MiB | +27.2% |
+
+All six runs passed. The observed peak includes EF Core initialization and query execution within the synthetic workload.

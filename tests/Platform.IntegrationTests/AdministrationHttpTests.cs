@@ -25,6 +25,12 @@ public sealed class AdministrationHttpTests
         using var bank = new BankDestinationService(f.Sessions, f.Secrets, new byte[32]);
         var payments = new PaymentSettlementFixture(f);
         await f.AdminAsync(Ct);
+        var lastProduct = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
+        await using (var seed = await f.Sessions.BeginAsync(Ct))
+        {
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title,local_first,active,revision) VALUES ($1,'manual','immediate','Public inactive item',false,false,7)", DbValue.Uuid(lastProduct)), Ct);
+            await seed.CommitAsync(Ct);
+        }
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         await using var app = builder.Build();
@@ -61,6 +67,15 @@ public sealed class AdministrationHttpTests
             Assert.NotEqual(page.Items[0].Id, next.Items[0].Id);
             using (var invalid = await client.GetAsync("/v1/admin/inventory", Ct)) await Error(invalid, HttpStatusCode.BadRequest, "validation_failed");
             using (var invalid = await client.GetAsync("/v1/admin/products?limit=0", Ct)) await Error(invalid, HttpStatusCode.BadRequest, "validation_failed");
+            var productPage = await Products("?limit=1");
+            Assert.Equal(new AdminProduct(f.Product, "public shared item", "local", "immediate", true, true, 0), Assert.Single(productPage.Items));
+            Assert.Equal(f.Product, productPage.Next);
+            var finalPage = await Products("?limit=1&after=" + productPage.Next);
+            Assert.Equal(new AdminProduct(lastProduct, "Public inactive item", "manual", "immediate", false, false, 7), Assert.Single(finalPage.Items));
+            Assert.Null(finalPage.Next);
+            var emptyPage = await Products("?limit=1&after=" + lastProduct);
+            Assert.Empty(emptyPage.Items);
+            Assert.Null(emptyPage.Next);
             using (var duplicate = await Post(body[..^1] + ",\"BrandId\":\"" + f.Brands[0].ToString("D") + "\"}")) await Error(duplicate, HttpStatusCode.BadRequest, "validation_failed");
             string wrong = JsonSerializer.Serialize(command with { BrandId = f.Brands[1], Value = command.Value with { CommandId = Guid.NewGuid() } }, OrderApiJsonContext.Default.WalletCommand);
             using (var foreign = await Post(wrong)) await Error(foreign, HttpStatusCode.NotFound, "not_found");
@@ -68,10 +83,13 @@ public sealed class AdministrationHttpTests
             Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallets WHERE balance=0", Ct));
             await using (var revoke = await f.Sessions.BeginAsync(Ct))
             { await revoke.ExecuteAsync(new DbStatement("UPDATE shop.admin_sessions SET revoked_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(issued.Id)), Ct); await revoke.CommitAsync(Ct); }
+            using (var deniedProducts = await client.GetAsync("/v1/admin/products", Ct)) await Error(deniedProducts, HttpStatusCode.Unauthorized, "unauthenticated");
             using var denied = await Post(body);
             await Error(denied, HttpStatusCode.Unauthorized, "unauthenticated");
         }
         await app.StopAsync(Ct);
+        async Task<AdminPage<AdminProduct>> Products(string query) =>
+            JsonSerializer.Deserialize(await client.GetStringAsync("/v1/admin/products" + query, Ct), CatalogApiJsonContext.Default.AdminPageAdminProduct)!;
         Task<HttpResponseMessage> Post(string json) => client.PostAsync("/v1/admin/wallet-adjustments", new StringContent(json, Encoding.UTF8, "application/json"), Ct);
     }
     private static async Task Error(HttpResponseMessage response, HttpStatusCode status, string code)

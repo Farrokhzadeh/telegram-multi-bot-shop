@@ -54,8 +54,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         AdminCommand.Page(limit);
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.QueryManyAsync(new DbStatement("SELECT id,title,fulfillment_kind,availability_policy,local_first,active,revision FROM shop.products WHERE ($1 IS NULL OR id>$1) ORDER BY id LIMIT $2",
-            AdminCommand.Id(after), DbValue.Integer(limit + 1)), r => new AdminProduct(r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetBoolean(4), r.GetBoolean(5), r.GetInt64(6)), limit + 1, ct);
+        var rows = await session.ListAdminProductsAsync(after, limit + 1, ct);
         return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
     }
     public async Task<AdminPage<InventoryMetadata>> InventoryAsync(AuthenticatedAdmin actor, Guid product, Guid? after, int limit, CancellationToken ct = default)

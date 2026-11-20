@@ -1,13 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <IsAotCompatible>true</IsAotCompatible>
-  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../Platform.Security/Platform.Security.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <EmbeddedResource Include="../../ops/migrations/0001_core.sql" LogicalName="Platform.Persistence.Migrations.0001_core.sql" />
   </ItemGroup>
 </Project>
