@@ -4,7 +4,7 @@
 
 - Akanti (آکانتی) is the project name. AccAbad (`acc-abad`) is the first migration brand. Use the project name for general product documentation and the brand identifier for brand-specific configuration and evidence.
 
-- Use Spec Kit. The active feature is selected by [.specify/feature.json](.specify/feature.json); its current directory is `specs/001-multibrand-redesign/`.
+- Use Spec Kit. The active feature is selected by [.specify/feature.json](.specify/feature.json). The multi-brand redesign remains at `specs/001-multibrand-redesign/`.
 - Read [constitution](.specify/memory/constitution.md), [handoff](specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md), [spec](specs/001-multibrand-redesign/spec.md), [plan](specs/001-multibrand-redesign/plan.md), [tasks](specs/001-multibrand-redesign/tasks.md) and [schema contract](specs/001-multibrand-redesign/schema-contract.md) before implementation. Consult [consistency review](specs/001-multibrand-redesign/consistency-review.md), [traceability](specs/001-multibrand-redesign/requirements-traceability.md), relevant contracts and qualification documents for the affected gate.
 - Latest main and current owner decisions are authoritative. Use tasks and qualification records for status; dated plans, research, branch names, test counts and checkpoint notes describe their original scope.
 - Continue eligible authorized offline implementation without routine task-by-task confirmation. Existing approvals retain their exact data, instance, account and recipient limits. Installed commands and task completion do not expand authorization.
