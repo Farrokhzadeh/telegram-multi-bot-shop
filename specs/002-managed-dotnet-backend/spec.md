@@ -14,11 +14,13 @@ Akanti already runs on .NET 10 and ASP.NET Core. This change switches its backen
 
 - **FR-001**: Target .NET 10 LTS with ASP.NET Core and use regular JIT publishing for the backend Docker image. Keep current process roles and application behavior.
 - **FR-002**: Preserve the API routes, OpenAPI contract, administrator authorization, Telegram.Bot integration, PostgreSQL schema, Npgsql queries, background job semantics, and existing encryption.
-- **FR-003**: Keep this backend only. No admin panel, customer web UI, EF Core, SQLite migration, or shop feature expansion is part of this change. Interactive API documentation can be added separately using the existing OpenAPI document.
+- **FR-003**: Keep this backend only. No admin panel, customer web UI, EF Core, SQLite migration, or shop feature expansion is part of this change.
+- **FR-004**: Serve Swagger UI at `/swagger` in Development using Akanti’s existing admin OpenAPI document as the source of truth. Keep the UI and its document route off by default outside Development. Requests from Swagger UI must use the same administrator bearer authentication as other API clients; the UI does not issue tokens.
 
 ## Success criteria
 
 - **SC-001**: The managed backend builds and the existing automated suite and applicable offline smoke checks pass.
 - **SC-002**: Record idle and peak RAM for the AOT and JIT builds using the same existing synthetic workload and process layout. Report the observed change without imposing a new memory target.
+- **SC-003**: In Development, Swagger UI loads the existing admin contract and lists its 29 operations. Outside Development the docs routes are disabled by default, and the admin API’s existing authentication behavior is unchanged.
 
 This spec does not authorize a production cutover.
