@@ -1,6 +1,6 @@
 # Feature Specification: SQLite Persistence
 
-**Feature**: `004-sqlite-persistence` · **Created**: 2026-11-20 · **Status**: Draft
+**Feature**: `004-sqlite-persistence` · **Created**: 2026-11-20 · **Status**: Specified
 
 ## User scenario and testing
 
@@ -20,4 +20,4 @@ Run the Akanti staging backend and bot on a fresh SQLite database on one host. S
 
 ## Constitution check
 
-[Principle IV](../../.specify/memory/constitution.md#iv-reliable-financial-and-background-side-effects-non-negotiable) requires PostgreSQL-backed durable jobs. Moving those jobs to SQLite requires a proposed amendment and owner approval before implementation. The proposal must preserve the existing durability and recovery guarantees.
+[Principle IV](../../.specify/memory/constitution.md#iv-reliable-financial-and-background-side-effects-non-negotiable) permits SQLite for fresh, single-host staging once synthetic qualification verifies durable job recovery under contention, replay, and restart.
