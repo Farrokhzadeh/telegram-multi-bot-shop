@@ -73,8 +73,10 @@ state and pause automatic resending pending reconciliation or explicit authorize
 Preserve the paid obligation and protected access to the same complete manifest. Do not promise
 exactly-once remote Telegram receipt or that a customer has read a message.
 
-Keep PostgreSQL-backed durable jobs and recovery semantics: deduplication, transactional
-enqueue, leases, retries and persisted delivery markers. In-memory Channels MAY provide bounded
+Keep durable jobs and recovery semantics: deduplication, transactional enqueue, leases, retries
+and persisted delivery markers. Use PostgreSQL for production. A fresh, single-host staging
+environment may use SQLite once synthetic qualification verifies the same guarantees under writer
+contention, callback replay and process restart. In-memory Channels MAY provide bounded
 wake-up/dispatch, but MUST NOT be the sole record of outstanding business work. External
 callbacks/webhooks require verification and replay protection.
 
@@ -96,6 +98,15 @@ Maintain feature-to-code-to-test traceability for critical flows. Prioritize tar
 5. Treat changes to schema, money flows, security, and deployment as review blockers until validation evidence exists. Keep the current Python fleet operational during development.
 
 ## Amendment record
+
+### 3.1.0 — 2026-11-20
+
+The owner approved SQLite-backed durable jobs for fresh staging under feature `004-sqlite-persistence`.
+This expands the supported staging storage options while retaining the existing job guarantees.
+SQLite lets staging exercise the backend without a separate database service. Writer contention or
+interrupted commits could cause repeated work or delayed jobs. Qualify contention, callback replay,
+and restart recovery using synthetic data before staging deployment. Production authorization and
+legacy migration scope are governed by the existing rules.
 
 ### 3.0.0 — 2026-10-31
 
@@ -170,4 +181,4 @@ production cutover is authorized by this amendment. Only repository setup T001 i
 
 This constitution supersedes feature plans. Any exceptions require a written rationale, risk assessment, approval, and a version amendment (MAJOR removes/weakens safeguards, MINOR adds principles, PATCH clarifies wording). A checked checklist means verified evidence, not an intention. The C# feature remains a **draft migration design**, not an authorized production cutover.
 
-**Version**: 3.0.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-10-31
+**Version**: 3.1.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-11-20
