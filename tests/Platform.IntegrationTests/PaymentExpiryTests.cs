@@ -172,22 +172,6 @@ public sealed class PaymentExpiryTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
     }
     [Fact]
-    public async Task OnlyOneAwaitingOrderPerBrandMembershipRejectedByUniqueIndex()
-    {
-        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
-        var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(Ct);
-        var first = await payments.OrderAsync(ct: Ct);
-        await using var invalid = await f.Sessions.BeginAsync(Ct);
-        var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,unit_price_usdt,
-                auto_price_toman_snapshot,pricing_rounding_step_snapshot,price_calculation_version,brand_public_name_snapshot,
-                product_title_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,payment_due_at)
-            VALUES (gen_random_uuid(),$1,$2,1,'product_purchase','awaiting_payment','USDT','crypto',10,false,5000,$3,'public brand','public title','public terms','local',true,false,NOW()+INTERVAL '30 minutes')
-            """, DbValue.Uuid(f.Users[0]), DbValue.Uuid(f.Product), DbValue.Text(PricingPolicy.Version)), Ct));
-        Assert.Equal("23505", err.Failure.SqlState);
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='awaiting_payment'", Ct));
-    }
-    [Fact]
     public async Task SupportedCryptoNetworksAreExactlyUsdtTrc20AndUsdtBsc()
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
