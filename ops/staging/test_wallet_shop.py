@@ -5,6 +5,7 @@ from accabad_presentation import TextPresentation
 from telegram_transport import TelegramError
 
 from wallet_pilot import WalletShop
+from wallet_shop_telegram import legacy_history_chat
 
 
 class WalletShopTests(unittest.TestCase):
@@ -61,6 +62,17 @@ class WalletShopTests(unittest.TestCase):
         if "rich_message" in payload:
             return TextPresentation(payload["rich_message"]["html"]).text()
         return payload["text"]
+
+    def test_legacy_history_requires_the_approved_private_sender(self):
+        history = {"actor": 101, "bot": 102, "text": "Historical orders"}
+        sender = {"id": 101, "is_bot": False}
+        message = {**self.message, "from": sender, "text": "/legacyorders@testadbadbot"}
+        self.assertEqual(101, legacy_history_chat({"message": message}, history))
+        self.assertIsNone(legacy_history_chat({"message": message}, None))
+        self.assertIsNone(legacy_history_chat({"callback_query": {"message": message}}, history))
+        self.assertIsNone(legacy_history_chat({"message": {**message, "from": {**sender, "id": 103}}}, history))
+        self.assertIsNone(legacy_history_chat({"message": {**message, "from": {**sender, "is_bot": True}}}, history))
+        self.assertIsNone(legacy_history_chat({"message": {**message, "chat": {"id": 101, "type": "group"}}}, history))
 
     def test_customer_navigation_and_persisted_language(self):
         self.send("/start")
