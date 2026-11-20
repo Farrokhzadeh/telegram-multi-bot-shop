@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
-mkdir -p artifacts/native
+output=artifacts/native
+publish=()
+if [[ ${1:-} == --managed ]]; then
+  output=artifacts/managed
+  publish=(-p:PublishAot=false --no-self-contained)
+fi
+export AKANTI_SMOKE_OUTPUT="$output"
+mkdir -p "$output"
 for host in Api BotHost JobHost; do
-  dotnet publish "src/Platform.${host}/Platform.${host}.csproj" -c Release -r linux-x64 --no-restore -o "artifacts/native/${host}"
-  "artifacts/native/${host}/Platform.${host}" --qualify
-  file "artifacts/native/${host}/Platform.${host}"
-  sha256sum "artifacts/native/${host}/Platform.${host}"
+  dotnet publish "src/Platform.${host}/Platform.${host}.csproj" -c Release -r linux-x64 --no-restore "${publish[@]}" -o "$output/${host}"
+  "$output/${host}/Platform.${host}" --qualify
+  file "$output/${host}/Platform.${host}"
+  sha256sum "$output/${host}/Platform.${host}"
   status=0
-  "artifacts/native/${host}/Platform.${host}" || status=$?
+  "$output/${host}/Platform.${host}" || status=$?
   test "$status" -eq 78
 done
-artifacts/native/BotHost/Platform.BotHost --qualify-ingress
-dotnet publish src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/SchemaRunner
-file artifacts/native/SchemaRunner/Platform.SchemaRunner
-sha256sum artifacts/native/SchemaRunner/Platform.SchemaRunner
+$output/BotHost/Platform.BotHost --qualify-ingress
+dotnet publish src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -c Release -r linux-x64 --no-restore "${publish[@]}" -o $output/SchemaRunner
+file $output/SchemaRunner/Platform.SchemaRunner
+sha256sum $output/SchemaRunner/Platform.SchemaRunner
 status=0
-artifacts/native/SchemaRunner/Platform.SchemaRunner || status=$?
+$output/SchemaRunner/Platform.SchemaRunner || status=$?
 test "$status" -eq 78
-dotnet publish tests/Platform.AotSmoke/Platform.AotSmoke.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/AotSmoke
-SHOP_SCHEMA_RUNNER_PATH="$PWD/artifacts/native/SchemaRunner/Platform.SchemaRunner" artifacts/native/AotSmoke/Platform.AotSmoke
-file artifacts/native/AotSmoke/Platform.AotSmoke
-sha256sum artifacts/native/AotSmoke/Platform.AotSmoke
-artifacts/native/Api/Platform.Api --serve-qualification &
+dotnet publish tests/Platform.AotSmoke/Platform.AotSmoke.csproj -c Release -r linux-x64 --no-restore "${publish[@]}" -o $output/AotSmoke
+SHOP_SCHEMA_RUNNER_PATH="$PWD/$output/SchemaRunner/Platform.SchemaRunner" "$output/AotSmoke/Platform.AotSmoke"
+file $output/AotSmoke/Platform.AotSmoke
+sha256sum $output/AotSmoke/Platform.AotSmoke
+ASPNETCORE_ENVIRONMENT=Production DOTNET_ENVIRONMENT=Production "$output/Api/Platform.Api" --serve-qualification &
 api_pid=$!
 trap 'kill "$api_pid" 2>/dev/null || true' EXIT
 for attempt in $(seq 1 50); do
@@ -43,13 +50,13 @@ test "$(curl --fail --silent -H 'X-Qualification-Bot: a' -H 'Content-Type: appli
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' -H 'Content-Type: application/json' --data '{' "$customer_url")" = 400
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' --data 'text=synthetic' "$customer_url")" = 415
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18080/health/ready)" = 503
-echo 'T010 native HTTP probes passed: registered A/B identities, rejected selectors, bounded JSON boundary; readiness remains false.'
-curl --silent --dump-header artifacts/native/fault-headers.txt --output artifacts/native/fault-response.json http://127.0.0.1:18080/qualification/fault
+echo 'T010 published HTTP probes passed: registered A/B identities, rejected selectors, bounded JSON boundary; readiness remains false.'
+curl --silent --dump-header $output/fault-headers.txt --output $output/fault-response.json http://127.0.0.1:18080/qualification/fault
 python3 - <<'PY'
-import json,uuid
+import json,os,uuid
 from pathlib import Path
-headers=Path('artifacts/native/fault-headers.txt').read_text()
-body=Path('artifacts/native/fault-response.json').read_text()
+headers=(Path(os.environ['AKANTI_SMOKE_OUTPUT']) / 'fault-headers.txt').read_text()
+body=(Path(os.environ['AKANTI_SMOKE_OUTPUT']) / 'fault-response.json').read_text()
 assert '500' in headers.splitlines()[0]
 assert 'public-synthetic-private-detail' not in body
 response=json.loads(body)
@@ -57,6 +64,24 @@ assert response['code']=='internal_error'
 identifier=str(uuid.UUID(response['requestId']))
 assert any(line.lower().strip()=='x-request-id: '+identifier for line in headers.splitlines())
 PY
-echo 'T014 native HTTP probes passed: safe error JSON and server correlation; readiness remains false.'
+echo 'T014 published HTTP probes passed: safe error JSON and server correlation; readiness remains false.'
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'X-Qualification-Bot: a' -H 'X-Admin: true' http://127.0.0.1:18080/qualification/admin-boundary)" = 401
-echo 'T016 native HTTP boundary passed: bot identity and admin-looking headers grant no backend privilege.'
+echo 'T016 published HTTP boundary passed: bot identity and admin-looking headers grant no backend privilege.'
+
+if [[ ${1:-} == --managed ]]; then
+  test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/swagger/index.html)" = 404
+  test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/openapi/admin-api.json)" = 404
+  kill "$api_pid"
+  wait "$api_pid" || true
+  ASPNETCORE_ENVIRONMENT=Development DOTNET_ENVIRONMENT=Development "$output/Api/Platform.Api" --serve-qualification &
+  api_pid=$!
+  for attempt in $(seq 1 50); do
+    if curl --fail --silent http://127.0.0.1:18080/health/live >/dev/null; then break; fi
+    sleep 0.2
+  done
+  curl --fail --silent --location http://127.0.0.1:18080/swagger/ -o "$output/swagger.html"
+  curl --fail --silent http://127.0.0.1:18080/swagger/index.js -o "$output/swagger.js"
+  grep -q '/openapi/admin-api.json' "$output/swagger.js"
+  curl --fail --silent http://127.0.0.1:18080/openapi/admin-api.json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert sum(map(len,d["paths"].values()))==29 and d["components"]["securitySchemes"]["adminBearer"]["scheme"]=="bearer"'
+  test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/qualification/admin-boundary)" = 401
+fi

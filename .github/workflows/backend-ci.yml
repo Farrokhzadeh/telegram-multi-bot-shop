@@ -41,8 +41,6 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
         with:
           global-json-file: global.json
-      - name: Install native compiler
-        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
       - name: Secret scan
         shell: bash
         run: |
@@ -89,10 +87,10 @@ jobs:
             dotnet test "tests/Platform.${suite}/Platform.${suite}.csproj" -c Release --no-build --no-restore --logger 'trx;LogFileName=qualification.trx' --results-directory "artifacts/test-results/${suite}" || result=1
           done
           exit "$result"
-      - name: Publish and run Linux Native AOT
+      - name: Publish and run managed Linux backend
         env:
           SHOP_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
-        run: bash ops/ci/native-smoke.sh
+        run: bash ops/ci/native-smoke.sh --managed
       - name: Record redacted acceptance evidence
         run: |
           python3 ops/ci/check-acceptance-evidence.py --results-root artifacts/test-results --output artifacts/acceptance/scenario-witnesses.json
@@ -105,9 +103,9 @@ jobs:
             artifacts/acceptance/
             artifacts/migration/
             artifacts/contracts/
-            artifacts/native/SchemaRunner/Platform.SchemaRunner
-            artifacts/native/BotHost/Platform.BotHost
-            artifacts/native/AotSmoke/Platform.AotSmoke
+            artifacts/managed/SchemaRunner/
+            artifacts/managed/JobHost/
+            artifacts/managed/AotSmoke/
             artifacts/test-results/
             **/packages.lock.json
           retention-days: 7
@@ -126,22 +124,28 @@ jobs:
           global-json-file: global.json
       - name: Install native compiler
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
-      - name: Publish and smoke-test staging API and bot
+      - name: Publish and smoke-test managed staging API and bot
         shell: bash
         run: |
+          sdk_options=(-c Release -r linux-x64 -p:PublishAot=false)
           dotnet restore src/Platform.Api/Platform.Api.csproj -r linux-x64 --locked-mode
-          dotnet publish src/Platform.Api/Platform.Api.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/Api
-          artifacts/native/Api/Platform.Api --qualify
+          dotnet publish src/Platform.Api/Platform.Api.csproj "${sdk_options[@]}" --no-restore --no-self-contained -o artifacts/staging/Api
+          artifacts/staging/Api/Platform.Api --qualify
           status=0
-          artifacts/native/Api/Platform.Api || status=$?
+          artifacts/staging/Api/Platform.Api || status=$?
           test "$status" -eq 78
           dotnet restore src/Platform.BotHost/Platform.BotHost.csproj -r linux-x64 --locked-mode
-          dotnet publish src/Platform.BotHost/Platform.BotHost.csproj -c Release -r linux-x64 --no-restore -o artifacts/native/BotHost
-          artifacts/native/BotHost/Platform.BotHost --qualify-ingress
+          dotnet publish src/Platform.BotHost/Platform.BotHost.csproj "${sdk_options[@]}" --no-restore --self-contained -o artifacts/staging/BotHost
+          artifacts/staging/BotHost/Platform.BotHost --qualify-ingress
           status=0
-          artifacts/native/BotHost/Platform.BotHost --serve-staging-preview --root /run/akanti-preview || status=$?
+          artifacts/staging/BotHost/Platform.BotHost --serve-staging-preview --root /run/akanti-preview || status=$?
           test "$status" -eq 78
-      - name: Test native API with its matching synthetic canary schema
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 020e5996006c8867b1d64e24a31f174ce344c4c4
+          path: aot-baseline
+          persist-credentials: false
+      - name: Compare the same synthetic canary with Native AOT
         shell: bash
         run: |
           docker pull --platform linux/amd64 mcr.microsoft.com/dotnet/sdk@sha256:212fe4cb74627d5adf9817a4088906ae3edff1bd853bb27565d4b46731efe61e
@@ -149,31 +153,42 @@ jobs:
           docker tag postgres@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583 postgres:18.6
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git show HEAD:ops/migrations/0001_core.sql > "$RUNNER_TEMP/t081-schema.sql"
-          sudo python3 ops/staging/check_ci_canary.py artifacts/native/Api/Platform.Api "$RUNNER_TEMP/t081-schema.sql"
-      - name: Package native staging candidate
+          cmp aot-baseline/ops/migrations/0001_core.sql "$RUNNER_TEMP/t081-schema.sql"
+          dotnet restore aot-baseline/src/Platform.Api/Platform.Api.csproj -r linux-x64 --locked-mode
+          dotnet publish aot-baseline/src/Platform.Api/Platform.Api.csproj -c Release -r linux-x64 --no-restore -o "$RUNNER_TEMP/aot-baseline"
+          sudo python3 ops/staging/check_ci_canary.py "$RUNNER_TEMP/aot-baseline/Platform.Api" "$RUNNER_TEMP/t081-schema.sql" | tee "$RUNNER_TEMP/aot.log"
+          sudo python3 ops/staging/check_ci_canary.py artifacts/staging/Api "$RUNNER_TEMP/t081-schema.sql" | tee "$RUNNER_TEMP/jit.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          def measurement(name):
+              [line] = [line[7:] for line in (root / (name + ".log")).read_text().splitlines() if line.startswith("MEMORY ")]
+              return json.loads(line)
+          aot, jit = measurement("aot"), measurement("jit")
+          result = {"aot": aot, "jit": jit, "change_percent": {key: round(100 * (jit[key] / aot[key] - 1), 1) for key in aot}}
+          content = json.dumps(result, indent=2)
+          Path("artifacts/staging/runtime-memory.json").write_text(content + "\n")
+          print(content)
+          PY
+      - name: Package managed staging candidate
+        shell: bash
         run: |
-          mkdir -p artifacts/staging
           printf '%s\n' "$GITHUB_SHA" > artifacts/staging/SOURCE_COMMIT
-          (
-            cd artifacts/native/Api
-            sha256sum Platform.Api
-            cd ../BotHost
-            sha256sum Platform.BotHost
-          ) > artifacts/staging/SHA256SUMS
           cp "$RUNNER_TEMP/t081-schema.sql" artifacts/staging/0001_core.sql
           (
             cd artifacts/staging
-            sha256sum 0001_core.sql >> SHA256SUMS
-            cat SHA256SUMS
-          )
+            find Api BotHost -type f -print0 | sort -z | xargs -0 sha256sum
+            sha256sum 0001_core.sql
+          ) > artifacts/staging/SHA256SUMS
           tar -czf artifacts/staging/Platform.Api-linux-x64.tar.gz \
-            -C artifacts/native/Api Platform.Api \
-            -C "$PWD/artifacts/native/BotHost" Platform.BotHost \
-            -C "$PWD/artifacts/staging" SHA256SUMS SOURCE_COMMIT 0001_core.sql
+            -C artifacts/staging Api BotHost SHA256SUMS SOURCE_COMMIT 0001_core.sql
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: staging-api-linux-x64-${{ github.sha }}
-          path: artifacts/staging/Platform.Api-linux-x64.tar.gz
+          path: |
+            artifacts/staging/Platform.Api-linux-x64.tar.gz
+            artifacts/staging/runtime-memory.json
           if-no-files-found: error
           retention-days: 7
   deploy-staging:
@@ -212,7 +227,12 @@ jobs:
           test "$(cat "$bundle/SOURCE_COMMIT")" = "$GITHUB_SHA"
           (cd "$bundle" && sha256sum --check SHA256SUMS)
           git show HEAD:ops/migrations/0001_core.sql | cmp - "$bundle/0001_core.sql"
-          install -m 0555 artifacts/qualified-delivery/artifacts/native/AotSmoke/Platform.AotSmoke "$bundle/Platform.AotSmoke"
+          for role in AotSmoke JobHost SchemaRunner; do
+            cp -a "artifacts/qualified-delivery/artifacts/managed/$role" "$bundle/"
+          done
+          for role in Api BotHost JobHost SchemaRunner AotSmoke; do
+            chmod 0555 "$bundle/$role/Platform.$role"
+          done
           install -d "$bundle/shop"
           install -m 0444 ops/staging/{accabad_presentation,telegram_transport,wallet_pilot,wallet_shop_telegram}.py "$bundle/shop/"
           install -m 0555 ops/staging/deploy-shop-runtime.sh "$bundle/deploy-shop-runtime.sh"
@@ -221,7 +241,7 @@ jobs:
           docker build --platform linux/amd64 --file ops/staging/Dockerfile \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" --tag "$tag" "$bundle"
           docker run --rm --network none "$tag" --qualify
-          docker run --rm --network none --entrypoint /app/Platform.BotHost "$tag" --qualify-ingress
+          docker run --rm --network none --entrypoint /app/BotHost/Platform.BotHost "$tag" --qualify-ingress
           export DOCKER_CONFIG
           DOCKER_CONFIG=$(mktemp -d "$RUNNER_TEMP/akanti-docker.XXXXXX")
           printf '%s\n' "$DOCKERHUB_TOKEN" | docker login --username "$DOCKERHUB_USERNAME" --password-stdin

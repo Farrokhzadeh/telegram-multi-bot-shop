@@ -5,6 +5,7 @@
     <PublishAot>true</PublishAot>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
     <ProjectReference Include="../Platform.Core/Platform.Core.csproj" />
     <ProjectReference Include="../Platform.Persistence/Platform.Persistence.csproj" />
     <ProjectReference Include="../Platform.Security/Platform.Security.csproj" />

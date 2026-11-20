@@ -46,14 +46,15 @@ created=0
 next_state=
 
 start_poller() {
-	local name=$1 directory=$2
+	local name=$1 directory=$2 bot_host=$2/BotHost/Platform.BotHost
+	if [[ ! -x $bot_host ]]; then bot_host=$directory/Platform.BotHost; fi
 	systemd-run --unit="$name" --property=UMask=0077 --property=NoNewPrivileges=yes \
 		--property=MemoryMax=160M --property=CPUQuota=30% --property=TasksMax=40 \
 		--property=Restart=on-failure --property=RestartPreventExitStatus=78 --property=RestartSec=4 \
 		--property="StandardOutput=append:$directory/telegram.private.log" \
 		--property="StandardError=append:$directory/telegram.private.log" \
 		--setenv=PYTHONDONTWRITEBYTECODE=1 --setenv=PYTHONUNBUFFERED=1 \
-		--setenv="AKANTI_TELEGRAM_BOT_HOST=$directory/Platform.BotHost" \
+		--setenv="AKANTI_TELEGRAM_BOT_HOST=$bot_host" \
 		/usr/bin/python3 "$directory/wallet_shop_telegram.py" "$preview/config" "$preview/state" "$target"
 }
 
@@ -93,8 +94,19 @@ trap rollback EXIT
 trap 'exit 1' INT TERM
 
 docker cp "$qualification:/app/shop/." "$release"
-docker cp "$qualification:/app/Platform.BotHost" "$release/Platform.BotHost"
-"$release/Platform.BotHost" --qualify-ingress
+if docker exec "$qualification" test -d /app/BotHost; then
+	docker cp "$qualification:/app/BotHost" "$release/BotHost"
+	bot_host=$release/BotHost/Platform.BotHost
+	core_entry=/app/AotSmoke/Platform.AotSmoke
+else
+	docker cp "$qualification:/app/Platform.BotHost" "$release/Platform.BotHost"
+	bot_host=$release/Platform.BotHost
+	core_entry=/app/Platform.AotSmoke
+fi
+if [[ -f $work/accabad-stage-shop.json ]]; then
+	install -m 0444 "$old_release/accabad_stage.py" "$old_release/wallet_shop_telegram.py" "$release/"
+fi
+"$bot_host" --qualify-ingress
 next_state=$(mktemp "$work/shop-active.XXXXXX")
 printf '%s\n' "$core" "$unit" "$release" "$commit" > "$next_state"
 
@@ -107,7 +119,7 @@ docker create --pull never --name "$core" --label org.akanti.environment=staging
 	--cpus .6 --memory 300m --memory-swap 300m --pids-limit 60 --tmpfs /tmp:rw,nosuid,size=24m,uid=10001,gid=10001 \
 	--env-file "$commerce/runtime.env" --mount "type=bind,src=$target,dst=/stage/target" \
 	--workdir /stage/target --log-opt max-size=1m --log-opt max-file=2 \
-	--entrypoint /app/Platform.AotSmoke "$image" --cutover-stage --root /stage/target --mode serve >/dev/null
+	--entrypoint "$core_entry" "$image" --cutover-stage --root /stage/target --mode serve >/dev/null
 created=1
 docker start "$core" >/dev/null
 wait_ready ready.json "$core"

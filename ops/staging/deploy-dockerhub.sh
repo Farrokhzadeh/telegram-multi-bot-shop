@@ -57,8 +57,17 @@ if (( ! ready )); then
 fi
 
 if [[ -f $work/shop-root ]]; then
-    docker exec "$candidate" cat /app/deploy-shop-runtime.sh > "$work/deploy-shop-runtime.sh"
-    bash "$work/deploy-shop-runtime.sh" "$image" "$commit" "$candidate"
+    helper=$work/deploy-shop-runtime.sh
+    if docker exec "$candidate" test -d /app/Api; then
+        docker exec "$candidate" cat /app/deploy-shop-runtime.sh > "$helper.next"
+        bash "$helper.next" "$image" "$commit" "$candidate"
+        mv -f "$helper.next" "$helper"
+    else
+        if [[ ! -s $helper ]]; then
+            docker exec "$candidate" cat /app/deploy-shop-runtime.sh > "$helper"
+        fi
+        bash "$helper" "$image" "$commit" "$candidate"
+    fi
 fi
 
 created=0

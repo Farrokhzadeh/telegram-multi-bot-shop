@@ -4,7 +4,7 @@
 
 ## Setup
 
-- [ ] T001 Record the current AOT image, role layout, and existing synthetic workload from `.github/workflows/backend-ci.yml` and `ops/PERFORMANCE_EVIDENCE.md` so the managed build has a comparable baseline.
+- [x] T001 Record the current AOT image, role layout, and existing synthetic workload from `.github/workflows/backend-ci.yml` and `ops/PERFORMANCE_EVIDENCE.md` so the managed build has a comparable baseline.
 
 ## Foundation
 
@@ -21,6 +21,6 @@
 
 - [ ] T005 Run the existing automated suites and applicable offline smoke checks from `.github/workflows/backend-ci.yml`. Use `specs/002-managed-dotnet-backend/quickstart.md` to check the local Swagger routes and existing contract. No new suite or live Telegram, provider or production-data checks.
 - [ ] T006 Run the same existing synthetic workload against AOT and JIT with matching role layout and resource settings. Record idle and peak RAM and the percentage change in `ops/PERFORMANCE_EVIDENCE.md`.
-- [ ] T007 Update `README.md` and `docs/ADMIN_API.md` with the managed deployment, Development Swagger URL, and existing bearer authentication.
+- [x] T007 Update `README.md` and `docs/ADMIN_API.md` with the managed deployment, Development Swagger URL, and existing bearer authentication.
 
 **Order:** T001 starts the baseline. T002 and T003 can proceed independently because the publish and API edits touch different files. T004 follows T002. T005 follows T002–T004, then T006 and T007 close the feature. The MVP is US1 with offline verification. Production cutover is outside this checklist.

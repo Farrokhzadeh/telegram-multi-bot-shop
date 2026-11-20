@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Hosting;
 using Platform.Api;
 using Platform.Core;
 using Platform.Security;
@@ -20,6 +21,11 @@ var app = builder.Build();
 app.Urls.Clear();
 app.Urls.Add("http://127.0.0.1:18080");
 app.UseMiddleware<DiagnosticsMiddleware>((Action<string>)Console.WriteLine);
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwaggerUI(options => options.SwaggerEndpoint("/openapi/admin-api.json", "Akanti admin API"));
+    app.MapGet("/openapi/admin-api.json", () => Results.Json(OpenApiContract.Generate(), ContractJsonContext.Default.ApiDocument));
+}
 app.UseRouting();
 // No online administrator verifier is enabled in this loopback foundation host.
 app.UseMiddleware<AdminGuardMiddleware>((Func<AdminToken, CancellationToken, Task<AuthenticatedAdmin?>>)

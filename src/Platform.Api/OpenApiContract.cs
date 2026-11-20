@@ -58,8 +58,7 @@ public static partial class OpenApiContract
     public static ApiDocument Generate(IEndpointRouteBuilder endpoints)
     {
         var actual = endpoints.DataSources.SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().Where(e => e.RoutePattern.RawText?.StartsWith("/v1/admin/", StringComparison.Ordinal) == true).ToArray();
-        var paths = new SortedDictionary<string, SortedDictionary<string, ApiOperation>>(StringComparer.Ordinal);
-        var schemas = new Dictionary<string, ApiSchema>(StringComparer.Ordinal);
+        var routes = new List<ApiRoute>();
         foreach (var endpoint in actual)
         {
             if (endpoint.Metadata.GetMetadata<AdministratorEndpointMetadata>() is null) throw new InvalidOperationException("Unprotected administrator contract route.");
@@ -68,15 +67,29 @@ public static partial class OpenApiContract
             {
                 ApiRoute? entry = Routes.SingleOrDefault(r => r.Path == path && r.Method == method);
                 if (entry is null) throw new InvalidOperationException("Administrator route is missing its frozen contract.");
-                var parameters = RouteParameter().Matches(path).Select(m => new ApiParameter(m.Groups[1].Value, "path", true, new("string", "uuid"))).Concat(entry.Query.Select(q =>
-                    new ApiParameter(q.TrimEnd('!'), "query", q.EndsWith('!'), q.StartsWith("limit", StringComparison.Ordinal) || q.StartsWith("afterRevision", StringComparison.Ordinal) ? new("integer", "int64") : new("string", "uuid")))).ToArray();
-                var responses = new Dictionary<string, ApiResponse>(StringComparer.Ordinal) { [entry.Response is null ? "204" : "200"] = new("Committed or current result", entry.Response is null ? null : Content(Schema(entry.Response, schemas))) };
-                foreach (string status in new[] { "400", "401", "403", "404", "409", "413", "415", "408", "500", "503" }) responses[status] = new("Redacted error", Content(Schema(DiagnosticsJsonContext.Default.ApiFailure, schemas)));
-                var operation = new ApiOperation(method.ToLowerInvariant() + "_" + path.Replace('/', '_').Replace("{", "", StringComparison.Ordinal).Replace("}", "", StringComparison.Ordinal),
-                    [new() { ["adminBearer"] = [] }], parameters, entry.Request is null ? null : new(true, Content(Schema(entry.Request, schemas))), responses);
-                if (!paths.TryGetValue(path, out var methods)) paths[path] = methods = new(StringComparer.Ordinal);
-                methods.Add(method.ToLowerInvariant(), operation);
+                routes.Add(entry);
             }
+        }
+        return Generate(routes);
+    }
+
+    internal static ApiDocument Generate() => Generate(Routes);
+
+    private static ApiDocument Generate(IEnumerable<ApiRoute> routes)
+    {
+        var paths = new SortedDictionary<string, SortedDictionary<string, ApiOperation>>(StringComparer.Ordinal);
+        var schemas = new Dictionary<string, ApiSchema>(StringComparer.Ordinal);
+        foreach (var entry in routes)
+        {
+            string path = entry.Path, method = entry.Method;
+            var parameters = RouteParameter().Matches(path).Select(m => new ApiParameter(m.Groups[1].Value, "path", true, new("string", "uuid"))).Concat(entry.Query.Select(q =>
+                new ApiParameter(q.TrimEnd('!'), "query", q.EndsWith('!'), q.StartsWith("limit", StringComparison.Ordinal) || q.StartsWith("afterRevision", StringComparison.Ordinal) ? new("integer", "int64") : new("string", "uuid")))).ToArray();
+            var responses = new Dictionary<string, ApiResponse>(StringComparer.Ordinal) { [entry.Response is null ? "204" : "200"] = new("Committed or current result", entry.Response is null ? null : Content(Schema(entry.Response, schemas))) };
+            foreach (string status in new[] { "400", "401", "403", "404", "409", "413", "415", "408", "500", "503" }) responses[status] = new("Redacted error", Content(Schema(DiagnosticsJsonContext.Default.ApiFailure, schemas)));
+            var operation = new ApiOperation(method.ToLowerInvariant() + "_" + path.Replace('/', '_').Replace("{", "", StringComparison.Ordinal).Replace("}", "", StringComparison.Ordinal),
+                [new() { ["adminBearer"] = [] }], parameters, entry.Request is null ? null : new(true, Content(Schema(entry.Request, schemas))), responses);
+            if (!paths.TryGetValue(path, out var methods)) paths[path] = methods = new(StringComparer.Ordinal);
+            methods.Add(method.ToLowerInvariant(), operation);
         }
         return new("3.0.3", new("Multi-brand shop administration", "1.0.0-offline"), paths, new(new() { ["adminBearer"] = new("http", "bearer") }, schemas));
     }

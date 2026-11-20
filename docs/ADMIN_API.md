@@ -5,8 +5,12 @@ The versioned admin contract is an OpenAPI 3.0.3 JSON file with 29 operations. I
 ## Get the contract
 
 1. Open a successful [Offline backend qualification run](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml) for the commit you are integrating.
-2. Download `offline-qualification-<commit>` from **Artifacts** and extract `artifacts/contracts/admin-api.json`. GitHub retains each artifact for seven days. The **Publish and run Linux Native AOT** step records the file's SHA-256.
+2. Download `offline-qualification-<commit>` from **Artifacts** and extract `artifacts/contracts/admin-api.json`. GitHub retains each artifact for seven days. The **Publish and run managed Linux backend** step records the file's SHA-256.
 3. Use the file against mocks during frontend development. The current Docker Hub staging image runs a local qualification API and the isolated Telegram shop. It does not expose an admin API base URL or a Swagger UI. Live integration needs a separately configured admin host and administrator sessions.
+
+## Browse locally with Swagger UI
+
+Run `ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Platform.Api -- --serve-qualification` and open [Swagger UI](http://127.0.0.1:18080/swagger). It reads the same 29-operation contract from `/openapi/admin-api.json`. The loopback qualification host shows the contract without enabling the admin endpoints. On an admin API host, calls still need a valid bearer session. The documentation routes are off outside Development.
 
 ## Integrate the admin panel
 

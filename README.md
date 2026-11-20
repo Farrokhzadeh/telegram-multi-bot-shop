@@ -2,7 +2,7 @@
 
 Akanti is a multi-brand commerce backend for Telegram shops. Each brand has its own bot, customer memberships, wallets, orders, and payment settings. Brands can share a product catalog and stock pool. AccAbad (`acc-abad`) is the first brand Akanti will replace.
 
-The backend uses C# and .NET 10 Native AOT with PostgreSQL. It models payments, inventory, durable jobs, and delivery in a 28-table relational schema. The [admin API guide](docs/ADMIN_API.md) explains how to get the OpenAPI contract and start a frontend.
+The backend uses C# and ASP.NET Core on .NET 10 with PostgreSQL. It models payments, inventory, durable jobs, and delivery in a 28-table relational schema. The [admin API guide](docs/ADMIN_API.md) explains how to get the OpenAPI contract and start a frontend.
 
 ## Release status
 
@@ -10,7 +10,7 @@ Spec Kit records 96/96 tasks complete for the approved backend scope. The [stagi
 
 ## Method 1 — Run or update the local demo
 
-Run a local demo on a Linux x86-64 machine with Bash, `tar`, `sha256sum`, and `curl`. It needs no database, bot token, or payment credentials.
+Run a local demo on a Linux x86-64 machine with the ASP.NET Core 10 runtime, Bash, `tar`, `sha256sum`, and `curl`. It needs no database, bot token, or payment credentials.
 
 1. Open a successful [Offline backend qualification run](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml). Note its full commit SHA and download `staging-api-linux-x64-<commit>` from **Artifacts**. Unzip the GitHub download to get `Platform.Api-linux-x64.tar.gz`. Artifacts are retained for seven days, so use an available successful run that packages `0001_core.sql`.
 2. Open a terminal in the directory containing that `.tar.gz` file and run the commands below. Replace the example SHA with the full SHA shown on the run.
@@ -21,7 +21,7 @@ Run a local demo on a Linux x86-64 machine with Bash, `tar`, `sha256sum`, and `c
    tar -xzf Platform.Api-linux-x64.tar.gz -C "$demo" &&
      test "$(cat "$demo/SOURCE_COMMIT")" = "$candidate" &&
      (cd "$demo" && sha256sum --check SHA256SUMS) &&
-     "$demo/Platform.Api" --serve-qualification
+     "$demo/Api/Platform.Api" --serve-qualification
    ```
 
 3. Leave that terminal open. In a second terminal, run this check. A successful response includes `"mode":"synthetic-qualification"` and `"applicationReady":false`. The false value is expected in the demo.
@@ -38,7 +38,7 @@ Run a local demo on a Linux x86-64 machine with Bash, `tar`, `sha256sum`, and `c
 
 **If staging is already configured, push to `main`.** The same workflow qualifies that commit, publishes the image to Docker Hub, and deploys it over SSH. Open the [Actions run](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/workflows/backend-ci.yml) and wait for **deploy-staging** to pass.
 
-The staging server pulls the image by digest and checks the API locally. Where the Telegram shop is registered, it also starts the shop and waits for a successful Telegram poll. The server uses the GitHub-built image directly.
+The staging server pulls the managed .NET image by digest and checks the API locally. The runtime image supplies .NET 10 for container roles. The host Telegram bridge uses a self-contained JIT publish. Where the Telegram shop is registered, it also starts the shop and waits for a successful Telegram poll. The server uses the GitHub-built image directly.
 
 ### One-time setup
 

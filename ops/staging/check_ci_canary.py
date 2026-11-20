@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,13 @@ RUNTIME = "mcr.microsoft.com/dotnet/sdk@sha256:212fe4cb74627d5adf9817a4088906ae3
 POSTGRES = "postgres@sha256:bd5dfa494a5a259704365813dbfa5fa6b3e69be7348d43b547f540c730478583"
 
 
+def memory(compose_file, metric):
+    container = stage.output("docker", "compose", "-f", str(compose_file), "ps", "-q", "stage-bot-a")
+    pid = stage.output("docker", "inspect", "--format", "{{.State.Pid}}", container)
+    cgroup, = (line[3:] for line in Path(f"/proc/{pid}/cgroup").read_text().splitlines() if line.startswith("0::"))
+    return int((Path("/sys/fs/cgroup") / cgroup.lstrip("/") / metric).read_text())
+
+
 def check(executable, schema, workspace):
     schema_hash = hashlib.sha256(schema.read_bytes()).hexdigest()
     print(f"Synthetic canary schema SHA-256 {schema_hash}", flush=True)
@@ -21,16 +29,18 @@ def check(executable, schema, workspace):
     db_image = stage.output("docker", "image", "inspect", "--format", "{{.Id}}", POSTGRES)
     assert db_image == stage.output("docker", "image", "inspect", "--format", "{{.Id}}", "postgres:18.6")
     bundle = workspace / "bundle"
-    bundle.mkdir()
-    (bundle / "Platform.Api").write_bytes(executable.read_bytes())
-    (bundle / "Platform.Api").chmod(0o755)
+    if executable.is_dir():
+        shutil.copytree(executable, bundle)
+    else:
+        bundle.mkdir()
+        shutil.copy2(executable, bundle / "Platform.Api")
     settings = stage.provision(bundle, schema)
     assert settings[2] == schema_hash
     compose_file = stage.ROOT / "compose.json"
     config = json.loads(compose_file.read_text())
     db, bot = (config["services"][n] for n in ("stage-db", "stage-bot-a"))
     config["services"] = {"stage-db": db, "stage-bot-a": bot}
-    for service, size in ((db, "128m"), (bot, "64m")):
+    for service, size in ((db, "128m"), (bot, "128m")):
         service.update(cpus=0.1, mem_limit=size, memswap_limit=size)
     bot["entrypoint"] = ["/opt/runtime/Platform.Api", "--serve-synthetic-staging", "bot-a"]
     compose_file.chmod(0o600)
@@ -54,9 +64,11 @@ def check(executable, schema, workspace):
                    "message_id": 77, "chat": {"type": "private", "id": 7001}}}}
         stage.compose("up", "-d", "--no-deps", "--pull", "never", "stage-bot-a")
         wait_for(lambda: request(inspector, "/ready") == "bot-a\n200")
+        idle = memory(compose_file, "memory.current")
         wrong = dict(payload, callback_query=dict(payload["callback_query"], message=dict(payload["callback_query"]["message"], **{"from": {"id": 1002, "is_bot": True}})))
         assert request(inspector, "/callbacks/stage-a", header, wrong).endswith("\n401")
         assert request(inspector, "/callbacks/stage-a", header, payload) == "Product\n200"
+        peak = memory(compose_file, "memory.peak")
         stage.compose("stop", "-t", "10", "stage-bot-a")
         assert stage.query("SELECT count(*) FROM shop.orders;") == "0"
         stage.compose("up", "-d", "--no-deps", "--pull", "never", "stage-bot-a")
@@ -64,7 +76,9 @@ def check(executable, schema, workspace):
         assert request(inspector, "/callbacks/stage-a", header, payload) == "Duplicate\n200"
         assert stage.query("SELECT count(*) FROM shop.bot_activity_events WHERE telegram_update_id=501;") == "1"
         assert stage.query("SELECT count(*) FROM shop.orders;") == "0"
-        print("PASS native staging catalog, wrong-bot rejection, independent stop and restart replay against the matching synthetic schema")
+        peak = max(peak, memory(compose_file, "memory.peak"))
+        print("MEMORY " + json.dumps({"idle_bytes": idle, "peak_bytes": peak}), flush=True)
+        print("PASS staging catalog, wrong-bot rejection, independent stop and restart replay against the matching synthetic schema")
     except (AssertionError, RuntimeError, subprocess.SubprocessError):
         stage.compose("ps", "--all")
         stage.compose("logs", "--tail", "12", "stage-bot-a")
