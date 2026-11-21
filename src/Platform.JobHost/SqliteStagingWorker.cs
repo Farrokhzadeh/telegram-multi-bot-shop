@@ -26,7 +26,7 @@ internal static class SqliteStagingWorker
             secrets = state.LoadSecrets(SecretService.JobHost);
             token = state.ReadTelegramToken();
         }
-        catch (Exception error) when (error is IOException or InvalidOperationException
+        catch (Exception error) when (error is IOException or InvalidOperationException or SecretConfigurationException
             or UnauthorizedAccessException or ArgumentException)
         {
             Console.Error.WriteLine("The staging SQLite worker identity is unavailable.");
