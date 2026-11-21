@@ -97,9 +97,9 @@ public sealed class SqliteStagingConfiguration
         {
             string token = new UTF8Encoding(false, true).GetString(bytes).Trim();
             int colon = token.IndexOf(':');
-            if (colon<=0 || token[..colon] != TelegramBotId.ToString(CultureInfo.InvariantCulture) ||
-                token.Length-colon-1 is < 30 or > 90 ||
-                token[(colon+1)..].Any(c=>!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
+            if (colon <= 0 || token[..colon] != TelegramBotId.ToString(CultureInfo.InvariantCulture) ||
+                token.Length - colon - 1 is < 30 or > 90 ||
+                token[(colon + 1)..].Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
                 throw new UnauthorizedAccessException("Staging Telegram bot identity is unavailable.");
             return token;
         }
@@ -112,7 +112,7 @@ public sealed class SqliteStagingConfiguration
         try
         {
             if (!long.TryParse(Encoding.ASCII.GetString(bytes).Trim(), NumberStyles.None,
-                    CultureInfo.InvariantCulture, out long value) || value<=0)
+                    CultureInfo.InvariantCulture, out long value) || value <= 0)
                 throw new UnauthorizedAccessException("Staging identity is invalid.");
             return value;
         }
@@ -122,8 +122,8 @@ public sealed class SqliteStagingConfiguration
     private static byte[] ReadPrivate(string path, int limit)
     {
         var file = new FileInfo(path);
-        if (!file.Exists || file.LinkTarget is not null || file.Length is <1 or >160 ||
-            file.Length>limit || (File.GetUnixFileMode(path) & (UnixFileMode)63)!=0)
+        if (!file.Exists || file.LinkTarget is not null || file.Length is < 1 or > 160 ||
+            file.Length > limit || (File.GetUnixFileMode(path) & (UnixFileMode)63) != 0)
             throw new UnauthorizedAccessException("Private staging configuration is unavailable.");
         return File.ReadAllBytes(path);
     }

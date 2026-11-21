@@ -124,7 +124,7 @@ internal static class SqliteStagingWorker
         catch (ApiRequestException error) when (target is not null && error.ErrorCode == 400 &&
             error.Message.Contains("message is not modified", StringComparison.Ordinal))
         { return new(DeliveryOutcomeKind.Succeeded, target); }
-        catch (ApiRequestException error) when (error.ErrorCode is >=400 and <500 and not 429)
+        catch (ApiRequestException error) when (error.ErrorCode is >= 400 and < 500 and not 429)
         { return new(DeliveryOutcomeKind.Uneditable); }
         catch (Exception error) when (error is RequestException or HttpRequestException
             or JsonException or IOException or OperationCanceledException)
@@ -134,7 +134,7 @@ internal static class SqliteStagingWorker
     private static async Task<DeliveryOutcome> SendDocumentAsync(string token, HttpClient http,
         long recipient, DeliveryDispatch dispatch, CancellationToken ct)
     {
-        if (dispatch.TargetMessageId is not null || dispatch.Content.Length is <1 or >16777216)
+        if (dispatch.TargetMessageId is not null || dispatch.Content.Length is < 1 or > 16777216)
             return new(DeliveryOutcomeKind.Uneditable);
         byte[] file = dispatch.Content.ToArray();
         try
@@ -149,7 +149,7 @@ internal static class SqliteStagingWorker
             using var response = await http.PostAsync("https://api.telegram.org/bot" + token + "/sendDocument",
                 form, ct);
             if (!response.IsSuccessStatusCode)
-                return response.StatusCode is >=HttpStatusCode.BadRequest and <HttpStatusCode.InternalServerError
+                return response.StatusCode is >= HttpStatusCode.BadRequest and < HttpStatusCode.InternalServerError
                     and not HttpStatusCode.TooManyRequests
                     ? new(DeliveryOutcomeKind.Uneditable) : new(DeliveryOutcomeKind.Unknown);
             byte[] json = await response.Content.ReadAsByteArrayAsync(ct);
