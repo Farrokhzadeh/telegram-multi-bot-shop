@@ -57,8 +57,7 @@ public sealed class SqliteStagingConfiguration
         bool valid = await state.Sessions.RunAsync(false, async (_, tx, token) =>
         {
             using var command = SqliteWallet.Command(tx, """
-                SELECT (SELECT count(*) FROM brands WHERE active=1)=1
-                    AND EXISTS(SELECT 1 FROM brands WHERE id=$brand AND bot_id=1001
+                SELECT EXISTS(SELECT 1 FROM brands WHERE id=$brand AND bot_id=1001
                         AND policy_version>=0 AND active=1)
                     AND EXISTS(SELECT 1 FROM users WHERE brand_id=$brand AND telegram_id=7001
                         AND blocked_at IS NULL AND banned_at IS NULL)
