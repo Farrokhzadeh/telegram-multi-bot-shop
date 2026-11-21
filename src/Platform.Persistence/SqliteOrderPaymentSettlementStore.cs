@@ -6,9 +6,9 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
 {
-    internal async Task<PaymentSettlement> SettleAsync(BrandContext context, long expectedRevision, Guid payment,
+    public async Task<PaymentSettlement> SettleAsync(BrandContext context, long expectedRevision, Guid payment,
         Func<InvoiceExpectation, CancellationToken, Task<ProviderPaymentSnapshot>> lookup, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
