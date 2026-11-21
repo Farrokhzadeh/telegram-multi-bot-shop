@@ -9,6 +9,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <EmbeddedResource Include="../../ops/migrations/sqlite/0001_core.sql" LogicalName="Platform.Persistence.Migrations.Sqlite.0001_core.sql" />
     <EmbeddedResource Include="../../ops/migrations/0001_core.sql" LogicalName="Platform.Persistence.Migrations.0001_core.sql" />
   </ItemGroup>
 </Project>

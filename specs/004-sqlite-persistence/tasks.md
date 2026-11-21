@@ -8,7 +8,7 @@
 
 ## Foundation
 
-- [ ] T002 Add the explicit SQLite schema and synthetic seed operation in `ops/migrations/` and `src/Platform.SchemaRunner/Program.cs`. Preserve canonical keys, constraints, and brand boundaries. Seed a test brand, admin, catalog, and stock.
+- [x] T002 Add the explicit empty SQLite schema and initialization operation in `ops/migrations/` and `src/Platform.SchemaRunner/Program.cs`. Preserve canonical keys, constraints, and brand boundaries. Keep synthetic seed rows inside disposable test fixtures.
 - [ ] T003 Add SQLite sessions beside `src/Platform.Persistence/DbSession.cs`. Enable WAL and foreign keys, bound the busy timeout, and use immediate write transactions. Keep rollback, cancellation, and pre-commit integrity checks inside the session boundary.
 
 ## US1 — Run Akanti on a fresh SQLite staging database (P1)

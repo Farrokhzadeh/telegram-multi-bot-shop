@@ -4,7 +4,7 @@
 
 ## User scenario and testing
 
-Run the Akanti staging backend and bot on a fresh SQLite database on one host. Seed a test brand, administrator, and catalog with synthetic data. Use the existing tests to exercise catalog reads, checkout, payments, allocation, and restart recovery. Existing PostgreSQL rows and AccAbad history are outside this feature. Production cutover requires separate approval.
+Run the Akanti staging backend and bot on a fresh SQLite database on one host. Use synthetic brand, administrator, and catalog rows only in disposable qualification databases. Use the existing tests to exercise catalog reads, checkout, payments, allocation, and restart recovery. Existing PostgreSQL rows and AccAbad history are outside this feature. Production cutover requires separate approval.
 
 ## Requirements
 

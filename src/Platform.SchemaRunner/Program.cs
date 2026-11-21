@@ -3,6 +3,21 @@ using Platform.Persistence;
 using Platform.Migration;
 using Platform.SchemaRunner;
 
+if (args is ["--initialize-staging-sqlite", var sqlitePath])
+{
+    try
+    {
+        await SqliteSchema.InitializeAsync(sqlitePath);
+        Console.WriteLine("Empty SQLite staging schema initialized.");
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
+    {
+        Console.Error.WriteLine("SQLite staging initialization rejected. Use a new local database path in the staging directory.");
+        return 78;
+    }
+}
+
 string ReadProtectedFile(string path)
 {
     if (!Path.IsPathFullyQualified(path) || !File.Exists(path) || new FileInfo(path).LinkTarget is not null)

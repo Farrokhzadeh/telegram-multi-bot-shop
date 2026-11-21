@@ -15,7 +15,11 @@ exec 9>"$work/deploy.lock"
 flock -n 9
 
 [[ $(uname -m) == x86_64 ]]
-[[ $(df -PB1 "$work" | awk 'NR==2 {print $4}') -ge 3221225472 ]]
+available_bytes=$(df -PB1 "$work" | awk 'NR==2 {print $4}')
+if [[ $available_bytes -lt 3221225472 ]]; then
+    printf 'Akanti staging needs 3221225472 free bytes before pulling the image. Available: %s bytes.\n' "$available_bytes" >&2
+    exit 1
+fi
 [[ $(awk '/^MemAvailable:/ {print $2}' /proc/meminfo) -ge 1048576 ]]
 [[ $(nproc) -ge 2 ]]
 

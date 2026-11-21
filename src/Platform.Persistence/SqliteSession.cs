@@ -27,11 +27,17 @@ internal sealed class SqliteSessionFactory
     {
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
         await using var journal = connection.CreateCommand();
         journal.CommandText = "PRAGMA journal_mode";
         if (!string.Equals((string?)await journal.ExecuteScalarAsync(ct), "wal", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The SQLite database must be initialized in WAL mode.");
-        if (!write)
+        if (write)
+        {
+            journal.CommandText = "PRAGMA recursive_triggers=ON";
+            await journal.ExecuteNonQueryAsync(ct);
+        }
+        else
         {
             journal.CommandText = "PRAGMA query_only=ON";
             await journal.ExecuteNonQueryAsync(ct);
