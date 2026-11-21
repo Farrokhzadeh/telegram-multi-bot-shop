@@ -1,12 +1,12 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using Platform.Core;
 
 namespace Platform.Persistence;
 
 public static class SqliteSchema
 {
     private const string UtcFormat = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
-    private const string DecimalFormat = "0.############################";
 
     public static async Task InitializeAsync(string path, CancellationToken ct = default)
     {
@@ -44,6 +44,10 @@ public static class SqliteSchema
         await transaction.CommitAsync(CancellationToken.None);
     }
 
+    internal static string UtcText(DateTime value) => value.Kind == DateTimeKind.Utc
+        ? value.ToString(UtcFormat, CultureInfo.InvariantCulture)
+        : throw new ArgumentException("A UTC timestamp is required.", nameof(value));
+
     internal static void Configure(SqliteConnection connection)
     {
         connection.CreateFunction<string?, bool>("akanti_uuid", value => value?.Length == 36 && Guid.TryParseExact(value, "D", out _), isDeterministic: true);
@@ -59,5 +63,5 @@ public static class SqliteSchema
 
     private static bool TryCanonicalDecimal(string? value, out decimal result) =>
         decimal.TryParse(value, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out result) &&
-        string.Equals(value, result.ToString(DecimalFormat, CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        string.Equals(value, ExactDecimal.Format(result), StringComparison.Ordinal);
 }

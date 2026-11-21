@@ -24,7 +24,7 @@ public sealed class JobLease
 /// Trusted service persistence, not customer authorization or remote-effect permission. Caller owns the
 /// business transaction and explicit commit. No callback, network operation, retry loop or startup DDL.
 /// </summary>
-public static class OutboxStore
+public static partial class OutboxStore
 {
     private const string Columns = "j.id,j.brand_id,j.job_kind,coalesce(j.payment_id,j.order_id,j.fulfillment_id,j.campaign_id,j.discount_id,j.support_message_id,j.telegram_delivery_id,j.product_stock_subscription_id,j.supplier_request_id,j.product_id,j.product_supplier_source_id),j.audit_event_id,j.origin_revision,j.attempts,j.lease_until";
     private const string Fence = " WHERE j.id=$1 AND j.status='leased' AND j.locked_by=$2 AND j.attempts=$3 AND j.lease_until>clock_timestamp() AND (j.origin_revision IS NULL OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.revision=j.origin_revision))";
