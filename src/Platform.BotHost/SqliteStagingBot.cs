@@ -202,7 +202,7 @@ internal static class SqliteStagingBot
             !chat.TryGetProperty("id", out var chatId) || chatId.GetInt64() != tester ||
             !message.TryGetProperty("from", out var sender) ||
             !sender.TryGetProperty("id", out var from) || from.GetInt64() != senderExpected ||
-            sender.TryGetProperty("is_bot", out var bot) && bot.GetBoolean())
+            (!sender.TryGetProperty("is_bot", out var isBot) || isBot.GetBoolean() != (senderExpected != tester)))
             return false;
         return true;
     }
