@@ -14,7 +14,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         {
             var state = await ReadAsync(tx, context, order, token);
             var renewed = await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(30), token);
-            if (state.Kind!="product_purchase" || state.Payment is not ("paid" or "not_required") || state.Held || state.Review)
+            if (state.Kind != "product_purchase" || state.Payment is not ("paid" or "not_required") || state.Held || state.Review)
                 throw new UnauthorizedAccessException("Order is unavailable for manifest preparation.");
             if (state.Generation is null)
             {
@@ -75,7 +75,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
             var intent = await ReadIntentAsync(tx, delivery, token);
             var state = await ReadAsync(tx, context, intent.Order, token);
             var renewed = await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(30), token);
-            if (intent.Status=="succeeded")
+            if (intent.Status == "succeeded")
             {
                 await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
                 return (DeliveryDispatch?)null;
@@ -84,13 +84,13 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
                 SELECT 1 FROM telegram_deliveries WHERE order_id=$order AND purpose='order_credentials'
                 AND delivery_generation=$generation AND status='succeeded' AND id<>$id LIMIT 1
                 """, ("$order", intent.Order), ("$generation", intent.Generation), ("$id", delivery)))
-            if (await prior.ExecuteScalarAsync(token) is not null)
-            {
-                await Change(tx, "UPDATE telegram_deliveries SET status='cancelled',last_error_code='known_success' WHERE id=$id",
-                    token, ("$id", delivery));
-                await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
-                return (DeliveryDispatch?)null;
-            }
+                if (await prior.ExecuteScalarAsync(token) is not null)
+                {
+                    await Change(tx, "UPDATE telegram_deliveries SET status='cancelled',last_error_code='known_success' WHERE id=$id",
+                        token, ("$id", delivery));
+                    await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
+                    return (DeliveryDispatch?)null;
+                }
             if (intent.Status is not ("pending" or "retry") || intent.Generation != state.Generation ||
                 state.Status is not ("ready" or "delivering" or "completed") || !state.Released ||
                 state.Held || state.Review || state.Blocked)
@@ -104,7 +104,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
                 await using var rows = await metadata.ExecuteReaderAsync(token);
                 while (await rows.ReadAsync(token))
                 {
-                    if (rows.GetString(0)=="uncertain" || (!rows.IsDBNull(1) && rows.GetString(1)=="remote_outcome_unknown"))
+                    if (rows.GetString(0) == "uncertain" || (!rows.IsDBNull(1) && rows.GetString(1) == "remote_outcome_unknown"))
                     {
                         await OutboxStore.FailSqliteAsync(tx, renewed, JobError.CredentialRecovery, token);
                         await Change(tx, """
@@ -112,7 +112,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
                             """, token, ("$id", delivery));
                         return (DeliveryDispatch?)null;
                     }
-                    if (rows.GetString(0)=="leased")
+                    if (rows.GetString(0) == "leased")
                     {
                         await OutboxStore.RetrySqliteAsync(tx, renewed, TimeSpan.FromSeconds(1), 100, JobError.Busy, token);
                         return (DeliveryDispatch?)null;
@@ -150,15 +150,15 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         {
             var intent = await ReadIntentAsync(tx, delivery, token);
             var state = await ReadAsync(tx, context, intent.Order, token);
-            if (intent.Status=="succeeded") return 0;
-            if (intent.Status!="leased" || intent.Attempt!=lease.Attempt ||
-                intent.Generation!=state.Generation || !state.Released || state.Held || state.Review)
+            if (intent.Status == "succeeded") return 0;
+            if (intent.Status != "leased" || intent.Attempt != lease.Attempt ||
+                intent.Generation != state.Generation || !state.Released || state.Held || state.Review)
                 throw new UnauthorizedAccessException("Delivery lease no longer owns this intent.");
-            bool success = outcome.Kind==DeliveryOutcomeKind.Succeeded && outcome.MessageId is >0 &&
-                (intent.Target is null || intent.Target==outcome.MessageId);
+            bool success = outcome.Kind == DeliveryOutcomeKind.Succeeded && outcome.MessageId is > 0 &&
+                (intent.Target is null || intent.Target == outcome.MessageId);
             bool retry = intent.Target is not null && outcome.Kind is (DeliveryOutcomeKind.Unknown or DeliveryOutcomeKind.Retry);
             string status = success ? "succeeded" : retry ? "retry" :
-                outcome.Kind==DeliveryOutcomeKind.Unknown ? "uncertain" : "failed";
+                outcome.Kind == DeliveryOutcomeKind.Unknown ? "uncertain" : "failed";
             string now = SqliteSchema.UtcText(DateTime.UtcNow);
             string available = SqliteSchema.UtcText(DateTime.UtcNow.AddSeconds(5));
             await Change(tx, """
@@ -167,14 +167,14 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
                 WHERE id=$job AND telegram_delivery_id=$delivery AND attempts=$attempt
                     AND status='leased' AND locked_by=$worker AND lease_until>$now
                 """, token, ("$status", success ? "succeeded" : retry ? "retry" : "failed"), ("$available", available),
-                ("$now", now), ("$code", success ? "known_success" : status=="uncertain" ? "remote_outcome_unknown" : "credential_recovery"),
+                ("$now", now), ("$code", success ? "known_success" : status == "uncertain" ? "remote_outcome_unknown" : "credential_recovery"),
                 ("$job", lease.Id), ("$delivery", delivery), ("$attempt", lease.Attempt), ("$worker", lease.Worker.ToString("D")));
             await Change(tx, """
                 UPDATE telegram_deliveries SET status=$status,telegram_message_id=$message,
                     sent_at=CASE WHEN $status='succeeded' THEN $now ELSE NULL END,
                     last_error_code=$code,next_attempt_at=$available WHERE id=$delivery AND status='leased'
                 """, token, ("$status", status), ("$message", success ? outcome.MessageId : null), ("$now", now),
-                ("$code", success ? "known_success" : status=="uncertain" ? "remote_outcome_unknown" : "credential_recovery"),
+                ("$code", success ? "known_success" : status == "uncertain" ? "remote_outcome_unknown" : "credential_recovery"),
                 ("$available", available), ("$delivery", delivery));
             if (success)
             {
@@ -195,7 +195,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         {
             var intent = await ReadIntentAsync(tx, delivery, token);
             var state = await ReadAsync(tx, context, intent.Order, token);
-            if (!state.Released || state.Generation!=intent.Generation || state.Held || state.Review)
+            if (!state.Released || state.Generation != intent.Generation || state.Held || state.Review)
                 throw new UnauthorizedAccessException("Recovery authority changed.");
             string now = SqliteSchema.UtcText(DateTime.UtcNow);
             string status = intent.Target is null ? "failed" : "retry";
@@ -204,7 +204,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
                     completed_at=CASE WHEN $status='failed' THEN $now ELSE NULL END,last_error_code='remote_outcome_unknown'
                 WHERE telegram_delivery_id=$delivery AND status='leased' AND lease_until<=$now
                 """, ("$status", status), ("$now", now), ("$delivery", delivery));
-            if (await command.ExecuteNonQueryAsync(token)==1)
+            if (await command.ExecuteNonQueryAsync(token) == 1)
                 await Change(tx, "UPDATE telegram_deliveries SET status=$status,last_error_code='remote_outcome_unknown' WHERE id=$id AND status='leased'",
                     token, ("$status", intent.Target is null ? "uncertain" : "retry"), ("$id", delivery));
             return 0;
@@ -214,7 +214,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         sessions.RunAsync(false, async (_, tx, token) =>
         {
             var state = await ReadAsync(tx, context, order, token);
-            if (state.Telegram!=actor || !state.Released || state.Held || state.Review || state.Blocked)
+            if (state.Telegram != actor || !state.Released || state.Held || state.Review || state.Blocked)
                 throw new UnauthorizedAccessException("Manifest is unavailable.");
             using var manifest = await BuildAsync(tx, context, order, state.Quantity, true, token);
             Verify(state, order, manifest);
@@ -228,14 +228,14 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
             SELECT id FROM telegram_deliveries WHERE order_id=$order AND purpose='order_credentials'
             ORDER BY part_no DESC LIMIT 1
             """, ("$order", order)))
-        if (await lookup.ExecuteScalarAsync(ct) is string existing) return Guid.Parse(existing);
+            if (await lookup.ExecuteScalarAsync(ct) is string existing) return Guid.Parse(existing);
         Guid id = Guid.CreateVersion7();
         await Change(tx, """
             INSERT INTO telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,target_message_id,
                 delivery_generation,dedupe_key,order_id,part_no)
             VALUES ($id,$brand,'customer_dm',$member,'order_credentials','edit',$target,$generation,$key,$order,1)
             """, ct, ("$id", id), ("$brand", context.BrandId), ("$member", state.Member),
-            ("$target", target), ("$generation", state.Generation), ("$key", "credentials:"+order.ToString("D")+":"+state.Generation),
+            ("$target", target), ("$generation", state.Generation), ("$key", "credentials:" + order.ToString("D") + ":" + state.Generation),
             ("$order", order));
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(context.BrandId, id), id, DateTime.UtcNow, ct);
         return id;
@@ -277,7 +277,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         using var writer = new BinaryWriter(bytes, Encoding.UTF8, leaveOpen: true);
         var text = new StringBuilder();
         bool file = false;
-        int count=0;
+        int count = 0;
         var cipher = new BrandCipher(secrets);
         writer.Write(1);
         writer.Write(quantity);
@@ -290,9 +290,9 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         {
             int number = row.GetInt32(1);
             string status = row.GetString(5);
-            if (number!=count+1 || row.IsDBNull(2) || row.IsDBNull(3) || row.IsDBNull(4) ||
-                (frozen ? status is not ("ready" or "released") || row.IsDBNull(6) : status!="acquired"))
-                return new([],[],false,true);
+            if (number != count + 1 || row.IsDBNull(2) || row.IsDBNull(3) || row.IsDBNull(4) ||
+                (frozen ? status is not ("ready" or "released") || row.IsDBNull(6) : status != "acquired"))
+                return new([], [], false, true);
             Guid id = row.GetGuid(0);
             byte[] plain = cipher.Decrypt(context, "fulfillments", id, "delivered_content", row.GetString(4),
                 row.GetFieldValue<byte[]>(3));
@@ -303,32 +303,32 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
                 writer.Write(kind);
                 writer.Write(plain.Length);
                 writer.Write(plain);
-                if (bytes.Length>16777216) throw new InvalidOperationException("Manifest exceeds delivery limit.");
-                if (kind=="file") file=true;
+                if (bytes.Length > 16777216) throw new InvalidOperationException("Manifest exceeds delivery limit.");
+                if (kind == "file") file = true;
                 if (!file)
                 {
-                    try { text.Append(number).Append(". ").Append(new UTF8Encoding(false,true).GetString(plain)).Append('\n'); }
-                    catch (DecoderFallbackException) { file=true; }
-                    if (text.Length>4096) file=true;
+                    try { text.Append(number).Append(". ").Append(new UTF8Encoding(false, true).GetString(plain)).Append('\n'); }
+                    catch (DecoderFallbackException) { file = true; }
+                    if (text.Length > 4096) file = true;
                 }
             }
             finally { CryptographicOperations.ZeroMemory(plain); }
             count++;
         }
         byte[] content = bytes.ToArray();
-        return new(content, file ? content.ToArray() : Encoding.UTF8.GetBytes(text.ToString()), count==quantity, file);
+        return new(content, file ? content.ToArray() : Encoding.UTF8.GetBytes(text.ToString()), count == quantity, file);
     }
 
     private static void Verify(State state, Guid order, Manifest manifest)
     {
         if (state.Status is not ("ready" or "delivering" or "completed") || !state.Released ||
-            state.Generation is not Guid generation || !manifest.Complete || state.Asset!=Asset(order,generation) ||
-            state.Digest is null || !CryptographicOperations.FixedTimeEquals(state.Digest,SHA256.HashData(manifest.Bytes)))
+            state.Generation is not Guid generation || !manifest.Complete || state.Asset != Asset(order, generation) ||
+            state.Digest is null || !CryptographicOperations.FixedTimeEquals(state.Digest, SHA256.HashData(manifest.Bytes)))
             throw new UnauthorizedAccessException("Manifest is unavailable.");
     }
-    private static string Asset(Guid order, Guid generation) => "manifest:"+order.ToString("D")+":"+generation.ToString("D");
+    private static string Asset(Guid order, Guid generation) => "manifest:" + order.ToString("D") + ":" + generation.ToString("D");
     private static Guid Require(JobLease lease, JobKind kind, BrandContext context) =>
-        lease.Intent.Kind==kind && lease.Intent.BrandId==context.BrandId && lease.Intent.OriginId is Guid id
+        lease.Intent.Kind == kind && lease.Intent.BrandId == context.BrandId && lease.Intent.OriginId is Guid id
             ? id : throw new UnauthorizedAccessException("Job origin is unavailable.");
 
     private static async Task Change(SqliteTransaction tx, string sql, CancellationToken ct,
@@ -338,7 +338,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
     {
         using var command = SqliteWallet.Command(tx, sql, values);
         int changed = await command.ExecuteNonQueryAsync(ct);
-        if (exactlyOne && changed!=1) throw new UnauthorizedAccessException("Concurrent delivery modification.");
+        if (exactlyOne && changed != 1) throw new UnauthorizedAccessException("Concurrent delivery modification.");
     }
 
     private sealed class Manifest(byte[] bytes, byte[] payload, bool complete, bool file) : IDisposable
@@ -353,7 +353,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
             CryptographicOperations.ZeroMemory(Payload);
         }
     }
-    private sealed record State(Guid Member,int Quantity,string Kind,string Payment,string Status,Guid? Generation,
-        string? Asset,byte[]? Digest,bool Released,bool Held,bool Review,long Telegram,bool Blocked);
-    private sealed record Intent(Guid Order,Guid Generation,long? Target,string Status,long Attempt);
+    private sealed record State(Guid Member, int Quantity, string Kind, string Payment, string Status, Guid? Generation,
+        string? Asset, byte[]? Digest, bool Released, bool Held, bool Review, long Telegram, bool Blocked);
+    private sealed record Intent(Guid Order, Guid Generation, long? Target, string Status, long Attempt);
 }
