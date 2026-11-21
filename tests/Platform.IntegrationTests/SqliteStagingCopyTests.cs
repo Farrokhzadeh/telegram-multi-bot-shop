@@ -14,7 +14,7 @@ public sealed class SqliteStagingCopyTests
         try
         {
             var path = Path.Combine(directory.FullName, "staging.db");
-            var result = await SqliteStagingCopy.CopyAsync(fixture.Database.Data.ConnectionString, path, ct);
+            var result = await SqliteStagingCopy.CopyAsync(fixture.Database.Data, path, ct);
             Assert.Equal(28, result.Tables);
             Assert.True(result.Rows > 0);
             Assert.True(File.Exists(path));
@@ -36,7 +36,7 @@ public sealed class SqliteStagingCopyTests
                 return true;
             }, ct);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                SqliteStagingCopy.CopyAsync(fixture.Database.Data.ConnectionString, path, ct));
+                SqliteStagingCopy.CopyAsync(fixture.Database.Data, path, ct));
             var again = new SqliteSessionFactory(path);
             await again.RunAsync(false, async (_, tx, token) =>
             {
