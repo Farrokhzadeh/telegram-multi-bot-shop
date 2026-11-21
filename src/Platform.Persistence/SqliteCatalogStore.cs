@@ -11,6 +11,23 @@ namespace Platform.Persistence;
 
 public sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
 {
+    public Task<Guid[]> VisibleProductsAsync(BrandContext context, long actor, CancellationToken ct = default) =>
+        sessions.RunAsync(false, async (_, tx, token) =>
+        {
+            using var command = SqliteWallet.Command(tx, """
+                SELECT l.product_id FROM brand_products l JOIN products p ON p.id=l.product_id
+                JOIN brands b ON b.id=l.brand_id JOIN users u ON u.brand_id=b.id
+                WHERE l.brand_id=$brand AND b.bot_id=$bot AND b.active=1
+                    AND u.telegram_id=$actor AND u.blocked_at IS NULL AND u.banned_at IS NULL
+                    AND l.visible=1 AND p.active=1 AND b.require_channel_join=0
+                ORDER BY l.product_id LIMIT 25
+                """, ("$brand", context.BrandId), ("$bot", context.BotId), ("$actor", actor));
+            var results = new List<Guid>();
+            await using var rows = await command.ExecuteReaderAsync(token);
+            while (await rows.ReadAsync(token)) results.Add(rows.GetGuid(0));
+            return results.ToArray();
+        }, ct);
+
     public Task<CatalogItem?> GetAsync(BrandContext context, long actor, Guid product, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
