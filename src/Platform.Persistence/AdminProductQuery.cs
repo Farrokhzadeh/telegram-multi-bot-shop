@@ -15,9 +15,7 @@ public sealed partial class DbSession
                 .Options;
             await using var catalog = new AdminProductQuery(config);
             await catalog.Database.UseTransactionAsync(transaction, ct);
-            var products = catalog.Set<AdminProduct>().AsNoTracking();
-            if (after is { } cursor) products = products.Where(product => product.Id.CompareTo(cursor) > 0);
-            return await products.OrderBy(product => product.Id).Take(count).ToListAsync(ct);
+            return await catalog.ListAsync(after, count, ct);
         }
         catch (Exception error) { throw RecordFailure(error, DbPhase.Executing, ct); }
         finally { Exit(); }
@@ -26,10 +24,17 @@ public sealed partial class DbSession
 
 internal sealed class AdminProductQuery(DbContextOptions<AdminProductQuery> options) : DbContext(options)
 {
+    internal Task<List<AdminProduct>> ListAsync(Guid? after, int count, CancellationToken ct)
+    {
+        var products = Set<AdminProduct>().AsNoTracking();
+        if (after is { } cursor) products = products.Where(product => product.Id.CompareTo(cursor) > 0);
+        return products.OrderBy(product => product.Id).Take(count).ToListAsync(ct);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var product = modelBuilder.Entity<AdminProduct>();
-        product.ToTable("products", "shop");
+        product.ToTable("products", Database.IsSqlite() ? null : "shop");
         product.HasKey(p => p.Id);
         product.Property(p => p.Id).HasColumnName("id").ValueGeneratedNever();
         product.Property(p => p.Title).HasColumnName("title");

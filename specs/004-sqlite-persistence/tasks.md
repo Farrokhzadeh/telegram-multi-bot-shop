@@ -4,7 +4,7 @@
 
 ## Setup
 
-- [ ] T001 Pin Microsoft.Data.Sqlite and the EF Core 10 SQLite provider in `Directory.Packages.props` and `src/Platform.Persistence/Platform.Persistence.csproj`. Regenerate affected lock files.
+- [x] T001 Pin Microsoft.Data.Sqlite and the EF Core 10 SQLite provider in `Directory.Packages.props` and `src/Platform.Persistence/Platform.Persistence.csproj`. Regenerate affected lock files.
 
 ## Foundation
 
