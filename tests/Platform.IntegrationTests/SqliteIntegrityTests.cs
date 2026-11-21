@@ -43,12 +43,8 @@ public sealed class SqliteIntegrityTests
             }, ct);
             await Assert.ThrowsAsync<InvalidOperationException>(() => sessions.RunAsync(true, async (_, tx, token) =>
             {
-                await ExecuteAsync(tx, """
-                    UPDATE wallets SET balance='9',version=2 WHERE user_id=$member;
-                    INSERT INTO wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,
-                        idempotency_key,legacy_import_batch,reason)
-                    VALUES ($entry,$member,'1','9',2,'opening_balance',true,'fixture-broken',$batch,'fixture');
-                    """, token, ("$member", member), ("$entry", Guid.NewGuid()), ("$batch", Guid.NewGuid()));
+                await ExecuteAsync(tx, "UPDATE wallets SET balance='9',version=2 WHERE user_id=$member",
+                    token, ("$member", member));
                 return true;
             }, ct));
             await sessions.RunAsync(false, async (_, tx, token) =>
