@@ -15,6 +15,35 @@ public sealed class SqliteStagingJobs(SqliteSessionFactory sessions)
             OutboxStore.ClaimSqliteAsync(tx, context.BrandId, kind, worker, TimeSpan.FromSeconds(90), token), ct);
     }
 
+    public Task<string> PurposeAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
+    {
+        if (lease.Intent.Kind != JobKind.SendTelegram || lease.Intent.BrandId != context.BrandId ||
+            lease.Intent.OriginId is not Guid id)
+            throw new UnauthorizedAccessException();
+        return sessions.RunAsync(false, async (_, tx, token) =>
+        {
+            using var command = SqliteWallet.Command(tx, """
+                SELECT purpose FROM telegram_deliveries WHERE id=$id AND brand_id=$brand
+                """, ("$id", id), ("$brand", context.BrandId));
+            return (string?)await command.ExecuteScalarAsync(token) ??
+                throw new UnauthorizedAccessException("Staging Telegram purpose is unavailable.");
+        }, ct);
+    }
+
+    public Task<Guid[]> ExpiredCredentialsAsync(BrandContext context, CancellationToken ct = default) =>
+        sessions.RunAsync(false, async (_, tx, token) =>
+        {
+            using var command = SqliteWallet.Command(tx, """
+                SELECT d.id FROM telegram_deliveries d JOIN jobs j ON j.telegram_delivery_id=d.id
+                WHERE d.brand_id=$brand AND d.purpose='order_credentials' AND d.status='leased'
+                    AND j.status='leased' AND j.lease_until<=$now ORDER BY j.lease_until,j.id LIMIT 50
+                """, ("$brand", context.BrandId), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
+            var rows = new List<Guid>();
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token)) rows.Add(reader.GetGuid(0));
+            return rows.ToArray();
+        }, ct);
+
     public Task<int> PendingAsync(BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
@@ -105,6 +134,9 @@ public sealed class SqliteStatusDeliveryStore(SqliteSessionFactory sessions)
                 ("$code",success?"known_success":retry?"idempotent_edit_retry":"remote_outcome_unknown"),
                 ("$available",future),("$id",id),("$attempt",lease.Attempt)))
                 if(await update.ExecuteNonQueryAsync(token)!=1) throw new UnauthorizedAccessException("Status dispatch state changed.");
+            if(success)
+                await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.PrepareManifest,
+                    context.BrandId, state.Order), id, DateTime.UtcNow, token);
             return 0;
         },ct);
     }
