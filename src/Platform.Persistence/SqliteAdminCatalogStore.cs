@@ -7,13 +7,13 @@ namespace Platform.Persistence;
 
 internal static class SqliteAdminSessionStore
 {
-    internal static Task<AuthenticatedAdmin> AuthenticateAsync(SqliteSessionFactory sessions, AdminToken token,
+    internal static async Task<AuthenticatedAdmin> AuthenticateAsync(SqliteSessionFactory sessions, AdminToken token,
         CancellationToken ct = default)
     {
         byte[] hash = token.Hash();
         try
         {
-            return sessions.RunAsync(false, async (_, tx, cancel) =>
+            return await sessions.RunAsync(false, async (_, tx, cancel) =>
             {
                 using var command = SqliteWallet.Command(tx, """
                     SELECT a.id,s.id,a.auth_version
