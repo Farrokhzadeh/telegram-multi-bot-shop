@@ -54,6 +54,7 @@ public static class SqliteStagingApi
                 var ingress = new SqliteStagingIngress(config.Sessions);
                 var catalog = new SqliteCatalogStore(config.Sessions, secrets);
                 var screens = new SqliteCustomerScreens(config.Sessions);
+                var checkout = new SqliteCheckoutStore(config.Sessions, secrets);
                 var admin = new SqliteAdminCatalogStore(config.Sessions);
                 var builder = WebApplication.CreateSlimBuilder();
                 builder.WebHost.UseUrls("http://127.0.0.1:18081");
@@ -76,7 +77,7 @@ public static class SqliteStagingApi
                         if (request is null || request.User != config.Recipient ||
                             request.Value.Length > 4096 || request.MessageText?.Length > 4096)
                             throw new UnauthorizedAccessException();
-                        SqliteStageReply reply = await ProcessAsync(request, config, catalog, screens, ingress,
+                        SqliteStageReply reply = await ProcessAsync(request, config, catalog, checkout, screens, ingress,
                             http.RequestAborted);
                         await http.Response.WriteAsJsonAsync(reply, SqliteStageApiJson.Default.SqliteStageReply,
                             http.RequestAborted);
@@ -187,7 +188,7 @@ public static class SqliteStagingApi
     }
 
     private static async Task<SqliteStageReply> ProcessAsync(SqliteStageRequest request,
-        SqliteStagingConfiguration config, SqliteCatalogStore catalog, SqliteCustomerScreens screens,
+        SqliteStagingConfiguration config, SqliteCatalogStore catalog, SqliteCheckoutStore checkout, SqliteCustomerScreens screens,
         SqliteStagingIngress ingress, CancellationToken ct)
     {
         if (request.Kind is not ("message" or "callback") || request.Value.Length is <1 or >4096 ||
@@ -275,7 +276,6 @@ public static class SqliteStagingApi
             if(confirmed!=QuoteText(prepared.Quote))
                 return new(true,"The staging quote changed. Open /shop to review the new price.",true);
             LocalCheckoutRequest requestToBuy=await catalog.RequireLocalAsync(context,actor,prepared,orderId,ct);
-            var checkout=new SqliteCheckoutStore(config.Sessions,catalog.Secrets);
             CheckoutResult result=await checkout.PurchaseLocalAsync(context,requestToBuy.PolicyRevision,actor,
                 requestToBuy,ct);
             if(result.Outcome is CheckoutOutcome.Purchased or CheckoutOutcome.Replayed)
