@@ -56,6 +56,8 @@ public static class SqliteSchema
         connection.CreateFunction<string, int, string>("akanti_add_minutes", (value, minutes) =>
             DateTime.ParseExact(value, UtcFormat, CultureInfo.InvariantCulture).AddMinutes(minutes)
                 .ToString(UtcFormat, CultureInfo.InvariantCulture), isDeterministic: true);
+        connection.CreateFunction<string, string, string>("akanti_decimal_add", (left, right) =>
+            ExactDecimal.Format(checked(ExactDecimal.Parse(left) + ExactDecimal.Parse(right))), isDeterministic: true);
         connection.CreateFunction<string?, bool>("akanti_decimal", value => TryCanonicalDecimal(value, out _), isDeterministic: true);
         connection.CreateFunction<string?, string, int?>("akanti_decimal_compare", (left, right) =>
             TryCanonicalDecimal(left, out var a) && TryCanonicalDecimal(right, out var b) ? decimal.Compare(a, b) : null, isDeterministic: true);
