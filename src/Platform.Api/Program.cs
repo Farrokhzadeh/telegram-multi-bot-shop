@@ -3,7 +3,17 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Hosting;
 using Platform.Api;
 using Platform.Core;
+using Platform.Persistence;
 using Platform.Security;
+
+if (args is ["--copy-staging-postgres-to-sqlite", "--destination", var file])
+{
+    var source = Environment.GetEnvironmentVariable("SHOP_STAGING_POSTGRES_READONLY")
+        ?? throw new InvalidOperationException("The staging-only read-only database source is not configured.");
+    var copy = await SqliteStagingCopy.CopyAsync(source, file);
+    Console.WriteLine("PASS: synthetic staging copy; tables=" + copy.Tables + ", rows=" + copy.Rows);
+    return 0;
+}
 
 if (args is ["--serve-synthetic-staging", var role])
     return await SyntheticStaging.RunAsync(role);
