@@ -5,9 +5,9 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-internal static class SqliteAdminSessionStore
+public static class SqliteAdminSessionStore
 {
-    internal static async Task<AuthenticatedAdmin> AuthenticateAsync(SqliteSessionFactory sessions, AdminToken token,
+    public static async Task<AuthenticatedAdmin> AuthenticateAsync(SqliteSessionFactory sessions, AdminToken token,
         CancellationToken ct = default)
     {
         byte[] hash = token.Hash();
@@ -44,9 +44,9 @@ internal static class SqliteAdminSessionStore
     }
 }
 
-internal sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)
+public sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)
 {
-    internal Task<AdminPage<AdminBrand>> BrandsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default) =>
+    public Task<AdminPage<AdminBrand>> BrandsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
             AdminCommand.Page(limit);
@@ -64,7 +64,7 @@ internal sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)
                 items.Count>limit ? items[limit-1].Id : null);
         }, ct);
 
-    internal Task<BrandPolicyDetail> PolicyAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default) =>
+    public Task<BrandPolicyDetail> PolicyAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
             await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
@@ -102,7 +102,7 @@ internal sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)
             return new BrandPolicyDetail(value,require,channels.ToArray(),revision);
         }, ct);
 
-    internal Task<ExchangeRateMetadata> FxAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default) =>
+    public Task<ExchangeRateMetadata> FxAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
             await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
@@ -118,7 +118,7 @@ internal sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)
                 row.IsDBNull(3)?null:row.GetString(3));
         }, ct);
 
-    internal Task<AdminPage<AdminProduct>> ProductsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default) =>
+    public Task<AdminPage<AdminProduct>> ProductsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (connection, tx, token) =>
         {
             AdminCommand.Page(limit);
@@ -131,7 +131,7 @@ internal sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)
                 products.Count>limit?products[limit-1].Id:null);
         }, ct);
 
-    internal Task<AdminPage<InventoryMetadata>> InventoryAsync(AuthenticatedAdmin actor, Guid product, Guid? after,
+    public Task<AdminPage<InventoryMetadata>> InventoryAsync(AuthenticatedAdmin actor, Guid product, Guid? after,
         int limit, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
