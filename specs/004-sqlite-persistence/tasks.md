@@ -19,6 +19,8 @@
 - [ ] T005 [US1] Port checkout, payments, wallets, inventory allocation, and durable jobs as one batch in `src/Platform.Persistence/`, starting with `CheckoutStore.cs`, `PaymentSettlementStore.cs`, and `OutboxStore.cs`. Preserve exact decimal amounts and denominations, immutable postings, encryption, replay keys, and lease fences. Keep provider calls outside write transactions and retain uncertain outcomes for administrator review.
 - [ ] T006 [US1] Wire SQLite mode through the staging API, bot, and worker entry points in `src/` and `ops/staging/deploy-shop-runtime.sh`. Share one persistent local database directory, reject an uninitialized file at startup, and retain rollback to the previous staging release.
 
+**T005 progress** — SQLite local wallet checkout, encrypted allocation, verified crypto wallet top-up settlement, and outbox storage have focused coverage. Prepared checkout, payment evidence and order settlement, and delivery processing still use PostgreSQL.
+
 ## Qualification and deployment
 
 - [ ] T007 Run the existing applicable automated checks through `.github/workflows/backend-ci.yml`. Adapt the fixtures in `tests/Platform.IntegrationTests/` and `tests/Shared/` for SQLite. Verify exact balances and stock, one settlement under replay, and restart recovery with stale lease rejection. Retain PostgreSQL regression checks.

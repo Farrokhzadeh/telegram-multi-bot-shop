@@ -122,7 +122,7 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
         return new(CheckoutOutcome.Purchased, request.OrderId);
     }
 
-    private static byte[] Fingerprint(BrandContext context, Guid member, LocalCheckoutRequest request)
+    internal static byte[] Fingerprint(BrandContext context, Guid member, LocalCheckoutRequest request)
     {
         using var bytes = new MemoryStream();
         using (var writer = new BinaryWriter(bytes, Encoding.UTF8, leaveOpen: true))
