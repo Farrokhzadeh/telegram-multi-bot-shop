@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Platform.Core;
@@ -27,7 +26,8 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
             var current = await LoadAsync(tx, context, expectedRevision, payment, token);
             if (current.Status == "settled") return Replayed(current);
             if (!Ready(current)) return Incomplete(current);
-            if (current != before with { Hash = current.Hash } || current.Hash is null || before.Hash is null ||
+            var unchanged = before with { Hash = current.Hash };
+            if (current != unchanged || current.Hash is null || before.Hash is null ||
                 !CryptographicOperations.FixedTimeEquals(current.Hash, before.Hash) ||
                 Stopwatch.GetElapsedTime(remote.ObservedAt) > TimeSpan.FromSeconds(30))
                 throw new PaymentNoticeRejectedException();
@@ -169,7 +169,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
             VALUES ($entry,$member,$amount,$new,$version,$kind,1,$key,$order,$payment,'verified_original_invoice')
             """, ct, ("$entry", entry), ("$member", state.Member), ("$amount", ExactDecimal.Format(increase.Amount)),
             ("$new", ExactDecimal.Format(wallet.Balance.Add(increase).Amount)), ("$version", checked(wallet.Version+1)),
-            ("$kind", kind), ("$key", "payment-credit:"+state.Origin), ("$order", state.Order),
+            ("$kind", kind), ("$key", "payment-credit:"+state.PaymentId.ToString("D")), ("$order", state.Order),
             ("$payment", state.PaymentId));
         return entry;
     }
