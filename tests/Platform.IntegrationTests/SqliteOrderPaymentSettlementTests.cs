@@ -90,10 +90,10 @@ public sealed class SqliteOrderPaymentSettlementTests
                 Assert.True(await row.ReadAsync(token));
                 Assert.Equal(stocked ? 0 : 1, row.GetInt64(0));
                 Assert.Equal(stocked ? 1 : 0, row.GetInt64(1));
-                Assert.Equal(1,row.GetInt64(2));
-                Assert.Equal(1,row.GetInt64(3));
-                Assert.Equal(stocked ? 1 : 0,row.GetInt64(4));
-                Assert.Equal("paid",row.GetString(5));
+                Assert.Equal(1, row.GetInt64(2));
+                Assert.Equal(1, row.GetInt64(3));
+                Assert.Equal(stocked ? 1 : 0, row.GetInt64(4));
+                Assert.Equal("paid", row.GetString(5));
                 Assert.Equal(stocked ? "acquiring" : "compensated", row.GetString(6));
                 return true;
             }, ct);
