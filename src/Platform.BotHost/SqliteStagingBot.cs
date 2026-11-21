@@ -166,7 +166,7 @@ internal static class SqliteStagingBot
         kind="";value="";anchor=null;prior=null;callbackId=null;
         if(update.TryGetProperty("message",out var message))
         {
-            if(!PrivateChat(message,tester) || !message.TryGetProperty("text",out var text) ||
+            if(!PrivateChat(message,tester,tester) || !message.TryGetProperty("text",out var text) ||
                 text.ValueKind!=JsonValueKind.String)return false;
             string? original=text.GetString();
             if(original is null || original.Length is <1 or >4096)return false;
@@ -177,7 +177,7 @@ internal static class SqliteStagingBot
         {
             if(!callback.TryGetProperty("from",out var actor) ||
                 !actor.TryGetProperty("id",out var sender) || sender.GetInt64()!=tester ||
-                !callback.TryGetProperty("message",out var msg) || !PrivateChat(msg,tester) ||
+                !callback.TryGetProperty("message",out var msg) || !PrivateChat(msg,tester,bot) ||
                 !msg.TryGetProperty("from",out var origin) || !origin.TryGetProperty("id",out var from) ||
                 from.GetInt64()!=bot || !callback.TryGetProperty("data",out var data) ||
                 data.ValueKind!=JsonValueKind.String || !callback.TryGetProperty("id",out var query))
@@ -194,13 +194,13 @@ internal static class SqliteStagingBot
         return false;
     }
 
-    private static bool PrivateChat(JsonElement message,long tester)
+    private static bool PrivateChat(JsonElement message,long tester,long senderExpected)
     {
         if(!message.TryGetProperty("chat",out var chat) ||
             !chat.TryGetProperty("type",out var type) || type.GetString()!="private" ||
             !chat.TryGetProperty("id",out var chatId) || chatId.GetInt64()!=tester ||
             !message.TryGetProperty("from",out var sender) ||
-            !sender.TryGetProperty("id",out var from) || from.GetInt64()!=tester ||
+            !sender.TryGetProperty("id",out var from) || from.GetInt64()!=senderExpected ||
             sender.TryGetProperty("is_bot",out var bot) && bot.GetBoolean())
             return false;
         return true;
