@@ -71,7 +71,7 @@ public static class SqliteStagingApi
                     long next = await ingress.NextOffsetAsync(config.Context, http.RequestAborted);
                     return Results.Text(next.ToString(CultureInfo.InvariantCulture));
                 });
-                app.MapPost("/staging/update", async (HttpContext http) =>
+                app.MapMethods("/staging/update", ["POST"], (RequestDelegate)(async (HttpContext http) =>
                 {
                     if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
                     try
@@ -85,6 +85,7 @@ public static class SqliteStagingApi
                             throw new UnauthorizedAccessException();
                         SqliteStageReply reply = await ProcessAsync(request, config, catalog, checkout, screens, ingress,
                             http.RequestAborted);
+                        http.Response.ContentType = "application/json";
                         await JsonSerializer.SerializeAsync(http.Response.Body, reply, SqliteStageApiJson.Default.SqliteStageReply,
                             http.RequestAborted);
                     }
@@ -92,14 +93,15 @@ public static class SqliteStagingApi
                         or PricingRejectedException or FormatException or InvalidOperationException)
                     {
                         http.Response.StatusCode = 409;
+                        http.Response.ContentType = "application/json";
                         await JsonSerializer.SerializeAsync(http.Response.Body, new SqliteStageReply(false,
                             "This staging action is unavailable. Open /shop again."),
                             SqliteStageApiJson.Default.SqliteStageReply, http.RequestAborted);
                     }
-                });
-                app.MapPost("/staging/ack", async (HttpContext http) =>
+                }));
+                app.MapMethods("/staging/ack", ["POST"], (RequestDelegate)(async (HttpContext http) =>
                 {
-                    if (!Authorize(http, privateKey)) return Results.Unauthorized();
+                    if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
                     try
                     {
                         var request = await JsonSerializer.DeserializeAsync(http.Request.Body,
@@ -110,11 +112,11 @@ public static class SqliteStagingApi
                             throw new UnauthorizedAccessException();
                         _ = await ingress.UpdateFlowAsync(config.Context, config.SyntheticActor, "catalog",
                             request.Product, null, request.Anchor, request.Revision, http.RequestAborted);
-                        return Results.Ok();
+                        http.Response.StatusCode = 204;
                     }
                     catch (Exception error) when (error is UnauthorizedAccessException or ArgumentException)
-                    { return Results.Conflict(); }
-                });
+                    { http.Response.StatusCode = 409; }
+                }));
                 app.MapGet("/admin/brands", async (HttpContext http) =>
                 {
                     if (!Authorize(http, privateKey)) return Results.Unauthorized();
