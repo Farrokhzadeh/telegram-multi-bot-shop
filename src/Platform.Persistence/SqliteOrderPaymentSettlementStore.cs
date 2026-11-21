@@ -121,7 +121,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
                 o.quantity,o.order_kind,p.payment_method,p.amount_due,p.expected_network_amount,p.network_amount,p.amount_received,
                 p.provider_payment_ref,p.idempotency_ref,p.network_asset,p.provider_status_code,p.provider_code,
                 p.ipn_payload_sha256,p.evidence_asset_ref,p.confirmed_at,p.first_payment_observed_at,o.payment_due_at,
-                p.compensating_wallet_entry_id
+                p.compensating_wallet_entry_id,p.id
             FROM payments p JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=o.user_id
             JOIN brands b ON b.id=u.brand_id
             WHERE p.id=$payment AND b.id=$brand AND b.bot_id=$bot AND b.active=1 AND b.policy_version=$revision
@@ -133,7 +133,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
             row.GetBoolean(6), row.GetInt32(7), row.GetString(8), row.GetString(9), ExactDecimal.Parse(row.GetString(10)),
             Number(row,11), Number(row,12), Number(row,13), Text(row,14), row.GetString(15), Text(row,16), Text(row,17),
             Text(row,18), row.IsDBNull(19) ? null : row.GetFieldValue<byte[]>(19), !row.IsDBNull(20),
-            Text(row,21), Text(row,22), Text(row,23), row.IsDBNull(24) ? null : row.GetGuid(24));
+            Text(row,21), Text(row,22), Text(row,23), row.IsDBNull(24) ? null : row.GetGuid(24), row.GetGuid(25));
     }
 
     private static bool Ready(State state) =>
@@ -256,8 +256,5 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
     private sealed record State(Guid Member, Guid Order, Guid Product, string Status, string OrderStatus, string Fulfillment,
         bool Preorder, int Quantity, string Kind, string Method, decimal Due, decimal? Expected, decimal? Tokens,
         decimal? Received, string? Provider, string Origin, string? Asset, string? ProviderStatus, string? ProviderCode,
-        byte[]? Hash, bool Evidence, string? Confirmed, string? First, string? Deadline, Guid? Credit)
-    {
-        internal Guid PaymentId => Guid.Parse(Origin.StartsWith("order:",StringComparison.Ordinal) ? Origin[6..] : Origin);
-    }
+        byte[]? Hash, bool Evidence, string? Confirmed, string? First, string? Deadline, Guid? Credit, Guid PaymentId);
 }
