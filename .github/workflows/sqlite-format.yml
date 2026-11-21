@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          files=(src/Platform.Persistence/Sqlite*.cs tests/Platform.IntegrationTests/Sqlite*.cs)
+          files=(src/Platform.Persistence/Sqlite*.cs src/Platform.Api/Sqlite*.cs src/Platform.BotHost/Sqlite*.cs src/Platform.JobHost/Sqlite*.cs tests/Platform.IntegrationTests/Sqlite*.cs)
           test "${#files[@]}" -gt 0
           dotnet format whitespace Platform.sln --no-restore --include "${files[@]}"
           git diff --check
