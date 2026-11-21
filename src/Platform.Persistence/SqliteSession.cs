@@ -3,12 +3,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Platform.Persistence;
 
-internal sealed class SqliteSessionFactory
+public sealed class SqliteSessionFactory
 {
     private readonly string connectionString;
     private readonly int timeoutSeconds;
 
-    internal SqliteSessionFactory(string path, int timeoutSeconds = 5)
+    public SqliteSessionFactory(string path, int timeoutSeconds = 5)
     {
         if (!Path.IsPathFullyQualified(path)) throw new ArgumentException("An absolute SQLite database path is required.", nameof(path));
         if (timeoutSeconds < 1) throw new ArgumentOutOfRangeException(nameof(timeoutSeconds));
