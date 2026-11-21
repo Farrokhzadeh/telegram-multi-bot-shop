@@ -189,7 +189,7 @@ public static class SqliteStagingApi
                     { return Results.Unauthorized(); }
                 });
                 Console.WriteLine("Managed SQLite staging API is starting.");
-                await app.RunAsync(ct);
+                await app.RunAsync();
                 return 0;
             }
             finally { CryptographicOperations.ZeroMemory(privateKey); }
