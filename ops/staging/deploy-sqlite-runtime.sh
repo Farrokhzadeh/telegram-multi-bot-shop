@@ -171,6 +171,8 @@ done
     { printf 'Managed SQLite Telegram bot health check failed.\n' >&2; exit 1; }
 docker exec "$api" sh -ec     'key=$(cat /stage/tester/api-key); test "$(curl -fsS --max-time 2 --noproxy "*" -H "X-Staging-Key: $key" http://127.0.0.1:18081/health/sqlite)" = "sqlite:ready"'
 
+docker exec "$api" /app/Api/Platform.Api --verify-sqlite-staging
+
 next=$(mktemp "$work/sqlite-active.XXXXXX")
 printf '%s\n' "$api" "$worker" "$bot" "sha256:$digest" "$commit" > "$next"
 chmod 0600 "$next"
