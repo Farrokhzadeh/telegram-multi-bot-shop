@@ -65,6 +65,12 @@ public static class SqliteStagingApi
                     await ingress.NextOffsetAsync(config.Context, http.RequestAborted);
                     return Results.Text("sqlite:ready");
                 });
+                app.MapGet("/staging/cursor", async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) return Results.Unauthorized();
+                    long next = await ingress.NextOffsetAsync(config.Context, http.RequestAborted);
+                    return Results.Text(next.ToString(CultureInfo.InvariantCulture));
+                });
                 app.MapPost("/staging/update", async (HttpContext http) =>
                 {
                     if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
