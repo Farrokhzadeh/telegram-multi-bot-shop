@@ -38,7 +38,7 @@ public sealed class SqliteCustomerScreensTests
             var firstOrder = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
-                for (int i=0;i<8;i++)
+                for (int i = 0; i < 8; i++)
                 {
                     using var order = SqliteWallet.Command(tx, """
                         INSERT INTO orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,unit_price_usdt,
@@ -46,28 +46,28 @@ public sealed class SqliteCustomerScreensTests
                             brand_public_name_snapshot,product_title_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,payment_confirmed_at)
                         VALUES ($id,$member,$product,1,'product_purchase','paid','USDT','wallet','10',false,'5000',
                             'synthetic','Fixture','Fixture','wallet','local',true,false,$now)
-                        """, ("$id", i==0 ? firstOrder : Guid.NewGuid()), ("$member", i==7 ? second : first),
+                        """, ("$id", i == 0 ? firstOrder : Guid.NewGuid()), ("$member", i == 7 ? second : first),
                         ("$product", product), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
                     await order.ExecuteNonQueryAsync(token);
                 }
                 return true;
             }, ct);
             var screen = new SqliteCustomerScreens(new SqliteSessionFactory(path));
-            var home = await screen.HomeAsync(contexts[0],7001,ct);
-            Assert.Equal("First",home.Brand);
-            Assert.Equal(7,home.Orders);
-            Assert.Equal(0,home.Balance);
-            var page0 = await screen.ListAsync(contexts[0],7001,CustomerScreenList.Orders,"all",0,ct);
-            var page1 = await screen.ListAsync(contexts[0],7001,CustomerScreenList.Orders,"all",1,ct);
-            Assert.Equal(5,page0.Entries.Count);
+            var home = await screen.HomeAsync(contexts[0], 7001, ct);
+            Assert.Equal("First", home.Brand);
+            Assert.Equal(7, home.Orders);
+            Assert.Equal(0, home.Balance);
+            var page0 = await screen.ListAsync(contexts[0], 7001, CustomerScreenList.Orders, "all", 0, ct);
+            var page1 = await screen.ListAsync(contexts[0], 7001, CustomerScreenList.Orders, "all", 1, ct);
+            Assert.Equal(5, page0.Entries.Count);
             Assert.True(page0.HasNext);
-            Assert.Equal(2,page1.Entries.Count);
+            Assert.Equal(2, page1.Entries.Count);
             Assert.False(page1.HasNext);
-            Assert.NotNull(await screen.DetailAsync(contexts[0],7001,CustomerScreenList.Orders,firstOrder,ct));
-            Assert.Null(await screen.DetailAsync(contexts[1],7001,CustomerScreenList.Orders,firstOrder,ct));
-            await screen.SetLanguageAsync(contexts[0],7001,"fa",ct);
-            Assert.Equal("fa",(await screen.HomeAsync(contexts[0],7001,ct)).Language);
-            Assert.Equal("fa",(await screen.HomeAsync(contexts[1],7001,ct)).Language);
+            Assert.NotNull(await screen.DetailAsync(contexts[0], 7001, CustomerScreenList.Orders, firstOrder, ct));
+            Assert.Null(await screen.DetailAsync(contexts[1], 7001, CustomerScreenList.Orders, firstOrder, ct));
+            await screen.SetLanguageAsync(contexts[0], 7001, "fa", ct);
+            Assert.Equal("fa", (await screen.HomeAsync(contexts[0], 7001, ct)).Language);
+            Assert.Equal("fa", (await screen.HomeAsync(contexts[1], 7001, ct)).Language);
         }
         finally { directory.Delete(recursive: true); }
     }
