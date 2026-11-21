@@ -78,6 +78,19 @@ public sealed class SqliteStagingConfiguration
             new SecretLoadGrant(service, StageDeployment, 7, [StageBrand], inventory));
     }
 
+    public byte[] ReadApiKey()
+    {
+        byte[] source = ReadPrivate("/stage/tester/api-key", 128);
+        try
+        {
+            if (source.Length != 64 || source.Any(c => !(c is >= (byte)'0' and <= (byte)'9' or
+                    >= (byte)'a' and <= (byte)'f')))
+                throw new UnauthorizedAccessException("Staging service key is invalid.");
+            return Convert.FromHexString(Encoding.ASCII.GetString(source));
+        }
+        finally { CryptographicOperations.ZeroMemory(source); }
+    }
+
     public string ReadTelegramToken()
     {
         byte[] bytes = ReadPrivate("/stage/tester/bot-token", 160);
