@@ -1,0 +1,33 @@
+name: Format SQLite migration sources
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  format:
+    if: contains(github.event.head_commit.message, '[format sqlite]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: true
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          global-json-file: global.json
+      - name: Restore locked sources
+        run: dotnet restore Platform.sln -r linux-x64 --locked-mode
+      - name: Format only SQLite sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(src/Platform.Persistence/Sqlite*.cs tests/Platform.IntegrationTests/Sqlite*.cs)
+          test "${#files[@]}" -gt 0
+          dotnet format whitespace Platform.sln --no-restore --include "${files[@]}"
+          git diff --check
+          git add -- "${files[@]}"
+          if ! git diff --cached --quiet; then
+            git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Format SQLite migration sources [skip ci]"
+            git push origin HEAD:main
+          fi
