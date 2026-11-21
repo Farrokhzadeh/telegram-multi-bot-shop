@@ -27,15 +27,15 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
 
     internal Task SetLanguageAsync(BrandContext context, long actor, string language, CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(language) || language.Length>35 || language[0]=='-' || language[^1]=='-' ||
-            language.Any(c => !char.IsAsciiLetterOrDigit(c) && c!='-')) throw new ArgumentException("Invalid language code.", nameof(language));
+        if (string.IsNullOrEmpty(language) || language.Length > 35 || language[0] == '-' || language[^1] == '-' ||
+            language.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')) throw new ArgumentException("Invalid language code.", nameof(language));
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             var member = await RequireAsync(tx, context, actor, token);
             using var command = SqliteWallet.Command(tx,
                 "UPDATE users SET language=$language WHERE id=$member AND brand_id=$brand AND telegram_id=$actor AND blocked_at IS NULL AND banned_at IS NULL",
                 ("$language", language), ("$member", member.Id), ("$brand", context.BrandId), ("$actor", actor));
-            if (await command.ExecuteNonQueryAsync(token)!=1) throw new UnauthorizedAccessException();
+            if (await command.ExecuteNonQueryAsync(token) != 1) throw new UnauthorizedAccessException();
             return 0;
         }, ct);
     }
@@ -43,9 +43,9 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
     internal Task<CustomerScreenPage> ListAsync(BrandContext context, long actor, CustomerScreenList screen, string filter, int page,
         CancellationToken ct = default)
     {
-        const int size=5;
+        const int size = 5;
         ArgumentOutOfRangeException.ThrowIfNegative(page);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(page, int.MaxValue/size);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(page, int.MaxValue / size);
         if (filter is not ("all" or "active" or "finished")) throw new ArgumentOutOfRangeException(nameof(filter));
         return sessions.RunAsync(false, async (_, tx, token) =>
         {
@@ -79,9 +79,9 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
                 _ => throw new ArgumentOutOfRangeException(nameof(screen))
             };
             using var command = SqliteWallet.Command(tx, sql, ("$member", member.Id), ("$brand", context.BrandId),
-                ("$filter", filter), ("$offset", page*size), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
+                ("$filter", filter), ("$offset", page * size), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
             var entries = await ReadAsync(command, 6, token);
-            return new CustomerScreenPage(entries.Take(size).ToArray(), entries.Count>size);
+            return new CustomerScreenPage(entries.Take(size).ToArray(), entries.Count > size);
         }, ct);
     }
 
@@ -116,7 +116,7 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
         await using var row = await command.ExecuteReaderAsync(ct);
         while (await row.ReadAsync(ct))
         {
-            if (entries.Count==maximum) throw new InvalidOperationException("Customer result limit exceeded.");
+            if (entries.Count == maximum) throw new InvalidOperationException("Customer result limit exceeded.");
             entries.Add(new(row.GetGuid(0), row.GetString(1), row.GetString(2), row.IsDBNull(3) ? null : ExactDecimal.Parse(row.GetString(3)),
                 row.IsDBNull(4) ? null : row.GetString(4), Utc(row.GetString(5)), row.IsDBNull(6) ? null : row.GetInt32(6)));
         }
@@ -125,7 +125,7 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
 
     private static async Task<Member> RequireAsync(SqliteTransaction tx, BrandContext context, long actor, CancellationToken ct)
     {
-        if (actor<=0) throw new ArgumentOutOfRangeException(nameof(actor));
+        if (actor <= 0) throw new ArgumentOutOfRangeException(nameof(actor));
         using var command = SqliteWallet.Command(tx, """
             SELECT u.id,u.language,b.public_name,u.first_seen_at,
                 (SELECT a.public_contact_handle FROM admins a WHERE a.id=b.customer_support_admin_id
@@ -138,7 +138,7 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
         await using var row = await command.ExecuteReaderAsync(ct);
         if (!await row.ReadAsync(ct)) throw new UnauthorizedAccessException("Customer membership is unavailable.");
         string? contact = row.IsDBNull(4) ? null : row.GetString(4);
-        if (contact is not null && (contact.Length is <5 or >32 || !contact.All(c => char.IsAsciiLetterOrDigit(c) || c=='_'))) contact=null;
+        if (contact is not null && (contact.Length is < 5 or > 32 || !contact.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))) contact = null;
         string language = row.GetString(1);
         return new(row.GetGuid(0), language, row.GetString(2), row.GetString(3), contact);
     }
