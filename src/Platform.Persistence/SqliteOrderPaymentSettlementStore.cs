@@ -47,7 +47,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
             ExternalSettlementRoute route;
             bool late = current.OrderStatus is ("expired" or "cancelled");
             if (!late && current.First is not null && current.Deadline is not null &&
-                string.CompareOrdinal(current.First, current.Deadline)>0 &&
+                string.CompareOrdinal(current.First, current.Deadline) > 0 &&
                 current.OrderStatus is ("awaiting_payment" or "under_review" or "confirmation_pending"))
             {
                 await Change(tx, """
@@ -131,23 +131,23 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
         if (!await row.ReadAsync(ct)) throw new UnauthorizedAccessException("Payment is unavailable.");
         return new(row.GetGuid(0), row.GetGuid(1), row.GetGuid(2), row.GetString(3), row.GetString(4), row.GetString(5),
             row.GetBoolean(6), row.GetInt32(7), row.GetString(8), row.GetString(9), ExactDecimal.Parse(row.GetString(10)),
-            Number(row,11), Number(row,12), Number(row,13), Text(row,14), row.GetString(15), Text(row,16), Text(row,17),
-            Text(row,18), row.IsDBNull(19) ? null : row.GetFieldValue<byte[]>(19), !row.IsDBNull(20),
-            Text(row,21), Text(row,22), Text(row,23), row.IsDBNull(24) ? null : row.GetGuid(24), row.GetGuid(25));
+            Number(row, 11), Number(row, 12), Number(row, 13), Text(row, 14), row.GetString(15), Text(row, 16), Text(row, 17),
+            Text(row, 18), row.IsDBNull(19) ? null : row.GetFieldValue<byte[]>(19), !row.IsDBNull(20),
+            Text(row, 21), Text(row, 22), Text(row, 23), row.IsDBNull(24) ? null : row.GetGuid(24), row.GetGuid(25));
     }
 
     private static bool Ready(State state) =>
-        state.Method=="crypto" && state.Status=="confirming" && state.ProviderCode=="nowpayments" &&
-        state.Provider is not null && state.ProviderStatus=="finished" && state.Expected is >0 &&
-        state.Tokens==state.Expected && state.Received==state.Due && state.Hash is not null &&
+        state.Method == "crypto" && state.Status == "confirming" && state.ProviderCode == "nowpayments" &&
+        state.Provider is not null && state.ProviderStatus == "finished" && state.Expected is > 0 &&
+        state.Tokens == state.Expected && state.Received == state.Due && state.Hash is not null &&
         state.Evidence && state.Confirmed is not null && state.First is not null &&
         state.Asset is ("USDTBSC" or "USDTTRC20");
 
     private static InvoiceExpectation Expectation(State data) =>
-        new(data.Provider!, data.Origin, data.Due, data.Asset=="USDTBSC" ? "usdtbsc" : "usdttrc20", data.Expected!.Value);
+        new(data.Provider!, data.Origin, data.Due, data.Asset == "USDTBSC" ? "usdtbsc" : "usdttrc20", data.Expected!.Value);
 
     private static PaymentSettlement Incomplete(State state) => new(
-        state.Status=="review" ? PaymentSettlementOutcome.Review : PaymentSettlementOutcome.Pending, ExternalSettlementRoute.Review);
+        state.Status == "review" ? PaymentSettlementOutcome.Review : PaymentSettlementOutcome.Pending, ExternalSettlementRoute.Review);
     private static PaymentSettlement Replayed(State state) =>
         new(PaymentSettlementOutcome.Replayed, ExternalSettlementRoute.AlreadyAccepted, state.Credit);
 
@@ -162,14 +162,14 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
             UPDATE wallets SET balance=$new,version=version+1,updated_at=$now WHERE user_id=$member AND version=$version
             """, ("$new", ExactDecimal.Format(wallet.Balance.Add(increase).Amount)), ("$now", now),
             ("$member", state.Member), ("$version", wallet.Version)))
-            if (await command.ExecuteNonQueryAsync(ct)!=1) throw new InvalidOperationException("Wallet version lost.");
+            if (await command.ExecuteNonQueryAsync(ct) != 1) throw new InvalidOperationException("Wallet version lost.");
         await Change(tx, """
             INSERT INTO wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,
                 idempotency_key,order_id,payment_id,reason)
             VALUES ($entry,$member,$amount,$new,$version,$kind,1,$key,$order,$payment,'verified_original_invoice')
             """, ct, ("$entry", entry), ("$member", state.Member), ("$amount", ExactDecimal.Format(increase.Amount)),
-            ("$new", ExactDecimal.Format(wallet.Balance.Add(increase).Amount)), ("$version", checked(wallet.Version+1)),
-            ("$kind", kind), ("$key", "payment-credit:"+state.PaymentId.ToString("D")), ("$order", state.Order),
+            ("$new", ExactDecimal.Format(wallet.Balance.Add(increase).Amount)), ("$version", checked(wallet.Version + 1)),
+            ("$kind", kind), ("$key", "payment-credit:" + state.PaymentId.ToString("D")), ("$order", state.Order),
             ("$payment", state.PaymentId));
         return entry;
     }
@@ -179,7 +179,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
     {
         var inventory = new InventoryCipher(secrets);
         var cipher = new BrandCipher(secrets);
-        int unit=0;
+        int unit = 0;
         foreach (var item in stock)
         {
             Guid fulfillment = Guid.CreateVersion7();
@@ -209,7 +209,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
             WHERE product_id=$product AND state='available' ORDER BY id LIMIT $count
             """, ("$product", product), ("$count", quantity));
         await using var row = await command.ExecuteReaderAsync(ct);
-        while(await row.ReadAsync(ct)) stock.Add(new(row.GetGuid(0), row.GetFieldValue<byte[]>(1), row.GetString(2)));
+        while (await row.ReadAsync(ct)) stock.Add(new(row.GetGuid(0), row.GetFieldValue<byte[]>(1), row.GetString(2)));
         return stock;
     }
 
@@ -235,7 +235,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
             VALUES ($id,$brand,'customer_dm',$member,'order_status',CASE WHEN $anchor IS NULL THEN 'send' ELSE 'edit' END,
                 (SELECT telegram_message_id FROM telegram_deliveries WHERE id=$anchor),$key,$order)
             """, ct, ("$id", delivery), ("$brand", context.BrandId), ("$member", state.Member),
-            ("$anchor", anchor), ("$key", "payment-status:"+state.PaymentId.ToString("D")), ("$order", state.Order));
+            ("$anchor", anchor), ("$key", "payment-status:" + state.PaymentId.ToString("D")), ("$order", state.Order));
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(context.BrandId, delivery), state.PaymentId, DateTime.UtcNow, ct);
     }
 
@@ -246,7 +246,7 @@ internal sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory ses
     {
         using var command = SqliteWallet.Command(tx, sql, values);
         int changed = await command.ExecuteNonQueryAsync(ct);
-        if (exactlyOne && changed!=1) throw new PaymentNoticeRejectedException();
+        if (exactlyOne && changed != 1) throw new PaymentNoticeRejectedException();
     }
 
     private static string? Text(SqliteDataReader row, int index) => row.IsDBNull(index) ? null : row.GetString(index);
