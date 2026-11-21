@@ -2,6 +2,8 @@ using Platform.Core;
 using Platform.BotHost;
 using Platform.Telegram;
 
+if (args is ["--serve-sqlite-staging"]) return await SqliteStagingBot.RunAsync();
+
 if (args is ["--staging-history-init", "--root", var stageRoot, "--actor", var stageActor, "--bot", var stageBot])
 {
     try { return await StagingHistoryBridge.InitializeAsync(stageRoot, stageActor, stageBot); }
