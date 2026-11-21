@@ -6,6 +6,9 @@ using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
 
+if (args is ["--serve-sqlite-staging"])
+    return await SqliteStagingApi.RunAsync();
+
 if (args is ["--copy-staging-postgres-to-sqlite", "--destination", var file])
 {
     var source = Environment.GetEnvironmentVariable("SHOP_STAGING_POSTGRES_READONLY")
