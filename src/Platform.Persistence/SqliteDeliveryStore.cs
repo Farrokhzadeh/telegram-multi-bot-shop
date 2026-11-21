@@ -57,11 +57,11 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
                 """, ("$order", order), ("$member", state.Member), ("$brand", context.BrandId)))
             {
                 object? result = await anchor.ExecuteScalarAsync(token);
-                if (result is long id) target=id;
+                if (result is long anchorMessage) target = anchorMessage;
             }
             Guid? delivery = null;
-            if (target is long id && !frozen.IsFile)
-                delivery = await EnqueueAsync(tx, context, state, order, id, token);
+            if (target is long targetMessage && !frozen.IsFile)
+                delivery = await EnqueueAsync(tx, context, state, order, targetMessage, token);
             await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
             return delivery;
         }, ct);
