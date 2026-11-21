@@ -121,6 +121,7 @@ public sealed class SqliteStagingConfiguration
 
     private static byte[] ReadPrivate(string path, int limit)
     {
+        if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException();
         var file = new FileInfo(path);
         if (!file.Exists || file.LinkTarget is not null || file.Length is < 1 or > 160 ||
             file.Length > limit || (File.GetUnixFileMode(path) & (UnixFileMode)63) != 0)
