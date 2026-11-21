@@ -6,6 +6,14 @@ using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
 
+if (args is ["--verify-sqlite-staging"])
+{
+    var stage = await SqliteStagingConfiguration.LoadAsync();
+    var counts = await SqliteStageHealthProbe.VerifyAsync(stage);
+    Console.WriteLine($"SQLite staging verified; brands={counts.Brands} users={counts.Customers} orders={counts.Orders} wallet_postings={counts.WalletPostings} deliveries={counts.TelegramDeliveries} open_jobs={counts.OpenJobs}");
+    return 0;
+}
+
 if (args is ["--serve-sqlite-staging"])
     return await SqliteStagingApi.RunAsync();
 
