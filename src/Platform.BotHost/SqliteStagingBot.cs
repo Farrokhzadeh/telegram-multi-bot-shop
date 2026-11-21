@@ -268,6 +268,7 @@ internal static class SqliteStagingBot
 
     private static string Private(string path, int maximum)
     {
+        if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException();
         var file = new FileInfo(path);
         if (!file.Exists || file.LinkTarget is not null || file.Length is < 1 or > 160 ||
             file.Length > maximum || (File.GetUnixFileMode(path) & (UnixFileMode)63) != 0)
