@@ -192,7 +192,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   deploy-staging:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_staging))
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_staging)) && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[no deploy]'))
     needs: [qualify, build-staging-api]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
