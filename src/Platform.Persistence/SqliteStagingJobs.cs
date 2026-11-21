@@ -15,6 +15,18 @@ public sealed class SqliteStagingJobs(SqliteSessionFactory sessions)
             OutboxStore.ClaimSqliteAsync(tx, context.BrandId, kind, worker, TimeSpan.FromSeconds(90), token), ct);
     }
 
+    public Task RetryPrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
+    {
+        if (lease.Intent.Kind != JobKind.PrepareManifest || lease.Intent.BrandId != context.BrandId)
+            throw new UnauthorizedAccessException();
+        return sessions.RunAsync(true, async (_, tx, token) =>
+        {
+            await OutboxStore.RetrySqliteAsync(tx, lease, TimeSpan.FromSeconds(10), 100,
+                JobError.Busy, token);
+            return 0;
+        }, ct);
+    }
+
     public Task<string> PurposeAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
         if (lease.Intent.Kind != JobKind.SendTelegram || lease.Intent.BrandId != context.BrandId ||
