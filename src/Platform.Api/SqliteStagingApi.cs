@@ -85,14 +85,14 @@ public static class SqliteStagingApi
                             throw new UnauthorizedAccessException();
                         SqliteStageReply reply = await ProcessAsync(request, config, catalog, checkout, screens, ingress,
                             http.RequestAborted);
-                        await http.Response.WriteAsJsonAsync(reply, SqliteStageApiJson.Default.SqliteStageReply,
+                        await JsonSerializer.SerializeAsync(http.Response.Body, reply, SqliteStageApiJson.Default.SqliteStageReply,
                             http.RequestAborted);
                     }
                     catch (Exception error) when (error is UnauthorizedAccessException or ArgumentException
                         or PricingRejectedException or FormatException or InvalidOperationException)
                     {
                         http.Response.StatusCode = 409;
-                        await http.Response.WriteAsJsonAsync(new SqliteStageReply(false,
+                        await JsonSerializer.SerializeAsync(http.Response.Body, new SqliteStageReply(false,
                             "This staging action is unavailable. Open /shop again."),
                             SqliteStageApiJson.Default.SqliteStageReply, http.RequestAborted);
                     }
@@ -122,7 +122,7 @@ public static class SqliteStagingApi
                     {
                         var actor = await AuthenticateAsync(http, config);
                         var page = await admin.BrandsAsync(actor, After(http), Limit(http), http.RequestAborted);
-                        await http.Response.WriteAsJsonAsync(page, SqliteStageApiJson.Default.AdminPageAdminBrand,
+                        await JsonSerializer.SerializeAsync(http.Response.Body, page, SqliteStageApiJson.Default.AdminPageAdminBrand,
                             http.RequestAborted);
                         return Results.Empty;
                     }
@@ -137,7 +137,7 @@ public static class SqliteStagingApi
                     {
                         var actor = await AuthenticateAsync(http, config);
                         var page = await admin.ProductsAsync(actor, After(http), Limit(http), http.RequestAborted);
-                        await http.Response.WriteAsJsonAsync(page, SqliteStageApiJson.Default.AdminPageAdminProduct,
+                        await JsonSerializer.SerializeAsync(http.Response.Body, page, SqliteStageApiJson.Default.AdminPageAdminProduct,
                             http.RequestAborted);
                         return Results.Empty;
                     }
@@ -152,7 +152,7 @@ public static class SqliteStagingApi
                     {
                         var actor = await AuthenticateAsync(http, config);
                         var detail = await admin.PolicyAsync(actor, config.Context, http.RequestAborted);
-                        await http.Response.WriteAsJsonAsync(detail, SqliteStageApiJson.Default.BrandPolicyDetail,
+                        await JsonSerializer.SerializeAsync(http.Response.Body, detail, SqliteStageApiJson.Default.BrandPolicyDetail,
                             http.RequestAborted);
                         return Results.Empty;
                     }
@@ -166,7 +166,7 @@ public static class SqliteStagingApi
                     {
                         var actor = await AuthenticateAsync(http, config);
                         var rate = await admin.FxAsync(actor, config.Context, http.RequestAborted);
-                        await http.Response.WriteAsJsonAsync(rate, SqliteStageApiJson.Default.ExchangeRateMetadata,
+                        await JsonSerializer.SerializeAsync(http.Response.Body, rate, SqliteStageApiJson.Default.ExchangeRateMetadata,
                             http.RequestAborted);
                         return Results.Empty;
                     }
@@ -180,7 +180,7 @@ public static class SqliteStagingApi
                     {
                         var actor = await AuthenticateAsync(http, config);
                         var page = await admin.InventoryAsync(actor, product, After(http), Limit(http), http.RequestAborted);
-                        await http.Response.WriteAsJsonAsync(page, SqliteStageApiJson.Default.AdminPageInventoryMetadata,
+                        await JsonSerializer.SerializeAsync(http.Response.Body, page, SqliteStageApiJson.Default.AdminPageInventoryMetadata,
                             http.RequestAborted);
                         return Results.Empty;
                     }
@@ -278,10 +278,10 @@ public static class SqliteStagingApi
             if (request.MessageText is not string confirmed || !confirmed.StartsWith("Staging quote\nQuantity: ", StringComparison.Ordinal))
                 throw new UnauthorizedAccessException("The confirmed quote is unavailable.");
             string count = confirmed.Split('\n', StringSplitOptions.None).ElementAtOrDefault(1) ?? "";
-            if (!int.TryParse(count.AsSpan("Quantity: ".Length), NumberStyles.None, CultureInfo.InvariantCulture, out int quantity) ||
-                quantity is < 1 or > 5) throw new UnauthorizedAccessException();
+            if (!int.TryParse(count.AsSpan("Quantity: ".Length), NumberStyles.None, CultureInfo.InvariantCulture, out int payableQuantity) ||
+                payableQuantity is < 1 or > 5) throw new UnauthorizedAccessException();
             var prepared = await catalog.PrepareAsync(context, actor,
-                new(product, quantity, CheckoutPayment.Wallet), ct);
+                new(product, payableQuantity, CheckoutPayment.Wallet), ct);
             if (confirmed != QuoteText(prepared.Quote))
                 return new(true, "The staging quote changed. Open /shop to review the new price.", true);
             LocalCheckoutRequest requestToBuy = await catalog.RequireLocalAsync(context, actor, prepared, orderId, ct);
