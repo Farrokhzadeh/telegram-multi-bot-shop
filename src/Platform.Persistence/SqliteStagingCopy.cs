@@ -13,9 +13,17 @@ public sealed record SqliteStagingCopyReport(int Tables, long Rows);
 
 public static class SqliteStagingCopy
 {
-    public static async Task<SqliteStagingCopyReport> CopyAsync(string source, string destination, CancellationToken ct = default)
+    public static async Task<SqliteStagingCopyReport> CopyAsync(string source, string destination,
+        CancellationToken ct = default)
     {
-        var builder = new NpgsqlConnectionStringBuilder(source);
+        await using var dataSource = NpgsqlDataSource.Create(source);
+        return await CopyAsync(dataSource, destination, ct);
+    }
+
+    public static async Task<SqliteStagingCopyReport> CopyAsync(NpgsqlDataSource source, string destination,
+        CancellationToken ct = default)
+    {
+        var builder = new NpgsqlConnectionStringBuilder(source.ConnectionString);
         if (string.IsNullOrEmpty(builder.Database) ||
             !(builder.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) ||
               builder.Database.StartsWith("shop_staging_", StringComparison.Ordinal)))
@@ -43,8 +51,7 @@ public static class SqliteStagingCopy
             {
                 await sqlite.OpenAsync(ct);
                 SqliteSchema.Configure(sqlite);
-                await using var postgres = new NpgsqlConnection(builder.ConnectionString);
-                await postgres.OpenAsync(ct);
+                await using var postgres = await source.OpenConnectionAsync(ct);
                 await using var snapshot = await postgres.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
                 await using (var readonlyCommand = new NpgsqlCommand("SET TRANSACTION READ ONLY", postgres, snapshot))
                     await readonlyCommand.ExecuteNonQueryAsync(ct);
