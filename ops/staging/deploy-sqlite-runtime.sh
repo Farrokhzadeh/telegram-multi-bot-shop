@@ -176,6 +176,11 @@ docker exec "$api" /app/Api/Platform.Api --verify-sqlite-staging
 next=$(mktemp "$work/sqlite-active.XXXXXX")
 printf '%s\n' "$api" "$worker" "$bot" "sha256:$digest" "$commit" > "$next"
 chmod 0600 "$next"
+if [[ -n $old_api ]]; then
+    cp "$previous" "$work/sqlite-previous.next"
+    chmod 0600 "$work/sqlite-previous.next"
+    mv -T "$work/sqlite-previous.next" "$work/sqlite-previous"
+fi
 mv -T "$next" "$previous"
 succeeded=1
 printf 'Persistent SQLite staging API, Telegram bot and worker are healthy at %s. No PostgreSQL rollback is permitted.\n' "$commit"
