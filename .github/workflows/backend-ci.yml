@@ -236,6 +236,8 @@ jobs:
           install -d "$bundle/shop"
           install -m 0444 ops/staging/{accabad_presentation,telegram_transport,wallet_pilot,wallet_shop_telegram}.py "$bundle/shop/"
           install -m 0555 ops/staging/deploy-shop-runtime.sh "$bundle/deploy-shop-runtime.sh"
+          install -m 0555 ops/staging/deploy-sqlite-runtime.sh "$bundle/deploy-sqlite-runtime.sh"
+          install -m 0444 ops/staging/sqlite-stage-provision.py "$bundle/sqlite-stage-provision.py"
           repository="docker.io/$DOCKERHUB_NAMESPACE/akanti"
           tag="$repository:git-$GITHUB_SHA"
           docker build --platform linux/amd64 --file ops/staging/Dockerfile \
@@ -257,6 +259,7 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           RELEASE_IMAGE: ${{ steps.publish.outputs.image }}
+          SHOP_DEPLOY_MODE: ${{ contains(github.event.head_commit.message, '[deploy sqlite]') && 'sqlite' || 'postgres' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -274,5 +277,5 @@ jobs:
           ssh -i "$ssh_dir/key" -p "$DEPLOY_PORT" -o BatchMode=yes \
             -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             -o "UserKnownHostsFile=$ssh_dir/known_hosts" -o ConnectTimeout=15 \
-            -- "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$RELEASE_IMAGE" "$GITHUB_SHA" \
+            -- "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$RELEASE_IMAGE" "$GITHUB_SHA" "$SHOP_DEPLOY_MODE" \
             < ops/staging/deploy-dockerhub.sh
