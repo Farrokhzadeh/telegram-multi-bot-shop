@@ -61,11 +61,11 @@ internal sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSn
             var supply=state is null?null:Supply(state,prepared.Query.Quantity,prepared.Query.Kind);
             if (state is null || state.Member!=prepared.Member || state.PolicyRevision!=prepared.PolicyRevision ||
                 state.ProductRevision!=prepared.ProductRevision || state.ListingRevision!=prepared.ListingRevision ||
-                state.Prices!=new QuotePrices(prepared.Quote.Terms.UnitUsdt,
-                    prepared.Quote.Terms.AutoToman?null:prepared.Quote.Terms.UnitToman,
-                    prepared.Quote.Terms.AutoToman,state.Prices.FxEnabled,state.Prices.Rate,state.Prices.MaximumFxAge) ||
-                supply!=prepared.Supply || Stopwatch.GetElapsedTime(prepared.IssuedAt)>TimeSpan.FromSeconds(30) ||
-                (await CouponsAsync(tx,context,state,token)).Count>0) throw new PricingRejectedException();
+                supply != prepared.Supply || Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30) ||
+                (await CouponsAsync(tx, context, state, token)).Count > 0) throw new PricingRejectedException();
+            var current = CheckoutQuote.Create(state.Prices, state.Presentation, prepared.Query.Quantity,
+                prepared.Query.Payment, [], DateTime.UtcNow);
+            if (current.Terms != prepared.Quote.Terms) throw new PricingRejectedException();
             return new LocalCheckoutRequest(order,prepared.Query.ProductId,prepared.Query.Quantity,
                 prepared.Quote.Terms.UnitUsdt,prepared.ListingRevision,prepared.ProductRevision,prepared.PolicyRevision);
         }, ct);
