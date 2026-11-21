@@ -5,9 +5,9 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
 {
-    internal Task<Guid?> PrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
+    public Task<Guid?> PrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
         Guid order = Require(lease, JobKind.PrepareManifest, context);
         return sessions.RunAsync(true, async (_, tx, token) =>
@@ -67,7 +67,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         }, ct);
     }
 
-    internal Task<DeliveryDispatch?> BeginAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
+    public Task<DeliveryDispatch?> BeginAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
         Guid delivery = Require(lease, JobKind.SendTelegram, context);
         return sessions.RunAsync(true, async (_, tx, token) =>
@@ -142,7 +142,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         }, ct);
     }
 
-    internal Task RecordOutcomeAsync(BrandContext context, JobLease lease, DeliveryOutcome outcome, CancellationToken ct = default)
+    public Task RecordOutcomeAsync(BrandContext context, JobLease lease, DeliveryOutcome outcome, CancellationToken ct = default)
     {
         Guid delivery = Require(lease, JobKind.SendTelegram, context);
         if (!Enum.IsDefined(outcome.Kind)) throw new ArgumentException("Invalid delivery outcome.");
@@ -190,7 +190,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
         }, ct);
     }
 
-    internal Task RecoverExpiredAsync(BrandContext context, Guid delivery, CancellationToken ct = default) =>
+    public Task RecoverExpiredAsync(BrandContext context, Guid delivery, CancellationToken ct = default) =>
         sessions.RunAsync(true, async (_, tx, token) =>
         {
             var intent = await ReadIntentAsync(tx, delivery, token);
@@ -210,7 +210,7 @@ internal sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretS
             return 0;
         }, ct);
 
-    internal Task<byte[]> ReadManifestAsync(BrandContext context, long actor, Guid order, CancellationToken ct = default) =>
+    public Task<byte[]> ReadManifestAsync(BrandContext context, long actor, Guid order, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
             var state = await ReadAsync(tx, context, order, token);
