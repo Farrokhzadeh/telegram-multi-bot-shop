@@ -46,6 +46,8 @@ internal sealed class SqliteSessionFactory
         await using var transaction = connection.BeginTransaction(deferred: !write);
         var result = await operation(connection, transaction, ct);
         ct.ThrowIfCancellationRequested();
+        if (write) await SqliteIntegrity.ValidateAsync(connection, transaction, ct);
+        ct.ThrowIfCancellationRequested();
         await transaction.CommitAsync(CancellationToken.None);
         return result;
     }
