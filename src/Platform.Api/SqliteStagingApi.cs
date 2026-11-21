@@ -41,7 +41,7 @@ public static class SqliteStagingApi
             secrets = config.LoadSecrets(SecretService.Api);
             privateKey = config.ReadApiKey();
         }
-        catch (Exception error) when (error is InvalidOperationException or UnauthorizedAccessException
+        catch (Exception error) when (error is InvalidOperationException or UnauthorizedAccessException or SecretConfigurationException
             or IOException or ArgumentException)
         {
             Console.Error.WriteLine("The isolated SQLite API staging configuration is unavailable.");
