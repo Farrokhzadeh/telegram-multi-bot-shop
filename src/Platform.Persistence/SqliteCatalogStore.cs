@@ -9,9 +9,9 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-internal sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
 {
-    internal Task<CatalogItem?> GetAsync(BrandContext context, long actor, Guid product, CancellationToken ct = default) =>
+    public Task<CatalogItem?> GetAsync(BrandContext context, long actor, Guid product, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
             var state = await ReadAsync(tx, context, actor, product, token);
@@ -23,10 +23,10 @@ internal sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSn
                 state.Bank && state.Market=="iran") { LocalStock=state.Local };
         }, ct);
 
-    internal async Task<CheckoutQuote> QuoteAsync(BrandContext context, long actor, CatalogQuery query,
+    public async Task<CheckoutQuote> QuoteAsync(BrandContext context, long actor, CatalogQuery query,
         CancellationToken ct = default) => (await PrepareAsync(context, actor, query, ct)).Quote;
 
-    internal Task<PreparedCheckout> PrepareAsync(BrandContext context, long actor, CatalogQuery query, CancellationToken ct = default)
+    public Task<PreparedCheckout> PrepareAsync(BrandContext context, long actor, CatalogQuery query, CancellationToken ct = default)
     {
         if (actor<=0 || query.ProductId==Guid.Empty || query.Quantity is <1 or >10000 ||
             query.Payment is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank) ||
@@ -45,7 +45,7 @@ internal sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSn
         }, ct);
     }
 
-    internal async Task<LocalCheckoutRequest> RequireLocalAsync(BrandContext context, long actor,
+    public async Task<LocalCheckoutRequest> RequireLocalAsync(BrandContext context, long actor,
         PreparedCheckout prepared, Guid order, CancellationToken ct = default)
     {
         if (order==Guid.Empty || !ReferenceEquals(prepared.Owner,this) || prepared.Context!=context ||
