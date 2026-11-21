@@ -5,9 +5,9 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
+public sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
 {
-    internal Task<CustomerHome> HomeAsync(BrandContext context, long actor, CancellationToken ct = default) =>
+    public Task<CustomerHome> HomeAsync(BrandContext context, long actor, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
             var member = await RequireAsync(tx, context, actor, token);
@@ -25,7 +25,7 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
             return new CustomerHome(member.Language, member.Name, ExactDecimal.Parse(balance), orders, spent, Utc(member.Joined), member.Contact);
         }, ct);
 
-    internal Task SetLanguageAsync(BrandContext context, long actor, string language, CancellationToken ct = default)
+    public Task SetLanguageAsync(BrandContext context, long actor, string language, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(language) || language.Length > 35 || language[0] == '-' || language[^1] == '-' ||
             language.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')) throw new ArgumentException("Invalid language code.", nameof(language));
@@ -40,7 +40,7 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
         }, ct);
     }
 
-    internal Task<CustomerScreenPage> ListAsync(BrandContext context, long actor, CustomerScreenList screen, string filter, int page,
+    public Task<CustomerScreenPage> ListAsync(BrandContext context, long actor, CustomerScreenList screen, string filter, int page,
         CancellationToken ct = default)
     {
         const int size = 5;
@@ -85,7 +85,7 @@ internal sealed class SqliteCustomerScreens(SqliteSessionFactory sessions)
         }, ct);
     }
 
-    internal Task<CustomerScreenEntry?> DetailAsync(BrandContext context, long actor, CustomerScreenList screen, Guid id,
+    public Task<CustomerScreenEntry?> DetailAsync(BrandContext context, long actor, CustomerScreenList screen, Guid id,
         CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
