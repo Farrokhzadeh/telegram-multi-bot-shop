@@ -122,6 +122,7 @@ public sealed class SqliteSessionTests
             using (var cancelled = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                {
                     await sessions.RunAsync(true, async (_, tx, token) =>
                     {
                         using var insert = SqliteWallet.Command(tx, """
@@ -133,7 +134,8 @@ public sealed class SqliteSessionTests
                         Assert.Equal(1, await insert.ExecuteNonQueryAsync(token));
                         cancelled.Cancel();
                         return 0;
-                    }, cancelled.Token));
+                    }, cancelled.Token);
+                });
             }
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
@@ -152,7 +154,9 @@ public sealed class SqliteSessionTests
             await using (var hold = writer.BeginTransaction(deferred: false))
             {
                 var error = await Assert.ThrowsAsync<SqliteException>(async () =>
-                    await Task.Run(() => sessions.RunAsync(true, (_, _, _) => Task.FromResult(0), ct), ct));
+                {
+                    await Task.Run(() => sessions.RunAsync(true, (_, _, _) => Task.FromResult(0), ct), ct);
+                });
                 Assert.Equal(5, error.SqliteErrorCode);
                 await hold.RollbackAsync(ct);
             }
