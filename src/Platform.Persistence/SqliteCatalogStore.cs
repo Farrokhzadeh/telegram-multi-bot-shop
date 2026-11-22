@@ -63,6 +63,29 @@ public sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSnap
         }, ct);
     }
 
+    internal async Task<CheckoutQuote> RequireCurrentAsync(SqliteTransaction tx, BrandContext context, long actor,
+        PreparedCheckout prepared, CancellationToken ct)
+    {
+        if (!ReferenceEquals(prepared.Owner, this) || prepared.Context != context ||
+            prepared.Actor != actor || Interlocked.Exchange(ref prepared.Used, 1) != 0 ||
+            Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30))
+            throw new PricingRejectedException();
+        var state = await ReadAsync(tx, context, actor, prepared.Query.ProductId, ct);
+        if (state is null || state.Member != prepared.Member ||
+            state.PolicyRevision != prepared.PolicyRevision ||
+            state.ProductRevision != prepared.ProductRevision ||
+            state.ListingRevision != prepared.ListingRevision ||
+            Supply(state, prepared.Query.Quantity, prepared.Query.Kind) != prepared.Supply)
+            throw new PricingRejectedException();
+        var coupons = await CouponsAsync(tx, context, state, ct);
+        CheckoutQuote current = CheckoutQuote.Create(state.Prices, state.Presentation,
+            prepared.Query.Quantity, prepared.Query.Payment, coupons, DateTime.UtcNow);
+        if (Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30) ||
+            current.Terms != prepared.Quote.Terms || current.RequestedPayment != prepared.Quote.RequestedPayment)
+            throw new PricingRejectedException();
+        return current;
+    }
+
     public async Task<LocalCheckoutRequest> RequireLocalAsync(BrandContext context, long actor,
         PreparedCheckout prepared, Guid order, CancellationToken ct = default)
     {
