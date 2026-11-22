@@ -55,11 +55,6 @@ public sealed class SqlitePaymentExpiryStore(SqliteSessionFactory sessions)
                     int.MaxValue, JobError.Busy, token);
                 return SqlitePaymentExpiryOutcome.NotDue;
             }
-            using (var held = SqliteWallet.Command(tx, """
-                SELECT 1 FROM discount_uses WHERE order_id=$order AND status='held' LIMIT 1
-                """, ("$order", order)))
-                if (await held.ExecuteScalarAsync(token) is not null)
-                    throw new InvalidOperationException("A discount hold requires qualified release before expiry.");
             string expired = SqliteSchema.UtcText(now);
             using (var change = SqliteWallet.Command(tx, """
                 UPDATE orders SET payment_status='expired',fulfillment_status='cancelled',
@@ -68,6 +63,7 @@ public sealed class SqlitePaymentExpiryStore(SqliteSessionFactory sessions)
                 """, ("$now", expired), ("$order", order)))
                 if (await change.ExecuteNonQueryAsync(token) != 1)
                     throw new InvalidOperationException("Expiry state was superseded.");
+            await SqliteDiscountClaimStore.TransitionAsync(tx, context, order, false, token);
             Guid delivery = Guid.CreateVersion7();
             using (var intent = SqliteWallet.Command(tx, """
                 INSERT INTO telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,
