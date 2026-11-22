@@ -41,7 +41,9 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
                 state.OrderStatus != "under_review" || state.Revision != expectedOrderRevision ||
                 state.Receipt is null || state.First is null || state.Due is null ||
                 string.CompareOrdinal(state.First, state.Due) > 0 ||
-                state.Held || state.Review || state.Kind is not ("local" or "manual") || state.Preorder)
+                state.Held || state.Review || state.OrderKind is not ("product_purchase" or "prepaid_units") ||
+                state.OrderKind == "product_purchase" && state.Kind is not ("local" or "manual") ||
+                state.Preorder)
                 throw new InvalidOperationException("Bank receipt is not eligible for approval.");
             string now = SqliteSchema.UtcText(DateTime.UtcNow);
             await Change(tx, """
@@ -62,7 +64,10 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
                 UPDATE orders SET payment_status='paid',payment_confirmed_at=$now,revision=revision+1,
                     updated_at=$now WHERE id=$order AND payment_status='under_review' AND revision=$revision
                 """, token, ("$now", now), ("$order", state.Order), ("$revision", expectedOrderRevision));
-            if (state.Kind == "local")
+            if (state.OrderKind == "prepaid_units")
+                _ = await new SqlitePrepaidSourceStore(sessions, secrets)
+                    .IssueAsync(tx, context, state.Order, token);
+            else if (state.Kind == "local")
             {
                 bool queued;
                 using (var backlog = SqliteWallet.Command(tx, """
@@ -99,7 +104,8 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
         using var command = SqliteWallet.Command(tx, """
             SELECT p.payment_method,p.status,p.receipt_asset_ref,p.first_payment_observed_at,
                 o.payment_due_at,o.payment_status,o.revision,o.product_id,o.quantity,o.fulfillment_kind_snapshot,
-                o.is_preorder,o.user_id,o.id,o.review_code IS NOT NULL,o.hold_at IS NOT NULL
+                o.is_preorder,o.user_id,o.id,o.review_code IS NOT NULL,o.hold_at IS NOT NULL,
+                o.order_kind
             FROM payments p JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=o.user_id
                 JOIN brands b ON b.id=u.brand_id
             WHERE p.id=$payment AND b.id=$brand AND b.bot_id=$bot AND b.active=1
@@ -109,7 +115,8 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
         return new(row.GetString(0), row.GetString(1), row.IsDBNull(2) ? null : row.GetString(2),
             row.IsDBNull(3) ? null : row.GetString(3), row.IsDBNull(4) ? null : row.GetString(4),
             row.GetString(5), row.GetInt64(6), row.GetGuid(7), row.GetInt32(8), row.GetString(9),
-            row.GetBoolean(10), row.GetGuid(11), row.GetGuid(12), row.GetBoolean(13), row.GetBoolean(14));
+            row.GetBoolean(10), row.GetGuid(11), row.GetGuid(12), row.GetBoolean(13), row.GetBoolean(14),
+            row.GetString(15));
     }
 
     private static Task FulfillmentAsync(SqliteTransaction tx, Guid order, string status, string? review,
@@ -150,5 +157,5 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
 
     private sealed record State(string Method, string Status, string? Receipt, string? First,
         string? Due, string OrderStatus, long Revision, Guid Product, int Quantity, string Kind,
-        bool Preorder, Guid Member, Guid Order, bool Review, bool Held);
+        bool Preorder, Guid Member, Guid Order, bool Review, bool Held, string OrderKind);
 }
