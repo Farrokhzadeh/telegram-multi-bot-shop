@@ -10,7 +10,7 @@ public sealed class SqliteCheckoutStore(SqliteSessionFactory sessions, SecretSna
     public Task<CheckoutResult> PurchaseLocalAsync(BrandContext context, long expectedRevision, long actor, LocalCheckoutRequest request, CancellationToken ct) =>
         sessions.RunAsync(true, (_, tx, token) => AcceptLocalAsync(tx, context, expectedRevision, actor, request, token), ct);
 
-    private async Task<CheckoutResult> AcceptLocalAsync(SqliteTransaction tx, BrandContext context, long expectedRevision, long actor, LocalCheckoutRequest request, CancellationToken ct)
+    internal async Task<CheckoutResult> AcceptLocalAsync(SqliteTransaction tx, BrandContext context, long expectedRevision, long actor, LocalCheckoutRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(request);
