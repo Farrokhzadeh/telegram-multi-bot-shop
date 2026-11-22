@@ -53,7 +53,9 @@ public sealed class SqliteWalletAdministrationTests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 store.AdjustAsync(actor, brand, debit with
                 {
-                    AmountUsd = "-8", ExpectedVersion = 2, CommandId = Guid.NewGuid()
+                    AmountUsd = "-8",
+                    ExpectedVersion = 2,
+                    CommandId = Guid.NewGuid()
                 }, ct));
             await new SqliteSessionFactory(path).RunAsync(false, async (_, tx, token) =>
             {
