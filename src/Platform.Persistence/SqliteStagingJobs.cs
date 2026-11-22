@@ -148,7 +148,7 @@ public sealed class SqliteStatusDeliveryStore(SqliteSessionFactory sessions)
                 if (await update.ExecuteNonQueryAsync(token) != 1) throw new UnauthorizedAccessException("Status dispatch state changed.");
             if (success && (state.Payment is "paid" or "not_required") && state.Delivery == "acquiring")
                 await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.PrepareManifest,
-                    context.BrandId, state.Order), id, DateTime.UtcNow, token);
+                    context.BrandId, state.Order), state.Order, DateTime.UtcNow, token);
             return 0;
         }, ct);
     }
