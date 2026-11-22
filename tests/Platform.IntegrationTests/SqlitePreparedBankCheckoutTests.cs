@@ -40,7 +40,7 @@ public sealed class SqlitePreparedBankCheckoutTests
                         $number,$holder,$key,$fingerprint,$now);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'fa');
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title)
-                    VALUES ($product,'local','immediate','Synthetic goods');
+                    VALUES ($product,'manual','immediate','Synthetic goods');
                     INSERT INTO brand_products(brand_id,product_id,visible,price_usdt,price_toman,allow_bank)
                     VALUES ($brand,$product,1,'10.25','1000000',1);
                     """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$number", encryptedNumber),
