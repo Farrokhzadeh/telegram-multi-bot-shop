@@ -9,6 +9,13 @@ on:
         description: Publish to Docker Hub and deploy to staging
         type: boolean
         default: false
+      staging_backend:
+        description: Explicitly select SQLite for a manual staging deployment
+        type: choice
+        default: none
+        options:
+          - none
+          - sqlite
 permissions:
   contents: read
 concurrency:
@@ -206,7 +213,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   deploy-staging:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy_staging)) && (github.event_name != 'push' || !contains(github.event.head_commit.message, '[no deploy]'))
+    if: github.ref == 'refs/heads/main' && ((github.event_name == 'push' && !contains(github.event.head_commit.message, '[no deploy]')) || (github.event_name == 'workflow_dispatch' && inputs.deploy_staging && inputs.staging_backend == 'sqlite'))
     needs: [qualify, build-staging-api]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -273,10 +280,14 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           RELEASE_IMAGE: ${{ steps.publish.outputs.image }}
-          SHOP_DEPLOY_MODE: ${{ contains(github.event.head_commit.message, '[deploy sqlite]') && 'sqlite' || 'postgres' }}
+          SHOP_DEPLOY_MODE: ${{ ((github.event_name == 'workflow_dispatch' && inputs.staging_backend == 'sqlite') || (github.event_name == 'push' && contains(github.event.head_commit.message, '[deploy sqlite]'))) && 'sqlite' || 'postgres' }}
         shell: bash
         run: |
           set -euo pipefail
+          [[ "$SHOP_DEPLOY_MODE" =~ ^(sqlite|postgres)$ ]]
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            [[ "$SHOP_DEPLOY_MODE" == sqlite ]]
+          fi
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]]
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
           [[ "$DEPLOY_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && (( DEPLOY_PORT <= 65535 ))
