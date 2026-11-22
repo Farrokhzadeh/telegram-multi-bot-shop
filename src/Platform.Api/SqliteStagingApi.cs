@@ -271,10 +271,8 @@ public static class SqliteStagingApi
             {
                 try
                 {
-                    CheckoutQuote quote = await catalog.QuoteAsync(context, actor,
-                        new(product, quantity, payment), ct);
-                    if (payment != CheckoutPayment.Wallet || quote.Terms.DiscountId is null)
-                        options.Add(new(label, "method:" + label + ":" + quantity.ToString(CultureInfo.InvariantCulture)));
+                    _ = await catalog.QuoteAsync(context, actor, new(product, quantity, payment), ct);
+                    options.Add(new(label, "method:" + label + ":" + quantity.ToString(CultureInfo.InvariantCulture)));
                 }
                 catch (PricingRejectedException) { }
             }
@@ -297,8 +295,6 @@ public static class SqliteStagingApi
                 _ => throw new UnauthorizedAccessException("Staging payment method is unavailable.")
             };
             var prepared = await catalog.PrepareAsync(context, actor, new(product, selectedQuantity, method), ct);
-            if (method == CheckoutPayment.Wallet && prepared.Quote.Terms.DiscountId is not null)
-                throw new PricingRejectedException();
             Guid order = Guid.CreateVersion7();
             _ = await ingress.UpdateFlowAsync(context, actor, "payment", product, order, request.Anchor,
                 state.Revision, ct);
@@ -328,8 +324,6 @@ public static class SqliteStagingApi
                 new(product, payableQuantity, method), ct);
             if (confirmed != QuoteText(prepared.Quote, method))
                 return new(true, "The staging quote changed. Open /shop to review the new price.", true);
-            if (method == CheckoutPayment.Wallet && prepared.Quote.Terms.DiscountId is not null)
-                throw new PricingRejectedException();
             var purchase = new CheckoutRequest(orderId, product, payableQuantity, method,
                 CheckoutKind.ProductPurchase, method == CheckoutPayment.Crypto ? CryptoAsset.UsdtTrc20 : null);
             CheckoutResult result = await checkout.PurchaseAsync(context, actor,
