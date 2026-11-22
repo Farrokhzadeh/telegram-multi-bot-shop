@@ -181,7 +181,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
                     using var clear = SqliteWallet.Command(tx, """
                         UPDATE orders SET fulfillment_status='acquiring',review_code=NULL,
                             revision=revision+1,updated_at=$now
-                        WHERE id=$order AND review_code IS NULL OR id=$order AND review_code='provider_unknown'
+                        WHERE id=$order AND (review_code IS NULL OR review_code='provider_unknown')
                         """, ("$now", now), ("$order", state.Binding.OrderId));
                     if (await clear.ExecuteNonQueryAsync(token) != 1)
                         throw new InvalidOperationException("Supplier fulfillment was superseded.");
@@ -261,7 +261,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             return true;
         }, ct);
 
-    private static async Task<bool> CaptureAsync(SqliteTransaction tx, BrandContext context,
+    private async Task<bool> CaptureAsync(SqliteTransaction tx, BrandContext context,
         State state, SupplierOutcome result, CancellationToken ct)
     {
         var inventory = new InventoryCipher(secrets);
