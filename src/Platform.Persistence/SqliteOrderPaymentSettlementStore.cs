@@ -68,7 +68,15 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
                     UPDATE orders SET payment_status='paid',payment_confirmed_at=$confirmed,
                         revision=revision+1,updated_at=$now WHERE id=$order
                     """, token, ("$confirmed", current.Confirmed), ("$now", now), ("$order", current.Order));
-                if (current.Preorder)
+                if (current.Kind == "prepaid_units")
+                {
+                    route = ExternalSettlementRoute.Prepaid;
+                    _ = await new SqlitePrepaidSourceStore(sessions, secrets)
+                        .IssueAsync(tx, context, current.Order, token);
+                }
+                else if (current.Kind != "product_purchase")
+                    throw new UnauthorizedAccessException("The original order kind is unavailable.");
+                else if (current.Preorder)
                 {
                     route = ExternalSettlementRoute.LocalPreorder;
                     await FulfillmentAsync(tx, current.Order, "waiting_stock", null, now, token);
