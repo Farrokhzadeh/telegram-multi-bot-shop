@@ -5,8 +5,10 @@ namespace Platform.IntegrationTests;
 
 public sealed class SqliteStagingRecoveryTests
 {
-    [Fact]
-    public async Task TelegramStatusSuccessQueuesManifestOnceAndPersistsAcrossRestart()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TelegramStatusSuccessQueuesManifestOnceAndPersistsAcrossRestart(bool preQueued)
     {
         var ct = TestContext.Current.CancellationToken;
         var dir = Directory.CreateTempSubdirectory("akanti-stage-status-");
@@ -40,6 +42,9 @@ public sealed class SqliteStagingRecoveryTests
                 await command.ExecuteNonQueryAsync(token);
                 await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(first.BrandId, delivery), delivery,
                     DateTime.UtcNow, token);
+                if (preQueued)
+                    await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.PrepareManifest, first.BrandId, order),
+                        order, DateTime.UtcNow, token);
                 return true;
             }, ct);
             var jobs = new SqliteStagingJobs(new SqliteSessionFactory(path));
