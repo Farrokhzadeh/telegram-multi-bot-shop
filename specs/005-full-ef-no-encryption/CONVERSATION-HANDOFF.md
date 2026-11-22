@@ -1,11 +1,11 @@
-# Feature005 — EF foundation implementation candidate
-- Main input66d6a475; owner authorized implementation of full EF and target encryption removal only. Work remains on main; no subagents.
-- T001 checked; other implementation gates remain open pending their individual acceptance.
-- CI45070992089 passed at66d6a475:260 unit/904 integration/148 contract, formatting and managed/staged artifact probes; deployment skipped. Scope is the original provider-probe candidate, not later code.
-- Current source adds28 explicit entities/501 fields, provider configurations, common/context-specific DbContexts, exact canonical SQLite decimal type mapping, UTC mapping and harmless database-clock function, design factories/tool pins/private design dependency and RID-preserving lock update.
-- New EF session adapters share native transactions and retain old SQLite pre-commit integrity checks. Writer/customer/admin/shared admission and cancellation use scoped guarded operations. No existing business store is switched and EF integrity port/migrations/adoption are not complete.
-- Local7 SQLite provider/model/session probes pass (plus6 existing session/integrity tests); build zero warnings/errors; both design factories/tool restore/locked restore pass. New PostgreSQL model/session probes and exact combined source require no-deploy CI.
-- Failed decimal ValueConverter sorting and nullable alternate-key tightening were investigated, not accepted. Custom decimal mapping fixes sorting/canonical bytes; two nullable-generation FKs are explicit database-constraint descriptors requiring migration DDL preservation. See researchR8.
-- Sandbox workaround: single-node/no-shared-compiler build, direct xUnit runner and direct SDK Roslyn formatter; private XDG runtime dir resolves NuGet mutex initialization without disabling signatures.
-- Runtime application encryption remains; no target data was converted. Legacy keys/readers, signatures/authentication and historical pinned evidence/baselines preserved. No owner-host, protected data, live provider/Telegram, staging or production operation.
-- Next: qualify combined candidate with [no deploy], repair failures, then finish foundations/migrations/integrity before switching stores; do not infer completion from mapped entities alone.
+# Feature005 — migration recovery candidate
+- Owner authorized implementation; work remains on main, one agent, only full EF conversion and application encryption removal.
+- Last qualified code7c4457fa:CI45073330799 passed260 unit/910 integration/148 contract, formatting/managed/artifact probes; deployment skipped.
+- T001–T005 and T009–T012 checked9/40 for their bounded source/model/session/tooling scope. EF integrity, adoption, complete store port and encryption removal remain open.
+- Qualified source contains28 explicit entity classes/501 fields, both provider configurations/contexts, exact SQLite decimal mapping, UTC/database clock, existing-transaction EF adapters with writer/customer/admin/shared scope and pinned EF design tooling.
+- Local execution became unavailable; do not assume the dirty workspace or unpublished local candidate remains recoverable. Main and committed evidence are authoritative.
+- CI45076656777 regenerated six migration/snapshot sources using SDK10.0.403/EF10.0.15. All raw SHA-256s verified; see scaffold-provenance.json. Temporary recovery workflow removed.
+- Current unqualified candidate adds provider baseline migrations/snapshots, SQLite STRICT/deferred-FK generator,95 references including two nullable-generation descriptors,27 SQLite/85 PostgreSQL guards, safe-stop Down, read-only --describe-ef-schema and an explicitly managed SchemaRunner.
+- No daemon applies schema changes. No existing store has been switched wholesale; old SQLite pre-commit SQL validators remain. Application encryption is still present pending US2.
+- Next: evaluate exact combined no-deploy CI; fix restore/compile/format/migration failures. Finish T006 identity-bound adoption/creation and T007–T008 EF integrity/negative gates before runtime store switches and T013 closure.
+- Preserve legacy keys/readers, signatures/authentication, original pinned baselines/evidence and uncertain-effect fences. No protected conversion, provider activation, owner-host work or deployment is authorized by these checks.

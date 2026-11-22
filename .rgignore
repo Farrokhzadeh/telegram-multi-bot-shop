@@ -7,3 +7,6 @@ ops/*_QUALIFICATION.md
 **/packages.lock.json
 **/bin/
 **/obj/
+
+src/Platform.Persistence/Migrations/**/*.Designer.cs
+src/Platform.Persistence/Migrations/**/*ModelSnapshot.cs

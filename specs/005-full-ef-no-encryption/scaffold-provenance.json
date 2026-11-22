@@ -1,0 +1,47 @@
+{
+  "source_commit": "d99812a545a61bca95a7e8873b29730fe0f55143",
+  "workflow_run": 45076656777,
+  "job": 137375284347,
+  "sdk": "10.0.403",
+  "ef_tool": "10.0.15",
+  "scope": "Raw generated scaffolds after removing optional inheritdoc comments; all six checksums verified before reviewed guard/Down changes.",
+  "raw_generated_files": [
+    {
+      "path": "src/Platform.Persistence/Migrations/PostgreSql/20261122221553_InitialEfBaseline.Designer.cs",
+      "length": 229970,
+      "sha256": "f2e5da74a1272505eafc998e0ecad8f43d1716cc46b466176f30d9b53a1c0878"
+    },
+    {
+      "path": "src/Platform.Persistence/Migrations/PostgreSql/20261122221553_InitialEfBaseline.cs",
+      "length": 194356,
+      "sha256": "418c042ccfa7455fd43b96a2e6b03a05128359fad0e6eabdefc9eff059dd05a0"
+    },
+    {
+      "path": "src/Platform.Persistence/Migrations/PostgreSql/PostgresAkantiDbContextModelSnapshot.cs",
+      "length": 229899,
+      "sha256": "9c49d0f83bf83433ed59927fcb26af818b1c261b279355bf9bc07e9ca8e9d9b9"
+    },
+    {
+      "path": "src/Platform.Persistence/Migrations/Sqlite/20261122221551_InitialEfBaseline.Designer.cs",
+      "length": 263467,
+      "sha256": "dcfa0b92170f793fbfa75f002ad524445dc163b1684d4677d55394b608057799"
+    },
+    {
+      "path": "src/Platform.Persistence/Migrations/Sqlite/20261122221551_InitialEfBaseline.cs",
+      "length": 210432,
+      "sha256": "307737a41694ec21f7ffe7199b654648fe4f51f98feaad4075bc2fea95ae099b"
+    },
+    {
+      "path": "src/Platform.Persistence/Migrations/Sqlite/SqliteAkantiDbContextModelSnapshot.cs",
+      "length": 263394,
+      "sha256": "c5ef856f19d6d0156cbb9a7dcd52d1a623d4cf6303e8b6f27434f8e655181b35"
+    }
+  ],
+  "reviewed_changes": [
+    "SQLite strict-table/deferred-FK generator and two nullable-generation links",
+    "Provider integrity resources and PostgreSQL deferred-FK preservation",
+    "Explicit baseline downgrade refusal",
+    "SQLite encrypted baseline user_version=1",
+    "Managed SchemaRunner read-only script description; no adoption, conversion or deployment"
+  ]
+}

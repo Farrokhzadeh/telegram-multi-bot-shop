@@ -4,6 +4,8 @@
     <ProjectReference Include="../Platform.Security/Platform.Security.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Migrations/Sqlite/0001_ef_integrity.sql" LogicalName="Platform.Persistence.EfMigrations.Sqlite.0001_ef_integrity.sql" />
+    <EmbeddedResource Include="Migrations/PostgreSql/0001_ef_integrity.sql" LogicalName="Platform.Persistence.EfMigrations.PostgreSql.0001_ef_integrity.sql" />
     <PackageReference Include="Npgsql" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />

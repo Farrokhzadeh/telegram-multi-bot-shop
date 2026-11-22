@@ -90,4 +90,104 @@ public sealed class EfSchemaTests
         }
         finally { directory.Delete(recursive: true); }
     }
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("postgres")]
+    public void SchemaDescriptionIsDeterministicWithoutConnectingToTheDesignDatabase(string provider)
+    {
+        var first = Platform.SchemaRunner.EfSchemaCommand.Describe(provider);
+        Assert.Equal(first, Platform.SchemaRunner.EfSchemaCommand.Describe(provider));
+        Assert.Equal(provider, first.Provider);
+        Assert.EndsWith("_InitialEfBaseline", first.Migration, StringComparison.Ordinal);
+        Assert.Equal(64, first.ScriptSha256.Length);
+        Assert.All(first.ScriptSha256, value => Assert.True(char.IsAsciiHexDigitLower(value)));
+        Assert.Throws<ArgumentException>(() => Platform.SchemaRunner.EfSchemaCommand.Describe("unknown"));
+    }
+
+    [Fact]
+    public async Task PostgresEfMigrationPreservesDeferredReferencesAndCanonicalDatabaseGuards()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var database = await DisposablePostgres.CreateAsync(ct);
+        await using var connection = await database.Data.OpenConnectionAsync(ct);
+        var options = new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PostgresAkantiDbContext(options);
+        Assert.False(context.Database.HasPendingModelChanges());
+        await context.Database.MigrateAsync(ct);
+        Assert.Single(await context.Database.GetAppliedMigrationsAsync(ct));
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT count(*) FROM information_schema.tables WHERE table_schema='shop' AND table_name<>'__EFMigrationsHistory' AND table_type='BASE TABLE'";
+        Assert.Equal(28L, await command.ExecuteScalarAsync(ct));
+        command.CommandText = "SELECT count(*) FROM pg_constraint c JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='shop' AND c.contype='f' AND c.condeferrable";
+        Assert.Equal(95L, await command.ExecuteScalarAsync(ct));
+        command.CommandText = "SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='shop' AND NOT t.tgisinternal";
+        Assert.Equal(85L, await command.ExecuteScalarAsync(ct));
+        await VerifyTextRoundtripAsync(context, ct);
+    }
+
+    [Fact]
+    public async Task SqliteEfMigrationCreatesStrictTablesAndPreservesAllForeignKeysAndHistoryGuards()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
+        var options = new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options;
+        await using var context = new SqliteAkantiDbContext(options);
+        Assert.False(context.Database.HasPendingModelChanges());
+        await context.Database.MigrateAsync(ct);
+        Assert.Single(await context.Database.GetAppliedMigrationsAsync(ct));
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT count(*) FROM pragma_table_list WHERE name NOT LIKE 'sqlite_%' AND name<>'__EFMigrationsHistory' AND strict=1";
+        Assert.Equal(28L, await command.ExecuteScalarAsync(ct));
+        long foreignKeys = 0;
+        foreach (var entity in context.Model.GetEntityTypes())
+        {
+            command.CommandText = "SELECT count(DISTINCT id) FROM pragma_foreign_key_list($table)";
+            command.Parameters.Clear();
+            command.Parameters.AddWithValue("$table", entity.GetTableName()!);
+            foreignKeys += (long)(await command.ExecuteScalarAsync(ct))!;
+        }
+        Assert.Equal(95, foreignKeys);
+        command.Parameters.Clear();
+        command.CommandText = "SELECT count(*) FROM sqlite_schema WHERE type='trigger'";
+        Assert.Equal(27L, await command.ExecuteScalarAsync(ct));
+        command.CommandText = "SELECT sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'__EFMigrationsHistory'";
+        int deferred = 0;
+        await using (var definitions = await command.ExecuteReaderAsync(ct))
+            while (await definitions.ReadAsync(ct)) deferred += definitions.GetString(0).Split("DEFERRABLE", StringSplitOptions.None).Length - 1;
+        Assert.Equal(95, deferred);
+        command.CommandText = "SELECT sql FROM sqlite_schema WHERE type='table' AND name='fulfillments'";
+        string definition = (string)(await command.ExecuteScalarAsync(ct))!;
+        Assert.Contains("fulfillments_order_id_manifest_generation_fk", definition, StringComparison.Ordinal);
+        Assert.Contains("DEFERRABLE INITIALLY IMMEDIATE", definition, StringComparison.Ordinal);
+        await VerifyTextRoundtripAsync(context, ct);
+    }
+
+    private static async Task VerifyTextRoundtripAsync(AkantiDbContext context, CancellationToken ct)
+    {
+        context.Set<Platform.Persistence.Entities.Product>().Add(new()
+        {
+            Id = Guid.NewGuid(),
+            Title = new string('x', 161),
+            FulfillmentKind = "manual",
+            AvailabilityPolicy = "immediate"
+        });
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(ct));
+        context.ChangeTracker.Clear();
+        Assert.Empty(await context.Set<Platform.Persistence.Entities.Product>().ToArrayAsync(ct));
+        string original = string.Concat(Enumerable.Repeat("😀", 160));
+        Guid id = Guid.NewGuid();
+        context.Set<Platform.Persistence.Entities.Product>().Add(new()
+        {
+            Id = id,
+            Title = original,
+            FulfillmentKind = "manual",
+            AvailabilityPolicy = "immediate"
+        });
+        await context.SaveChangesAsync(ct);
+        context.ChangeTracker.Clear();
+        Assert.Equal(original, await context.Set<Platform.Persistence.Entities.Product>().Where(value => value.Id == id).Select(value => value.Title).SingleAsync(ct));
+    }
+
 }

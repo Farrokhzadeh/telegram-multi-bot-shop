@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Platform.Persistence.Migrations;
 using Platform.Persistence.Configurations;
 
 namespace Platform.Persistence;
@@ -8,6 +10,8 @@ public abstract class AkantiDbContext(DbContextOptions options) : DbContext(opti
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         bool sqlite = Database.IsSqlite();
+        if ((this is SqliteAkantiDbContext && !sqlite) || (this is PostgresAkantiDbContext && !Database.IsNpgsql()))
+            throw new InvalidOperationException("The context provider is incompatible.");
         modelBuilder.HasDbFunction(() => EfValues.UtcNow()).HasName(sqlite ? "akanti_utc_now" : "clock_timestamp").IsBuiltIn();
         modelBuilder.ApplyConfiguration(new Configurations.BrandConfiguration(sqlite));
         modelBuilder.ApplyConfiguration(new Configurations.BrandChannelConfiguration(sqlite));
@@ -40,6 +44,14 @@ public abstract class AkantiDbContext(DbContextOptions options) : DbContext(opti
     }
 }
 
-public sealed class SqliteAkantiDbContext(DbContextOptions<SqliteAkantiDbContext> options) : AkantiDbContext(options);
+public sealed class SqliteAkantiDbContext(DbContextOptions<SqliteAkantiDbContext> options) : AkantiDbContext(options)
+{
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+        optionsBuilder.ReplaceService<IMigrationsSqlGenerator, AkantiSqliteMigrationsSqlGenerator>();
+}
 
-public sealed class PostgresAkantiDbContext(DbContextOptions<PostgresAkantiDbContext> options) : AkantiDbContext(options);
+public sealed class PostgresAkantiDbContext(DbContextOptions<PostgresAkantiDbContext> options) : AkantiDbContext(options)
+{
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+        optionsBuilder.UseNpgsql(provider => provider.MigrationsHistoryTable("__EFMigrationsHistory", "shop"));
+}

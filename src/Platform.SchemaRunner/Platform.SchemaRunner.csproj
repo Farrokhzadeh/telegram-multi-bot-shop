@@ -2,8 +2,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <IsAotCompatible>true</IsAotCompatible>
-    <PublishAot>true</PublishAot>
+    <IsAotCompatible>false</IsAotCompatible>
+    <PublishAot>false</PublishAot>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Platform.Persistence/Platform.Persistence.csproj" />

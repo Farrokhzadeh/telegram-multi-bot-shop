@@ -33,3 +33,10 @@ dotnet ef dbcontext info --project src/Platform.Persistence/Platform.Persistence
 dotnet ef dbcontext info --project src/Platform.Persistence/Platform.Persistence.csproj --context PostgresAkantiDbContext --no-build
 ```
 Build the project first when needed. The design factories accept no runtime connection arguments and select only in-memory/credential-free design identities. These commands identify models; they do not perform adoption, conversion or deployment. Operator migration/adoption commands remain unimplemented at this checkpoint.
+
+## Managed read-only schema description
+```bash
+dotnet run --project src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -- --describe-ef-schema sqlite
+dotnet run --project src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -- --describe-ef-schema postgres
+```
+These commands only describe committed migration metadata and a deterministic script hash; design identities never connect to a target. SchemaRunner is managed because EF migration generation is incompatible with Native AOT. No existing-file adoption or data conversion is implemented by this command. Do not substitute it for schema, content or financial qualification.

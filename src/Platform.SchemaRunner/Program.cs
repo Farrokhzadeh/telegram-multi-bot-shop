@@ -3,6 +3,21 @@ using Platform.Persistence;
 using Platform.Migration;
 using Platform.SchemaRunner;
 
+if (args is ["--describe-ef-schema", var efProvider])
+{
+    try
+    {
+        var description = EfSchemaCommand.Describe(efProvider);
+        Console.WriteLine("provider=" + description.Provider + " migration=" + description.Migration + " script_sha256=" + description.ScriptSha256);
+        return 0;
+    }
+    catch (Exception error) when (error is ArgumentException or InvalidOperationException or NotSupportedException)
+    {
+        Console.Error.WriteLine("EF schema description rejected; verify the provider, model and reviewed migration artifacts.");
+        return 78;
+    }
+}
+
 if (args is ["--initialize-staging-sqlite", var sqlitePath])
 {
     try
