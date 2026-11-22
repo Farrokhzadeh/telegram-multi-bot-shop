@@ -104,7 +104,7 @@ public sealed class SqlitePrepaidSourceStore(SqliteSessionFactory sessions, Secr
             ("$key", key), ("$prefix", code[..3]), ("$product", product),
             ("$member", member), ("$units", quantity), ("$revision", revision),
             ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
-        if (await insert.ExecuteNonQueryAsync(ct) != 1)
+        if (await insert.ExecuteNonQueryAsync(ct) != 4)
             throw new InvalidOperationException("Prepaid entitlement was not persisted.");
         await SqliteDiscountClaimStore.TransitionAsync(tx, context, source, true, ct);
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Coupon(context.BrandId, coupon),
