@@ -1,0 +1,12 @@
+# Feature005 implementation qualification
+## T001 inventory
+Main input `5bbfa6b548d8b76f9d16f2dbbcd0cda0dd331e63`, source baseline `c44dc1b`. Inventoried all28 tables/fields/constraints,71 persistence type caller sets across235 C# source files, target-writing migration tools and referenced asset/credential/key/IPC surfaces. See inventory.md and immutable links in data-model.md. No protected data or live host was accessed. Closure evidence for converted paths remains T038.
+## T002 provider feasibility candidate
+- SDK10.0.403, local managed runtime10.0.14; current EF SQLite10.0.15/Npgsql provider10.0.3 pins unchanged. Tests are synthetic only.
+- `EfProviderTests.cs` SHA-256 `fcfe6af485a69549e402d11f8b0de381537cef311b85e757fe33f7cf3838314d`. SQLite probes exercise translated exact decimal order/comparison/arithmetic/sum,20-digit integer plus8-digit fractional precision, UUID high-bit cursor boundaries, UTC microsecond-safe roundtrip, binary/Unicode/NULL, explicit cancelled-operation rollback and actual EF-generated table rebuild preserving data/index/check rejection.
+- Local build succeeded with zero warnings/errors. All3 SQLite EF provider tests pass; PostgreSQL counterpart requires existing CI synthetic PostgreSQL identity and remains pending.
+- Existing SqliteSessionTests/SqliteIntegrityTests also run as focused transaction/integrity baseline; all6 tests pass, exit0,1.966s on this synthetic local run. Existing session fixtures cover bounded immediate-writer contention and cancellation; no duplicate contention test was added.
+- Local sandbox disallows MSBuild named-pipe worker sockets. Initial multi-node build/test launch failed with SocketException13 before test execution. Retained failure log privately; single-node in-process build and direct xUnit runner succeeded. This is a tooling workaround, not an application change.
+- Formatting CLI failed at sandbox named-pipe workspace loading (exit1); full formatter must be evaluated in CI, not claimed passing locally.
+- CPU cap2, build/test process timeouts45–240s, private workspace logs/exit files; no live PostgreSQL/Telegram/provider connections. Local schema rebuild is a disposable probe, not target migration adoption proof.
+- Need exact-commit CI qualification with `[no deploy]` to validate PostgreSQL and full existing regression. No staging deployment, production operation, target conversion or encryption removal has occurred.

@@ -1,11 +1,7 @@
-# Full EF and encryption removal — plan/tasks checkpoint
-- Feature:005; main baseline `48eeccda54275cfaf3c7b5c1ba22eff1d08d650b`, 2026-11-22.
-- Owner scope: complete EF conversion and application encryption removal only. Plan then tasks requested; no implementation or deployment requested.
-- Generated: plan, research, complete28-entity data-model, persistence/conversion contracts, source inventory, quickstart and dependency-ordered40-task checklist.
-- Status:0/40 implementation tasks complete. No code, schema, running service, provider or protected-data changes. Tests of generated design/Spec Kit tooling do not qualify runtime behavior.
-- Decisions: both maintained target providers use the common EF model; preserve exact values, transaction and external-effect fences; final target has direct content and no content-encryption keyring dependency.
-- Source readers/keys remain migration/recovery-only. Password/token hashes, signature metadata including payments.ipn_key_id, authentication credentials, TLS, file protections and tenant authorization remain.
-- Governance: scoped constitution 4.0.0 records existing owner approval/rationale/plaintext-storage risk; historical text and pinned baseline/evidence files preserved; constitution heading/blob index refreshed.
-- Protected execution, AccAbad mapping/import, feature002 work, provider activation, key retirement and staging/production deployment remain outside scope.
-- Next when implementation requested:T001 caller/field/asset inventory, then focused provider feasibility/baseline T002; follow tasks.md dependencies and keep gates unchecked until exact evidence passes.
-- Planning validation:15 existing Spec Kit tooling tests passed; feature resolution,40-task format/count/dependencies,28-entity coverage, local document links, historical-baseline preservation and diff whitespace checks passed. No CI or implementation suite was run.
+# Feature005 — implementation checkpoint
+- Implementation authorized after plan/tasks. Main input5bbfa6b; all historical pinned evidence/baselines unchanged.
+- T001 checked: all28 schema fields/relations,71 persistence type caller sets across235 source files and target/source/asset/auth/IPC classifications recorded.
+- T002 candidate adds EfProviderTests:3 local SQLite probes pass; PostgreSQL probe and full exact-commit CI pending. Existing focused transaction/integrity regression and whitespace formatter run locally; final count/exit evidence follows in qualification.md.
+- Build uses SDK10.0.403, existing pins and single-node/no-build-server workaround because sandbox named-pipe sockets are denied. Tests run in-process with synthetic data; no live services or owner-host access.
+- T002–T040 remain unchecked. No application runtime wiring, plaintext migration, encrypted-data conversion, staging deployment or production change has occurred.
+- Next: evaluate no-deploy CI for this exact candidate; repair failures before closing T002, then implement T003 and foundation in task order.
