@@ -189,7 +189,7 @@ public sealed class SqliteDiscountClaimTests
             await new SqlitePaymentEvidenceStore(sessions).BindInvoiceAsync(brand, 0, 7001,
                 payment, "123456789", 8.2m, ct);
             using var notice = PaymentNoticeFixture.Notice(origin: "order:" + order.ToString("D"),
-                quoteAmount: 8.2m, expectedTokens: 8.2m, receivedTokens: 8.2m);
+                quote: 8.2m, expected: 8.2m, actual: 8.2m);
             var capture = new SqlitePaymentCaptureStore(sessions, secrets);
             Assert.Equal(PaymentCaptureOutcome.Ready, (await capture.CaptureAsync(brand, 0, notice,
                 (proof, _) => Task.FromResult("protected:synthetic/" + proof.Digest), ct)).Outcome);
