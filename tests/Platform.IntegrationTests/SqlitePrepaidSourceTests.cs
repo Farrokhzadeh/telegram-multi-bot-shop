@@ -107,8 +107,10 @@ public sealed class SqlitePrepaidSourceTests
     }
 
 
-    [Fact]
-    public async Task WalletPrepaidCheckoutDebitsOnceAndIssuesOriginalSourceEntitlement()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WalletPrepaidCheckoutDebitsOnceAndIssuesOriginalSourceEntitlement(bool unknown)
     {
         var ct = TestContext.Current.CancellationToken;
         var dir = Directory.CreateTempSubdirectory("akanti-sqlite-prepaid-wallet-");
@@ -181,6 +183,43 @@ public sealed class SqlitePrepaidSourceTests
                 Assert.Equal(1, row.GetInt64(6));
                 return 0;
             }, ct);
+            var notices = new SqliteCouponDeliveryStore(sessions, secrets);
+            JobLease? pending = await notices.ClaimNoticeAsync(brand, Guid.NewGuid(), ct);
+            Assert.NotNull(pending);
+            await notices.PrepareAsync(brand, pending, ct);
+            Assert.Null(await notices.ClaimNoticeAsync(brand, Guid.NewGuid(), ct));
+            JobLease? delivery = await sessions.RunAsync(true, (_, tx, token) =>
+                OutboxStore.ClaimSqliteAsync(tx, brand.BrandId, JobKind.SendTelegram, Guid.NewGuid(),
+                    TimeSpan.FromMinutes(1), token), ct);
+            Assert.NotNull(delivery);
+            var dispatch = await notices.BeginAsync(brand, delivery, ct);
+            Assert.NotNull(dispatch);
+            Assert.Equal(7001, dispatch.ChatId);
+            Assert.Contains("Code: ", dispatch.Text);
+            Assert.Equal(48, dispatch.Text.Split("Code: ", 2)[1].Length);
+            await notices.RecordOutcomeAsync(brand, delivery, unknown
+                ? new(DeliveryOutcomeKind.Unknown)
+                : new(DeliveryOutcomeKind.Succeeded, 901), ct);
+            await new SqliteSessionFactory(path).RunAsync(false, async (_, tx, token) =>
+            {
+                using var query = SqliteWallet.Command(tx, """
+                    SELECT d.status,j.status,(SELECT count(*) FROM wallet_entries WHERE order_id=$order),
+                        (SELECT count(*) FROM discounts WHERE source_order_id=$order)
+                    FROM telegram_deliveries d JOIN jobs j ON j.telegram_delivery_id=d.id
+                    WHERE d.purpose='discount_notice' AND d.discount_id IN
+                        (SELECT id FROM discounts WHERE source_order_id=$order)
+                    """, ("$order", order));
+                await using var row = await query.ExecuteReaderAsync(token);
+                Assert.True(await row.ReadAsync(token));
+                Assert.Equal(unknown ? "uncertain" : "succeeded", row.GetString(0));
+                Assert.Equal(unknown ? "failed" : "succeeded", row.GetString(1));
+                Assert.Equal(1, row.GetInt64(2));
+                Assert.Equal(1, row.GetInt64(3));
+                return 0;
+            }, ct);
+            Assert.Null(await sessions.RunAsync(true, (_, tx, token) =>
+                OutboxStore.ClaimSqliteAsync(tx, brand.BrandId, JobKind.SendTelegram, Guid.NewGuid(),
+                    TimeSpan.FromSeconds(30), token), ct));
         }
         finally { dir.Delete(recursive: true); }
     }
