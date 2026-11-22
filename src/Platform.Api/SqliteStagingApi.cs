@@ -32,6 +32,9 @@ public sealed record SqliteStageReply(bool Accepted, string Text = "", bool Edit
 [JsonSerializable(typeof(SqliteStageAdminIdentity))]
 [JsonSerializable(typeof(SqliteStageCouponEditCommand))]
 [JsonSerializable(typeof(SqliteStageConfigurationSaved))]
+[JsonSerializable(typeof(AdminChange<BrandPolicyEdit>))]
+[JsonSerializable(typeof(AdminChange<MasterProductEdit>))]
+[JsonSerializable(typeof(AdminChange<ListingEdit>))]
 [JsonSerializable(typeof(SqliteStageReply))]
 [JsonSerializable(typeof(AdminPage<AdminBrand>))]
 [JsonSerializable(typeof(AdminPage<AdminProduct>))]
@@ -247,6 +250,95 @@ public static class SqliteStagingApi
                         await JsonSerializer.SerializeAsync(http.Response.Body,
                             new SqliteStageAdminIdentity(entry),
                             SqliteStageApiJson.Default.SqliteStageAdminIdentity, http.RequestAborted);
+                    }
+                    catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
+                    { http.Response.StatusCode = 401; }
+                    catch (Exception error) when (error is ArgumentException or InvalidOperationException
+                        or FormatException or OverflowException)
+                    { http.Response.StatusCode = 409; }
+                }));
+                app.MapMethods("/v1/admin/brands/{brand:guid}", ["PATCH"],
+                    (RequestDelegate)(async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
+                    try
+                    {
+                        var actor = await AuthenticateAsync(http, config);
+                        if (!Guid.TryParse(http.Request.RouteValues["brand"]?.ToString(), out var brand) ||
+                            brand != config.Context.BrandId) throw new UnauthorizedAccessException();
+                        http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+                            .MaxRequestBodySize = 8192;
+                        var input = await JsonSerializer.DeserializeAsync(http.Request.Body,
+                            SqliteStageApiJson.Default.AdminChangeBrandPolicyEdit, http.RequestAborted);
+                        if (input is null || input.Value is null) throw new UnauthorizedAccessException();
+                        long revision = await new SqliteAdminCatalogWriteStore(config.Sessions).PolicyAsync(
+                            actor, config.Context, input.Value, input.ExpectedRevision,
+                            input.CommandId, http.RequestAborted);
+                        http.Response.ContentType = "application/json";
+                        await JsonSerializer.SerializeAsync(http.Response.Body,
+                            new SqliteStageConfigurationSaved(revision),
+                            SqliteStageApiJson.Default.SqliteStageConfigurationSaved,
+                            http.RequestAborted);
+                    }
+                    catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
+                    { http.Response.StatusCode = 401; }
+                    catch (Exception error) when (error is ArgumentException or InvalidOperationException
+                        or FormatException or OverflowException)
+                    { http.Response.StatusCode = 409; }
+                }));
+                app.MapMethods("/v1/admin/products/{id:guid}", ["PUT"],
+                    (RequestDelegate)(async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
+                    try
+                    {
+                        var actor = await AuthenticateAsync(http, config);
+                        if (!Guid.TryParse(http.Request.RouteValues["id"]?.ToString(), out var product) ||
+                            product == Guid.Empty) throw new UnauthorizedAccessException();
+                        http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+                            .MaxRequestBodySize = 8192;
+                        var input = await JsonSerializer.DeserializeAsync(http.Request.Body,
+                            SqliteStageApiJson.Default.AdminChangeMasterProductEdit, http.RequestAborted);
+                        if (input is null || input.Value is null) throw new UnauthorizedAccessException();
+                        long revision = await new SqliteAdminCatalogWriteStore(config.Sessions).ProductAsync(
+                            actor, product, input.Value, input.ExpectedRevision, input.CommandId,
+                            http.RequestAborted);
+                        http.Response.ContentType = "application/json";
+                        await JsonSerializer.SerializeAsync(http.Response.Body,
+                            new SqliteStageConfigurationSaved(revision),
+                            SqliteStageApiJson.Default.SqliteStageConfigurationSaved,
+                            http.RequestAborted);
+                    }
+                    catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
+                    { http.Response.StatusCode = 401; }
+                    catch (Exception error) when (error is ArgumentException or InvalidOperationException
+                        or FormatException or OverflowException)
+                    { http.Response.StatusCode = 409; }
+                }));
+                app.MapMethods("/v1/admin/products/{id:guid}/brands/{brand:guid}", ["PUT"],
+                    (RequestDelegate)(async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
+                    try
+                    {
+                        var actor = await AuthenticateAsync(http, config);
+                        if (!Guid.TryParse(http.Request.RouteValues["id"]?.ToString(), out var product) ||
+                            product == Guid.Empty ||
+                            !Guid.TryParse(http.Request.RouteValues["brand"]?.ToString(), out var brand) ||
+                            brand != config.Context.BrandId) throw new UnauthorizedAccessException();
+                        http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+                            .MaxRequestBodySize = 8192;
+                        var input = await JsonSerializer.DeserializeAsync(http.Request.Body,
+                            SqliteStageApiJson.Default.AdminChangeListingEdit, http.RequestAborted);
+                        if (input is null || input.Value is null) throw new UnauthorizedAccessException();
+                        long revision = await new SqliteAdminCatalogWriteStore(config.Sessions).ListingAsync(
+                            actor, config.Context, product, input.Value, input.ExpectedRevision,
+                            input.CommandId, http.RequestAborted);
+                        http.Response.ContentType = "application/json";
+                        await JsonSerializer.SerializeAsync(http.Response.Body,
+                            new SqliteStageConfigurationSaved(revision),
+                            SqliteStageApiJson.Default.SqliteStageConfigurationSaved,
+                            http.RequestAborted);
                     }
                     catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
                     { http.Response.StatusCode = 401; }
