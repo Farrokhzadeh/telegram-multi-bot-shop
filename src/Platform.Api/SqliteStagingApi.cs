@@ -262,17 +262,22 @@ public static class SqliteStagingApi
             quantity is >= 1 and <= 5)
         {
             var options = new List<SqliteStageButton>();
-            foreach (var (payment, label) in new[]
+            foreach (var (payment, kind, label) in new[]
             {
-                (CheckoutPayment.Wallet, "wallet"),
-                (CheckoutPayment.Crypto, "crypto"),
-                (CheckoutPayment.Bank, "bank")
+                (CheckoutPayment.Wallet, CheckoutKind.ProductPurchase, "goods-wallet"),
+                (CheckoutPayment.Crypto, CheckoutKind.ProductPurchase, "goods-crypto"),
+                (CheckoutPayment.Bank, CheckoutKind.ProductPurchase, "goods-bank"),
+                (CheckoutPayment.Wallet, CheckoutKind.PrepaidUnits, "prepaid-wallet"),
+                (CheckoutPayment.Crypto, CheckoutKind.PrepaidUnits, "prepaid-crypto"),
+                (CheckoutPayment.Bank, CheckoutKind.PrepaidUnits, "prepaid-bank")
             })
             {
                 try
                 {
-                    _ = await catalog.QuoteAsync(context, actor, new(product, quantity, payment), ct);
-                    options.Add(new(label, "method:" + label + ":" + quantity.ToString(CultureInfo.InvariantCulture)));
+                    CheckoutQuote quote = await catalog.QuoteAsync(context, actor,
+                        new(product, quantity, payment, kind), ct);
+                    if (quote.Payable.Amount > 0)
+                        options.Add(new(label, "method:" + label + ":" + quantity.ToString(CultureInfo.InvariantCulture)));
                 }
                 catch (PricingRejectedException) { }
             }
@@ -287,18 +292,23 @@ public static class SqliteStagingApi
                 CultureInfo.InvariantCulture, out int selectedQuantity) || selectedQuantity is < 1 or > 5 ||
                 request.MessageText != "Staging quantity\nQuantity: " + selectedQuantity.ToString(CultureInfo.InvariantCulture))
                 throw new UnauthorizedAccessException("Staging quantity selection is unavailable.");
-            CheckoutPayment method = parts[1] switch
+            (CheckoutPayment method, CheckoutKind kind) = parts[1] switch
             {
-                "wallet" => CheckoutPayment.Wallet,
-                "crypto" => CheckoutPayment.Crypto,
-                "bank" => CheckoutPayment.Bank,
+                "goods-wallet" => (CheckoutPayment.Wallet, CheckoutKind.ProductPurchase),
+                "goods-crypto" => (CheckoutPayment.Crypto, CheckoutKind.ProductPurchase),
+                "goods-bank" => (CheckoutPayment.Bank, CheckoutKind.ProductPurchase),
+                "prepaid-wallet" => (CheckoutPayment.Wallet, CheckoutKind.PrepaidUnits),
+                "prepaid-crypto" => (CheckoutPayment.Crypto, CheckoutKind.PrepaidUnits),
+                "prepaid-bank" => (CheckoutPayment.Bank, CheckoutKind.PrepaidUnits),
                 _ => throw new UnauthorizedAccessException("Staging payment method is unavailable.")
             };
-            var prepared = await catalog.PrepareAsync(context, actor, new(product, selectedQuantity, method), ct);
+            var prepared = await catalog.PrepareAsync(context, actor,
+                new(product, selectedQuantity, method, kind), ct);
+            if (prepared.Quote.Payable.Amount <= 0) throw new PricingRejectedException();
             Guid order = Guid.CreateVersion7();
             _ = await ingress.UpdateFlowAsync(context, actor, "payment", product, order, request.Anchor,
                 state.Revision, ct);
-            return new(true, QuoteText(prepared.Quote, method), true,
+            return new(true, QuoteText(prepared.Quote, method, kind), true,
                 [new("Confirm staging checkout", "pay:" + order.ToString("N")), new("Cancel", "cancel")]);
         }
         if (choice == "cancel" && state.State == "payment")
@@ -315,17 +325,20 @@ public static class SqliteStagingApi
             if (!int.TryParse(count.AsSpan("Quantity: ".Length), NumberStyles.None, CultureInfo.InvariantCulture, out int payableQuantity) ||
                 payableQuantity is < 1 or > 5) throw new UnauthorizedAccessException();
             string[] lines = confirmed.Split('\n', StringSplitOptions.None);
-            if (lines.Length != 5 || !lines[4].StartsWith("Method: ", StringComparison.Ordinal) ||
+            if (lines.Length != 6 || !lines[4].StartsWith("Method: ", StringComparison.Ordinal) ||
+                !lines[5].StartsWith("Kind: ", StringComparison.Ordinal) ||
                 !Enum.TryParse<CheckoutPayment>(lines[4].AsSpan(8), out var method) ||
+                !Enum.TryParse<CheckoutKind>(lines[5].AsSpan(6), out var kind) ||
                 method is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank) ||
-                lines[4] != "Method: " + method)
+                kind is not (CheckoutKind.ProductPurchase or CheckoutKind.PrepaidUnits) ||
+                lines[4] != "Method: " + method || lines[5] != "Kind: " + kind)
                 throw new UnauthorizedAccessException("The confirmed staging payment method is unavailable.");
             var prepared = await catalog.PrepareAsync(context, actor,
-                new(product, payableQuantity, method), ct);
-            if (confirmed != QuoteText(prepared.Quote, method))
+                new(product, payableQuantity, method, kind), ct);
+            if (confirmed != QuoteText(prepared.Quote, method, kind))
                 return new(true, "The staging quote changed. Open /shop to review the new price.", true);
             var purchase = new CheckoutRequest(orderId, product, payableQuantity, method,
-                CheckoutKind.ProductPurchase, method == CheckoutPayment.Crypto ? CryptoAsset.UsdtTrc20 : null);
+                kind, method == CheckoutPayment.Crypto ? CryptoAsset.UsdtTrc20 : null);
             CheckoutResult result = await checkout.PurchaseAsync(context, actor,
                 purchase, prepared, catalog, ct);
             if (result.Outcome is CheckoutOutcome.Purchased or CheckoutOutcome.Replayed or CheckoutOutcome.AwaitingPayment)
@@ -333,18 +346,20 @@ public static class SqliteStagingApi
                 _ = await ingress.UpdateFlowAsync(context, actor, "idle", null, null, null, state.Revision, ct);
                 return new(true, result.Outcome == CheckoutOutcome.AwaitingPayment
                     ? "Staging order accepted. Awaiting verified external payment."
-                    : "Staging order accepted. Delivery is queued.", true);
+                    : kind == CheckoutKind.PrepaidUnits
+                        ? "Staging prepaid entitlement issued. Private delivery is queued."
+                        : "Staging order accepted. Delivery is queued.", true);
             }
             return new(true, "Checkout was not accepted: " + result.Outcome + ". Open /shop to retry.", true);
         }
         return new(false);
     }
 
-    private static string QuoteText(CheckoutQuote quote, CheckoutPayment method) =>
+    private static string QuoteText(CheckoutQuote quote, CheckoutPayment method, CheckoutKind kind) =>
         "Staging quote\nQuantity: " + quote.Terms.Quantity.ToString(CultureInfo.InvariantCulture) +
         "\nTotal: " + quote.Payable.Amount.ToString(CultureInfo.InvariantCulture) +
         " " + quote.Payable.Currency + "\nProduct: " + quote.Terms.Product.Title +
-        "\nMethod: " + method;
+        "\nMethod: " + method + "\nKind: " + kind;
 
     private static async Task<SqliteStageReply> WalletAsync(SqliteCustomerScreens screens,
         SqliteStagingConfiguration config, CancellationToken ct)
