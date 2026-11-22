@@ -156,7 +156,7 @@ public sealed class SqliteAdminCatalogWriteStore(SqliteSessionFactory sessions)
                 ("$description", value.Description), ("$icon_mode", value.IconMode),
                 ("$icon", value.Icon), ("$guide_mode", value.GuidanceMode),
                 ("$guidance", value.Guidance), ("$usd", ExactDecimal.Format(usd.Amount)),
-                ("$toman", toman is Money local ? ExactDecimal.Format(local.Amount) : null),
+                ("$toman", toman is Money price ? ExactDecimal.Format(price.Amount) : null),
                 ("$automatic", value.AutomaticToman), ("$wallet", value.Wallet),
                 ("$crypto", value.Crypto), ("$bank", value.Bank),
                 ("$minimum", value.Minimum), ("$maximum", value.Maximum),
