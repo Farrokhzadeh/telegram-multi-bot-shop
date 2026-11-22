@@ -51,6 +51,10 @@ public sealed class SqliteAdminCatalogTests
             Assert.Single(brands.Items);
             Assert.Null(brands.Next);
             Assert.Equal("Admin", (await catalog.PolicyAsync(actor, brand, ct)).Value.PublicName);
+            var fx = await catalog.FxAsync(actor, brand, ct);
+            Assert.Null(fx.TomanPerUsd);
+            Assert.Null(fx.Source);
+            Assert.Empty((await catalog.InventoryAsync(actor, productIds[0], null, 3, ct)).Items);
             var first = await catalog.ProductsAsync(actor, null, 3, ct);
             Assert.Equal(3, first.Items.Length);
             Assert.Equal(productIds.Take(3), first.Items.Select(item => item.Id));
