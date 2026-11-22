@@ -49,9 +49,11 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         }
         if (prepared.Query != new CatalogQuery(request.ProductId, request.Quantity, request.Payment, request.Kind))
             throw new PricingRejectedException();
-        bool local = request.Kind == CheckoutKind.ProductPurchase && request.Payment == CheckoutPayment.Wallet &&
+        bool localSupply = request.Kind == CheckoutKind.ProductPurchase && request.Payment == CheckoutPayment.Wallet &&
             prepared.Supply.LocalUnits == request.Quantity && prepared.Supply.RemoteUnits == 0 &&
-            !prepared.Supply.WaitingForLocalStock && prepared.Quote.Terms.DiscountId is null;
+            !prepared.Supply.WaitingForLocalStock;
+        bool local = localSupply && prepared.Quote.Terms.DiscountId is null;
+        bool walletCoupon = localSupply && prepared.Quote.Terms.DiscountId is not null;
         var localRequest = new LocalCheckoutRequest(request.OrderId, request.ProductId, request.Quantity,
             prepared.Quote.Terms.UnitUsdt, prepared.ListingRevision, prepared.ProductRevision, prepared.PolicyRevision);
         byte[] digest = local ? CheckoutStore.Fingerprint(context, member, localRequest) :
@@ -81,9 +83,9 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         if (local)
             return await new SqliteCheckoutStore(sessions, secrets).AcceptLocalAsync(
                 tx, context, revision, actor, localRequest, ct);
-        if (request.Payment == CheckoutPayment.Wallet && request.Kind != CheckoutKind.PrepaidUnits)
+        if (request.Payment == CheckoutPayment.Wallet && request.Kind != CheckoutKind.PrepaidUnits && !walletCoupon)
             return new(CheckoutOutcome.Unavailable);
-        if (request.Kind == CheckoutKind.PrepaidUnits && request.Payment == CheckoutPayment.Wallet &&
+        if (request.Payment == CheckoutPayment.Wallet &&
             (await SqliteWallet.ReadAsync(tx, member, ct)).Balance.Amount < quote.TotalUsd.Amount)
             return new(CheckoutOutcome.InsufficientBalance);
         DateTime instant = DateTime.UtcNow;
@@ -128,6 +130,21 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             localFirst = row.GetBoolean(1);
             preorder = request.Kind == CheckoutKind.ProductPurchase &&
                 row.GetString(2) == "local_preorder";
+        }
+
+        List<SqliteOrderPaymentSettlementStore.Stock>? walletStock = null;
+        if (walletCoupon)
+        {
+            using (var older = SqliteWallet.Command(tx, """
+                SELECT EXISTS(SELECT 1 FROM orders WHERE product_id=$product AND is_preorder=1
+                    AND payment_status IN ('paid','not_required')
+                    AND fulfillment_status IN ('waiting_stock','requires_admin'))
+                """, ("$product", request.ProductId)))
+                if ((long)(await older.ExecuteScalarAsync(ct))! != 0)
+                    return new(CheckoutOutcome.Unavailable);
+            walletStock = await SqliteOrderPaymentSettlementStore.ReadStockAsync(tx,
+                request.ProductId, request.Quantity, ct);
+            if (walletStock.Count != request.Quantity) return new(CheckoutOutcome.OutOfStock);
         }
 
         foreach (Guid old in pending)
@@ -199,6 +216,19 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         if (terms.DiscountId is not null)
             await SqliteDiscountClaimStore.HoldAsync(tx, context, member, request.OrderId, request.ProductId,
                 quote, ct);
+        if (walletCoupon)
+        {
+            var wallet = await SqliteWallet.ReadAsync(tx, member, ct);
+            if (wallet.Balance.Amount < quote.TotalUsd.Amount) throw new PricingRejectedException();
+            await SqliteWallet.PostAsync(tx, member, wallet,
+                new Money(-quote.TotalUsd.Amount, Currency.Usd), request.OrderId, false, now, ct);
+            await new SqliteOrderPaymentSettlementStore(sessions, secrets).AcquireAsync(
+                tx, context, request.OrderId, walletStock!, now, ct);
+            await OutboxStore.EnqueueSqliteAsync(tx,
+                JobIntent.Order(JobKind.PrepareManifest, context.BrandId, request.OrderId),
+                request.OrderId, DateTime.UtcNow, ct);
+            return new(CheckoutOutcome.Purchased, request.OrderId);
+        }
         if (request.Kind == CheckoutKind.PrepaidUnits && request.Payment == CheckoutPayment.Wallet)
         {
             using (var ensure = SqliteWallet.Command(tx,
