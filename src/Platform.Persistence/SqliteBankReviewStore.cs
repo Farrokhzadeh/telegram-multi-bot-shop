@@ -65,7 +65,7 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
                     updated_at=$now WHERE id=$order AND payment_status='under_review' AND revision=$revision
                 """, token, ("$now", now), ("$order", state.Order), ("$revision", expectedOrderRevision));
             if (state.OrderKind == "prepaid_units")
-                _ = await new SqlitePrepaidSourceStore(sessions, secrets)
+                await new SqlitePrepaidSourceStore(sessions, secrets)
                     .IssueAsync(tx, context, state.Order, token);
             else if (state.Kind == "local")
             {

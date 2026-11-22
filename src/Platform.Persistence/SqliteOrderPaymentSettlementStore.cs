@@ -71,7 +71,7 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
                 if (current.Kind == "prepaid_units")
                 {
                     route = ExternalSettlementRoute.Prepaid;
-                    _ = await new SqlitePrepaidSourceStore(sessions, secrets)
+                    await new SqlitePrepaidSourceStore(sessions, secrets)
                         .IssueAsync(tx, context, current.Order, token);
                 }
                 else if (current.Kind != "product_purchase")
