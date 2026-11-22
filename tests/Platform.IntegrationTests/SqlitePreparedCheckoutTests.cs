@@ -62,7 +62,7 @@ public sealed class SqlitePreparedCheckoutTests
                 using var inspect = SqliteWallet.Command(tx, """
                     SELECT p.id,p.status,p.amount_due,p.network_asset,o.payment_status,
                         (SELECT count(*) FROM jobs WHERE job_kind='expire_order_payment' AND order_id=$order),
-                        (SELECT count(*) FROM jobs WHERE job_kind='send_telegram' AND order_id=$order),
+                        (SELECT count(*) FROM jobs j JOIN telegram_deliveries d ON d.id=j.telegram_delivery_id WHERE j.job_kind='send_telegram' AND d.order_id=$order),
                         (SELECT count(*) FROM wallet_entries),
                         (SELECT count(*) FROM inventory_items WHERE id=$stock AND state='available')
                     FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.id=$order
