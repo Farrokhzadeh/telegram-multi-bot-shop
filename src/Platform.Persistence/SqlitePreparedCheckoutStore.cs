@@ -91,9 +91,28 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
                         OR p.status IN ('observed','confirming','settled','review')))
                 OR EXISTS(SELECT 1 FROM orders WHERE user_id=$member
                     AND payment_status IN ('under_review','confirmation_pending'))
+                OR EXISTS(SELECT 1 FROM discount_uses d JOIN orders o ON o.id=d.order_id
+                    WHERE o.user_id=$member AND o.payment_status='awaiting_payment' AND d.status='held')
             """, ("$member", member)))
             if ((long)(await unsafePayment.ExecuteScalarAsync(ct))! != 0)
                 return new(CheckoutOutcome.Unavailable);
+
+        string kind;
+        bool localFirst;
+        bool preorder;
+        using (var product = SqliteWallet.Command(tx, """
+            SELECT fulfillment_kind,local_first,availability_policy
+            FROM products WHERE id=$product AND active=1
+            """, ("$product", request.ProductId)))
+        await using (var row = await product.ExecuteReaderAsync(ct))
+        {
+            if (!await row.ReadAsync(ct) || row.GetString(0) is not ("local" or "manual") ||
+                (row.GetString(2) == "local_preorder" && row.GetString(0) != "local"))
+                throw new PricingRejectedException();
+            kind = row.GetString(0);
+            localFirst = row.GetBoolean(1);
+            preorder = row.GetString(2) == "local_preorder";
+        }
 
         foreach (Guid old in pending)
         {
@@ -110,17 +129,6 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             await QueueInstructionAsync(tx, context, member, old, "replaced", ct);
         }
 
-        using (var product = SqliteWallet.Command(tx, """
-            SELECT fulfillment_kind,local_first,availability_policy
-            FROM products WHERE id=$product AND active=1
-            """, ("$product", request.ProductId)))
-        await using (var row = await product.ExecuteReaderAsync(ct))
-        {
-            if (!await row.ReadAsync(ct) || row.GetString(0) is not ("local" or "manual"))
-                return new(CheckoutOutcome.Unavailable);
-            if (row.GetString(2) == "local_preorder" && row.GetString(0) != "local")
-                return new(CheckoutOutcome.Unavailable);
-        }
         await Change(tx, """
             INSERT INTO audit_events(id,actor_kind,actor_user_id,brand_id,action,entity_kind,entity_id,
                 reason,command_sha256,correlation_id)
@@ -128,19 +136,6 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             """, ct, ("$order", request.OrderId), ("$member", member), ("$brand", context.BrandId),
             ("$digest", digest), ("$correlation", Guid.CreateVersion7()));
         string dueAt = SqliteSchema.UtcText(DateTime.UtcNow.AddMinutes(30));
-        string kind;
-        bool localFirst;
-        bool preorder;
-        using (var product = SqliteWallet.Command(tx, """
-            SELECT fulfillment_kind,local_first,availability_policy='local_preorder' FROM products WHERE id=$product
-            """, ("$product", request.ProductId)))
-        await using (var row = await product.ExecuteReaderAsync(ct))
-        {
-            if (!await row.ReadAsync(ct)) throw new PricingRejectedException();
-            kind = row.GetString(0);
-            localFirst = row.GetBoolean(1);
-            preorder = row.GetBoolean(2);
-        }
         await Change(tx, """
             INSERT INTO orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,
                 unit_price_usdt,unit_price_toman,fx_rate_snapshot,fx_source_snapshot,fx_fetched_at_snapshot,
@@ -257,7 +252,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
                 a.message,$dedupe,$order FROM (SELECT 1) seed LEFT JOIN (
                 SELECT telegram_message_id message FROM telegram_deliveries WHERE order_id=$order
                     AND purpose='order_status' AND status='succeeded' AND telegram_message_id IS NOT NULL
-                ORDER BY created_at,id LIMIT 1) a ON true
+                ORDER BY created_at,id LIMIT 1) a ON true WHERE true
             ON CONFLICT(dedupe_key) DO NOTHING
             """, ("$id", delivery), ("$brand", context.BrandId), ("$member", member),
             ("$dedupe", dedupe), ("$order", order)))
