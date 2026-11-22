@@ -8,6 +8,13 @@ namespace Platform.Persistence;
 
 public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
 {
+    public Task<CheckoutResult> PurchaseAsync(BrandContext context, long actor, CheckoutRequest request,
+        PreparedCheckout prepared, SqliteCatalogStore catalog, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        return PurchaseAsync(context, prepared.PolicyRevision, actor, request, prepared, catalog, ct);
+    }
+
     public Task<CheckoutResult> PurchaseAsync(BrandContext context, long revision, long actor, CheckoutRequest request,
         PreparedCheckout prepared, SqliteCatalogStore catalog, CancellationToken ct = default)
     {

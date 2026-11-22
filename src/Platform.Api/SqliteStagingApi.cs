@@ -286,8 +286,8 @@ public static class SqliteStagingApi
         {
             string[] parts = choice.Split(':', StringSplitOptions.None);
             if (parts.Length != 3 || !int.TryParse(parts[2], NumberStyles.None,
-                CultureInfo.InvariantCulture, out int quantity) || quantity is < 1 or > 5 ||
-                request.MessageText != "Staging quantity\nQuantity: " + quantity.ToString(CultureInfo.InvariantCulture))
+                CultureInfo.InvariantCulture, out int selectedQuantity) || selectedQuantity is < 1 or > 5 ||
+                request.MessageText != "Staging quantity\nQuantity: " + selectedQuantity.ToString(CultureInfo.InvariantCulture))
                 throw new UnauthorizedAccessException("Staging quantity selection is unavailable.");
             CheckoutPayment method = parts[1] switch
             {
@@ -296,7 +296,7 @@ public static class SqliteStagingApi
                 "bank" => CheckoutPayment.Bank,
                 _ => throw new UnauthorizedAccessException("Staging payment method is unavailable.")
             };
-            var prepared = await catalog.PrepareAsync(context, actor, new(product, quantity, method), ct);
+            var prepared = await catalog.PrepareAsync(context, actor, new(product, selectedQuantity, method), ct);
             if (method == CheckoutPayment.Wallet && prepared.Quote.Terms.DiscountId is not null)
                 throw new PricingRejectedException();
             Guid order = Guid.CreateVersion7();
@@ -332,7 +332,7 @@ public static class SqliteStagingApi
                 throw new PricingRejectedException();
             var purchase = new CheckoutRequest(orderId, product, payableQuantity, method,
                 CheckoutKind.ProductPurchase, method == CheckoutPayment.Crypto ? CryptoAsset.UsdtTrc20 : null);
-            CheckoutResult result = await checkout.PurchaseAsync(context, prepared.PolicyRevision, actor,
+            CheckoutResult result = await checkout.PurchaseAsync(context, actor,
                 purchase, prepared, catalog, ct);
             if (result.Outcome is CheckoutOutcome.Purchased or CheckoutOutcome.Replayed or CheckoutOutcome.AwaitingPayment)
             {
