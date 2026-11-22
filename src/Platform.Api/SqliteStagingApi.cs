@@ -35,6 +35,7 @@ public sealed record SqliteStageReply(bool Accepted, string Text = "", bool Edit
 [JsonSerializable(typeof(AdminChange<BrandPolicyEdit>))]
 [JsonSerializable(typeof(AdminChange<MasterProductEdit>))]
 [JsonSerializable(typeof(AdminChange<ListingEdit>))]
+[JsonSerializable(typeof(StockImport))]
 [JsonSerializable(typeof(SqliteStageReply))]
 [JsonSerializable(typeof(AdminPage<AdminBrand>))]
 [JsonSerializable(typeof(AdminPage<AdminProduct>))]
@@ -231,6 +232,34 @@ public static class SqliteStagingApi
                         or ArgumentException or FormatException)
                     { return Results.Unauthorized(); }
                 });
+                app.MapMethods("/v1/admin/inventory/import", ["POST"],
+                    (RequestDelegate)(async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
+                    try
+                    {
+                        _ = await AuthenticateAsync(http, config);
+                        http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+                            .MaxRequestBodySize = 131072;
+                        var input = await JsonSerializer.DeserializeAsync(http.Request.Body,
+                            SqliteStageApiJson.Default.StockImport, http.RequestAborted);
+                        if (input is null || input.ProductId == Guid.Empty || input.CommandId == Guid.Empty ||
+                            input.Items is not { Length: >= 1 and <= 32 })
+                            throw new UnauthorizedAccessException();
+                        string authorization = http.Request.Headers.Authorization.ToString();
+                        await SqliteStageInventoryBridge.ForwardAsync(privateKey,
+                            authorization[7..], input.ProductId, input.Items, input.CommandId,
+                            http.RequestAborted);
+                        http.Response.StatusCode = 204;
+                    }
+                    catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
+                    { http.Response.StatusCode = 401; }
+                    catch (Exception error) when (error is ArgumentException or InvalidOperationException
+                        or FormatException or OverflowException or JsonException)
+                    { http.Response.StatusCode = 409; }
+                    catch (Exception error) when (error is IOException or System.Net.Sockets.SocketException)
+                    { http.Response.StatusCode = 503; }
+                }));
                 app.MapMethods("/v1/admin/wallet-adjustments", ["POST"],
                     (RequestDelegate)(async (HttpContext http) =>
                 {
