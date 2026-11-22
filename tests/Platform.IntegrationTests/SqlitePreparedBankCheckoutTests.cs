@@ -1,0 +1,94 @@
+using System.Security.Cryptography;
+using System.Text;
+using Platform.Core;
+using Platform.Persistence;
+using Platform.Security;
+using Platform.Testing;
+
+namespace Platform.IntegrationTests;
+
+public sealed class SqlitePreparedBankCheckoutTests
+{
+    [Fact]
+    public async Task FrozenBankCheckoutRetainsEncryptedDestinationAndDoesNotDebitWallet()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dir = Directory.CreateTempSubdirectory("akanti-sqlite-bank-");
+        try
+        {
+            string path = Path.Combine(dir.FullName, "shop.db");
+            await SqliteSchema.InitializeAsync(path, ct);
+            var sessions = new SqliteSessionFactory(path);
+            using var files = new SyntheticSecretFiles();
+            files.WriteManifest(brands: CheckoutFixture.BrandIds);
+            using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            var brand = CheckoutFixture.ResolveContexts()[0];
+            Guid member = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid();
+            const string card = "1111222233334444", holder = "Public synthetic account";
+            var cipher = new BrandCipher(secrets);
+            byte[] encryptedNumber = cipher.Encrypt(brand, "brands", brand.BrandId,
+                "bank_number_ciphertext", Encoding.UTF8.GetBytes(card));
+            byte[] encryptedHolder = cipher.Encrypt(brand, "brands", brand.BrandId,
+                "bank_holder_ciphertext", Encoding.UTF8.GetBytes(holder));
+            await sessions.RunAsync(true, async (_, tx, token) =>
+            {
+                using var setup = SqliteWallet.Command(tx, """
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
+                        bot_token_ciphertext,bot_token_key_id,active,allow_bank,bank_number_ciphertext,
+                        bank_holder_ciphertext,bank_key_id,bank_card_fingerprint,bank_changed_at)
+                    VALUES ($brand,'stage','Stage','Stage','iran','fa','stage_bot',$bot,x'01','fixture',1,1,
+                        $number,$holder,$key,$fingerprint,$now);
+                    INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'fa');
+                    INSERT INTO products(id,fulfillment_kind,availability_policy,title)
+                    VALUES ($product,'local','immediate','Synthetic goods');
+                    INSERT INTO brand_products(brand_id,product_id,visible,price_usdt,price_toman,allow_bank)
+                    VALUES ($brand,$product,1,'10.25','1000000',1);
+                    """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$number", encryptedNumber),
+                    ("$holder", encryptedHolder), ("$key", secrets.CurrentBrandKeyId(brand)),
+                    ("$fingerprint", SHA256.HashData(Encoding.UTF8.GetBytes(card))),
+                    ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$member", member), ("$product", product));
+                await setup.ExecuteNonQueryAsync(token);
+                return 0;
+            }, ct);
+            var catalog = new SqliteCatalogStore(sessions, secrets);
+            PreparedCheckout prepared = await catalog.PrepareAsync(brand, 7001,
+                new CatalogQuery(product, 1, CheckoutPayment.Bank), ct);
+            var checkout = new SqlitePreparedCheckoutStore(sessions, secrets);
+            var request = new CheckoutRequest(order, product, 1, CheckoutPayment.Bank);
+            Assert.Equal(CheckoutOutcome.AwaitingPayment,
+                (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
+            Assert.Equal(CheckoutOutcome.Replayed,
+                (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
+            await sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var command = SqliteWallet.Command(tx, """
+                    SELECT p.id,p.quote_currency,p.amount_due,p.bank_destination_ciphertext,
+                        p.bank_destination_key_id,o.payment_status,
+                        (SELECT count(*) FROM wallet_entries)
+                    FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.id=$order
+                    """, ("$order", order));
+                await using var row = await command.ExecuteReaderAsync(token);
+                Assert.True(await row.ReadAsync(token));
+                Assert.Equal("TOMAN", row.GetString(1));
+                Assert.Equal("1000000", row.GetString(2));
+                Assert.Equal("awaiting_payment", row.GetString(5));
+                Assert.Equal(0, row.GetInt64(6));
+                byte[] plain = cipher.Decrypt(brand, "payments", row.GetGuid(0),
+                    "bank_destination_ciphertext", row.GetString(4), row.GetFieldValue<byte[]>(3));
+                try
+                {
+                    using var stream = new MemoryStream(plain);
+                    using var reader = new BinaryReader(stream, Encoding.UTF8);
+                    Assert.Equal(1, reader.ReadInt32());
+                    int length = reader.ReadInt32();
+                    Assert.Equal(card, Encoding.UTF8.GetString(reader.ReadBytes(length)));
+                    length = reader.ReadInt32();
+                    Assert.Equal(holder, Encoding.UTF8.GetString(reader.ReadBytes(length)));
+                }
+                finally { CryptographicOperations.ZeroMemory(plain); }
+                return 0;
+            }, ct);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+}
