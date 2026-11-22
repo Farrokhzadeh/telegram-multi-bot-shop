@@ -214,7 +214,7 @@ public sealed class SqliteSessionTests
             await using (var hold = new SqliteConnection(settings))
             {
                 await hold.OpenAsync(ct);
-                await using var reader = hold.BeginTransaction();
+                await using var reader = hold.BeginTransaction(deferred: true);
                 using (var query = hold.CreateCommand())
                 {
                     query.Transaction = reader;
