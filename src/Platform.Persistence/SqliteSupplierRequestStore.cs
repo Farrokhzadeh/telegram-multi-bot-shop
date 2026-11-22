@@ -138,10 +138,35 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
                     throw new UnauthorizedAccessException("The supplier result is not an active attempt.");
             }
             JobLease renewed = await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(90), token);
+            if (state.Status is "succeeded" or "resolved")
+            {
+                using var terminal = SqliteWallet.Command(tx, """
+                    UPDATE supplier_request_attempts SET outcome='unknown',
+                        error_code='terminal_obligation',evidence_ref=$evidence,finished_at=$now
+                    WHERE id=$attempt AND outcome='in_flight'
+                    """, ("$evidence", evidence), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)),
+                    ("$attempt", attempt.Id));
+                if (await terminal.ExecuteNonQueryAsync(token) != 1)
+                    throw new UnauthorizedAccessException("Supplier terminal attempt was superseded.");
+                await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
+                return 0;
+            }
             bool archived = evidence is not null && result.Evidence.Length > 0;
             string? review = SupplierRules.Validate(state.Binding, result);
             bool identity = SupplierRules.Identity(state.Binding, result) is null &&
                 result.Items.All(item => item.Reference.Length <= 160);
+            if (attempt.ParentSubmit is Guid parent)
+            {
+                using var origin = SqliteWallet.Command(tx, """
+                    SELECT coalesce(a.remote_ref,(SELECT r.remote_ref FROM supplier_request_attempts r
+                        WHERE r.parent_submit_attempt_id=a.id AND r.remote_ref IS NOT NULL
+                        ORDER BY r.attempt_no DESC LIMIT 1))
+                    FROM supplier_request_attempts a WHERE a.id=$parent AND a.operation='submit'
+                    """, ("$parent", parent));
+                object? reference = await origin.ExecuteScalarAsync(token);
+                if (reference is string previous && result.PurchaseReference is string current &&
+                    previous != current) identity = false;
+            }
             if (!identity) review = "identity_mismatch";
             if (!archived && (result.Kind != SupplierOutcomeKind.Unknown ||
                 result.Evidence.Length > 0 || result.Items.Count > 0)) review = "credential_recovery";
@@ -200,7 +225,8 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             {
                 string code = review ?? (noEffect ? "provider_failed" : "provider_unknown");
                 await ReviewAsync(tx, state, code, noEffect ? "failed" :
-                    result.Items.Count > 0 && identity && archived ? "partial_pending_admin" : "unknown", token);
+                    result.Items.Count > 0 && identity && archived ? "partial_pending_admin" : "unknown",
+                    token, archived ? evidence : null, identity ? result.PurchaseReference : null);
                 if (!noEffect && lease.Intent.Kind == JobKind.SubmitSupplier)
                     await OutboxStore.EnqueueSqliteAsync(tx,
                         JobIntent.Supplier(JobKind.ReconcileSupplier, context.BrandId, state.Binding.RequestId),
@@ -386,12 +412,15 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
     }
 
     private static async Task ReviewAsync(SqliteTransaction tx, State state, string code, string status,
-        CancellationToken ct)
+        CancellationToken ct, string? evidence = null, string? remote = null)
     {
         using (var request = SqliteWallet.Command(tx, """
-            UPDATE supplier_requests SET status=$status,review_code=$code,updated_at=$now
+            UPDATE supplier_requests SET status=$status,review_code=$code,
+                evidence_ref=coalesce($evidence,evidence_ref),
+                remote_ref=coalesce(remote_ref,$remote),updated_at=$now
             WHERE id=$request AND status NOT IN ('succeeded','resolved')
             """, ("$status", status), ("$code", code),
+            ("$evidence", evidence), ("$remote", remote),
             ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$request", state.Binding.RequestId)))
             if (await request.ExecuteNonQueryAsync(ct) != 1)
                 throw new InvalidOperationException("Supplier review could not be recorded.");
