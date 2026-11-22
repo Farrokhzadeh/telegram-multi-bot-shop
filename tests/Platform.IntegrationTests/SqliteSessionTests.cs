@@ -207,7 +207,9 @@ public sealed class SqliteSessionTests
             await InsertAsync("first", 1001);
             var settings = new SqliteConnectionStringBuilder
             {
-                DataSource = path, Mode = SqliteOpenMode.ReadWrite, Pooling = false
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
             }.ToString();
             await using (var hold = new SqliteConnection(settings))
             {
@@ -225,7 +227,9 @@ public sealed class SqliteSessionTests
                 await using (var source = new SqliteConnection(settings))
                 await using (var destination = new SqliteConnection(new SqliteConnectionStringBuilder
                 {
-                    DataSource = backup, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false
+                    DataSource = backup,
+                    Mode = SqliteOpenMode.ReadWriteCreate,
+                    Pooling = false
                 }.ToString()))
                 {
                     await source.OpenAsync(ct);
