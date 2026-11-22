@@ -105,4 +105,83 @@ public sealed class SqlitePrepaidSourceTests
         }
         finally { dir.Delete(recursive: true); }
     }
+
+
+    [Fact]
+    public async Task WalletPrepaidCheckoutDebitsOnceAndIssuesOriginalSourceEntitlement()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dir = Directory.CreateTempSubdirectory("akanti-sqlite-prepaid-wallet-");
+        try
+        {
+            string path = Path.Combine(dir.FullName, "shop.db");
+            await SqliteSchema.InitializeAsync(path, ct);
+            var sessions = new SqliteSessionFactory(path);
+            using var files = new SyntheticSecretFiles();
+            files.WriteManifest(brands: CheckoutFixture.BrandIds);
+            using var secrets = SecretFiles.Load(files.Root, "service-config.json",
+                files.Grant(brands: CheckoutFixture.BrandIds));
+            var brand = CheckoutFixture.ResolveContexts()[0];
+            Guid member = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid(),
+                admin = Guid.NewGuid(), audit = Guid.NewGuid();
+            await sessions.RunAsync(true, async (_, tx, token) =>
+            {
+                using var setup = SqliteWallet.Command(tx, """
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
+                        bot_id,bot_token_ciphertext,bot_token_key_id,active,allow_wallet)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1,1);
+                    INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
+                    INSERT INTO admins(id,login,authentication_mode,external_subject)
+                    VALUES ($admin,'wallet-admin','external','synthetic');
+                    INSERT INTO audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,
+                        reason,correlation_id)
+                    VALUES ($audit,'admin',$admin,$brand,'wallet_adjustment','wallet',$member,'fixture',$audit);
+                    INSERT INTO wallets(user_id,balance,version) VALUES ($member,'80',1);
+                    INSERT INTO wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,
+                        is_posting,idempotency_key,admin_id,audit_event_id,reason)
+                    VALUES ($audit,$member,'80','80',1,'admin_adjustment',1,'synthetic-fund',$admin,$audit,'fixture');
+                    INSERT INTO products(id,fulfillment_kind,availability_policy,title)
+                    VALUES ($product,'local','immediate','Synthetic prepaid units');
+                    INSERT INTO brand_products(brand_id,product_id,visible,price_usdt,allow_wallet)
+                    VALUES ($brand,$product,1,'7.5',1);
+                    """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$member", member),
+                    ("$admin", admin), ("$audit", audit), ("$product", product));
+                await setup.ExecuteNonQueryAsync(token);
+                return 0;
+            }, ct);
+            var catalog = new SqliteCatalogStore(sessions, secrets);
+            PreparedCheckout prepared = await catalog.PrepareAsync(brand, 7001,
+                new CatalogQuery(product, 3, CheckoutPayment.Wallet, CheckoutKind.PrepaidUnits), ct);
+            var checkout = new SqlitePreparedCheckoutStore(sessions, secrets);
+            var request = new CheckoutRequest(order, product, 3, CheckoutPayment.Wallet, CheckoutKind.PrepaidUnits);
+            Assert.Equal(CheckoutOutcome.Purchased,
+                (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
+            Assert.Equal(CheckoutOutcome.Replayed,
+                (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                checkout.PurchaseAsync(CheckoutFixture.ResolveContexts()[1], 0, 7001, request, prepared, catalog, ct));
+            await new SqliteSessionFactory(path).RunAsync(false, async (_, tx, token) =>
+            {
+                using var query = SqliteWallet.Command(tx, """
+                    SELECT w.balance,w.version,o.payment_status,o.fulfillment_status,
+                        (SELECT count(*) FROM wallet_entries WHERE order_id=$order AND movement_kind='purchase_debit'),
+                        (SELECT count(*) FROM discounts WHERE source_order_id=$order AND kind='prepaid_entitlement'),
+                        (SELECT count(*) FROM jobs WHERE job_kind='coupon_notice'
+                            AND discount_id IN (SELECT id FROM discounts WHERE source_order_id=$order))
+                    FROM wallets w JOIN orders o ON o.user_id=w.user_id WHERE o.id=$order
+                    """, ("$order", order));
+                await using var row = await query.ExecuteReaderAsync(token);
+                Assert.True(await row.ReadAsync(token));
+                Assert.Equal("57.5", row.GetString(0));
+                Assert.Equal(2, row.GetInt64(1));
+                Assert.Equal("paid", row.GetString(2));
+                Assert.Equal("completed", row.GetString(3));
+                Assert.Equal(1, row.GetInt64(4));
+                Assert.Equal(1, row.GetInt64(5));
+                Assert.Equal(1, row.GetInt64(6));
+                return 0;
+            }, ct);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
 }
