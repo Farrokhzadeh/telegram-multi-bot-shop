@@ -48,10 +48,12 @@ internal static class SqliteStagingWorker
                 var credentials = new SqliteDeliveryStore(state.Sessions, secrets);
                 var expiry = new SqlitePaymentExpiryStore(state.Sessions);
                 var preorders = new SqliteLocalPreorderStore(state.Sessions, secrets);
+                var coupons = new SqliteCouponDeliveryStore(state.Sessions, secrets);
                 Console.WriteLine("The managed SQLite staging delivery worker is running.");
                 while (!ct.IsCancellationRequested)
                 {
                     await status.RecoverExpiredAsync(state.Context, ct);
+                    await coupons.RecoverExpiredAsync(state.Context, ct);
                     foreach (Guid expired in await jobs.ExpiredCredentialsAsync(state.Context, ct))
                         await credentials.RecoverExpiredAsync(state.Context, expired, ct);
                     JobLease? due = await expiry.ClaimAsync(state.Context, workerId, ct);
@@ -64,6 +66,12 @@ internal static class SqliteStagingWorker
                     if (waiting is not null)
                     {
                         _ = await preorders.DrainAsync(waiting, [state.Context], ct);
+                        continue;
+                    }
+                    JobLease? coupon = await coupons.ClaimNoticeAsync(state.Context, workerId, ct);
+                    if (coupon is not null)
+                    {
+                        await coupons.PrepareAsync(state.Context, coupon, ct);
                         continue;
                     }
                     JobLease? prepare = await jobs.ClaimAsync(state.Context, JobKind.PrepareManifest, workerId, ct);
@@ -92,6 +100,17 @@ internal static class SqliteStagingWorker
                         DeliveryOutcome outcome = await SendTextAsync(token, http, state.Recipient,
                             dispatch.TargetMessageId, dispatch.Text, ct);
                         await status.RecordOutcomeAsync(state.Context, send, outcome, ct);
+                        continue;
+                    }
+                    if (purpose == "discount_notice")
+                    {
+                        SqliteCouponDispatch? dispatch = await coupons.BeginAsync(state.Context, send, ct);
+                        if (dispatch is null) continue;
+                        if (dispatch.ChatId != state.SyntheticActor)
+                            throw new UnauthorizedAccessException("A prepaid notice destination was not the staging actor.");
+                        DeliveryOutcome outcome = await SendTextAsync(token, http, state.Recipient,
+                            null, dispatch.Text, ct);
+                        await coupons.RecordOutcomeAsync(state.Context, send, outcome, ct);
                         continue;
                     }
                     if (purpose == "order_credentials")
