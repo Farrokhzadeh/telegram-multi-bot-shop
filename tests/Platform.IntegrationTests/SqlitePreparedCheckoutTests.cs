@@ -55,7 +55,7 @@ public sealed class SqlitePreparedCheckoutTests
                 (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
             Assert.Equal(CheckoutOutcome.Replayed,
                 (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            await Assert.ThrowsAsync<PricingRejectedException>(() =>
                 checkout.PurchaseAsync(brand, 0, 7001, request with { Quantity = 2 }, prepared, catalog, ct));
             Guid payment = await sessions.RunAsync(false, async (_, tx, token) =>
             {
