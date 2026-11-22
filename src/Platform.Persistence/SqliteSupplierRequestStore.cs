@@ -137,7 +137,8 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
                     (row.IsDBNull(2) ? null : row.GetGuid(2)) != attempt.ParentSubmit)
                     throw new UnauthorizedAccessException("The supplier result is not an active attempt.");
             }
-            JobLease renewed = await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(90), token);
+            JobLease renewed = lease.Intent.Kind == JobKind.SubmitSupplier ? lease :
+                await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(90), token);
             if (state.Status is "succeeded" or "resolved")
             {
                 using var terminal = SqliteWallet.Command(tx, """
