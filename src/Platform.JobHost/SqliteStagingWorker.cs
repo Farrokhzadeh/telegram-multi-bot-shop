@@ -53,9 +53,13 @@ internal static class SqliteStagingWorker
                 var suppliers = new SqliteSupplierRequestStore(state.Sessions, secrets);
                 var supplierWorker = new SqliteSupplierFulfillmentWorker(suppliers,
                     new SqliteSyntheticSupplierAdapter(), new SqliteSyntheticSupplierEvidenceArchive());
+                Task inventory = SqliteStageInventoryBridge.ServeAsync(state.Sessions, secrets,
+                    state.ReadApiKey(), ct);
                 Console.WriteLine("The managed SQLite staging delivery worker is running.");
                 while (!ct.IsCancellationRequested)
                 {
+                    if (inventory.IsFaulted)
+                        throw new InvalidOperationException("Staging inventory import bridge is unavailable.");
                     await status.RecoverExpiredAsync(state.Context, ct);
                     await coupons.RecoverExpiredAsync(state.Context, ct);
                     foreach (Guid expired in await jobs.ExpiredCredentialsAsync(state.Context, ct))

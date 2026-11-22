@@ -112,7 +112,7 @@ public static class SqliteStageInventoryBridge
     }
 
     public static async Task ServeAsync(SqliteSessionFactory sessions, SecretSnapshot secrets,
-        ReadOnlyMemory<byte> requiredKey, CancellationToken ct)
+        byte[] requiredKey, CancellationToken ct)
     {
         using var listener = new TcpListener(IPAddress.Loopback, Port);
         listener.Start(2);
@@ -149,6 +149,6 @@ public static class SqliteStageInventoryBridge
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
-        finally { listener.Stop(); }
+        finally { listener.Stop(); CryptographicOperations.ZeroMemory(requiredKey); }
     }
 }
