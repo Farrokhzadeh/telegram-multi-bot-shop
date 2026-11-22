@@ -25,6 +25,12 @@ public sealed class SqliteAdminCatalogWriteStore(SqliteSessionFactory sessions)
             hash, revision, checked(revision + 1));
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
+            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
+            using (var scope = SqliteWallet.Command(tx,
+                "SELECT 1 FROM brands WHERE id=$brand AND bot_id=$bot",
+                ("$brand", context.BrandId), ("$bot", context.BotId)))
+                if (await scope.ExecuteScalarAsync(token) is null)
+                    throw new UnauthorizedAccessException("The brand policy scope is unavailable.");
             if (!await AuditAsync(tx, actor, audit, token)) return checked(revision + 1);
             if (value.Support)
             {
@@ -124,13 +130,14 @@ public sealed class SqliteAdminCatalogWriteStore(SqliteSessionFactory sessions)
             revision, checked(revision + 1));
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
-            if (!await AuditAsync(tx, actor, audit, token)) return checked(revision + 1);
+            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
             using (var identity = SqliteWallet.Command(tx, """
                 SELECT EXISTS(SELECT 1 FROM products WHERE id=$product)
                     AND EXISTS(SELECT 1 FROM brands WHERE id=$brand AND bot_id=$bot AND active=1)
                 """, ("$product", product), ("$brand", context.BrandId), ("$bot", context.BotId)))
                 if ((long)(await identity.ExecuteScalarAsync(token))! != 1)
                     throw new UnauthorizedAccessException("The listing scope is unavailable.");
+            if (!await AuditAsync(tx, actor, audit, token)) return checked(revision + 1);
             using var save = SqliteWallet.Command(tx, """
                 INSERT INTO brand_products(brand_id,product_id,visible,title_mode,title_override,
                     description_mode,description_override,icon_mode,icon_override,guidance_mode,
