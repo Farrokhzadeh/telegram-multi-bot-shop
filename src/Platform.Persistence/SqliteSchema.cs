@@ -50,6 +50,7 @@ public static class SqliteSchema
 
     internal static void Configure(SqliteConnection connection)
     {
+        connection.CreateFunction("akanti_utc_now", () => UtcText(DateTime.UtcNow), isDeterministic: false);
         connection.CreateFunction<string?, bool>("akanti_uuid", value => value?.Length == 36 && Guid.TryParseExact(value, "D", out _), isDeterministic: true);
         connection.CreateFunction<string?, bool>("akanti_utc_time", value =>
             DateTime.TryParseExact(value, UtcFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out _), isDeterministic: true);

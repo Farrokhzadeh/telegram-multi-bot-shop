@@ -1,7 +1,11 @@
-# Feature005 — implementation checkpoint
-- Implementation authorized after plan/tasks. Main input5bbfa6b; all historical pinned evidence/baselines unchanged.
-- T001 checked: all28 schema fields/relations,71 persistence type caller sets across235 source files and target/source/asset/auth/IPC classifications recorded.
-- T002 candidate adds EfProviderTests:3 local SQLite probes pass; PostgreSQL probe and full exact-commit CI pending. Existing focused transaction/integrity regression and whitespace formatter run locally; final count/exit evidence follows in qualification.md.
-- Build uses SDK10.0.403, existing pins and single-node/no-build-server workaround because sandbox named-pipe sockets are denied. Tests run in-process with synthetic data; no live services or owner-host access.
-- T002–T040 remain unchecked. No application runtime wiring, plaintext migration, encrypted-data conversion, staging deployment or production change has occurred.
-- Next: evaluate no-deploy CI for this exact candidate; repair failures before closing T002, then implement T003 and foundation in task order.
+# Feature005 — EF foundation implementation candidate
+- Main input66d6a475; owner authorized implementation of full EF and target encryption removal only. Work remains on main; no subagents.
+- T001 checked; other implementation gates remain open pending their individual acceptance.
+- CI45070992089 passed at66d6a475:260 unit/904 integration/148 contract, formatting and managed/staged artifact probes; deployment skipped. Scope is the original provider-probe candidate, not later code.
+- Current source adds28 explicit entities/501 fields, provider configurations, common/context-specific DbContexts, exact canonical SQLite decimal type mapping, UTC mapping and harmless database-clock function, design factories/tool pins/private design dependency and RID-preserving lock update.
+- New EF session adapters share native transactions and retain old SQLite pre-commit integrity checks. Writer/customer/admin/shared admission and cancellation use scoped guarded operations. No existing business store is switched and EF integrity port/migrations/adoption are not complete.
+- Local7 SQLite provider/model/session probes pass (plus6 existing session/integrity tests); build zero warnings/errors; both design factories/tool restore/locked restore pass. New PostgreSQL model/session probes and exact combined source require no-deploy CI.
+- Failed decimal ValueConverter sorting and nullable alternate-key tightening were investigated, not accepted. Custom decimal mapping fixes sorting/canonical bytes; two nullable-generation FKs are explicit database-constraint descriptors requiring migration DDL preservation. See researchR8.
+- Sandbox workaround: single-node/no-shared-compiler build, direct xUnit runner and direct SDK Roslyn formatter; private XDG runtime dir resolves NuGet mutex initialization without disabling signatures.
+- Runtime application encryption remains; no target data was converted. Legacy keys/readers, signatures/authentication and historical pinned evidence/baselines preserved. No owner-host, protected data, live provider/Telegram, staging or production operation.
+- Next: qualify combined candidate with [no deploy], repair failures, then finish foundations/migrations/integrity before switching stores; do not infer completion from mapped entities alone.

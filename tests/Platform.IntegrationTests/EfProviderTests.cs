@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Platform.Core;
+using Platform.Persistence;
+using Platform.Persistence.Configurations;
 using Platform.Testing;
 
 namespace Platform.IntegrationTests;
@@ -17,6 +19,7 @@ public sealed class EfProviderTests
         var ct = TestContext.Current.CancellationToken;
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
         var options = new DbContextOptionsBuilder<ProbeContext>().UseSqlite(connection).Options;
         await using var context = new ProbeContext(options);
         await VerifyAsync(context, ct);
@@ -45,6 +48,7 @@ public sealed class EfProviderTests
         var ct = TestContext.Current.CancellationToken;
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
         var options = new DbContextOptionsBuilder<ProbeContext>().UseSqlite(connection).Options;
         await using var context = new ProbeContext(options);
         await context.Database.EnsureCreatedAsync(ct);
@@ -69,6 +73,7 @@ public sealed class EfProviderTests
         var ct = TestContext.Current.CancellationToken;
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
         var options = new DbContextOptionsBuilder<ProbeContext>().UseSqlite(connection).Options;
         await using var context = new ProbeContext(options);
         await context.Database.EnsureCreatedAsync(ct);
@@ -113,6 +118,31 @@ public sealed class EfProviderTests
         await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(ct));
         context.ChangeTracker.Clear();
         Assert.Single(await context.Rows.ToArrayAsync(ct));
+    }
+
+    [Fact]
+    public async Task SqliteCanonicalMappingStoresTrailingScaleAndExactCalculatedUpdatesWithoutFloatingPoint()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
+        var options = new DbContextOptionsBuilder<ProbeContext>().UseSqlite(connection).Options;
+        await using var context = new ProbeContext(options);
+        await context.Database.EnsureCreatedAsync(ct);
+        var row = Row(1, 2.500000m);
+        context.Rows.Add(row);
+        await context.SaveChangesAsync(ct);
+        await using var inspect = connection.CreateCommand();
+        inspect.CommandText = "SELECT Amount FROM ef_provider_rows";
+        Assert.Equal("2.5", await inspect.ExecuteScalarAsync(ct));
+        row.Amount = ExactDecimal.Add(row.Amount, 0.5m);
+        await context.SaveChangesAsync(ct);
+        Assert.Equal("3", await inspect.ExecuteScalarAsync(ct));
+        decimal guarded = ExactDecimal.Add(row.Amount, 0.00000001m);
+        Assert.Equal(1, await context.Rows.Where(value => value.Id == row.Id && value.Amount == 3m)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.Amount, guarded), ct));
+        Assert.Equal("3.00000001", await inspect.ExecuteScalarAsync(ct));
     }
 
     private static async Task VerifyAsync(ProbeContext context, CancellationToken ct)
@@ -167,10 +197,12 @@ public sealed class EfProviderTests
         {
             var row = modelBuilder.Entity<ProbeRow>();
             row.ToTable("ef_provider_rows", table => table.HasCheckConstraint("ef_content_nonempty", Database.IsSqlite() ? "length(\"Content\") > 0" : "octet_length(\"Content\") > 0"));
+            if (Database.IsSqlite()) row.ToTable("ef_provider_rows", table => table.HasCheckConstraint("ef_canonical_amount", "akanti_decimal(\"Amount\")=1"));
             row.HasIndex(value => new { value.At, value.Id });
             row.HasKey(value => value.Id);
             row.Property(value => value.Id).ValueGeneratedNever();
             row.Property(value => value.Amount).HasColumnType(Database.IsSqlite() ? "TEXT" : "numeric(28,8)");
+            if (Database.IsSqlite()) row.Property(value => value.Amount).Metadata.SetTypeMapping(ExactSqliteDecimalMapping.Instance);
             row.Property(value => value.Content).IsRequired();
         }
     }

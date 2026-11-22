@@ -29,7 +29,7 @@ public sealed record DbSessionOptions
     }
 }
 
-public sealed class DbSessionFactory
+public sealed partial class DbSessionFactory
 {
     private readonly NpgsqlDataSource data;
     private readonly DbSessionOptions options;

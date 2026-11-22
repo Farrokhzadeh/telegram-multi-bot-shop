@@ -24,3 +24,12 @@ Expected: all maintained SQLite/PostgreSQL behavior remains equivalent, exact va
 Expected: no target application encryption dependencies; exact recoverable content/state; all retained security and uncertain-effect controls work.
 ## Final candidate
 Use existing workflow/build/managed runtime probes only after implementation requires them, with deployment explicitly suppressed. Run the full affected SQLite/PostgreSQL regression, formatting/warning review and published Linux host tests at the exact candidate. Retain immutable evidence hashes privately as required and record redacted scope/results in this feature's qualification.md. Do not claim full-EF Native AOT support from the old catalog-only artifact. No staging/production conversion or deployment belongs to this guide without separate execution authorization.
+
+## Implemented design tooling
+```bash
+dotnet tool restore
+dotnet restore Platform.sln -r linux-x64 --locked-mode
+dotnet ef dbcontext info --project src/Platform.Persistence/Platform.Persistence.csproj --context SqliteAkantiDbContext --no-build
+dotnet ef dbcontext info --project src/Platform.Persistence/Platform.Persistence.csproj --context PostgresAkantiDbContext --no-build
+```
+Build the project first when needed. The design factories accept no runtime connection arguments and select only in-memory/credential-free design identities. These commands identify models; they do not perform adoption, conversion or deployment. Operator migration/adoption commands remain unimplemented at this checkpoint.

@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteSessionFactory
+public sealed partial class SqliteSessionFactory
 {
     private readonly string connectionString;
     private readonly int timeoutSeconds;

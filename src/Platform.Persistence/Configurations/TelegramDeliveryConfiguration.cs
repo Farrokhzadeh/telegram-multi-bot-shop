@@ -1,0 +1,173 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Platform.Persistence.Entities;
+
+namespace Platform.Persistence.Configurations;
+
+internal sealed class TelegramDeliveryConfiguration(bool sqlite) : IEntityTypeConfiguration<TelegramDelivery>
+{
+    public void Configure(EntityTypeBuilder<TelegramDelivery> row)
+    {
+        row.ToTable("telegram_deliveries", sqlite ? null : "shop", table =>
+        {
+            if (sqlite)
+            {
+                table.HasCheckConstraint("ck_telegram_deliveries_1", "id IS NULL OR akanti_uuid(id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_2", "brand_id IS NULL OR akanti_uuid(brand_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_3", "recipient_kind IN ('customer_dm','staff_chat')");
+                table.HasCheckConstraint("ck_telegram_deliveries_4", "user_id IS NULL OR akanti_uuid(user_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_5", "staff_chat_id < 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_6", "purpose IN ('order_credentials','order_status','campaign','discount_notice','support_notice','restock_notice','staff_supplier_case','staff_supplier_bonus')");
+                table.HasCheckConstraint("ck_telegram_deliveries_7", "action IN ('send','edit')");
+                table.HasCheckConstraint("ck_telegram_deliveries_8", "target_message_id > 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_9", "part_no > 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_10", "delivery_generation IS NULL OR akanti_uuid(delivery_generation)");
+                table.HasCheckConstraint("ck_telegram_deliveries_11", "recipient_language IS NULL OR (length(recipient_language) BETWEEN 1 AND 160 AND trim(recipient_language)<>'')");
+                table.HasCheckConstraint("ck_telegram_deliveries_12", "dedupe_key IS NULL OR (length(dedupe_key) BETWEEN 1 AND 160 AND trim(dedupe_key)<>'')");
+                table.HasCheckConstraint("ck_telegram_deliveries_13", "status IN ('pending','leased','succeeded','retry','failed','cancelled','uncertain')");
+                table.HasCheckConstraint("ck_telegram_deliveries_14", "attempts >= 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_15", "telegram_message_id > 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_16", "last_error_code IS NULL OR (length(last_error_code) BETWEEN 1 AND 160 AND trim(last_error_code)<>'')");
+                table.HasCheckConstraint("ck_telegram_deliveries_17", "campaign_id IS NULL OR akanti_uuid(campaign_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_18", "campaign_batch_id IS NULL OR akanti_uuid(campaign_batch_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_19", "discount_id IS NULL OR akanti_uuid(discount_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_20", "order_id IS NULL OR akanti_uuid(order_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_21", "fulfillment_id IS NULL OR akanti_uuid(fulfillment_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_22", "support_message_id IS NULL OR akanti_uuid(support_message_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_23", "product_stock_subscription_id IS NULL OR akanti_uuid(product_stock_subscription_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_24", "supplier_request_id IS NULL OR akanti_uuid(supplier_request_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_25", "audit_event_id IS NULL OR akanti_uuid(audit_event_id)");
+                table.HasCheckConstraint("ck_telegram_deliveries_26", "(recipient_kind='customer_dm' AND user_id IS NOT NULL AND staff_chat_id IS NULL AND purpose NOT IN ('staff_supplier_case','staff_supplier_bonus')) OR\n           (recipient_kind='staff_chat' AND user_id IS NULL AND staff_chat_id IS NOT NULL AND purpose IN ('staff_supplier_case','staff_supplier_bonus'))");
+                table.HasCheckConstraint("ck_telegram_deliveries_27", "action <> 'edit' OR target_message_id IS NOT NULL");
+                table.HasCheckConstraint("ck_telegram_deliveries_28", "status <> 'succeeded' OR sent_at IS NOT NULL");
+                table.HasCheckConstraint("ck_telegram_deliveries_29", "((campaign_id IS NOT NULL) + (campaign_batch_id IS NOT NULL)) IN (0,2)");
+                table.HasCheckConstraint("ck_telegram_deliveries_30", "eligibility_checked_at IS NULL OR akanti_utc_time(eligibility_checked_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_31", "next_attempt_at IS NULL OR akanti_utc_time(next_attempt_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_32", "last_attempt_at IS NULL OR akanti_utc_time(last_attempt_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_33", "sent_at IS NULL OR akanti_utc_time(sent_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_34", "created_at IS NULL OR akanti_utc_time(created_at)");
+            }
+            else
+            {
+                table.HasCheckConstraint("ck_telegram_deliveries_1", "recipient_kind IN ('customer_dm','staff_chat')");
+                table.HasCheckConstraint("ck_telegram_deliveries_2", "staff_chat_id < 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_3", "purpose IN ('order_credentials','order_status','campaign','discount_notice','support_notice','restock_notice','staff_supplier_case','staff_supplier_bonus')");
+                table.HasCheckConstraint("ck_telegram_deliveries_4", "action IN ('send','edit')");
+                table.HasCheckConstraint("ck_telegram_deliveries_5", "target_message_id > 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_6", "part_no > 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_7", "status IN ('pending','leased','succeeded','retry','failed','cancelled','uncertain')");
+                table.HasCheckConstraint("ck_telegram_deliveries_8", "attempts >= 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_9", "telegram_message_id > 0");
+                table.HasCheckConstraint("ck_telegram_deliveries_10", "(recipient_kind='customer_dm' AND user_id IS NOT NULL AND staff_chat_id IS NULL AND purpose NOT IN ('staff_supplier_case','staff_supplier_bonus')) OR\n           (recipient_kind='staff_chat' AND user_id IS NULL AND staff_chat_id IS NOT NULL AND purpose IN ('staff_supplier_case','staff_supplier_bonus'))");
+                table.HasCheckConstraint("ck_telegram_deliveries_11", "action <> 'edit' OR target_message_id IS NOT NULL");
+                table.HasCheckConstraint("ck_telegram_deliveries_12", "status <> 'succeeded' OR sent_at IS NOT NULL");
+                table.HasCheckConstraint("ck_telegram_deliveries_13", "num_nonnulls(campaign_id,campaign_batch_id) IN (0,2)");
+                table.HasCheckConstraint("ck_telegram_deliveries_14", "isfinite(eligibility_checked_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_15", "isfinite(next_attempt_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_16", "isfinite(last_attempt_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_17", "isfinite(sent_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_18", "isfinite(created_at)");
+                table.HasCheckConstraint("ck_telegram_deliveries_19", "length(recipient_language) BETWEEN 1 AND 160 AND btrim(recipient_language)<>''");
+                table.HasCheckConstraint("ck_telegram_deliveries_20", "length(dedupe_key) BETWEEN 1 AND 160 AND btrim(dedupe_key)<>''");
+                table.HasCheckConstraint("ck_telegram_deliveries_21", "length(last_error_code) BETWEEN 1 AND 160 AND btrim(last_error_code)<>''");
+            }
+        });
+        row.HasKey(v => v.Id);
+        var id = row.Property(v => v.Id).HasColumnName("id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        id.IsRequired();
+        id.ValueGeneratedNever();
+        if (sqlite) id.UseCollation("NOCASE");
+        var brand_id = row.Property(v => v.BrandId).HasColumnName("brand_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        brand_id.IsRequired();
+        brand_id.ValueGeneratedNever();
+        if (sqlite) brand_id.UseCollation("NOCASE");
+        var recipient_kind = row.Property(v => v.RecipientKind).HasColumnName("recipient_kind").HasColumnType(sqlite ? "TEXT" : "text");
+        recipient_kind.IsRequired();
+        var user_id = row.Property(v => v.UserId).HasColumnName("user_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        user_id.ValueGeneratedNever();
+        if (sqlite) user_id.UseCollation("NOCASE");
+        var staff_chat_id = row.Property(v => v.StaffChatId).HasColumnName("staff_chat_id").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        var purpose = row.Property(v => v.Purpose).HasColumnName("purpose").HasColumnType(sqlite ? "TEXT" : "text");
+        purpose.IsRequired();
+        var action = row.Property(v => v.Action).HasColumnName("action").HasColumnType(sqlite ? "TEXT" : "text");
+        action.IsRequired();
+        var target_message_id = row.Property(v => v.TargetMessageId).HasColumnName("target_message_id").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        var part_no = row.Property(v => v.PartNo).HasColumnName("part_no").HasColumnType(sqlite ? "INTEGER" : "integer");
+        part_no.IsRequired();
+        part_no.HasDefaultValueSql(sqlite ? "1" : "1");
+        var delivery_generation = row.Property(v => v.DeliveryGeneration).HasColumnName("delivery_generation").HasColumnType(sqlite ? "TEXT" : "uuid");
+        delivery_generation.ValueGeneratedNever();
+        if (sqlite) delivery_generation.UseCollation("NOCASE");
+        var recipient_language = row.Property(v => v.RecipientLanguage).HasColumnName("recipient_language").HasColumnType(sqlite ? "TEXT" : "text");
+        recipient_language.HasMaxLength(160);
+        var eligibility_checked_at = row.Property(v => v.EligibilityCheckedAt).HasColumnName("eligibility_checked_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        if (sqlite) eligibility_checked_at.HasConversion(EfValues.UtcTime);
+        var dedupe_key = row.Property(v => v.DedupeKey).HasColumnName("dedupe_key").HasColumnType(sqlite ? "TEXT" : "text");
+        dedupe_key.IsRequired();
+        dedupe_key.HasMaxLength(160);
+        var status = row.Property(v => v.Status).HasColumnName("status").HasColumnType(sqlite ? "TEXT" : "text");
+        status.IsRequired();
+        status.HasDefaultValueSql(sqlite ? "'pending'" : "'pending'");
+        var attempts = row.Property(v => v.Attempts).HasColumnName("attempts").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        attempts.IsRequired();
+        attempts.HasDefaultValueSql(sqlite ? "0" : "0");
+        var next_attempt_at = row.Property(v => v.NextAttemptAt).HasColumnName("next_attempt_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        next_attempt_at.IsRequired();
+        next_attempt_at.HasDefaultValueSql(sqlite ? "(strftime('%Y-%m-%dT%H:%M:%f','now') || '0000Z')" : "CURRENT_TIMESTAMP");
+        if (sqlite) next_attempt_at.HasConversion(EfValues.UtcTime);
+        var last_attempt_at = row.Property(v => v.LastAttemptAt).HasColumnName("last_attempt_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        if (sqlite) last_attempt_at.HasConversion(EfValues.UtcTime);
+        var telegram_message_id = row.Property(v => v.TelegramMessageId).HasColumnName("telegram_message_id").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        var last_error_code = row.Property(v => v.LastErrorCode).HasColumnName("last_error_code").HasColumnType(sqlite ? "TEXT" : "text");
+        last_error_code.HasMaxLength(160);
+        var sent_at = row.Property(v => v.SentAt).HasColumnName("sent_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        if (sqlite) sent_at.HasConversion(EfValues.UtcTime);
+        var created_at = row.Property(v => v.CreatedAt).HasColumnName("created_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        created_at.IsRequired();
+        created_at.HasDefaultValueSql(sqlite ? "(strftime('%Y-%m-%dT%H:%M:%f','now') || '0000Z')" : "CURRENT_TIMESTAMP");
+        if (sqlite) created_at.HasConversion(EfValues.UtcTime);
+        var campaign_id = row.Property(v => v.CampaignId).HasColumnName("campaign_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        campaign_id.ValueGeneratedNever();
+        if (sqlite) campaign_id.UseCollation("NOCASE");
+        var campaign_batch_id = row.Property(v => v.CampaignBatchId).HasColumnName("campaign_batch_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        campaign_batch_id.ValueGeneratedNever();
+        if (sqlite) campaign_batch_id.UseCollation("NOCASE");
+        var discount_id = row.Property(v => v.DiscountId).HasColumnName("discount_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        discount_id.ValueGeneratedNever();
+        if (sqlite) discount_id.UseCollation("NOCASE");
+        var order_id = row.Property(v => v.OrderId).HasColumnName("order_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        order_id.ValueGeneratedNever();
+        if (sqlite) order_id.UseCollation("NOCASE");
+        var fulfillment_id = row.Property(v => v.FulfillmentId).HasColumnName("fulfillment_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        fulfillment_id.ValueGeneratedNever();
+        if (sqlite) fulfillment_id.UseCollation("NOCASE");
+        var support_message_id = row.Property(v => v.SupportMessageId).HasColumnName("support_message_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        support_message_id.ValueGeneratedNever();
+        if (sqlite) support_message_id.UseCollation("NOCASE");
+        var product_stock_subscription_id = row.Property(v => v.ProductStockSubscriptionId).HasColumnName("product_stock_subscription_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        product_stock_subscription_id.ValueGeneratedNever();
+        if (sqlite) product_stock_subscription_id.UseCollation("NOCASE");
+        var supplier_request_id = row.Property(v => v.SupplierRequestId).HasColumnName("supplier_request_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        supplier_request_id.ValueGeneratedNever();
+        if (sqlite) supplier_request_id.UseCollation("NOCASE");
+        var audit_event_id = row.Property(v => v.AuditEventId).HasColumnName("audit_event_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        audit_event_id.ValueGeneratedNever();
+        if (sqlite) audit_event_id.UseCollation("NOCASE");
+        row.HasIndex(v => v.DedupeKey).IsUnique();
+        row.HasOne<Brand>().WithMany().HasForeignKey(v => v.BrandId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_brand_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<User>().WithMany().HasForeignKey(v => v.UserId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_user_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<Discount>().WithMany().HasForeignKey(v => v.DiscountId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_discount_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<Order>().WithMany().HasForeignKey(v => v.OrderId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_order_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<Fulfillment>().WithMany().HasForeignKey(v => v.FulfillmentId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_fulfillment_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<SupportMessage>().WithMany().HasForeignKey(v => v.SupportMessageId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_support_message_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<ProductStockSubscription>().WithMany().HasForeignKey(v => v.ProductStockSubscriptionId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_product_stock_subscription_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<SupplierRequest>().WithMany().HasForeignKey(v => v.SupplierRequestId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_supplier_request_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<AuditEvent>().WithMany().HasForeignKey(v => v.AuditEventId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_audit_event_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasOne<Campaign>().WithMany().HasForeignKey(v => new { v.CampaignId, v.CampaignBatchId, v.BrandId }).HasPrincipalKey(v => new { v.Id, v.BatchId, v.BrandId }).OnDelete(DeleteBehavior.Restrict).HasConstraintName("telegram_deliveries_campaign_id_campaign_batch_id_brand_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasAnnotation("Akanti:DatabaseForeignKey:telegram_deliveries_order_id_delivery_generation_fk", "{\"columns\":[\"order_id\",\"delivery_generation\"],\"principalTable\":\"orders\",\"principalColumns\":[\"id\",\"delivery_generation\"],\"onDelete\":\"RESTRICT\",\"deferrability\":\"DEFERRABLE INITIALLY IMMEDIATE\"}");
+        row.HasIndex(v => new { v.CampaignBatchId, v.UserId }).HasDatabaseName("delivery_campaign_recipient_once").IsUnique().HasFilter(sqlite ? "campaign_id IS NOT NULL" : "campaign_id IS NOT NULL");
+        row.HasIndex(v => new { v.OrderId, v.DeliveryGeneration, v.PartNo, v.Purpose }).HasDatabaseName("delivery_manifest_part_once").IsUnique().HasFilter(sqlite ? "purpose='order_credentials'" : "purpose='order_credentials'");
+        row.HasIndex(v => v.ProductStockSubscriptionId).HasDatabaseName("delivery_restock_once").IsUnique().HasFilter(sqlite ? "product_stock_subscription_id IS NOT NULL" : "product_stock_subscription_id IS NOT NULL");
+        row.HasIndex(v => new { v.SupplierRequestId, v.AuditEventId, v.DeliveryGeneration, v.Purpose }).HasDatabaseName("delivery_staff_case_once").IsUnique().HasFilter(sqlite ? "recipient_kind='staff_chat'" : "recipient_kind='staff_chat'");
+    }
+}
