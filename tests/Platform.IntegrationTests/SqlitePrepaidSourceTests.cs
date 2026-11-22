@@ -108,9 +108,10 @@ public sealed class SqlitePrepaidSourceTests
 
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task WalletPrepaidCheckoutDebitsOnceAndIssuesOriginalSourceEntitlement(bool unknown)
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task WalletPrepaidCheckoutDebitsOnceAndIssuesOriginalSourceEntitlement(int outcome)
     {
         var ct = TestContext.Current.CancellationToken;
         var dir = Directory.CreateTempSubdirectory("akanti-sqlite-prepaid-wallet-");
@@ -197,7 +198,20 @@ public sealed class SqlitePrepaidSourceTests
             Assert.Equal(7001, dispatch.ChatId);
             Assert.Contains("Code: ", dispatch.Text);
             Assert.Equal(48, dispatch.Text.Split("Code: ", 2)[1].Length);
-            await notices.RecordOutcomeAsync(brand, delivery, unknown
+            if (outcome == 2)
+            {
+                await sessions.RunAsync(true, async (_, tx, token) =>
+                {
+                    using var expire = SqliteWallet.Command(tx, """
+                        UPDATE jobs SET lease_until=$expired WHERE id=$id AND status='leased'
+                        """, ("$expired", SqliteSchema.UtcText(DateTime.UtcNow.AddMinutes(-1))),
+                        ("$id", delivery.Id));
+                    return await expire.ExecuteNonQueryAsync(token);
+                }, ct);
+                Assert.Equal(1, await new SqliteCouponDeliveryStore(new SqliteSessionFactory(path), secrets)
+                    .RecoverExpiredAsync(brand, ct));
+            }
+            else await notices.RecordOutcomeAsync(brand, delivery, outcome == 0
                 ? new(DeliveryOutcomeKind.Unknown)
                 : new(DeliveryOutcomeKind.Succeeded, 901), ct);
             await new SqliteSessionFactory(path).RunAsync(false, async (_, tx, token) =>
@@ -211,8 +225,8 @@ public sealed class SqlitePrepaidSourceTests
                     """, ("$order", order));
                 await using var row = await query.ExecuteReaderAsync(token);
                 Assert.True(await row.ReadAsync(token));
-                Assert.Equal(unknown ? "uncertain" : "succeeded", row.GetString(0));
-                Assert.Equal(unknown ? "failed" : "succeeded", row.GetString(1));
+                Assert.Equal(outcome == 1 ? "succeeded" : "uncertain", row.GetString(0));
+                Assert.Equal(outcome == 1 ? "succeeded" : "failed", row.GetString(1));
                 Assert.Equal(1, row.GetInt64(2));
                 Assert.Equal(1, row.GetInt64(3));
                 return 0;
