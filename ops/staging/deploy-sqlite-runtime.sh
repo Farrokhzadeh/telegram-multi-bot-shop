@@ -96,8 +96,15 @@ cleanup() {
             docker start "$old_worker" >/dev/null 2>&1 || true
             docker start "$old_bot" >/dev/null 2>&1 || true
             printf 'Returned to the previously qualified SQLite executable with persistent database unchanged.\n' >&2
+        elif [[ ! -e $persistent/shop.db ]]; then
+            if docker start "${pg[0]}" >/dev/null 2>&1 &&
+                systemctl start "${pg[1]}" >/dev/null 2>&1; then
+                printf 'Initial SQLite copy failed before publication; previous PostgreSQL staging was restored.\n' >&2
+            else
+                printf 'Initial SQLite copy failed and PostgreSQL staging requires manual recovery.\n' >&2
+            fi
         else
-            printf 'Initial cutover failed: existing SQLite database remains intact; PG Telegram poller was NOT restarted.\n' >&2
+            printf 'SQLite database state remains intact; PostgreSQL staging was NOT restarted.\n' >&2
         fi
     fi
     exit "$result"
