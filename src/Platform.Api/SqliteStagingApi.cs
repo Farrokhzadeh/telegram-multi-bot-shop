@@ -18,6 +18,9 @@ public sealed record SqliteStageReceiptDecision(Guid BrandId, bool Approve, long
     Guid CommandId, string Reason);
 public sealed record SqliteStageWalletCommand(Guid BrandId, WalletAdjustment Value);
 public sealed record SqliteStageAdminIdentity(Guid Id);
+public sealed record SqliteStageCouponEditCommand(Guid BrandId, CouponOwnerEdit Value,
+    long ExpectedRevision, AuditReason Reason, Guid CommandId);
+public sealed record SqliteStageConfigurationSaved(long Revision);
 public sealed record SqliteStageButton(string Text, string Data);
 public sealed record SqliteStageReply(bool Accepted, string Text = "", bool Edit = false,
     SqliteStageButton[]? Buttons = null, string? Ack = null, Guid? Product = null, long? Revision = null);
@@ -27,6 +30,8 @@ public sealed record SqliteStageReply(bool Accepted, string Text = "", bool Edit
 [JsonSerializable(typeof(SqliteStageReceiptDecision))]
 [JsonSerializable(typeof(SqliteStageWalletCommand))]
 [JsonSerializable(typeof(SqliteStageAdminIdentity))]
+[JsonSerializable(typeof(SqliteStageCouponEditCommand))]
+[JsonSerializable(typeof(SqliteStageConfigurationSaved))]
 [JsonSerializable(typeof(SqliteStageReply))]
 [JsonSerializable(typeof(AdminPage<AdminBrand>))]
 [JsonSerializable(typeof(AdminPage<AdminProduct>))]
@@ -242,6 +247,36 @@ public static class SqliteStagingApi
                         await JsonSerializer.SerializeAsync(http.Response.Body,
                             new SqliteStageAdminIdentity(entry),
                             SqliteStageApiJson.Default.SqliteStageAdminIdentity, http.RequestAborted);
+                    }
+                    catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
+                    { http.Response.StatusCode = 401; }
+                    catch (Exception error) when (error is ArgumentException or InvalidOperationException
+                        or FormatException or OverflowException)
+                    { http.Response.StatusCode = 409; }
+                }));
+                app.MapMethods("/v1/admin/coupons/{id:guid}", ["PATCH"],
+                    (RequestDelegate)(async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
+                    try
+                    {
+                        var actor = await AuthenticateAsync(http, config);
+                        if (!Guid.TryParse(http.Request.RouteValues["id"]?.ToString(), out var coupon) ||
+                            coupon == Guid.Empty) throw new UnauthorizedAccessException();
+                        http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+                            .MaxRequestBodySize = 8192;
+                        var input = await JsonSerializer.DeserializeAsync(http.Request.Body,
+                            SqliteStageApiJson.Default.SqliteStageCouponEditCommand, http.RequestAborted);
+                        if (input is null || input.BrandId != config.Context.BrandId ||
+                            input.Value is null) throw new UnauthorizedAccessException();
+                        long revision = await new SqliteCouponAdministrationStore(config.Sessions).EditAsync(
+                            config.Context, actor, coupon, input.ExpectedRevision, input.Value,
+                            input.Reason, input.CommandId, http.RequestAborted);
+                        http.Response.ContentType = "application/json";
+                        await JsonSerializer.SerializeAsync(http.Response.Body,
+                            new SqliteStageConfigurationSaved(revision),
+                            SqliteStageApiJson.Default.SqliteStageConfigurationSaved,
+                            http.RequestAborted);
                     }
                     catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
                     { http.Response.StatusCode = 401; }
