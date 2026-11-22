@@ -60,6 +60,7 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
             {
                 route = ExternalSettlementRoute.LateCredit;
                 credit = await CreditAsync(tx, current, "late_crypto_credit", now, token);
+                await SqliteDiscountClaimStore.TransitionAsync(tx, context, current.Order, false, token);
             }
             else if (current.OrderStatus is ("awaiting_payment" or "under_review" or "confirmation_pending"))
             {
@@ -91,6 +92,7 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
                                 resolution_at=$now,resolution_wallet_entry_id=$credit,revision=revision+1,updated_at=$now
                             WHERE id=$order
                             """, token, ("$now", now), ("$credit", credit), ("$order", current.Order));
+                        await SqliteDiscountClaimStore.TransitionAsync(tx, context, current.Order, false, token);
                     }
                     else
                     {
