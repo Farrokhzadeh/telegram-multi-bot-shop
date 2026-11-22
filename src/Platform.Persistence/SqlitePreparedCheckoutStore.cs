@@ -75,7 +75,9 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
                 tx, context, revision, actor, localRequest, ct);
         if (request.Payment == CheckoutPayment.Wallet)
             return new(CheckoutOutcome.Unavailable);
-        string now = SqliteSchema.UtcText(DateTime.UtcNow);
+        DateTime instant = DateTime.UtcNow;
+        string now = SqliteSchema.UtcText(instant);
+        string dueAt = SqliteSchema.UtcText(instant.AddMinutes(30));
         var pending = new List<Guid>();
         using (var existing = SqliteWallet.Command(tx, """
             SELECT o.id FROM orders o WHERE o.user_id=$member AND o.payment_status='awaiting_payment'
@@ -135,7 +137,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             VALUES ($order,'customer',$member,$brand,'create','order',$order,'customer_request',$digest,$correlation)
             """, ct, ("$order", request.OrderId), ("$member", member), ("$brand", context.BrandId),
             ("$digest", digest), ("$correlation", Guid.CreateVersion7()));
-        string dueAt = SqliteSchema.UtcText(DateTime.UtcNow.AddMinutes(30));
+
         await Change(tx, """
             INSERT INTO orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,
                 unit_price_usdt,unit_price_toman,fx_rate_snapshot,fx_source_snapshot,fx_fetched_at_snapshot,
@@ -169,7 +171,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             ("$key", "workflow:checkout_created:" + request.OrderId.ToString("N")), ("$now", now));
         await CreatePaymentAsync(tx, context, request, quote, ct);
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.ExpireOrderPayment,
-            context.BrandId, request.OrderId), request.OrderId, DateTime.UtcNow.AddMinutes(30), ct);
+            context.BrandId, request.OrderId), request.OrderId, instant.AddMinutes(30), ct);
         await QueueInstructionAsync(tx, context, member, request.OrderId, "created", ct);
         return new(CheckoutOutcome.AwaitingPayment, request.OrderId);
     }
