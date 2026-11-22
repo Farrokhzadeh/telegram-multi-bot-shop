@@ -19,6 +19,9 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
         if (!Matches(before, notice)) throw new PaymentNoticeRejectedException();
         if (before.Pending)
             await ResumeArchiveAsync(context, revision, before.Id, archive, ct);
+        if (before.Canonical is not null &&
+            CryptographicOperations.FixedTimeEquals(before.Canonical, notice.CanonicalHash))
+            return new PaymentCapture(PaymentCaptureOutcome.Replayed, before.Id);
         byte[] encrypted = new BrandCipher(secrets).Encrypt(context, "payments", before.Id, "ipn_evidence", notice.Body.Span);
         var proof = new ProtectedPaymentEvidence(before.Id, context.BrandId,
             Convert.ToHexStringLower(notice.RawHash), secrets.CurrentBrandKeyId(context), encrypted);
