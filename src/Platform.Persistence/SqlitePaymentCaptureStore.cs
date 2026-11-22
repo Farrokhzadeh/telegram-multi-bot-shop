@@ -187,7 +187,7 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
                 SELECT telegram_message_id message FROM telegram_deliveries
                 WHERE order_id=$order AND purpose='order_status' AND status='succeeded' AND telegram_message_id IS NOT NULL
                 ORDER BY created_at,id LIMIT 1
-            ) a ON true
+            ) a ON true WHERE true
             ON CONFLICT(dedupe_key) DO NOTHING
             """, ("$id", delivery), ("$brand", context.BrandId), ("$member", member),
             ("$order", order), ("$dedupe", "instruction-processing:" + order.ToString("D")));
