@@ -174,7 +174,7 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
         return entry;
     }
 
-    private async Task AcquireAsync(SqliteTransaction tx, BrandContext context, Guid order,
+    internal async Task AcquireAsync(SqliteTransaction tx, BrandContext context, Guid order,
         IReadOnlyList<Stock> stock, string now, CancellationToken ct)
     {
         var inventory = new InventoryCipher(secrets);
@@ -201,7 +201,7 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
         }
     }
 
-    private static async Task<List<Stock>> ReadStockAsync(SqliteTransaction tx, Guid product, int quantity, CancellationToken ct)
+    internal static async Task<List<Stock>> ReadStockAsync(SqliteTransaction tx, Guid product, int quantity, CancellationToken ct)
     {
         var stock = new List<Stock>();
         using var command = SqliteWallet.Command(tx, """
@@ -252,7 +252,7 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
     private static string? Text(SqliteDataReader row, int index) => row.IsDBNull(index) ? null : row.GetString(index);
     private static decimal? Number(SqliteDataReader row, int index) => row.IsDBNull(index) ? null : ExactDecimal.Parse(row.GetString(index));
 
-    private sealed record Stock(Guid Id, byte[] Content, string Key);
+    internal sealed record Stock(Guid Id, byte[] Content, string Key);
     private sealed record State(Guid Member, Guid Order, Guid Product, string Status, string OrderStatus, string Fulfillment,
         bool Preorder, int Quantity, string Kind, string Method, decimal Due, decimal? Expected, decimal? Tokens,
         decimal? Received, string? Provider, string Origin, string? Asset, string? ProviderStatus, string? ProviderCode,
