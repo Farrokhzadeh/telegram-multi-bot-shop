@@ -145,6 +145,12 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             if (!identity) review = "identity_mismatch";
             if (!archived && (result.Kind != SupplierOutcomeKind.Unknown ||
                 result.Evidence.Length > 0 || result.Items.Count > 0)) review = "credential_recovery";
+            if (identity && archived && result.Items.Count > 0 &&
+                !await ExistingItemsMatchAsync(tx, context, state, result, token))
+            {
+                identity = false;
+                review = "identity_mismatch";
+            }
             bool acquired = false;
             if (identity && archived && result.Items.Count > 0)
                 acquired = await CaptureAsync(tx, context, state, result, token);
@@ -261,6 +267,55 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             return true;
         }, ct);
 
+    private async Task<bool> ExistingItemsMatchAsync(SqliteTransaction tx, BrandContext context,
+        State state, SupplierOutcome result, CancellationToken ct)
+    {
+        int newCustomers = 0;
+        using (var count = SqliteWallet.Command(tx, """
+            SELECT quantity-(SELECT count(*) FROM fulfillments
+                WHERE order_id=$order AND status<>'unfilled')
+            FROM orders WHERE id=$order
+            """, ("$order", state.Binding.OrderId)))
+        {
+            if (await count.ExecuteScalarAsync(ct) is not long available || available < 0)
+                return false;
+            foreach (SupplierItem item in result.Items)
+            {
+                using var query = SqliteWallet.Command(tx, """
+                    SELECT id,supplier_request_id,'customer',delivered_content,delivered_content_key_id,content_kind
+                    FROM fulfillments WHERE supplier_item_key=$key
+                    UNION ALL
+                    SELECT id,supplier_request_id,'bonus',credential_ciphertext,credential_key_id,NULL
+                    FROM inventory_items WHERE supplier_item_key=$key
+                    """, ("$key", SupplierRules.ItemKey(state.Binding, item.Reference)));
+                await using var rows = await query.ExecuteReaderAsync(ct);
+                if (!await rows.ReadAsync(ct))
+                {
+                    if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++;
+                    continue;
+                }
+                Guid id = rows.GetGuid(0), request = rows.GetGuid(1);
+                string kind = rows.GetString(2);
+                byte[] encrypted = rows.GetFieldValue<byte[]>(3);
+                string key = rows.GetString(4);
+                string? contentKind = rows.IsDBNull(5) ? null : rows.GetString(5);
+                if (await rows.ReadAsync(ct) || request != state.Binding.RequestId ||
+                    kind != (item.Disposition == SupplierItemDisposition.Customer ? "customer" : "bonus") ||
+                    contentKind is not null && contentKind != item.ContentKind)
+                    return false;
+                byte[] plain = kind == "customer"
+                    ? new BrandCipher(secrets).Decrypt(context, "fulfillments", id, "delivered_content", key, encrypted)
+                    : new InventoryCipher(secrets).Decrypt(id, key, encrypted);
+                try
+                {
+                    if (!CryptographicOperations.FixedTimeEquals(plain, item.Content.Span)) return false;
+                }
+                finally { CryptographicOperations.ZeroMemory(plain); }
+            }
+            return newCustomers <= available;
+        }
+    }
+
     private async Task<bool> CaptureAsync(SqliteTransaction tx, BrandContext context,
         State state, SupplierOutcome result, CancellationToken ct)
     {
@@ -362,6 +417,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             FROM supplier_requests r JOIN orders o ON o.id=r.order_id
                 JOIN users u ON u.id=o.user_id JOIN brands b ON b.id=u.brand_id
                 LEFT JOIN product_supplier_sources s ON s.id=r.product_supplier_source_id
+                    AND s.product_id=o.product_id
             WHERE r.id=$request AND b.id=$brand AND b.bot_id=$bot AND b.active=1
             """, ("$request", request), ("$brand", context.BrandId), ("$bot", context.BotId));
         await using var row = await query.ExecuteReaderAsync(ct);
