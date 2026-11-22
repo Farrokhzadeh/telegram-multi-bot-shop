@@ -429,10 +429,10 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             row.IsDBNull(8) ? null : row.GetString(8), row.GetString(9), row.GetInt32(10),
             ExactDecimal.Parse(row.GetString(11)), row.GetString(12),
             row.IsDBNull(13) ? null : ExactDecimal.Parse(row.GetString(13)));
-        return new(binding,row.GetString(14),row.IsDBNull(15) ? null : row.GetString(15),
-            row.GetString(16),row.GetString(17),row.GetBoolean(18),row.IsDBNull(19) ? null : row.GetString(19),
-            !row.IsDBNull(20) && row.GetBoolean(20),row.IsDBNull(21) ? 0 : row.GetInt64(21),
-            row.GetInt32(22));
+        return new(binding, row.GetString(14), row.IsDBNull(15) ? null : row.GetString(15),
+            row.GetString(16), row.GetString(17), row.GetBoolean(18),
+            row.IsDBNull(19) ? null : row.GetString(19), !row.IsDBNull(20) && row.GetBoolean(20),
+            row.IsDBNull(21) ? 0 : row.GetInt64(21), row.GetInt32(22));
     }
 
     private static Guid AttemptId(Guid job, long number) =>
