@@ -1,0 +1,50 @@
+using Platform.Core;
+using Platform.Persistence;
+using Platform.Security;
+
+namespace Platform.Fulfillment;
+
+public sealed class SqliteSupplierFulfillmentWorker(SqliteSupplierRequestStore store,
+    ISupplierAdapter adapter, ISupplierEvidenceArchive archive)
+{
+    public async Task RunAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
+    {
+        SupplierBinding binding = await store.ReadAsync(context, lease, ct);
+        if (adapter.Provider != binding.Provider || adapter.Account != binding.Account)
+            throw new UnauthorizedAccessException("Original supplier account is unavailable.");
+        SupplierQuote? quote = null;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+        if (lease.Intent.Kind == JobKind.SubmitSupplier)
+        {
+            try { quote = await adapter.InspectAsync(binding, deadline.Token); }
+            catch (Exception) { }
+        }
+        SupplierAttempt? attempt = await store.BeginAsync(context, lease, quote,
+            adapter.UsesPurchaseKey, adapter.ProvenIntentLookup, adapter.SupportsExport, ct);
+        if (attempt is null) return;
+        SupplierOutcome result;
+        try
+        {
+            result = attempt.Operation switch
+            {
+                "submit" => await adapter.SubmitAttemptAsync(binding, attempt.PurchaseKey,
+                    SupplierRules.UnitCeiling(binding), deadline.Token),
+                "export" => await adapter.ExportAsync(binding, attempt.PurchaseReference!, deadline.Token),
+                _ => await adapter.LookupAsync(binding, attempt.PurchaseReference, deadline.Token)
+            };
+        }
+        catch (Exception) { result = new(SupplierOutcomeKind.Unknown, null, null, null, [], []); }
+        using (result)
+        {
+            string? evidence = null;
+            try
+            {
+                if (result.Evidence.Length > 0)
+                    evidence = await archive.StoreAsync(binding, attempt.Id, result.Evidence, deadline.Token);
+            }
+            catch (Exception) { }
+            await store.RecordAsync(context, lease, attempt, result, evidence, CancellationToken.None);
+        }
+    }
+}
