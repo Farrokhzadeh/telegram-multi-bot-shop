@@ -12,13 +12,13 @@ Use .NET 10, Microsoft.Data.Sqlite and the EF Core 10 SQLite provider. Retain th
 
 ## Constitution check
 
-Pass before and after design under the staging allowance in v3.1.0. Keep logical schema constraints, brand boundaries, authorization, encryption, exact amounts and durable recovery. The existing PostgreSQL release and legacy data remain available for rollback.
+Pass before and after design under the staging allowance in v3.1.0. Keep logical schema constraints, brand boundaries, authorization, encryption, exact amounts and durable recovery. The existing PostgreSQL release and legacy data remain protected and separately retained; they cannot be used as an automatic staging fallback after SQLite has published or accepted writes.
 
 ## Implementation
 
 1. Add explicit schema setup and a SQLite session boundary in [persistence](../../src/Platform.Persistence) and [SchemaRunner](../../src/Platform.SchemaRunner). Use the [data model](data-model.md) and switch the existing EF Core admin catalog query for SQLite mode.
 2. Port the checkout, wallet, payment, allocation and durable job stores together. Replace PostgreSQL locks and deferred trigger checks with equivalent transaction guards. Preserve callback and command replay handling and keep provider calls outside write transactions.
-3. Wire SQLite into the existing staging API, bot, and worker entry points and deploy helpers. Mount one persistent database directory shared by these roles. Qualify the full path on a disposable database before replacing the staging runtime. Retain rollback to the previous staging release.
+3. Wire SQLite into the existing staging API, bot, and worker entry points and deploy helpers. Mount one persistent database directory shared by these roles. Qualify the full path on a disposable database before replacing the staging runtime. Retain rollback to a qualified, schema-compatible previous SQLite executable using the same committed database, or fail closed. PostgreSQL fallback is allowed only before first SQLite publication.
 
 ## Project structure
 
