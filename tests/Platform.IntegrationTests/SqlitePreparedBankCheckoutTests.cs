@@ -24,6 +24,8 @@ public sealed class SqlitePreparedBankCheckoutTests
             using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
             var brand = CheckoutFixture.ResolveContexts()[0];
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid();
+            using var adminToken = AdminToken.Create();
+            Guid admin = Guid.NewGuid(), adminSession = Guid.NewGuid();
             const string card = "1111222233334444", holder = "Public synthetic account";
             var cipher = new BrandCipher(secrets);
             byte[] encryptedNumber = cipher.Encrypt(brand, "brands", brand.BrandId,
@@ -43,10 +45,16 @@ public sealed class SqlitePreparedBankCheckoutTests
                     VALUES ($product,'manual','immediate','Synthetic goods');
                     INSERT INTO brand_products(brand_id,product_id,visible,price_usdt,price_toman,allow_bank)
                     VALUES ($brand,$product,1,'10.25','1000000',1);
+                    INSERT INTO admins(id,login,authentication_mode,external_subject)
+                    VALUES ($admin,'synthetic-admin','external','synthetic');
+                    INSERT INTO admin_sessions(id,admin_id,token_hash,auth_version_at_issue,expires_at)
+                    VALUES ($session,$admin,$hash,0,$expires);
                     """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$number", encryptedNumber),
                     ("$holder", encryptedHolder), ("$key", secrets.CurrentBrandKeyId(brand)),
                     ("$fingerprint", SHA256.HashData(Encoding.UTF8.GetBytes(card))),
-                    ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$member", member), ("$product", product));
+                    ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$member", member), ("$product", product),
+                    ("$admin", admin), ("$session", adminSession), ("$hash", adminToken.Hash()),
+                    ("$expires", SqliteSchema.UtcText(DateTime.UtcNow.AddHours(1))));
                 await setup.ExecuteNonQueryAsync(token);
                 return 0;
             }, ct);
@@ -108,6 +116,46 @@ public sealed class SqlitePreparedBankCheckoutTests
                 Assert.Equal("observed", row.GetString(0));
                 Assert.Equal("under_review", row.GetString(1));
                 Assert.Equal(0, row.GetInt64(2));
+                return 0;
+            }, ct);
+
+            var authenticated = await SqliteAdminSessionStore.AuthenticateAsync(sessions, adminToken, ct);
+            var review = new SqliteBankReviewStore(sessions, secrets);
+            long revision = await sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var sql = SqliteWallet.Command(tx, "SELECT revision FROM orders WHERE id=$order",
+                    ("$order", order));
+                return (long)(await sql.ExecuteScalarAsync(token))!;
+            }, ct);
+            Guid decision = Guid.NewGuid();
+            Assert.Equal(SqliteBankDecisionOutcome.ConfirmedPaid,
+                await review.DecideAsync(brand, authenticated, payment, true, revision,
+                    decision, "Synthetic receipt accepted", ct));
+            Assert.Equal(SqliteBankDecisionOutcome.Replayed,
+                await review.DecideAsync(brand, authenticated, payment, true, revision,
+                    decision, "Synthetic receipt accepted", ct));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                review.DecideAsync(brand, authenticated, payment, false, revision,
+                    decision, "Synthetic receipt rejected", ct));
+            await sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var sql = SqliteWallet.Command(tx, """
+                    SELECT p.status,p.amount_received,p.review_admin_id,o.payment_status,o.fulfillment_status,
+                        (SELECT count(*) FROM wallet_entries),
+                        (SELECT count(*) FROM audit_events WHERE id=$command),
+                        (SELECT count(*) FROM telegram_deliveries WHERE order_id=$order AND purpose='order_status')
+                    FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.id=$order
+                    """, ("$order", order), ("$command", decision));
+                await using var row = await sql.ExecuteReaderAsync(token);
+                Assert.True(await row.ReadAsync(token));
+                Assert.Equal("settled", row.GetString(0));
+                Assert.Equal("1000000", row.GetString(1));
+                Assert.Equal(admin, row.GetGuid(2));
+                Assert.Equal("paid", row.GetString(3));
+                Assert.Equal("requires_admin", row.GetString(4));
+                Assert.Equal(0, row.GetInt64(5));
+                Assert.Equal(1, row.GetInt64(6));
+                Assert.Equal(2, row.GetInt64(7));
                 return 0;
             }, ct);
 
