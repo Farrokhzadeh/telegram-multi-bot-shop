@@ -14,12 +14,15 @@ namespace Platform.Api;
 public sealed record SqliteStageRequest(long UpdateId, long User, string Kind, string Value, long? Anchor = null,
     string? MessageText = null);
 public sealed record SqliteStageAck(long UpdateId, long User, long Anchor, Guid Product, long Revision);
+public sealed record SqliteStageReceiptDecision(Guid BrandId, bool Approve, long ExpectedRevision,
+    Guid CommandId, string Reason);
 public sealed record SqliteStageButton(string Text, string Data);
 public sealed record SqliteStageReply(bool Accepted, string Text = "", bool Edit = false,
     SqliteStageButton[]? Buttons = null, string? Ack = null, Guid? Product = null, long? Revision = null);
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(SqliteStageRequest))]
 [JsonSerializable(typeof(SqliteStageAck))]
+[JsonSerializable(typeof(SqliteStageReceiptDecision))]
 [JsonSerializable(typeof(SqliteStageReply))]
 [JsonSerializable(typeof(AdminPage<AdminBrand>))]
 [JsonSerializable(typeof(AdminPage<AdminProduct>))]
@@ -190,6 +193,31 @@ public static class SqliteStagingApi
                         or ArgumentException or FormatException)
                     { return Results.Unauthorized(); }
                 });
+                app.MapMethods("/v1/admin/manual-deposits/{id:guid}/decision", ["POST"],
+                    (RequestDelegate)(async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) { http.Response.StatusCode = 401; return; }
+                    try
+                    {
+                        var actor = await AuthenticateAsync(http, config);
+                        if (!Guid.TryParse(http.Request.RouteValues["id"]?.ToString(), out var payment) ||
+                            payment == Guid.Empty) throw new UnauthorizedAccessException();
+                        http.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>()!
+                            .MaxRequestBodySize = 4096;
+                        var input = await JsonSerializer.DeserializeAsync(http.Request.Body,
+                            SqliteStageApiJson.Default.SqliteStageReceiptDecision, http.RequestAborted);
+                        if (input is null || input.BrandId != config.Context.BrandId ||
+                            input.CommandId == Guid.Empty) throw new UnauthorizedAccessException();
+                        await new SqliteBankReviewStore(config.Sessions, secrets).DecideAsync(config.Context,
+                            actor, payment, input.Approve, input.ExpectedRevision, input.CommandId,
+                            input.Reason, http.RequestAborted);
+                        http.Response.StatusCode = 204;
+                    }
+                    catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException)
+                    { http.Response.StatusCode = 401; }
+                    catch (Exception error) when (error is ArgumentException or InvalidOperationException)
+                    { http.Response.StatusCode = 409; }
+                }));
                 Console.WriteLine("Managed SQLite staging API is starting.");
                 await app.RunAsync();
                 return 0;
