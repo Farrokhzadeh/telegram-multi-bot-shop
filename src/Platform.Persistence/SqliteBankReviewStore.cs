@@ -71,7 +71,8 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
                         AND fulfillment_status IN ('waiting_stock','requires_admin'))
                     """, ("$product", state.Product), ("$order", state.Order)))
                     queued = (long)(await backlog.ExecuteScalarAsync(token))! != 0;
-                var stock = queued ? [] : await SqliteOrderPaymentSettlementStore.ReadStockAsync(
+                List<SqliteOrderPaymentSettlementStore.Stock> stock = queued ? [] :
+                    await SqliteOrderPaymentSettlementStore.ReadStockAsync(
                     tx, state.Product, state.Quantity, token);
                 if (!queued && stock.Count == state.Quantity)
                 {
