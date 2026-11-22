@@ -46,12 +46,26 @@ internal static class SqliteStagingWorker
                 var jobs = new SqliteStagingJobs(state.Sessions);
                 var status = new SqliteStatusDeliveryStore(state.Sessions);
                 var credentials = new SqliteDeliveryStore(state.Sessions, secrets);
+                var expiry = new SqlitePaymentExpiryStore(state.Sessions);
+                var preorders = new SqliteLocalPreorderStore(state.Sessions, secrets);
                 Console.WriteLine("The managed SQLite staging delivery worker is running.");
                 while (!ct.IsCancellationRequested)
                 {
                     await status.RecoverExpiredAsync(state.Context, ct);
                     foreach (Guid expired in await jobs.ExpiredCredentialsAsync(state.Context, ct))
                         await credentials.RecoverExpiredAsync(state.Context, expired, ct);
+                    JobLease? due = await expiry.ClaimAsync(state.Context, workerId, ct);
+                    if (due is not null)
+                    {
+                        _ = await expiry.RunAsync(state.Context, due, ct);
+                        continue;
+                    }
+                    JobLease? waiting = await preorders.ClaimAsync(workerId, ct);
+                    if (waiting is not null)
+                    {
+                        _ = await preorders.DrainAsync(waiting, [state.Context], ct);
+                        continue;
+                    }
                     JobLease? prepare = await jobs.ClaimAsync(state.Context, JobKind.PrepareManifest, workerId, ct);
                     if (prepare is not null)
                     {
