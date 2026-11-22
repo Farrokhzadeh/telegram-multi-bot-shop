@@ -65,7 +65,7 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
         string asset = await ArchiveAsync(archive, proof, ct);
         await sessions.RunAsync(true, async (_, tx, token) =>
         {
-            _ = await ReadAsync(tx, context, revision, payment, null, token);
+            await ReadAsync(tx, context, revision, payment, null, token);
             using var command = SqliteWallet.Command(tx, """
                 UPDATE payments SET evidence_asset_ref=$asset,pending_evidence_ciphertext=NULL,pending_evidence_key_id=NULL
                 WHERE id=$payment AND evidence_digest=$digest AND pending_evidence_ciphertext IS NOT NULL
@@ -90,16 +90,16 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
                 return null;
             if (state.Status == "settled")
             {
-                Guid eventId = new(notice.CanonicalHash.AsSpan(0, 16));
+                Guid replayEvent = new(notice.CanonicalHash.AsSpan(0, 16));
                 using var audit = SqliteWallet.Command(tx, """
                     INSERT INTO audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id)
                     VALUES ($event,'system',$brand,'update','payment',$payment,'post_settlement_notice',$hash,$payment)
                     ON CONFLICT(id) DO NOTHING
-                    """, ("$event", eventId), ("$brand", context.BrandId), ("$payment", state.Id),
+                    """, ("$event", replayEvent), ("$brand", context.BrandId), ("$payment", state.Id),
                     ("$hash", notice.RawHash));
                 await audit.ExecuteNonQueryAsync(token);
                 await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Payment(JobKind.VerifyPayment, context.BrandId, state.Id),
-                    eventId, observed, token);
+                    replayEvent, observed, token);
                 return new PaymentCapture(PaymentCaptureOutcome.Replayed, state.Id);
             }
             if (state.Provider is null)
