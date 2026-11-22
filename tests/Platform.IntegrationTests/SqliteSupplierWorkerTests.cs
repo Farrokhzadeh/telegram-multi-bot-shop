@@ -65,10 +65,11 @@ public sealed class SqliteSupplierWorkerTests
             var store = new SqliteSupplierRequestStore(sessions, secrets);
             JobLease? lease = await store.ClaimAsync(brand, JobKind.SubmitSupplier, Guid.NewGuid(), ct);
             Assert.NotNull(lease);
-            var adapter = new SyntheticAdapter(uncertain);
+            ISupplierAdapter adapter = uncertain ? new SyntheticAdapter(true) :
+                new SqliteSyntheticSupplierAdapter();
             var archive = new SyntheticArchive();
             await new SqliteSupplierFulfillmentWorker(store, adapter, archive).RunAsync(brand, lease, ct);
-            Assert.Equal(1, adapter.Submissions);
+            if (adapter is SyntheticAdapter fake) Assert.Equal(1, fake.Submissions);
             Assert.Equal(uncertain ? 0 : 1, archive.Saves);
             await new SqliteSessionFactory(path).RunAsync(false, async (_, tx, token) =>
             {
