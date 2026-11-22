@@ -19,6 +19,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             request.Quantity is < 1 or > 10000 ||
             request.Payment is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank) ||
             request.Kind != CheckoutKind.ProductPurchase ||
+            (request.Payment == CheckoutPayment.Crypto && request.Network is null) ||
             request.Network is CryptoAsset network && (request.Payment != CheckoutPayment.Crypto || !Enum.IsDefined(network)))
             throw new ArgumentException("The prepared checkout request is unavailable.");
         return sessions.RunAsync(true, (_, tx, token) => AcceptAsync(tx, context, revision, actor, request,
