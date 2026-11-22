@@ -167,7 +167,7 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
             AdminCommand.Hash("supplier-bonus-access-v1", request.ToString("D"), inventory.ToString("D")));
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
-            _ = await AuditReplayAsync(tx, actor, audit, token);
+            bool replay = await AuditReplayAsync(tx, actor, audit, token);
             using var query = SqliteWallet.Command(tx, """
                 SELECT i.remote_item_ref,i.credential_ciphertext,i.credential_key_id
                 FROM inventory_items i JOIN supplier_requests r ON r.id=i.supplier_request_id
@@ -187,7 +187,7 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
                 encrypted = row.GetFieldValue<byte[]>(1);
                 key = row.GetString(2);
             }
-            await WriteAuditAsync(tx, actor, audit, token);
+            if (!replay) await WriteAuditAsync(tx, actor, audit, token);
             byte[] plain = new InventoryCipher(secrets).Decrypt(inventory, key, encrypted);
             try { return new SupplierItem(reference, SupplierItemDisposition.Bonus, "code", plain); }
             finally { CryptographicOperations.ZeroMemory(plain); }
