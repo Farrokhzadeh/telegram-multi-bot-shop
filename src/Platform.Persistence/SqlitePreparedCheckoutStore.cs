@@ -68,8 +68,8 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         CheckoutQuote quote = await catalog.RequireCurrentAsync(tx, context, actor, prepared, ct);
         QuoteTerms terms = quote.Terms;
         if (prepared.Member != member || prepared.PolicyRevision != revision ||
-            terms.DiscountId is not null || terms.Payment != request.Payment ||
-            prepared.Supply.RemoteUnits != 0 || quote.Payable.Amount <= 0)
+            terms.Payment != request.Payment || prepared.Supply.RemoteUnits != 0 ||
+            quote.Payable.Amount <= 0)
             throw new PricingRejectedException();
         if (local)
             return await new SqliteCheckoutStore(sessions, secrets).AcceptLocalAsync(
@@ -145,10 +145,12 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
                 auto_price_toman_snapshot,pricing_rounding_step_snapshot,price_calculation_version,
                 brand_public_name_snapshot,product_title_snapshot,product_description_snapshot,product_icon_snapshot,
                 product_guidance_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,
-                is_preorder,payment_due_at,created_at,updated_at)
+                is_preorder,payment_due_at,created_at,updated_at,
+                discount_pct_snapshot,discount_units_snapshot,discount_revision_id)
             VALUES ($order,$member,$product,$quantity,'product_purchase','awaiting_payment',$currency,$method,
                 $usd,$toman,$rate,$source,$fetched,$automatic,$step,$version,$brandName,$title,$description,$icon,
-                $guidance,'Frozen quote; complete-order delivery',$kind,$localFirst,$preorder,$deadline,$now,$now)
+                $guidance,'Frozen quote; complete-order delivery',$kind,$localFirst,$preorder,$deadline,$now,$now,
+                $percent,$discountUnits,$discountRevision)
             """, ct, ("$order", request.OrderId), ("$member", member), ("$product", request.ProductId),
             ("$quantity", request.Quantity), ("$currency", terms.Currency.ToCode()),
             ("$method", request.Payment == CheckoutPayment.Bank ? "bank" : "crypto"),
@@ -162,7 +164,10 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             ("$title", terms.Product.Title), ("$description", terms.Product.Description),
             ("$icon", terms.Product.Icon), ("$guidance", terms.Product.Guidance),
             ("$kind", kind), ("$localFirst", localFirst), ("$preorder", preorder),
-            ("$deadline", dueAt), ("$now", now));
+            ("$deadline", dueAt), ("$now", now),
+            ("$percent", terms.DiscountPercent is decimal percentage ? ExactDecimal.Format(percentage) : null),
+            ("$discountUnits", terms.DiscountUnits),
+            ("$discountRevision", terms.DiscountRevisionId));
         await Change(tx, """
             INSERT INTO bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,
                 order_id,quantity_selected,outcome_code,idempotency_key,occurred_at)
@@ -170,6 +175,9 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             """, ct, ("$id", Guid.CreateVersion7()), ("$member", member),
             ("$product", request.ProductId), ("$order", request.OrderId), ("$quantity", request.Quantity),
             ("$key", "workflow:checkout_created:" + request.OrderId.ToString("N")), ("$now", now));
+        if (terms.DiscountId is not null)
+            await SqliteDiscountClaimStore.HoldAsync(tx, context, member, request.OrderId, request.ProductId,
+                quote, ct);
         await CreatePaymentAsync(tx, context, request, quote, ct);
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.ExpireOrderPayment,
             context.BrandId, request.OrderId), request.OrderId, instant.AddMinutes(30), ct);
