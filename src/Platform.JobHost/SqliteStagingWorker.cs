@@ -58,7 +58,7 @@ internal static class SqliteStagingWorker
                 Console.WriteLine("The managed SQLite staging delivery worker is running.");
                 while (!ct.IsCancellationRequested)
                 {
-                    if (inventory.IsFaulted)
+                    if (inventory.IsCompleted && !ct.IsCancellationRequested)
                         throw new InvalidOperationException("Staging inventory import bridge is unavailable.");
                     await status.RecoverExpiredAsync(state.Context, ct);
                     await coupons.RecoverExpiredAsync(state.Context, ct);
