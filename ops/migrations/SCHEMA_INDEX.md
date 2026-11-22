@@ -1,0 +1,62 @@
+# Baseline SQL table index
+Generated from exact Git blobs below; **1-based inclusive line ranges**, including each `CREATE TABLE` body. Read only targeted lines with `sed -n 'START,ENDp'`. Never edit the baselines to update this index; regenerate the index after any authorized schema change.
+
+## [0001_core.sql](0001_core.sql) · Git blob `d346350220eaab7d9096b89b5a5922704d098014`
+- `brands`: L12–L59
+- `brand_channels`: L61–L73
+- `users`: L75–L102
+- `admins`: L104–L132
+- `admin_sessions`: L134–L149
+- `products`: L151–L169
+- `brand_products`: L171–L200
+- `inventory_items`: L202–L222
+- `wallets`: L224–L230
+- `wallet_entries`: L232–L262
+- `orders`: L264–L343
+- `payments`: L345–L407
+- `fulfillments`: L409–L435
+- `supplier_requests`: L437–L471
+- `jobs`: L473–L506
+- `campaigns`: L508–L535
+- `telegram_deliveries`: L537–L578
+- `support_tickets`: L580–L596
+- `support_messages`: L598–L613
+- `legacy_id_map`: L615–L629
+- `audit_events`: L631–L655
+- `discounts`: L657–L687
+- `discount_uses`: L689–L702
+- `discount_revisions`: L704–L724
+- `bot_activity_events`: L726–L763
+- `supplier_request_attempts`: L765–L788
+- `product_supplier_sources`: L790–L819
+- `product_stock_subscriptions`: L821–L836
+
+## [sqlite/0001_core.sql](sqlite/0001_core.sql) · Git blob `76bd2cbfd128c3ea90f6fc6ef6d9450cc1c9868f`
+- `brands`: L1–L49
+- `brand_channels`: L51–L64
+- `users`: L66–L96
+- `admins`: L98–L128
+- `admin_sessions`: L130–L146
+- `products`: L148–L167
+- `brand_products`: L169–L200
+- `inventory_items`: L202–L225
+- `wallets`: L227–L234
+- `wallet_entries`: L236–L272
+- `orders`: L274–L359
+- `payments`: L361–L427
+- `fulfillments`: L429–L459
+- `supplier_requests`: L461–L498
+- `jobs`: L500–L546
+- `campaigns`: L548–L577
+- `telegram_deliveries`: L579–L631
+- `support_tickets`: L633–L652
+- `support_messages`: L654–L671
+- `legacy_id_map`: L673–L688
+- `audit_events`: L690–L717
+- `discounts`: L719–L754
+- `discount_uses`: L756–L772
+- `discount_revisions`: L774–L798
+- `bot_activity_events`: L800–L841
+- `supplier_request_attempts`: L843–L869
+- `product_supplier_sources`: L871–L901
+- `product_stock_subscriptions`: L903–L920
