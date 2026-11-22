@@ -59,8 +59,10 @@ public sealed class SqlitePrepaidSourceTests
             Guid issued = await store.IssueAsync(brand, source, ct);
             Assert.Equal(issued, await new SqlitePrepaidSourceStore(new SqliteSessionFactory(path), secrets)
                 .IssueAsync(brand, source, ct));
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            await Assert.ThrowsAsync<PricingRejectedException>(() =>
                 store.IssueAsync(CheckoutFixture.ResolveContexts()[1], source, ct));
+            await Assert.ThrowsAsync<PricingRejectedException>(() =>
+                store.IssueAsync(brand, Guid.NewGuid(), ct));
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
                 using var sql = SqliteWallet.Command(tx, """

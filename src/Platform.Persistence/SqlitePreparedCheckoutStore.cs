@@ -152,11 +152,11 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
                 brand_public_name_snapshot,product_title_snapshot,product_description_snapshot,product_icon_snapshot,
                 product_guidance_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,
                 is_preorder,payment_due_at,created_at,updated_at,
-                discount_pct_snapshot,discount_units_snapshot,discount_revision_id,payment_confirmed_at)
+                discount_pct_snapshot,discount_units_snapshot,payment_confirmed_at)
             VALUES ($order,$member,$product,$quantity,$orderKind,$status,$currency,$method,
                 $usd,$toman,$rate,$source,$fetched,$automatic,$step,$version,$brandName,$title,$description,$icon,
                 $guidance,'Frozen quote; complete-order delivery',$kind,$localFirst,$preorder,$deadline,$now,$now,
-                $percent,$discountUnits,$discountRevision,$confirmed)
+                $percent,$discountUnits,$confirmed)
             """, ct, ("$order", request.OrderId), ("$member", member), ("$product", request.ProductId),
             ("$quantity", request.Quantity), ("$currency", terms.Currency.ToCode()),
             ("$method", request.Payment switch
@@ -181,8 +181,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             ("$confirmed", request.Payment == CheckoutPayment.Wallet ? now : null),
             ("$now", now),
             ("$percent", terms.DiscountPercent is decimal percentage ? ExactDecimal.Format(percentage) : null),
-            ("$discountUnits", terms.DiscountUnits),
-            ("$discountRevision", terms.DiscountRevisionId));
+            ("$discountUnits", terms.DiscountUnits));
         await Change(tx, """
             INSERT INTO bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,
                 order_id,quantity_selected,outcome_code,idempotency_key,occurred_at)

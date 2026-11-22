@@ -37,11 +37,11 @@ public sealed class SqliteDiscountClaimTests
                         payment_method,unit_price_usdt,auto_price_toman_snapshot,pricing_rounding_step_snapshot,
                         price_calculation_version,brand_public_name_snapshot,product_title_snapshot,
                         payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,
-                        discount_pct_snapshot,discount_units_snapshot,discount_revision_id,
+                        discount_pct_snapshot,discount_units_snapshot,
                         created_at,updated_at,payment_due_at)
                     VALUES ($order,$member,$product,1,'product_purchase','awaiting_payment','USDT','crypto',
                         '10.25',false,'5000','synthetic','Stage','Synthetic goods','synthetic',
-                        'manual',false,false,'20',1,$revision,$created,$created,$due);
+                        'manual',false,false,'20',1,$created,$created,$due);
                     INSERT INTO audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,
                         reason,correlation_id)
                     VALUES ($audit,'system',$brand,'coupon_issue','discount',$coupon,'synthetic',$audit);
