@@ -1,23 +1,25 @@
 # Spec Kit 001 — line-numbered document index
 1-based source lines; headings and Git blob IDs reflect the listed snapshots. Regenerate after any source edit. Use `rg -n` and `sed -n 'START,ENDp'` for relevant sections only. For history see [archived handoff](archive/CONVERSATION-HANDOFF-history.md).
 
-## [../../.specify/memory/constitution.md](../../.specify/memory/constitution.md) · Git blob `9a0aa977d0d28690ed11321846518fecb3301a26`
+## [../../.specify/memory/constitution.md](../../.specify/memory/constitution.md) · Git blob `f948e3f076a0b0b8f0d1d3162f10117b4de63724`
 1: # AccAbad Multi-Brand Commerce Constitution
-3: ## Core Principles
-5: ### I. Behavioral parity and customer safety (NON-NEGOTIABLE)
-8: ### II. Preserve source data, identities, obligations, and encryption (NON-NEGOTIABLE)
-30: ### III. Explicit shared-core boundaries and recoverability (NON-NEGOTIABLE)
-57: ### IV. Reliable financial and background side effects (NON-NEGOTIABLE)
-83: ### V. Security, tenant scope, and privacy
-86: ### VI. Evidence-based implementation and efficiency
-89: ### VII. Focused verification and traceability
-92: ## Development and release gates
-100: ## Amendment record
-102: ### 3.1.0 — 2026-11-20
-111: ### 3.0.0 — 2026-10-31
-142: ### 2.0.0 — 2026-10-30
-169: ### Approved risk assessment and controls
-180: ## Governance
+3: ## Feature005 prospective scope — owner-approved override
+7: ## Core Principles
+9: ### I. Behavioral parity and customer safety (NON-NEGOTIABLE)
+12: ### II. Preserve source data, identities, obligations, and encryption (NON-NEGOTIABLE)
+34: ### III. Explicit shared-core boundaries and recoverability (NON-NEGOTIABLE)
+61: ### IV. Reliable financial and background side effects (NON-NEGOTIABLE)
+87: ### V. Security, tenant scope, and privacy
+90: ### VI. Evidence-based implementation and efficiency
+93: ### VII. Focused verification and traceability
+96: ## Development and release gates
+104: ## Amendment record
+106: ### 4.0.0 — 2026-11-22
+113: ### 3.1.0 — 2026-11-20
+122: ### 3.0.0 — 2026-10-31
+153: ### 2.0.0 — 2026-10-30
+180: ### Approved risk assessment and controls
+191: ## Governance
 
 ## [spec.md](spec.md) · Git blob `f80451991fb19ea69bb090d425499587816b21de`
 1: # Akanti (آکانتی) Multi-Brand Commerce Specification

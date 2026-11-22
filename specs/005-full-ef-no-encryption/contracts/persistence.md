@@ -1,0 +1,24 @@
+# Persistence and compatibility contract
+**Applies to**: US1, FR-001–FR-005/FR-011–FR-012; US2 changes content representation only.
+## Context and command boundary
+- One common 28-entity model, SQLite/PostgreSQL provider contexts, explicit provider/model-cache identity and separate migration snapshots. Context lifetime is one bounded authorized operation; do not share mutable tracked contexts between requests/workers.
+- Existing trusted BrandContext/admin/session/writer ownership must be validated in the same logical transaction as the guarded write. Query filters are supplementary; they cannot replace authorized object lookups or restrict intentional shared catalog/inventory incorrectly.
+- Use existing store/service interfaces where possible; convert implementations and callers. No new generic repository layer, duplicate SQL store fallback or public raw DbContext bypass.
+- Begin explicit provider transaction before dependent reads. SQLite writer starts immediate, reader deferred/query-only, with WAL/FK checks and bounded timeout. PostgreSQL uses existing appropriate isolation or qualified serializable transactions/guarded revision updates. EF enlists on that same connection/transaction.
+- Flush pending tracked changes before cross-table validation; include set-based updates and related/principal changes in the affected-scope validator. Preserve database constraints for final defense. Commit only once all assertions pass; after cancellation before commit roll back; classify unknown commit rather than replaying blindly. Only the database commit phase may ignore a cancellation already admitted at its final safety boundary, preserving existing outcome semantics.
+- One debit/credit, stock allocation, audit, discount transition and outbox enqueue are atomic where current commands require it. Guarded EF updates must check affected row count. Bounded whole-transaction retries re-read state only when rollback is known and no external effect has occurred.
+- Never hold the DB transaction over HTTP/provider/Telegram requests. Commit durable intent, call outside transaction, record result with lease/version/idempotency fencing; uncertain results remain reviewable without automatic resubmission.
+## Exact values and read contracts
+Preserve current DTOs, operation/status codes, validation errors, cursor order and limit+1 pagination. Pin provider behavior with UUID/decimal/UTC/binary boundary tests. No floating-point money, currency relabeling, guessed FX, implicit client-side unbounded query or unnecessary eager-loading graph. Use projections/no tracking for reads; tracked changes or qualified ExecuteUpdate-style operations for writes. Revisions are application concurrency tokens on SQLite.
+## Schema ownership
+Explicit SchemaRunner commands alone create/adopt/upgrade an identified target using reviewed EF migrations/snapshots. Reject unknown drift/provider/schema/format, symlinks and unsafe paths. All constraints/indexes/guards must survive SQLite table rebuild and PostgreSQL migration. Adoption records migration metadata only after verifying exact compatible baseline; it cannot stamp an arbitrary existing schema as migrated. Old SQL baselines remain historical and are not appended or rehashed to manufacture adoption proof. No daemon startup migration or automatic old/new format fallback.
+## SQL exception register
+| ID | Allowed use | Boundary and acceptance |
+| --- | --- | --- |
+| SQL-01 | Provider connection configuration and transaction controls | WAL/FK/query-only/timeout/isolation setup; contains no domain SELECT/INSERT/UPDATE/DELETE |
+| SQL-02 | Reviewed EF migration DDL and integrity functions/triggers | Schema definition/guard only; same artifact inventory and negative tests across rebuilds; no old store query hidden in a function |
+| SQL-03 | Read-only identity/catalog verification | Explicit schema tool verifies source/target identity and format before mutation; not a customer query path |
+| SQL-04 | Legacy source inspection/recovery | Authorized read-only source adapter only; target writes still EF, no source mutations |
+No other exception is pre-approved. Any implementation gap needs a recorded technical justification and review against FR-004; money/checkout/job operations cannot be exempted wholesale.
+## External interfaces
+Existing authenticated API endpoints, bot callback/command vocabulary, provider interfaces and job intent kinds retain their business contract. Encryption-specific internal DTO arguments/field names/mount requirements are deliberately retired; document exact affected endpoints/config keys during T001 and T029–T035. Do not return new plaintext secret fields in existing public/admin list DTOs. Keep non-live adapters injectable for qualification; this contract authorizes no external call or new provider activation.

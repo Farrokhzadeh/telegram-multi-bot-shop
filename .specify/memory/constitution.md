@@ -1,5 +1,9 @@
 # AccAbad Multi-Brand Commerce Constitution
 
+## Feature005 prospective scope — owner-approved override
+For `specs/005-full-ef-no-encryption`, the owner's 2026-11-22 decision requires complete Entity Framework target persistence and removes application-level encryption from new Akanti. This scoped provision overrides older target keyring/shared-inventory-decryption requirements in II/III, target encryption-key separation in V, and the optional-ORM wording in VI. Target database, WAL, operational assets and backups contain unencrypted content; protection of host/storage is owner-managed. Retain restricted files, tenant/actor authorization, hashing, signature verification, transport security, redaction and access-controlled backups; reports remain secret-free.
+Legacy source/archive/backup encryption and required old keys remain preserved and readable through isolated migration/recovery tooling. Historical encrypted-target requirements below continue to describe prior approved releases and legacy evidence; they do not require encryption in the new005 target. All other identity, money, durable-work and release safeguards remain in force. No source alteration, key retirement, protected-data execution, provider activation or deployment is authorized by this amendment. See [005 specification](../../specs/005-full-ef-no-encryption/spec.md) and [conversion contract](../../specs/005-full-ef-no-encryption/contracts/conversion.md).
+
 ## Core Principles
 
 ### I. Behavioral parity and customer safety (NON-NEGOTIABLE)
@@ -99,6 +103,13 @@ Maintain feature-to-code-to-test traceability for critical flows. Prioritize tar
 
 ## Amendment record
 
+### 4.0.0 — 2026-11-22
+
+**Approval**: The owner directed complete EF conversion, explicitly directed removal of Akanti encryption with owner-managed data protection, then limited feature005 to those two items and requested its specification, plan and tasks. This records that existing decision; no new approval or activation is inferred.
+**Rationale**: A complete entity-based target replaces the prior catalog-only EF scope; removing target application encryption removes runtime keyring complexity as requested. This is a MAJOR amendment because it removes an at-rest content safeguard for the new target.
+**Risk and retained controls**: Anyone obtaining target database/WAL/assets/backups can read their content. Restricted owner-managed storage, file permissions, service/tenant authorization, redaction, hashes/signatures and transport protection remain mandatory. Conversion uses immutable originals, exact field/asset and financial reconciliation, resumable private checkpoints, isolated historical readers/keys and incompatible-format refusal; accepted new writes cannot roll back to a stale encrypted snapshot. Keys remain while any legacy source/archive/backup depends on them.
+**Scope**: Only prospective feature005 target persistence/content representation. Historical approvals, pinned evidence/baseline hashes, existing running services and all separate migration/deployment/provider gates are unchanged. Required tests now include no-key target startup and plaintext conversion/recovery as well as preserved money/tenancy/delivery guarantees; old encrypted samples remain required for recovery-tool qualification.
+
 ### 3.1.0 — 2026-11-20
 
 The owner approved SQLite-backed durable jobs for fresh staging under feature `004-sqlite-persistence`.
@@ -181,4 +192,4 @@ production cutover is authorized by this amendment. Only repository setup T001 i
 
 This constitution supersedes feature plans. Any exceptions require a written rationale, risk assessment, approval, and a version amendment (MAJOR removes/weakens safeguards, MINOR adds principles, PATCH clarifies wording). A checked checklist means verified evidence, not an intention. The C# feature remains a **draft migration design**, not an authorized production cutover.
 
-**Version**: 3.1.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-11-20
+**Version**: 4.0.0 | **Ratified**: 2026-10-15 | **Last Amended**: 2026-11-22

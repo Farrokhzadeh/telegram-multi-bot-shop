@@ -1,10 +1,11 @@
-# Full EF and encryption removal — specification checkpoint
-- Baseline: main `c44dc1bde2966d866cdcca771fd5d8921621bf57`, 2026-11-22.
-- Owner scope: only full Entity Framework conversion and removal of new Akanti application encryption; latest instruction requests specify only.
-- Created: `spec.md`, `checklists/requirements.md`; feature pointer selects 005.
-- Status: specification quality reviewed; no plan, tasks, implementation, conversion or deployment performed.
-- Historical features/checklists/baselines and their hashes are unchanged.
-- EF scope: all 28 entities, all maintained target runtime paths and explicit EF schema ownership; existing EF catalog-only milestone is insufficient.
-- Encryption scope: all target content and runtime key dependencies; retain authentication, hashes/signatures, TLS, access restrictions and legacy-only readers/keys needed by source/archive/backup recovery.
-- Next when requested: run speckit-plan for 005, inventory runtime persistence/encryption and schema fields, record the scoped owner-approved target-encryption governance amendment, then design model, migration, invariants, conversion/recovery and acceptance coverage.
-- Out of scope: AccAbad mapping/import, feature 002 follow-up, live providers, protected-data execution, staging/production changes and key retirement.
+# Full EF and encryption removal — plan/tasks checkpoint
+- Feature:005; main baseline `48eeccda54275cfaf3c7b5c1ba22eff1d08d650b`, 2026-11-22.
+- Owner scope: complete EF conversion and application encryption removal only. Plan then tasks requested; no implementation or deployment requested.
+- Generated: plan, research, complete28-entity data-model, persistence/conversion contracts, source inventory, quickstart and dependency-ordered40-task checklist.
+- Status:0/40 implementation tasks complete. No code, schema, running service, provider or protected-data changes. Tests of generated design/Spec Kit tooling do not qualify runtime behavior.
+- Decisions: both maintained target providers use the common EF model; preserve exact values, transaction and external-effect fences; final target has direct content and no content-encryption keyring dependency.
+- Source readers/keys remain migration/recovery-only. Password/token hashes, signature metadata including payments.ipn_key_id, authentication credentials, TLS, file protections and tenant authorization remain.
+- Governance: scoped constitution 4.0.0 records existing owner approval/rationale/plaintext-storage risk; historical text and pinned baseline/evidence files preserved; constitution heading/blob index refreshed.
+- Protected execution, AccAbad mapping/import, feature002 work, provider activation, key retirement and staging/production deployment remain outside scope.
+- Next when implementation requested:T001 caller/field/asset inventory, then focused provider feasibility/baseline T002; follow tasks.md dependencies and keep gates unchecked until exact evidence passes.
+- Planning validation:15 existing Spec Kit tooling tests passed; feature resolution,40-task format/count/dependencies,28-entity coverage, local document links, historical-baseline preservation and diff whitespace checks passed. No CI or implementation suite was run.

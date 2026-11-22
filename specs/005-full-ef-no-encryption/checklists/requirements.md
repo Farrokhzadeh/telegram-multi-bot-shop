@@ -22,4 +22,4 @@
 - [x] Defined outcomes can be independently verified during implementation.
 - [x] Framework constraint is explicit; detailed implementation design is deferred.
 ## Notes
-Validation passed by document review. Checked items assess specification quality only; implementation and acceptance outcomes are not complete. The generic template's no-framework rule has the explicit owner-requested EF exception. No plan or tasks were generated. No extension hook file exists; pre/post hooks were skipped.
+Validation passed by document review. Checked items assess specification quality only; implementation and acceptance outcomes are not complete. The generic template's no-framework rule has the explicit owner-requested EF exception. Plan and tasks were subsequently generated on owner request; their generation does not complete implementation. No extension hook file exists; pre/post hooks were skipped.
