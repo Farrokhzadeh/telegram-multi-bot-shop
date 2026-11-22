@@ -146,7 +146,7 @@ public sealed class SqliteStatusDeliveryStore(SqliteSessionFactory sessions)
                 ("$code", success ? "known_success" : retry ? "idempotent_edit_retry" : "remote_outcome_unknown"),
                 ("$available", future), ("$id", id), ("$attempt", lease.Attempt)))
                 if (await update.ExecuteNonQueryAsync(token) != 1) throw new UnauthorizedAccessException("Status dispatch state changed.");
-            if (success)
+            if (success && state.Payment is "paid" or "not_required" && state.Delivery == "acquiring")
                 await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.PrepareManifest,
                     context.BrandId, state.Order), id, DateTime.UtcNow, token);
             return 0;
