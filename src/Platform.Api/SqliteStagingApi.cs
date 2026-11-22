@@ -33,6 +33,7 @@ public sealed record SqliteStageReply(bool Accepted, string Text = "", bool Edit
 [JsonSerializable(typeof(BrandPolicyDetail))]
 [JsonSerializable(typeof(ExchangeRateMetadata))]
 [JsonSerializable(typeof(AdminPage<InventoryMetadata>))]
+[JsonSerializable(typeof(AdminPage<AdminOrder>))]
 public partial class SqliteStageApiJson : JsonSerializerContext { }
 
 public static class SqliteStagingApi
@@ -191,6 +192,31 @@ public static class SqliteStagingApi
                         var page = await admin.InventoryAsync(actor, product, After(http), Limit(http), http.RequestAborted);
                         await JsonSerializer.SerializeAsync(http.Response.Body, page, SqliteStageApiJson.Default.AdminPageInventoryMetadata,
                             http.RequestAborted);
+                        return Results.Empty;
+                    }
+                    catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException
+                        or ArgumentException or FormatException)
+                    { return Results.Unauthorized(); }
+                });
+                app.MapGet("/v1/admin/orders", async (HttpContext http) =>
+                {
+                    if (!Authorize(http, privateKey)) return Results.Unauthorized();
+                    try
+                    {
+                        var actor = await AuthenticateAsync(http, config);
+                        if (http.Request.Query.TryGetValue("brandId", out var specified) &&
+                            (!Guid.TryParse(specified.ToString(), out var brand) ||
+                                brand != config.Context.BrandId))
+                            throw new UnauthorizedAccessException();
+                        Guid? member = http.Request.Query.TryGetValue("memberId", out var memberText)
+                            ? Guid.Parse(memberText.ToString()) : null;
+                        Guid? order = http.Request.Query.TryGetValue("orderId", out var orderText)
+                            ? Guid.Parse(orderText.ToString()) : null;
+                        var page = await new SqliteAdminOrderStore(config.Sessions).SearchAsync(actor,
+                            config.Context, member, order, After(http), Limit(http), http.RequestAborted);
+                        http.Response.ContentType = "application/json";
+                        await JsonSerializer.SerializeAsync(http.Response.Body, page,
+                            SqliteStageApiJson.Default.AdminPageAdminOrder, http.RequestAborted);
                         return Results.Empty;
                     }
                     catch (Exception error) when (error is UnauthorizedAccessException or AdminAuthenticationException
