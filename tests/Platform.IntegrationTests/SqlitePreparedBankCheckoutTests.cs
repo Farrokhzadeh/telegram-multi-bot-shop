@@ -89,12 +89,13 @@ public sealed class SqlitePreparedBankCheckoutTests
                 return 0;
             }, ct);
             var receipt = new SqliteManualDepositStore(new SqliteSessionFactory(path));
+            Guid payment = await PaymentId();
             Assert.Equal(SqliteReceiptOutcome.Submitted,
-                await receipt.SubmitAsync(brand, 0, 7001, await PaymentId(), "protected:synthetic/bank-receipt", ct));
+                await receipt.SubmitAsync(brand, 0, 7001, payment, "protected:synthetic/bank-receipt", ct));
             Assert.Equal(SqliteReceiptOutcome.Replayed,
-                await receipt.SubmitAsync(brand, 0, 7001, await PaymentId(), "protected:synthetic/bank-receipt", ct));
+                await receipt.SubmitAsync(brand, 0, 7001, payment, "protected:synthetic/bank-receipt", ct));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                receipt.SubmitAsync(brand, 0, 7001, await PaymentId(), "protected:synthetic/changed", ct));
+                receipt.SubmitAsync(brand, 0, 7001, payment, "protected:synthetic/changed", ct));
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
                 using var sql = SqliteWallet.Command(tx, """
