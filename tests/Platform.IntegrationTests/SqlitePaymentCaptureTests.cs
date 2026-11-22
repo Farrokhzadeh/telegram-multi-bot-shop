@@ -119,10 +119,10 @@ public sealed class SqlitePaymentCaptureTests
                     INSERT INTO payments(id,order_id,payment_method,quote_currency,amount_due,provider_code,
                         provider_payment_ref,idempotency_ref,network_asset,expected_network_amount,status)
                     VALUES ($payment,$order,'crypto','USD','10.25','nowpayments','123456789',
-                        'order:'||$order,'USDTTRC20','10.4','awaiting');
+                        $origin,'USDTTRC20','10.4','awaiting');
                     """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$member", member),
                     ("$product", product), ("$order", order), ("$payment", payment),
-                    ("$now", now), ("$deadline", deadline));
+                    ("$now", now), ("$deadline", deadline), ("$origin", "order:" + order.ToString("D")));
                 await sql.ExecuteNonQueryAsync(token);
                 return 0;
             }, ct);
