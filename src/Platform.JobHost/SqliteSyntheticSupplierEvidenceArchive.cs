@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Platform.Core;
 using Platform.Fulfillment;
 
@@ -23,8 +22,9 @@ internal sealed class SqliteSyntheticSupplierEvidenceArchive : ISupplierEvidence
     public async Task<string> StoreAsync(SupplierBinding binding, Guid attempt,
         ReadOnlyMemory<byte> evidence, CancellationToken ct)
     {
-        if (binding.Provider != "synthetic" || binding.Account != "public-test-account" ||
-            attempt == Guid.Empty || evidence.Length is < 1 or > 65536)
+        if (!OperatingSystem.IsLinux() || binding.Provider != "synthetic" ||
+            binding.Account != "public-test-account" || attempt == Guid.Empty ||
+            evidence.Length is < 1 or > 65536)
             throw new UnauthorizedAccessException("Only synthetic supplier evidence may be archived.");
         string filename = attempt.ToString("N");
         string target = Path.Combine(Root, filename);
