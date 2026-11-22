@@ -67,6 +67,13 @@ public sealed class SqlitePreparedBankCheckoutTests
                 (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
             Assert.Equal(CheckoutOutcome.Replayed,
                 (await checkout.PurchaseAsync(brand, 0, 7001, request, prepared, catalog, ct)).Outcome);
+            var scopedAdmin = await SqliteAdminSessionStore.AuthenticateAsync(sessions, adminToken, ct);
+            var orders = new SqliteAdminOrderStore(sessions);
+            var page = await orders.SearchAsync(scopedAdmin, brand, member, order, null, 10, ct);
+            Assert.Equal(order, Assert.Single(page.Items).Id);
+            Assert.Null(page.Next);
+            Assert.Empty((await orders.SearchAsync(scopedAdmin, CheckoutFixture.ResolveContexts()[1],
+                null, null, null, 10, ct)).Items);
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
                 using var command = SqliteWallet.Command(tx, """
