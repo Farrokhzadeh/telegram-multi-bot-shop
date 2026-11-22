@@ -108,4 +108,71 @@ public sealed class SqliteSessionTests
         }
         finally { directory.Delete(recursive: true); }
     }
+
+    [Fact]
+    public async Task CancelledWriteRollsBackAndImmediateWriterContentionIsBounded()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Directory.CreateTempSubdirectory("akanti-sqlite-session-recovery-");
+        try
+        {
+            string path = Path.Combine(directory.FullName, "shop.db");
+            await SqliteSchema.InitializeAsync(path, ct);
+            var sessions = new SqliteSessionFactory(path, timeoutSeconds: 1);
+            using (var cancelled = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                    await sessions.RunAsync(true, async (_, tx, token) =>
+                    {
+                        using var insert = SqliteWallet.Command(tx, """
+                            INSERT INTO brands(id,code,internal_name,public_name,market,default_language,
+                                bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
+                            VALUES ($id,'cancelled','Cancelled','Cancelled','international','en',
+                                'cancelled_bot',1234,x'01','fixture')
+                            """, ("$id", Guid.NewGuid()));
+                        Assert.Equal(1, await insert.ExecuteNonQueryAsync(token));
+                        cancelled.Cancel();
+                        return 0;
+                    }, cancelled.Token));
+            }
+            await sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var query = SqliteWallet.Command(tx, "SELECT count(*) FROM brands");
+                Assert.Equal(0L, await query.ExecuteScalarAsync(token));
+                return 0;
+            }, ct);
+            await using var writer = new SqliteConnection(new SqliteConnectionStringBuilder
+            {
+                DataSource = path,
+                Mode = SqliteOpenMode.ReadWrite,
+                ForeignKeys = true,
+                Pooling = false
+            }.ToString());
+            await writer.OpenAsync(ct);
+            await using (var hold = writer.BeginTransaction(deferred: false))
+            {
+                var error = await Assert.ThrowsAsync<SqliteException>(async () =>
+                    await Task.Run(() => sessions.RunAsync(true, (_, _, _) => Task.FromResult(0), ct), ct));
+                Assert.Equal(5, error.SqliteErrorCode);
+                await hold.RollbackAsync(ct);
+            }
+            await sessions.RunAsync(true, async (_, tx, token) =>
+            {
+                using var insert = SqliteWallet.Command(tx, """
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,
+                        bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
+                    VALUES ($id,'recovered','Recovered','Recovered','international','en',
+                        'recovered_bot',1234,x'01','fixture')
+                    """, ("$id", Guid.NewGuid()));
+                return await insert.ExecuteNonQueryAsync(token);
+            }, ct);
+            await sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var query = SqliteWallet.Command(tx, "SELECT count(*) FROM brands");
+                Assert.Equal(1L, await query.ExecuteScalarAsync(token));
+                return 0;
+            }, ct);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
 }
