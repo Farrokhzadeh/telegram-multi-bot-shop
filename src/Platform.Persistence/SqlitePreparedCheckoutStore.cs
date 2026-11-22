@@ -18,7 +18,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         if (revision < 0 || actor <= 0 || request.OrderId == Guid.Empty || request.ProductId == Guid.Empty ||
             request.Quantity is < 1 or > 10000 ||
             request.Payment is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank) ||
-            request.Kind != CheckoutKind.ProductPurchase ||
+            request.Kind is not (CheckoutKind.ProductPurchase or CheckoutKind.PrepaidUnits) ||
             (request.Payment == CheckoutPayment.Crypto && request.Network is null) ||
             request.Network is CryptoAsset network && (request.Payment != CheckoutPayment.Crypto || !Enum.IsDefined(network)))
             throw new ArgumentException("The prepared checkout request is unavailable.");
@@ -42,7 +42,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         }
         if (prepared.Query != new CatalogQuery(request.ProductId, request.Quantity, request.Payment, request.Kind))
             throw new PricingRejectedException();
-        bool local = request.Payment == CheckoutPayment.Wallet &&
+        bool local = request.Kind == CheckoutKind.ProductPurchase && request.Payment == CheckoutPayment.Wallet &&
             prepared.Supply.LocalUnits == request.Quantity && prepared.Supply.RemoteUnits == 0 &&
             !prepared.Supply.WaitingForLocalStock && prepared.Quote.Terms.DiscountId is null;
         var localRequest = new LocalCheckoutRequest(request.OrderId, request.ProductId, request.Quantity,
@@ -74,8 +74,11 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         if (local)
             return await new SqliteCheckoutStore(sessions, secrets).AcceptLocalAsync(
                 tx, context, revision, actor, localRequest, ct);
-        if (request.Payment == CheckoutPayment.Wallet)
+        if (request.Payment == CheckoutPayment.Wallet && request.Kind != CheckoutKind.PrepaidUnits)
             return new(CheckoutOutcome.Unavailable);
+        if (request.Kind == CheckoutKind.PrepaidUnits && request.Payment == CheckoutPayment.Wallet &&
+            (await SqliteWallet.ReadAsync(tx, member, ct)).Balance.Amount < quote.TotalUsd.Amount)
+            return new(CheckoutOutcome.InsufficientBalance);
         DateTime instant = DateTime.UtcNow;
         string now = SqliteSchema.UtcText(instant);
         string dueAt = SqliteSchema.UtcText(instant.AddMinutes(30));
@@ -109,12 +112,15 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             """, ("$product", request.ProductId)))
         await using (var row = await product.ExecuteReaderAsync(ct))
         {
-            if (!await row.ReadAsync(ct) || row.GetString(0) is not ("local" or "manual") ||
-                (row.GetString(2) == "local_preorder" && row.GetString(0) != "local"))
+            if (!await row.ReadAsync(ct) ||
+                (request.Kind == CheckoutKind.ProductPurchase &&
+                    (row.GetString(0) is not ("local" or "manual") ||
+                    row.GetString(2) == "local_preorder" && row.GetString(0) != "local")))
                 throw new PricingRejectedException();
             kind = row.GetString(0);
             localFirst = row.GetBoolean(1);
-            preorder = row.GetString(2) == "local_preorder";
+            preorder = request.Kind == CheckoutKind.ProductPurchase &&
+                row.GetString(2) == "local_preorder";
         }
 
         foreach (Guid old in pending)
@@ -146,14 +152,21 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
                 brand_public_name_snapshot,product_title_snapshot,product_description_snapshot,product_icon_snapshot,
                 product_guidance_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,
                 is_preorder,payment_due_at,created_at,updated_at,
-                discount_pct_snapshot,discount_units_snapshot,discount_revision_id)
-            VALUES ($order,$member,$product,$quantity,'product_purchase','awaiting_payment',$currency,$method,
+                discount_pct_snapshot,discount_units_snapshot,discount_revision_id,payment_confirmed_at)
+            VALUES ($order,$member,$product,$quantity,$orderKind,$status,$currency,$method,
                 $usd,$toman,$rate,$source,$fetched,$automatic,$step,$version,$brandName,$title,$description,$icon,
                 $guidance,'Frozen quote; complete-order delivery',$kind,$localFirst,$preorder,$deadline,$now,$now,
-                $percent,$discountUnits,$discountRevision)
+                $percent,$discountUnits,$discountRevision,$confirmed)
             """, ct, ("$order", request.OrderId), ("$member", member), ("$product", request.ProductId),
             ("$quantity", request.Quantity), ("$currency", terms.Currency.ToCode()),
-            ("$method", request.Payment == CheckoutPayment.Bank ? "bank" : "crypto"),
+            ("$method", request.Payment switch
+            {
+                CheckoutPayment.Bank => "bank",
+                CheckoutPayment.Crypto => "crypto",
+                _ => "wallet"
+            }),
+            ("$orderKind", request.Kind == CheckoutKind.PrepaidUnits ? "prepaid_units" : "product_purchase"),
+            ("$status", request.Payment == CheckoutPayment.Wallet ? "paid" : "awaiting_payment"),
             ("$usd", ExactDecimal.Format(terms.UnitUsdt)),
             ("$toman", terms.UnitToman is decimal toman ? ExactDecimal.Format(toman) : null),
             ("$rate", terms.Rate is FxRate rate ? ExactDecimal.Format(rate.Toman) : null),
@@ -164,7 +177,9 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             ("$title", terms.Product.Title), ("$description", terms.Product.Description),
             ("$icon", terms.Product.Icon), ("$guidance", terms.Product.Guidance),
             ("$kind", kind), ("$localFirst", localFirst), ("$preorder", preorder),
-            ("$deadline", dueAt), ("$now", now),
+            ("$deadline", request.Payment == CheckoutPayment.Wallet ? null : dueAt),
+            ("$confirmed", request.Payment == CheckoutPayment.Wallet ? now : null),
+            ("$now", now),
             ("$percent", terms.DiscountPercent is decimal percentage ? ExactDecimal.Format(percentage) : null),
             ("$discountUnits", terms.DiscountUnits),
             ("$discountRevision", terms.DiscountRevisionId));
@@ -178,6 +193,19 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         if (terms.DiscountId is not null)
             await SqliteDiscountClaimStore.HoldAsync(tx, context, member, request.OrderId, request.ProductId,
                 quote, ct);
+        if (request.Kind == CheckoutKind.PrepaidUnits && request.Payment == CheckoutPayment.Wallet)
+        {
+            using (var ensure = SqliteWallet.Command(tx,
+                "INSERT INTO wallets(user_id) VALUES ($member) ON CONFLICT(user_id) DO NOTHING",
+                ("$member", member))) await ensure.ExecuteNonQueryAsync(ct);
+            var wallet = await SqliteWallet.ReadAsync(tx, member, ct);
+            if (wallet.Balance.Amount < quote.TotalUsd.Amount)
+                throw new PricingRejectedException();
+            await SqliteWallet.PostAsync(tx, member, wallet,
+                new Money(-quote.TotalUsd.Amount, Currency.Usd), request.OrderId, false, now, ct);
+            _ = await new SqlitePrepaidSourceStore(sessions, secrets).IssueAsync(tx, context, request.OrderId, ct);
+            return new(CheckoutOutcome.Purchased, request.OrderId);
+        }
         await CreatePaymentAsync(tx, context, request, quote, ct);
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.ExpireOrderPayment,
             context.BrandId, request.OrderId), request.OrderId, instant.AddMinutes(30), ct);
