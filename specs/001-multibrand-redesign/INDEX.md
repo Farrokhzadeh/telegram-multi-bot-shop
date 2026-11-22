@@ -163,3 +163,74 @@
 237: ## T043–T044 offline administration configuration checkpoint
 246: ## Phase 6 offline administration and notices checkpoint
 256: ## T092 complete recovered supplier review approval
+
+## [contracts/bot-activity-v1.md](contracts/bot-activity-v1.md) · Git blob `bf13b5cb865be52d31f6f37f6a320209fcae4477`
+1: # Bot activity registry and retention design — versions 1–2
+5: ## Stable vocabulary
+29: ## Field allowlist and access
+35: ## Selected index and privilege design
+43: ## Exact 180-day UTC policy
+51: ## T087 replay gate before executable retention (historical prerequisite)
+59: ## T088 replay prerequisite — technical review, 2026-11-02
+69: ## Qualified optional timeline extension
+77: ## Registry version 2 — T088 workflow review, 2026-11-02
+86: ## Registry version 3 — verified quantity ingress review, 2026-11-02
+95: ## Ephemeral quote retirement and actual target backup review — 2026-11-02
+104: ## Registry version 4 — actual checkout state review, 2026-11-02
+121: ## Registry version 5 — payment and topup state review, 2026-11-02
+130: ## Target import and registry version 6 review — 2026-11-02
+141: ## Final T088 policy and maintenance permission review — 2026-11-02
+149: ## T089 actual legacy preservation review — 2026-11-15
+
+## [contracts/legacy-commerce-policy-matrix.md](contracts/legacy-commerce-policy-matrix.md) · Git blob `dfa65e6b46ea4496db6a4ab9194fd2905a3c38e7`
+1: # Legacy commerce policy matrix
+27: ## Synthetic calculation anchors
+44: ## Pinned file identities
+
+## [contracts/legacy-source-inventory.md](contracts/legacy-source-inventory.md) · Git blob `dfe3315a3faf2b7aa39456b114e0c9f4d1c712db`
+1: # Legacy source inventory — offline baseline
+7: ## Financial and identity model declarations
+54: ## Source contract and risk map
+67: ## Encryption representations and reader boundary
+77: ## Telegram callback source evidence
+83: ## Migration file inventory
+155: ## Files read for this inventory
+196: ## Supplier snapshot distinction
+200: ## Remaining gates
+
+## [contracts/legacy-supplier-attempt-mapping.md](contracts/legacy-supplier-attempt-mapping.md) · Git blob `bf2356f41236d828d19ccefb55478218cd0764cb`
+1: # Legacy supplier history mapping — T090
+5: ## Entity correspondence
+16: ## Attempt fields and semantic restrictions
+39: ## Frozen-copy qualification boundary
+
+## [contracts/supplier-failure-policy.md](contracts/supplier-failure-policy.md) · Git blob `d2243debcc6c0701ed2e1187aae7983236c6defb`
+1: # Supplier failure and reconciliation policy
+3: ## Accepted obligations
+7: ## Before purchase
+11: ## Uncertain or partial result
+19: ## Explicit decisions after confirmed failure
+25: ## Qualification boundary
+
+## [contracts/supplier-provider-matrix.md](contracts/supplier-provider-matrix.md) · Git blob `96f778871a802ff708bdda450e546f35f2f29e51`
+1: # Supplier capability matrix and local-preorder reconciliation
+6: ## Owner-approved behavior
+15: ## First-release eligible product scope — owner approved (2026-10-30)
+21: ## Source capability matrix
+37: ## Owner-approved supplier-source relation — table 27 (final constraints pending)
+68: ## Local preorder reconciliation
+86: ## Before executable schema or implementation
+93: ## Supplier bonus disposition — owner approved (2026-10-30)
+99: ## Fully coupon-covered supplier checkout — owner approved (2026-10-30)
+105: ## Supplier cost increase guard — owner approval (2026-10-30)
+111: ## Supplier listings stay visible as out of stock — owner correction (2026-10-30)
+117: ## Opt-in one-time restock alerts — owner approval (2026-10-30)
+123: ## Mandatory supplier refresh before new order creation — owner clarification (2026-10-30)
+127: ## Remaining business clarifications approved (2026-10-30)
+139: ## Canonical persistence selected by consistency review
+144: ## Phase 7 provider-neutral offline checkpoint (2026-11-01)
+158: ## Owner-supplied documentation references — 2026-11-04
+162: ## Current official contract review — 2026-11-04
+176: ## Owner-approved option A — 2026-11-04
+182: ## Owner-approved supplier administrator review — 2026-11-18
+188: ## Documentation-only closeout — 2026-11-18
