@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Platform.Core;
 using Platform.Security;
 
 namespace Platform.Persistence;
