@@ -23,10 +23,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
                     SELECT 1 FROM supplier_requests WHERE order_id=$order AND status NOT IN ('succeeded','resolved') LIMIT 1
                     """, ("$order", order));
                 bool unresolved = await supplier.ExecuteScalarAsync(token) is not null;
-                using var coupon = SqliteWallet.Command(tx, "SELECT 1 FROM discount_uses WHERE order_id=$order AND status='held' LIMIT 1",
-                    ("$order", order));
-                bool heldCoupon = await coupon.ExecuteScalarAsync(token) is not null;
-                if (!manifest.Complete || unresolved || heldCoupon)
+                if (!manifest.Complete || unresolved)
                 {
                     await OutboxStore.RetrySqliteAsync(tx, renewed, TimeSpan.FromSeconds(5), 100, JobError.Busy, token);
                     return (Guid?)null;
@@ -44,6 +41,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
                     UPDATE fulfillments SET status='ready',manifest_generation=$generation
                     WHERE order_id=$order AND status='acquired'
                     """, token, false, ("$generation", generation), ("$order", order));
+                await SqliteDiscountClaimStore.TransitionAsync(tx, context, order, true, token);
                 state = await ReadAsync(tx, context, order, token);
             }
             using var frozen = await BuildAsync(tx, context, order, state.Quantity, true, token);
