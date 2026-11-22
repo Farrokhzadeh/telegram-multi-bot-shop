@@ -9,6 +9,8 @@
     <Compile Include="../Shared/CutoverTelegramRouter.cs" Link="Shared/CutoverTelegramRouter.cs" />
     <Compile Include="../Shared/CutoverStageRuntime.cs" Link="Shared/CutoverStageRuntime.cs" />
     <Compile Include="../Shared/CutoverPaymentCapture.cs" Link="Shared/CutoverPaymentCapture.cs" />
+    <Compile Include="../../src/Platform.SchemaRunner/EfPostgresQualification.cs" Link="Operator/EfPostgresQualification.cs" />
+    <Compile Include="../../src/Platform.SchemaRunner/EfSqliteQualification.cs" Link="Operator/EfSqliteQualification.cs" />
     <Compile Include="../../src/Platform.SchemaRunner/EfSchemaCommand.cs" Link="Operator/EfSchemaCommand.cs" />
     <Compile Include="../../src/Platform.SchemaRunner/ArchivePrivateFile.cs" Link="Operator/ArchivePrivateFile.cs" />
     <Compile Include="../../src/Platform.SchemaRunner/ReadOnlyQuarantineVerification.cs" Link="Operator/ReadOnlyQuarantineVerification.cs" />

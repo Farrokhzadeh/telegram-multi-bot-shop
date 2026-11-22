@@ -48,7 +48,10 @@ public static class SqliteSchema
         ? value.ToString(UtcFormat, CultureInfo.InvariantCulture)
         : throw new ArgumentException("A UTC timestamp is required.", nameof(value));
 
-    internal static void Configure(SqliteConnection connection)
+    public static Task ValidateIntegrityAsync(SqliteTransaction transaction, CancellationToken ct = default) =>
+        SqliteIntegrity.ValidateAsync(transaction.Connection ?? throw new InvalidOperationException("A live SQLite transaction is required."), transaction, ct);
+
+    public static void Configure(SqliteConnection connection)
     {
         connection.CreateFunction("akanti_utc_now", () => UtcText(DateTime.UtcNow), isDeterministic: false);
         connection.CreateFunction<string?, bool>("akanti_uuid", value => value?.Length == 36 && Guid.TryParseExact(value, "D", out _), isDeterministic: true);

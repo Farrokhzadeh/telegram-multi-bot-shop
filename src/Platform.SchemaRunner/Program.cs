@@ -3,6 +3,42 @@ using Platform.Persistence;
 using Platform.Migration;
 using Platform.SchemaRunner;
 
+if (args is ["--create-ef-qualification-sqlite", "--expected-script-sha256", _] ||
+    args is ["--adopt-ef-qualification-sqlite", "--database", _, "--expected-script-sha256", _])
+{
+    try
+    {
+        EfSqliteQualificationReceipt receipt;
+        if (args.Length == 3) receipt = await EfSchemaCommand.CreateSqliteQualificationAsync(args[2]);
+        else receipt = await EfSchemaCommand.AdoptSqliteQualificationAsync(args[2], args[4]);
+        Console.WriteLine("qualification_database=" + receipt.Path + " schema_sha256=" + receipt.SchemaSha256 + " script_sha256=" + receipt.ScriptSha256 + " history_written=" + receipt.HistoryWritten);
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or
+        NotSupportedException or FormatException or MigrationRejectedException or Microsoft.Data.Sqlite.SqliteException)
+    {
+        Console.Error.WriteLine("EF qualification schema operation rejected; preserve the private database and review identity and migration evidence.");
+        return 78;
+    }
+}
+
+if (args is ["--create-ef-qualification-postgres", "--connection-file", var efQualificationConnection, "--expected-script-sha256", var efQualificationHash])
+{
+    try
+    {
+        await using var efQualificationData = new NpgsqlSlimDataSourceBuilder(ArchivePrivateFile.ReadText(efQualificationConnection)).Build();
+        var receipt = await EfSchemaCommand.CreatePostgresQualificationAsync(efQualificationData, efQualificationHash);
+        Console.WriteLine("qualification_database=" + receipt.Database + " migration=" + receipt.Migration + " script_sha256=" + receipt.ScriptSha256);
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or
+        NotSupportedException or FormatException or MigrationRejectedException or NpgsqlException)
+    {
+        Console.Error.WriteLine("PostgreSQL EF qualification rejected; preserve the isolated target and review identity and migration evidence.");
+        return 78;
+    }
+}
+
 if (args is ["--describe-ef-schema", var efProvider])
 {
     try

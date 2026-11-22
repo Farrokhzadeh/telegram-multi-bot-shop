@@ -9,7 +9,7 @@ namespace Platform.SchemaRunner;
 
 public sealed record EfSchemaDescription(string Provider, string Migration, string ScriptSha256);
 
-public static class EfSchemaCommand
+public static partial class EfSchemaCommand
 {
     public static EfSchemaDescription Describe(string provider)
     {
