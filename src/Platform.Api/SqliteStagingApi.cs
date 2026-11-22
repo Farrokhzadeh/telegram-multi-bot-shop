@@ -54,7 +54,7 @@ public static class SqliteStagingApi
                 var ingress = new SqliteStagingIngress(config.Sessions);
                 var catalog = new SqliteCatalogStore(config.Sessions, secrets);
                 var screens = new SqliteCustomerScreens(config.Sessions);
-                var checkout = new SqliteCheckoutStore(config.Sessions, secrets);
+                var checkout = new SqlitePreparedCheckoutStore(config.Sessions, secrets);
                 var admin = new SqliteAdminCatalogStore(config.Sessions);
                 var builder = WebApplication.CreateSlimBuilder();
                 builder.WebHost.UseUrls("http://127.0.0.1:18081");
@@ -199,7 +199,7 @@ public static class SqliteStagingApi
     }
 
     private static async Task<SqliteStageReply> ProcessAsync(SqliteStageRequest request,
-        SqliteStagingConfiguration config, SqliteCatalogStore catalog, SqliteCheckoutStore checkout, SqliteCustomerScreens screens,
+        SqliteStagingConfiguration config, SqliteCatalogStore catalog, SqlitePreparedCheckoutStore checkout, SqliteCustomerScreens screens,
         SqliteStagingIngress ingress, CancellationToken ct)
     {
         if (request.Kind is not ("message" or "callback") || request.Value.Length is < 1 or > 4096 ||
@@ -261,13 +261,49 @@ public static class SqliteStagingApi
             int.TryParse(choice.AsSpan(4), NumberStyles.None, CultureInfo.InvariantCulture, out int quantity) &&
             quantity is >= 1 and <= 5)
         {
-            CheckoutQuote quote = await catalog.QuoteAsync(context, actor,
-                new(product, quantity, CheckoutPayment.Wallet), ct);
+            var options = new List<SqliteStageButton>();
+            foreach (var (payment, label) in new[]
+            {
+                (CheckoutPayment.Wallet, "wallet"),
+                (CheckoutPayment.Crypto, "crypto"),
+                (CheckoutPayment.Bank, "bank")
+            })
+            {
+                try
+                {
+                    CheckoutQuote quote = await catalog.QuoteAsync(context, actor,
+                        new(product, quantity, payment), ct);
+                    if (payment != CheckoutPayment.Wallet || quote.Terms.DiscountId is null)
+                        options.Add(new(label, "method:" + label + ":" + quantity.ToString(CultureInfo.InvariantCulture)));
+                }
+                catch (PricingRejectedException) { }
+            }
+            if (options.Count == 0) return new(true, "No staging payment method is available.", true);
+            return new(true, "Staging quantity\nQuantity: " + quantity.ToString(CultureInfo.InvariantCulture),
+                true, options.ToArray());
+        }
+        if (choice.StartsWith("method:", StringComparison.Ordinal) && state.State == "quantity")
+        {
+            string[] parts = choice.Split(':', StringSplitOptions.None);
+            if (parts.Length != 3 || !int.TryParse(parts[2], NumberStyles.None,
+                CultureInfo.InvariantCulture, out int quantity) || quantity is < 1 or > 5 ||
+                request.MessageText != "Staging quantity\nQuantity: " + quantity.ToString(CultureInfo.InvariantCulture))
+                throw new UnauthorizedAccessException("Staging quantity selection is unavailable.");
+            CheckoutPayment method = parts[1] switch
+            {
+                "wallet" => CheckoutPayment.Wallet,
+                "crypto" => CheckoutPayment.Crypto,
+                "bank" => CheckoutPayment.Bank,
+                _ => throw new UnauthorizedAccessException("Staging payment method is unavailable.")
+            };
+            var prepared = await catalog.PrepareAsync(context, actor, new(product, quantity, method), ct);
+            if (method == CheckoutPayment.Wallet && prepared.Quote.Terms.DiscountId is not null)
+                throw new PricingRejectedException();
             Guid order = Guid.CreateVersion7();
             _ = await ingress.UpdateFlowAsync(context, actor, "payment", product, order, request.Anchor,
                 state.Revision, ct);
-            return new(true, QuoteText(quote), true,
-                [new("Pay from test wallet", "pay:" + order.ToString("N")), new("Cancel", "cancel")]);
+            return new(true, QuoteText(prepared.Quote, method), true,
+                [new("Confirm staging checkout", "pay:" + order.ToString("N")), new("Cancel", "cancel")]);
         }
         if (choice == "cancel" && state.State == "payment")
         {
@@ -282,27 +318,39 @@ public static class SqliteStagingApi
             string count = confirmed.Split('\n', StringSplitOptions.None).ElementAtOrDefault(1) ?? "";
             if (!int.TryParse(count.AsSpan("Quantity: ".Length), NumberStyles.None, CultureInfo.InvariantCulture, out int payableQuantity) ||
                 payableQuantity is < 1 or > 5) throw new UnauthorizedAccessException();
+            string[] lines = confirmed.Split('\n', StringSplitOptions.None);
+            if (lines.Length != 5 || !lines[4].StartsWith("Method: ", StringComparison.Ordinal) ||
+                !Enum.TryParse<CheckoutPayment>(lines[4].AsSpan(8), out var method) ||
+                method is not (CheckoutPayment.Wallet or CheckoutPayment.Crypto or CheckoutPayment.Bank) ||
+                lines[4] != "Method: " + method)
+                throw new UnauthorizedAccessException("The confirmed staging payment method is unavailable.");
             var prepared = await catalog.PrepareAsync(context, actor,
-                new(product, payableQuantity, CheckoutPayment.Wallet), ct);
-            if (confirmed != QuoteText(prepared.Quote))
+                new(product, payableQuantity, method), ct);
+            if (confirmed != QuoteText(prepared.Quote, method))
                 return new(true, "The staging quote changed. Open /shop to review the new price.", true);
-            LocalCheckoutRequest requestToBuy = await catalog.RequireLocalAsync(context, actor, prepared, orderId, ct);
-            CheckoutResult result = await checkout.PurchaseLocalAsync(context, requestToBuy.PolicyRevision, actor,
-                requestToBuy, ct);
-            if (result.Outcome is CheckoutOutcome.Purchased or CheckoutOutcome.Replayed)
+            if (method == CheckoutPayment.Wallet && prepared.Quote.Terms.DiscountId is not null)
+                throw new PricingRejectedException();
+            var purchase = new CheckoutRequest(orderId, product, payableQuantity, method,
+                CheckoutKind.ProductPurchase, method == CheckoutPayment.Crypto ? CryptoAsset.UsdtTrc20 : null);
+            CheckoutResult result = await checkout.PurchaseAsync(context, prepared.PolicyRevision, actor,
+                purchase, prepared, catalog, ct);
+            if (result.Outcome is CheckoutOutcome.Purchased or CheckoutOutcome.Replayed or CheckoutOutcome.AwaitingPayment)
             {
                 _ = await ingress.UpdateFlowAsync(context, actor, "idle", null, null, null, state.Revision, ct);
-                return new(true, "Staging wallet order accepted. Delivery is queued.", true);
+                return new(true, result.Outcome == CheckoutOutcome.AwaitingPayment
+                    ? "Staging order accepted. Awaiting verified external payment."
+                    : "Staging order accepted. Delivery is queued.", true);
             }
             return new(true, "Checkout was not accepted: " + result.Outcome + ". Open /shop to retry.", true);
         }
         return new(false);
     }
 
-    private static string QuoteText(CheckoutQuote quote) =>
+    private static string QuoteText(CheckoutQuote quote, CheckoutPayment method) =>
         "Staging quote\nQuantity: " + quote.Terms.Quantity.ToString(CultureInfo.InvariantCulture) +
         "\nTotal: " + quote.Payable.Amount.ToString(CultureInfo.InvariantCulture) +
-        " " + quote.Payable.Currency + "\nProduct: " + quote.Terms.Product.Title;
+        " " + quote.Payable.Currency + "\nProduct: " + quote.Terms.Product.Title +
+        "\nMethod: " + method;
 
     private static async Task<SqliteStageReply> WalletAsync(SqliteCustomerScreens screens,
         SqliteStagingConfiguration config, CancellationToken ct)
