@@ -6,9 +6,10 @@ namespace Platform.IntegrationTests;
 public sealed class SqliteStagingRecoveryTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task TelegramStatusSuccessQueuesManifestOnceAndPersistsAcrossRestart(bool preQueued)
+    [InlineData(false, "acquiring")]
+    [InlineData(true, "acquiring")]
+    [InlineData(false, "requires_admin")]
+    public async Task TelegramStatusSuccessQueuesManifestOnceAndPersistsAcrossRestart(bool preQueued, string fulfillment)
     {
         var ct = TestContext.Current.CancellationToken;
         var dir = Directory.CreateTempSubdirectory("akanti-stage-status-");
@@ -33,12 +34,13 @@ public sealed class SqliteStagingRecoveryTests
                         payment_method,currency,unit_price_usdt,auto_price_toman_snapshot,pricing_rounding_step_snapshot,
                         price_calculation_version,brand_public_name_snapshot,product_title_snapshot,payment_terms_snapshot,
                         fulfillment_kind_snapshot,local_first_snapshot,is_preorder,payment_confirmed_at)
-                    VALUES ($order,$member,$product,1,'product_purchase','paid','acquiring','wallet','USDT','10',false,
+                    VALUES ($order,$member,$product,1,'product_purchase','paid',$fulfillment,'wallet','USDT','10',false,
                         '5000','synthetic','Stage','Fixture','wallet','local',true,false,$now);
                     INSERT INTO telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,dedupe_key,order_id)
                     VALUES ($delivery,$brand,'customer_dm',$member,'order_status','send','fixture-status',$order);
                     """, ("$brand", first.BrandId), ("$member", customer), ("$product", product),
-                    ("$order", order), ("$delivery", delivery), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
+                    ("$order", order), ("$delivery", delivery), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)),
+                    ("$fulfillment", fulfillment));
                 await command.ExecuteNonQueryAsync(token);
                 await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(first.BrandId, delivery), delivery,
                     DateTime.UtcNow, token);
@@ -61,8 +63,12 @@ public sealed class SqliteStagingRecoveryTests
             await statuses.RecordOutcomeAsync(first, lease, new(DeliveryOutcomeKind.Succeeded, 901), ct);
             var restored = new SqliteStagingJobs(new SqliteSessionFactory(path));
             JobLease? manifest = await restored.ClaimAsync(first, JobKind.PrepareManifest, Guid.NewGuid(), ct);
-            Assert.NotNull(manifest);
-            Assert.Equal(order, manifest.Intent.OriginId);
+            if (fulfillment == "acquiring")
+            {
+                Assert.NotNull(manifest);
+                Assert.Equal(order, manifest.Intent.OriginId);
+            }
+            else Assert.Null(manifest);
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
                 using var query = SqliteWallet.Command(tx, """
@@ -75,7 +81,7 @@ public sealed class SqliteStagingRecoveryTests
                 Assert.True(await rows.ReadAsync(token));
                 Assert.Equal("succeeded", rows.GetString(0));
                 Assert.Equal(901L, rows.GetInt64(1));
-                Assert.Equal(1L, rows.GetInt64(2));
+                Assert.Equal(fulfillment == "acquiring" ? 1L : 0L, rows.GetInt64(2));
                 Assert.Equal(1L, rows.GetInt64(3));
                 return true;
             }, ct);
