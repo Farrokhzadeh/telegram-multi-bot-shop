@@ -98,8 +98,9 @@ public sealed class SqlitePaymentCaptureTests
             files.WriteManifest(brands: CheckoutFixture.BrandIds);
             using var keys = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid(), payment = Guid.NewGuid();
-            string now = SqliteSchema.UtcText(DateTime.UtcNow);
-            string deadline = SqliteSchema.UtcText(DateTime.UtcNow.AddMinutes(30));
+            DateTime created = DateTime.UtcNow;
+            string now = SqliteSchema.UtcText(created);
+            string deadline = SqliteSchema.UtcText(created.AddMinutes(30));
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var sql = SqliteWallet.Command(tx, """
