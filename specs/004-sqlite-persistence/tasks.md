@@ -9,7 +9,9 @@
 ## Foundation
 
 - [x] T002 Add the explicit empty SQLite schema and initialization operation in `ops/migrations/` and `src/Platform.SchemaRunner/Program.cs`. Preserve canonical keys, constraints, and brand boundaries. Keep synthetic seed rows inside disposable test fixtures.
-- [ ] T003 Add SQLite sessions beside `src/Platform.Persistence/DbSession.cs`. Enable WAL and foreign keys, bound the busy timeout, and use immediate write transactions. Keep rollback, cancellation, and pre-commit integrity checks inside the session boundary.
+- [x] T003 Add SQLite sessions beside `src/Platform.Persistence/DbSession.cs`. Enable WAL and foreign keys, bound the busy timeout, and use immediate write transactions. Keep rollback, cancellation, and pre-commit integrity checks inside the session boundary.
+
+**T003 proof** — [CI 45029145898](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/45029145898) at `8d95339f2aec1c7d48be082f012bf5fc093c0f55` passed the complete 260 unit, 889 integration and 148 contract tests, formatting, staged artifact and Linux published smoke; synthetic SQLite session tests include WAL/foreign keys, immediate writer contention timeout, cancellation rollback and durable pre-commit checks. Deployment was skipped.
 
 ## US1 — Run Akanti on a fresh SQLite staging database (P1)
 
