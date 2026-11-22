@@ -7,7 +7,7 @@ namespace Platform.Persistence;
 public static class SqliteDiscountClaimStore
 {
     internal static async Task HoldAsync(SqliteTransaction tx, BrandContext context, Guid member,
-        Guid order, CheckoutQuote quote, CancellationToken ct)
+        Guid order, Guid product, CheckoutQuote quote, CancellationToken ct)
     {
         QuoteTerms terms = quote.Terms;
         if (terms.DiscountId is not Guid coupon || terms.DiscountRevisionId is not Guid revision ||
@@ -30,8 +30,8 @@ public static class SqliteDiscountClaimStore
             ExactDecimal.Parse(row.GetString(10)) != percent || row.IsDBNull(11) ||
             row.GetInt32(11) != terms.Quantity || row.GetString(12) != terms.Version ||
             ExactDecimal.Parse(row.GetString(13)) != terms.RoundingStep ||
-            row.GetGuid(14) != terms.Product.ProductId || row.GetGuid(15) != member ||
-            !row.IsDBNull(5) && row.GetGuid(5) != terms.Product.ProductId ||
+            row.GetGuid(14) != product || row.GetGuid(15) != member ||
+            !row.IsDBNull(5) && row.GetGuid(5) != product ||
             !row.IsDBNull(6) && row.GetGuid(6) != member)
             throw new PricingRejectedException();
         string now = SqliteSchema.UtcText(DateTime.UtcNow);
@@ -46,7 +46,7 @@ public static class SqliteDiscountClaimStore
             using var payment = SqliteWallet.Command(tx, """
                 SELECT 1 FROM orders WHERE id=$source AND user_id=$member AND product_id=$product
                     AND order_kind='prepaid_units' AND payment_status='paid' LIMIT 1
-                """, ("$source", source), ("$member", member), ("$product", terms.Product.ProductId));
+                """, ("$source", source), ("$member", member), ("$product", product));
             if (await payment.ExecuteScalarAsync(ct) is null) throw new PricingRejectedException();
         }
         else await row.CloseAsync();
