@@ -59,7 +59,7 @@ public sealed class SqliteAdminCatalogWriteTests
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 writer.ListingAsync(actor, other, product, listing, 0, Guid.NewGuid(), ct));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                writer.ListingAsync(actor, brand, product, listing, 1, Guid.NewGuid(), ct));
+                writer.ListingAsync(actor, brand, product, listing, 0, Guid.NewGuid(), ct));
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
                 using var verify = SqliteWallet.Command(tx, """
