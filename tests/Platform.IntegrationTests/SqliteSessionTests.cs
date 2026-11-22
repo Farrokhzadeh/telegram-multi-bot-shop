@@ -179,4 +179,82 @@ public sealed class SqliteSessionTests
         }
         finally { directory.Delete(recursive: true); }
     }
+
+    [Fact]
+    public async Task ConsistentBackupIncludesCommittedWalWritesWithoutDroppingSourceOrConstraints()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Directory.CreateTempSubdirectory("akanti-sqlite-wal-backup-");
+        try
+        {
+            string path = Path.Combine(directory.FullName, "shop.db");
+            string backup = Path.Combine(directory.FullName, "restored.db");
+            await SqliteSchema.InitializeAsync(path, ct);
+            var sessions = new SqliteSessionFactory(path);
+            async Task InsertAsync(string code, long bot)
+            {
+                await sessions.RunAsync(true, async (_, tx, token) =>
+                {
+                    using var insert = SqliteWallet.Command(tx, """
+                        INSERT INTO brands(id,code,internal_name,public_name,market,default_language,
+                            bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
+                        VALUES ($id,$code,$code,$code,'international','en',$username,$bot,x'01','fixture')
+                        """, ("$id", Guid.NewGuid()), ("$code", code),
+                        ("$username", code + "_bot"), ("$bot", bot));
+                    return await insert.ExecuteNonQueryAsync(token);
+                }, ct);
+            }
+            await InsertAsync("first", 1001);
+            var settings = new SqliteConnectionStringBuilder
+            {
+                DataSource = path, Mode = SqliteOpenMode.ReadWrite, Pooling = false
+            }.ToString();
+            await using (var hold = new SqliteConnection(settings))
+            {
+                await hold.OpenAsync(ct);
+                await using var reader = hold.BeginTransaction();
+                using (var query = hold.CreateCommand())
+                {
+                    query.Transaction = reader;
+                    query.CommandText = "SELECT count(*) FROM brands";
+                    Assert.Equal(1L, await query.ExecuteScalarAsync(ct));
+                }
+                await InsertAsync("second", 1002);
+                Assert.True(File.Exists(path + "-wal"));
+                Assert.True(new FileInfo(path + "-wal").Length > 0);
+                await using (var source = new SqliteConnection(settings))
+                await using (var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+                {
+                    DataSource = backup, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false
+                }.ToString()))
+                {
+                    await source.OpenAsync(ct);
+                    await destination.OpenAsync(ct);
+                    source.BackupDatabase(destination);
+                }
+                await reader.RollbackAsync(ct);
+            }
+            foreach (string database in new[] { path, backup })
+                await new SqliteSessionFactory(database).RunAsync(false, async (_, tx, token) =>
+                {
+                    using var check = SqliteWallet.Command(tx, """
+                        SELECT count(*),sum(bot_id) FROM brands
+                        WHERE code IN ('first','second')
+                        """);
+                    await using (var row = await check.ExecuteReaderAsync(token))
+                    {
+                        Assert.True(await row.ReadAsync(token));
+                        Assert.Equal(2L, row.GetInt64(0));
+                        Assert.Equal(2003L, row.GetInt64(1));
+                    }
+                    using var integrity = SqliteWallet.Command(tx, "PRAGMA integrity_check");
+                    Assert.Equal("ok", await integrity.ExecuteScalarAsync(token));
+                    using var constraints = SqliteWallet.Command(tx, "PRAGMA foreign_key_check");
+                    await using var violations = await constraints.ExecuteReaderAsync(token);
+                    Assert.False(await violations.ReadAsync(token));
+                    return 0;
+                }, ct);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
 }
