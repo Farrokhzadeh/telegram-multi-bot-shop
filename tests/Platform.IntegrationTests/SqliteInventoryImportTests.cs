@@ -126,6 +126,22 @@ public sealed class SqliteInventoryImportTests
                     SqliteStageInventoryBridge.ProcessAsync(frame, wrong, sessions, secrets, ct));
                 await SqliteStageInventoryBridge.ProcessAsync(frame, key, sessions, secrets, ct);
                 await new SqliteStageInventoryBridgeTestHelper().ReopenAsync(path, frame, key, secrets, ct);
+                using (var stop = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                {
+                    Task bridge = SqliteStageInventoryBridge.ServeAsync(sessions, secrets,
+                        key.ToArray(), stop.Token);
+                    try
+                    {
+                        await SqliteStageInventoryBridge.ForwardAsync(key,
+                            adminToken.ExportForTransport(), product,
+                            [new InventoryImportItem(item, "synthetic-bridge-private-credential")], command, ct);
+                        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                            SqliteStageInventoryBridge.ForwardAsync(wrong,
+                                adminToken.ExportForTransport(), product,
+                                [new InventoryImportItem(item, "synthetic-bridge-private-credential")], command, ct));
+                    }
+                    finally { stop.Cancel(); await bridge; }
+                }
                 await sessions.RunAsync(false, async (_, tx, cancel) =>
                 {
                     using var check = SqliteWallet.Command(tx, """
