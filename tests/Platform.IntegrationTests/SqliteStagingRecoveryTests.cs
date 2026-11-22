@@ -111,7 +111,7 @@ public sealed class SqliteStagingRecoveryTests
             Assert.False(await ingress.AdmitAsync(second, 101, ct));
             var before = await ingress.ReadFlowAsync(first, 7001, ct);
             var after = await ingress.UpdateFlowAsync(first, 7001, "catalog", product, null, 901, before.Revision, ct);
-            Assert.Equal(before.Revision+1, after.Revision);
+            Assert.Equal(before.Revision + 1, after.Revision);
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 ingress.UpdateFlowAsync(first, 7001, "quantity", product, null, 901, before.Revision, ct));
             var reopened = new SqliteStagingIngress(new SqliteSessionFactory(path));
