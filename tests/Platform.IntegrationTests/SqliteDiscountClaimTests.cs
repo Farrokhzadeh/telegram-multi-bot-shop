@@ -10,6 +10,96 @@ namespace Platform.IntegrationTests;
 public sealed class SqliteDiscountClaimTests
 {
     [Fact]
+    public async Task UnpaidExpiryReleasesTheOriginalCouponWithoutRedemptionOrWalletMovement()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var dir = Directory.CreateTempSubdirectory("akanti-sqlite-coupon-expiry-");
+        try
+        {
+            string path = Path.Combine(dir.FullName, "shop.db");
+            await SqliteSchema.InitializeAsync(path, ct);
+            var sessions = new SqliteSessionFactory(path);
+            var brand = CheckoutFixture.ResolveContexts()[0];
+            Guid member = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid(),
+                payment = Guid.NewGuid(), coupon = Guid.NewGuid(), audit = Guid.NewGuid(),
+                revision = Guid.NewGuid();
+            DateTime created = DateTime.UtcNow.AddMinutes(-40);
+            await sessions.RunAsync(true, async (_, tx, token) =>
+            {
+                using var setup = SqliteWallet.Command(tx, """
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
+                        bot_id,bot_token_ciphertext,bot_token_key_id,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                    INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
+                    INSERT INTO products(id,fulfillment_kind,availability_policy,title)
+                    VALUES ($product,'manual','immediate','Synthetic goods');
+                    INSERT INTO orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,
+                        payment_method,unit_price_usdt,auto_price_toman_snapshot,pricing_rounding_step_snapshot,
+                        price_calculation_version,brand_public_name_snapshot,product_title_snapshot,
+                        payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,
+                        discount_pct_snapshot,discount_units_snapshot,discount_revision_id,
+                        created_at,updated_at,payment_due_at)
+                    VALUES ($order,$member,$product,1,'product_purchase','awaiting_payment','USDT','crypto',
+                        '10.25',false,'5000','synthetic','Stage','Synthetic goods','synthetic',
+                        'manual',false,false,'20',1,$revision,$created,$created,$due);
+                    INSERT INTO audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,
+                        reason,correlation_id)
+                    VALUES ($audit,'system',$brand,'coupon_issue','discount',$coupon,'synthetic',$audit);
+                    INSERT INTO discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,display_prefix,
+                        issuance_batch_id,kind,percent_off,product_id,max_total_uses)
+                    VALUES ($coupon,$brand,zeroblob(32),x'01','fixture','SAVE',$batch,'promotion',
+                        '20',$product,10);
+                    INSERT INTO discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,
+                        max_total_uses,usage_adjustment_units,redeemed_count_at_revision,
+                        held_units_at_revision,active,product_id)
+                    VALUES ($revision,$coupon,0,$audit,'20',10,0,0,0,1,$product);
+                    INSERT INTO discount_uses(discount_id,order_id,discount_revision_id,
+                        units_covered,saved_amount,saved_currency,status)
+                    VALUES ($coupon,$order,$revision,1,'2.05','USD','held');
+                    INSERT INTO payments(id,order_id,payment_method,quote_currency,amount_due,
+                        idempotency_ref,network_asset,status)
+                    VALUES ($payment,$order,'crypto','USD','8.2',$origin,'USDTTRC20','created');
+                    """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$member", member),
+                    ("$product", product), ("$order", order), ("$payment", payment),
+                    ("$coupon", coupon), ("$batch", Guid.NewGuid()), ("$revision", revision),
+                    ("$audit", audit), ("$created", SqliteSchema.UtcText(created)),
+                    ("$due", SqliteSchema.UtcText(created.AddMinutes(30))),
+                    ("$origin", "order:" + order.ToString("D")));
+                await setup.ExecuteNonQueryAsync(token);
+                await OutboxStore.EnqueueSqliteAsync(tx,
+                    JobIntent.Order(JobKind.ExpireOrderPayment, brand.BrandId, order),
+                    order, DateTime.UtcNow.AddMinutes(-1), token);
+                return 0;
+            }, ct);
+            var expiry = new SqlitePaymentExpiryStore(sessions);
+            JobLease? lease = await expiry.ClaimAsync(brand, Guid.NewGuid(), ct);
+            Assert.NotNull(lease);
+            Assert.Equal(SqlitePaymentExpiryOutcome.Expired,
+                await expiry.RunAsync(brand, lease, ct));
+            await sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var query = SqliteWallet.Command(tx, """
+                    SELECT c.status,d.redeemed_count,o.payment_status,
+                        (SELECT count(*) FROM wallet_entries),
+                        (SELECT count(*) FROM jobs WHERE job_kind='expire_order_payment'
+                            AND status='succeeded')
+                    FROM discount_uses c JOIN discounts d ON d.id=c.discount_id
+                    JOIN orders o ON o.id=c.order_id WHERE o.id=$order
+                    """, ("$order", order));
+                await using var row = await query.ExecuteReaderAsync(token);
+                Assert.True(await row.ReadAsync(token));
+                Assert.Equal("released", row.GetString(0));
+                Assert.Equal(0, row.GetInt64(1));
+                Assert.Equal("expired", row.GetString(2));
+                Assert.Equal(0, row.GetInt64(3));
+                Assert.Equal(1, row.GetInt64(4));
+                return 0;
+            }, ct);
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
+    [Fact]
     public async Task FrozenCryptoCouponRedeemsOnlyWhenPaidManifestIsAuthorized()
     {
         var ct = TestContext.Current.CancellationToken;
