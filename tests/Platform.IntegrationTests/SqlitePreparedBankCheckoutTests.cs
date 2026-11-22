@@ -88,6 +88,34 @@ public sealed class SqlitePreparedBankCheckoutTests
                 finally { CryptographicOperations.ZeroMemory(plain); }
                 return 0;
             }, ct);
+            var receipt = new SqliteManualDepositStore(new SqliteSessionFactory(path));
+            Assert.Equal(SqliteReceiptOutcome.Submitted,
+                await receipt.SubmitAsync(brand, 0, 7001, await PaymentId(), "protected:synthetic/bank-receipt", ct));
+            Assert.Equal(SqliteReceiptOutcome.Replayed,
+                await receipt.SubmitAsync(brand, 0, 7001, await PaymentId(), "protected:synthetic/bank-receipt", ct));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                receipt.SubmitAsync(brand, 0, 7001, await PaymentId(), "protected:synthetic/changed", ct));
+            await sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var sql = SqliteWallet.Command(tx, """
+                    SELECT p.status,o.payment_status,
+                        (SELECT count(*) FROM wallet_entries)
+                    FROM payments p JOIN orders o ON o.id=p.order_id WHERE o.id=$order
+                    """, ("$order", order));
+                await using var row = await sql.ExecuteReaderAsync(token);
+                Assert.True(await row.ReadAsync(token));
+                Assert.Equal("observed", row.GetString(0));
+                Assert.Equal("under_review", row.GetString(1));
+                Assert.Equal(0, row.GetInt64(2));
+                return 0;
+            }, ct);
+
+            Task<Guid> PaymentId() => sessions.RunAsync(false, async (_, tx, token) =>
+            {
+                using var command = SqliteWallet.Command(tx, "SELECT id FROM payments WHERE order_id=$order",
+                    ("$order", order));
+                return Guid.Parse((string)(await command.ExecuteScalarAsync(token))!);
+            }, ct);
         }
         finally { dir.Delete(recursive: true); }
     }
