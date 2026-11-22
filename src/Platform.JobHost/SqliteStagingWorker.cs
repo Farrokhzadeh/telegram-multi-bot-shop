@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Platform.Core;
+using Platform.Fulfillment;
 using Platform.Persistence;
 using Platform.Security;
 using Platform.Telegram;
@@ -49,6 +50,9 @@ internal static class SqliteStagingWorker
                 var expiry = new SqlitePaymentExpiryStore(state.Sessions);
                 var preorders = new SqliteLocalPreorderStore(state.Sessions, secrets);
                 var coupons = new SqliteCouponDeliveryStore(state.Sessions, secrets);
+                var suppliers = new SqliteSupplierRequestStore(state.Sessions, secrets);
+                var supplierWorker = new SqliteSupplierFulfillmentWorker(suppliers,
+                    new SqliteSyntheticSupplierAdapter(), new SqliteSyntheticSupplierEvidenceArchive());
                 Console.WriteLine("The managed SQLite staging delivery worker is running.");
                 while (!ct.IsCancellationRequested)
                 {
@@ -66,6 +70,14 @@ internal static class SqliteStagingWorker
                     if (waiting is not null)
                     {
                         _ = await preorders.DrainAsync(waiting, [state.Context], ct);
+                        continue;
+                    }
+                    JobLease? supplier = await suppliers.ClaimAsync(state.Context,
+                        JobKind.SubmitSupplier, workerId, ct) ?? await suppliers.ClaimAsync(state.Context,
+                        JobKind.ReconcileSupplier, workerId, ct);
+                    if (supplier is not null)
+                    {
+                        await supplierWorker.RunAsync(state.Context, supplier, ct);
                         continue;
                     }
                     JobLease? coupon = await coupons.ClaimNoticeAsync(state.Context, workerId, ct);
