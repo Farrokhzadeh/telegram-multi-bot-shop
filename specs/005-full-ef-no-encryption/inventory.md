@@ -251,3 +251,6 @@ Static caller references below were resolved across all current src C# files (ex
 | Signature key metadata | `payments.ipn_key_id` identifies verified payment-signature binding; preserve with ipn_signature/ipn_payload_sha256/ipn_verified_at |
 | Manifest/payment/supplier/support referenced assets | Follow each evidence_ref, asset_ref, manifest_asset_ref and receipt_asset_ref writer/reader; preserve payload hash and exact access scope, enumerate conversion receipts for every referenced asset |
 All28 field/relationship inventories are in data-model.md with immutable exact source declarations. Remaining conversion evidence/disposition stays open for T038. Runtime source/class caller coverage and source-only vs target-write separation are explicit in this inventory; no protected records were accessed.
+
+## T013 source checkpoint
+All28 baseline entity mappings and18 original SQLite assertion codes have current EF dispositions; see integrity-matrix.md. CHECK/index parity against the immutable first SQLite baseline and all existing field/FK/guard inventories are tested. Nonzero numeric defaults now preserve/reject explicit0 rather than substitute defaults. Runtime store/caller rows in this inventory remain open; no old business SQL or encryption dependency is declared retired by model validation alone. Exact full-provider CI is pending.

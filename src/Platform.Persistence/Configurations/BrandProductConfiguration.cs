@@ -120,9 +120,11 @@ internal sealed class BrandProductConfiguration(bool sqlite) : IEntityTypeConfig
         var min_quantity = row.Property(v => v.MinQuantity).HasColumnName("min_quantity").HasColumnType(sqlite ? "INTEGER" : "integer");
         min_quantity.IsRequired();
         min_quantity.HasDefaultValueSql(sqlite ? "1" : "1");
+        min_quantity.HasSentinel(1);
         var max_quantity = row.Property(v => v.MaxQuantity).HasColumnName("max_quantity").HasColumnType(sqlite ? "INTEGER" : "integer");
         max_quantity.IsRequired();
         max_quantity.HasDefaultValueSql(sqlite ? "100" : "100");
+        max_quantity.HasSentinel(100);
         var revision = row.Property(v => v.Revision).HasColumnName("revision").HasColumnType(sqlite ? "INTEGER" : "bigint");
         revision.IsRequired();
         revision.IsConcurrencyToken();

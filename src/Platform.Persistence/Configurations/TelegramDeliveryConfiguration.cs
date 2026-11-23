@@ -95,6 +95,7 @@ internal sealed class TelegramDeliveryConfiguration(bool sqlite) : IEntityTypeCo
         var part_no = row.Property(v => v.PartNo).HasColumnName("part_no").HasColumnType(sqlite ? "INTEGER" : "integer");
         part_no.IsRequired();
         part_no.HasDefaultValueSql(sqlite ? "1" : "1");
+        part_no.HasSentinel(1);
         var delivery_generation = row.Property(v => v.DeliveryGeneration).HasColumnName("delivery_generation").HasColumnType(sqlite ? "TEXT" : "uuid");
         delivery_generation.ValueGeneratedNever();
         if (sqlite) delivery_generation.UseCollation("NOCASE");

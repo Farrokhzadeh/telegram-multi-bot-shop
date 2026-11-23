@@ -55,3 +55,6 @@ Business rebuild scripts restore the complete reviewed SQLite trigger set becaus
 
 ## PostgreSQL EF provider wiring
 EF affected-scope queries bind UUID collections. Slim PostgreSQL data sources used by converted paths must enable arrays before Build; synthetic target/proxy builders now do so. Native EF sessions use NonRetryingExecutionStrategy because the existing transaction boundary owns retry/outcome classification. Current unopened runtime paths and source-only recovery readers are not qualified by the synthetic builder change; complete their wiring with the corresponding conversion tasks.
+
+## Full model validation candidate
+Current EF command checks include all18 former SQLite assertions and related mutations; original SQL validation remains until runtime conversion closes. Original-baseline parity tests intentionally migrate only the first EF baseline, so historical encrypted constraints/indexes remain independently compared even after later schema lineages evolve. New accepted-state defaults write explicit replay0 and false flags exactly; invalid zeros hit their original constraints. These runtime-only unset markers do not change reviewed schema scripts or snapshots. Run the affected provider suites at the exact candidate; local SQLite success does not qualify PostgreSQL or a completed EF runtime.

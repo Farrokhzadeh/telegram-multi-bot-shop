@@ -10,7 +10,7 @@ public sealed class TelegramDelivery
     public string Purpose { get; set; } = null!;
     public string Action { get; set; } = null!;
     public long? TargetMessageId { get; set; }
-    public int PartNo { get; set; }
+    public int PartNo { get; set; } = 1;
     public Guid? DeliveryGeneration { get; set; }
     public string? RecipientLanguage { get; set; }
     public DateTime? EligibilityCheckedAt { get; set; }

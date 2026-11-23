@@ -35,60 +35,7 @@ public sealed class EfIntegrityTests
     {
         var ct = TestContext.Current.CancellationToken;
         await using var fixture = await Fixture.CreateAsync(ct);
-        const decimal opening = 12345678901234567890.12345678m;
-        const decimal balance = 12345678901234567890.12345679m;
-        await fixture.WriteAsync(async (session, token) =>
-        {
-            var wallet = await session.Data.Set<Wallet>().SingleAsync(token);
-            wallet.Balance = opening;
-            wallet.Version = 1;
-            session.Data.Add(new WalletEntry
-            {
-                Id = Guid.NewGuid(),
-                UserId = fixture.Member,
-                SignedAmount = opening,
-                BalanceAfter = opening,
-                PostingVersion = 1,
-                MovementKind = "opening_balance",
-                IsPosting = true,
-                IdempotencyKey = "ef-opening",
-                LegacyImportBatch = Guid.NewGuid(),
-                Reason = "Synthetic opening"
-            });
-            await session.Data.SaveChangesAsync(token);
-            Assert.False(session.Data.ChangeTracker.HasChanges());
-            Guid admin = Guid.NewGuid(), audit = Guid.NewGuid();
-            session.Data.Add(new Admin { Id = admin, Login = "ef-adjustment", AuthenticationMode = "external", ExternalSubject = "ef-adjustment" });
-            session.Data.Add(new AuditEvent
-            {
-                Id = audit,
-                ActorKind = "admin",
-                ActorAdminId = admin,
-                BrandId = CheckoutFixture.ResolveContexts()[0].BrandId,
-                Action = "wallet_adjustment",
-                EntityKind = "wallet",
-                EntityId = fixture.Member,
-                Reason = "Synthetic adjustment",
-                CorrelationId = Guid.NewGuid()
-            });
-            wallet.Balance = balance;
-            wallet.Version = 2;
-            session.Data.Add(new WalletEntry
-            {
-                Id = Guid.NewGuid(),
-                UserId = fixture.Member,
-                SignedAmount = 0.00000001m,
-                BalanceAfter = balance,
-                PostingVersion = 2,
-                MovementKind = "admin_adjustment",
-                IsPosting = true,
-                IdempotencyKey = "ef-adjustment",
-                AdminId = admin,
-                AuditEventId = audit,
-                Reason = "Synthetic adjustment"
-            });
-            await session.Data.SaveChangesAsync(token);
-        }, ct);
+        decimal balance = await SeedPostingsAsync(fixture, ct);
         Assert.Equal(balance, await fixture.BalanceAsync(ct));
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.WriteAsync(async (session, token) =>
         {
@@ -100,6 +47,30 @@ public sealed class EfIntegrityTests
             await session.UpdateAsync<Wallet>(value => value.UserId == fixture.Member,
                 setters => setters.SetProperty(value => value.Version, 3L), token);
             await session.Data.SaveChangesAsync(token);
+        }, ct));
+        Assert.Contains("EF commit rejected: wallet_posting_balance", error.Message);
+        Assert.Equal(balance, await fixture.BalanceAsync(ct));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AWalletCannotRegressToAnOlderMatchingPosting(bool setBased)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var fixture = await Fixture.CreateAsync(ct);
+        decimal balance = await SeedPostingsAsync(fixture, ct);
+        decimal earlier = balance - 0.00000001m;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.WriteAsync(async (session, token) =>
+        {
+            if (setBased) await session.UpdateAsync<Wallet>(value => value.UserId == fixture.Member,
+                setters => setters.SetProperty(value => value.Balance, earlier).SetProperty(value => value.Version, 1L), token);
+            else
+            {
+                var wallet = await session.Data.Set<Wallet>().SingleAsync(token);
+                wallet.Balance = earlier;
+                wallet.Version = 1;
+            }
         }, ct));
         Assert.Contains("EF commit rejected: wallet_posting_balance", error.Message);
         Assert.Equal(balance, await fixture.BalanceAsync(ct));
@@ -287,7 +258,66 @@ public sealed class EfIntegrityTests
             async (session, token) => await session.Data.Set<User>().Select(value => value.Language).SingleAsync(token), ct));
     }
 
-    private sealed class Fixture(DirectoryInfo directory, SqliteSessionFactory sessions, BrandContext brand, Guid member) : IAsyncDisposable
+    private static async Task<decimal> SeedPostingsAsync(Fixture fixture, CancellationToken ct)
+    {
+        const decimal opening = 12345678901234567890.12345678m;
+        const decimal balance = 12345678901234567890.12345679m;
+        await fixture.WriteAsync(async (session, token) =>
+        {
+            var wallet = await session.Data.Set<Wallet>().SingleAsync(token);
+            wallet.Balance = opening;
+            wallet.Version = 1;
+            session.Data.Add(new WalletEntry
+            {
+                Id = Guid.NewGuid(),
+                UserId = fixture.Member,
+                SignedAmount = opening,
+                BalanceAfter = opening,
+                PostingVersion = 1,
+                MovementKind = "opening_balance",
+                IsPosting = true,
+                IdempotencyKey = "ef-opening",
+                LegacyImportBatch = Guid.NewGuid(),
+                Reason = "Synthetic opening"
+            });
+            await session.Data.SaveChangesAsync(token);
+            Assert.False(session.Data.ChangeTracker.HasChanges());
+            Guid admin = Guid.NewGuid(), audit = Guid.NewGuid();
+            session.Data.Add(new Admin { Id = admin, Login = "ef-adjustment", AuthenticationMode = "external", ExternalSubject = "ef-adjustment" });
+            session.Data.Add(new AuditEvent
+            {
+                Id = audit,
+                ActorKind = "admin",
+                ActorAdminId = admin,
+                BrandId = CheckoutFixture.ResolveContexts()[0].BrandId,
+                Action = "wallet_adjustment",
+                EntityKind = "wallet",
+                EntityId = fixture.Member,
+                Reason = "Synthetic adjustment",
+                CorrelationId = Guid.NewGuid()
+            });
+            wallet.Balance = balance;
+            wallet.Version = 2;
+            session.Data.Add(new WalletEntry
+            {
+                Id = Guid.NewGuid(),
+                UserId = fixture.Member,
+                SignedAmount = 0.00000001m,
+                BalanceAfter = balance,
+                PostingVersion = 2,
+                MovementKind = "admin_adjustment",
+                IsPosting = true,
+                IdempotencyKey = "ef-adjustment",
+                AdminId = admin,
+                AuditEventId = audit,
+                Reason = "Synthetic adjustment"
+            });
+            await session.Data.SaveChangesAsync(token);
+        }, ct);
+        return balance;
+    }
+
+    internal sealed class Fixture(DirectoryInfo directory, SqliteSessionFactory sessions, BrandContext brand, Guid member) : IAsyncDisposable
     {
         internal Guid Member { get; } = member;
         internal SqliteSessionFactory Sessions { get; } = sessions;

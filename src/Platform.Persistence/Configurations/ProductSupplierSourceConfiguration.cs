@@ -87,6 +87,7 @@ internal sealed class ProductSupplierSourceConfiguration(bool sqlite) : IEntityT
         revision.IsRequired();
         revision.IsConcurrencyToken();
         revision.HasDefaultValueSql(sqlite ? "1" : "1");
+        revision.HasSentinel(1L);
         var observation_revision = row.Property(v => v.ObservationRevision).HasColumnName("observation_revision").HasColumnType(sqlite ? "INTEGER" : "bigint");
         observation_revision.IsRequired();
         observation_revision.IsConcurrencyToken();

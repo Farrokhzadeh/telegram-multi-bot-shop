@@ -33,7 +33,8 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
             var key = Data.Model.FindEntityType(typeof(T))!.FindPrimaryKey()!.Properties.Single();
             var before = await query.AsNoTracking().Take(257).ToListAsync(ct);
             if (before.Count > 256) throw new InvalidOperationException("The EF mutation batch exceeds its bound.");
-            Guid[] ids = before.Select(value => (Guid)Data.Entry(value).Property(key.Name).CurrentValue!).ToArray();
+            var prior = before.ToDictionary(value => (Guid)Data.Entry(value).Property(key.Name).CurrentValue!);
+            Guid[] ids = prior.Keys.ToArray();
             if (ids.Length == 0) return 0;
             foreach (var value in before) Integrity.Capture(value);
             Integrity.AllowSetWrite = true;
@@ -43,7 +44,11 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
             if (changed != ids.Length) throw new DbUpdateConcurrencyException("The EF mutation affected-row count differs.");
             var after = await Data.Set<T>().AsNoTracking().Where(value => ids.Contains(EF.Property<Guid>(value, key.Name))).ToListAsync(ct);
             if (after.Count != ids.Length) throw new InvalidOperationException("The EF mutation changed an identity.");
-            foreach (var value in after) Integrity.Capture(value);
+            foreach (var value in after)
+            {
+                Integrity.RequireMutation(prior[(Guid)Data.Entry(value).Property(key.Name).CurrentValue!], value);
+                Integrity.Capture(value);
+            }
             return changed;
         }
         catch { Integrity.Reject(); throw; }

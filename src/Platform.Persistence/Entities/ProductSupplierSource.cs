@@ -8,7 +8,7 @@ public sealed class ProductSupplierSource
     public string ExternalProductId { get; set; } = null!;
     public string? ExternalVariantId { get; set; }
     public bool Enabled { get; set; }
-    public long Revision { get; set; }
+    public long Revision { get; set; } = 1L;
     public long ObservationRevision { get; set; }
     public long? ObservedSourceRevision { get; set; }
     public string? ObservedAccountRef { get; set; }

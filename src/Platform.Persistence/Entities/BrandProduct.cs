@@ -19,8 +19,8 @@ public sealed class BrandProduct
     public bool AllowWallet { get; set; } = true;
     public bool AllowCrypto { get; set; }
     public bool AllowBank { get; set; }
-    public int MinQuantity { get; set; }
-    public int MaxQuantity { get; set; }
+    public int MinQuantity { get; set; } = 1;
+    public int MaxQuantity { get; set; } = 100;
     public long Revision { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

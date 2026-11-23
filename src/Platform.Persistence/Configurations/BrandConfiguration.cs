@@ -168,13 +168,16 @@ internal sealed class BrandConfiguration(bool sqlite) : IEntityTypeConfiguration
         var pricing_rounding_step = row.Property(v => v.PricingRoundingStep).HasColumnName("pricing_rounding_step").HasColumnType(sqlite ? "TEXT" : "numeric");
         pricing_rounding_step.IsRequired();
         pricing_rounding_step.HasDefaultValueSql(sqlite ? "5000" : "5000");
+        pricing_rounding_step.HasSentinel(5000m);
         if (sqlite) pricing_rounding_step.Metadata.SetTypeMapping(ExactSqliteDecimalMapping.Instance);
         var max_exchange_rate_age_seconds = row.Property(v => v.MaxExchangeRateAgeSeconds).HasColumnName("max_exchange_rate_age_seconds").HasColumnType(sqlite ? "INTEGER" : "bigint");
         max_exchange_rate_age_seconds.IsRequired();
         max_exchange_rate_age_seconds.HasDefaultValueSql(sqlite ? "3600" : "3600");
+        max_exchange_rate_age_seconds.HasSentinel(3600L);
         var telegram_update_highwater = row.Property(v => v.TelegramUpdateHighwater).HasColumnName("telegram_update_highwater").HasColumnType(sqlite ? "INTEGER" : "bigint");
         telegram_update_highwater.IsRequired();
         telegram_update_highwater.HasDefaultValueSql(sqlite ? "-1" : "-1");
+        telegram_update_highwater.HasSentinel(-1L);
         var telegram_update_window = row.Property(v => v.TelegramUpdateWindow).HasColumnName("telegram_update_window").HasColumnType(sqlite ? "BLOB" : "bytea");
         telegram_update_window.IsRequired();
         telegram_update_window.HasDefaultValueSql(sqlite ? "(zeroblob(128))" : "decode(repeat('00',128),'hex')");

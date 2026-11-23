@@ -32,9 +32,9 @@ public sealed class Brand
     public string? FxSource { get; set; }
     public DateTime? FxFetchedAt { get; set; }
     public string? FxErrorCode { get; set; }
-    public decimal PricingRoundingStep { get; set; }
-    public long MaxExchangeRateAgeSeconds { get; set; }
-    public long TelegramUpdateHighwater { get; set; }
+    public decimal PricingRoundingStep { get; set; } = 5000m;
+    public long MaxExchangeRateAgeSeconds { get; set; } = 3600L;
+    public long TelegramUpdateHighwater { get; set; } = -1L;
     public byte[] TelegramUpdateWindow { get; set; } = null!;
     public long PolicyVersion { get; set; }
     public DateTime CreatedAt { get; set; }
