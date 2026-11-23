@@ -99,10 +99,9 @@ public sealed class EfAdminSessionTests
         Guid admin = Guid.NewGuid(), ticket = Guid.NewGuid(), product = Guid.NewGuid(), command = Guid.NewGuid();
         await using (var seed = await fixture.Sessions.BeginAsync(ct))
         {
-            await seed.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.admins(id,login,authentication_mode,external_subject) VALUES ($1,'ef-audit','external','ef-audit');
-                INSERT INTO shop.admin_sessions(id,admin_id,token_hash,auth_version_at_issue,expires_at) VALUES ($2,$1,$3,0,clock_timestamp()+INTERVAL '1 hour')
-                """, DbValue.Uuid(admin), DbValue.Uuid(ticket), DbValue.Binary(token.Hash())), ct);
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,external_subject) VALUES ($1,'ef-audit','external','ef-audit')", DbValue.Uuid(admin)), ct);
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admin_sessions(id,admin_id,token_hash,auth_version_at_issue,expires_at) VALUES ($1,$2,$3,0,clock_timestamp()+INTERVAL '1 hour')",
+                DbValue.Uuid(ticket), DbValue.Uuid(admin), DbValue.Binary(token.Hash())), ct);
             await seed.CommitAsync(ct);
         }
         AuthenticatedAdmin actor;
