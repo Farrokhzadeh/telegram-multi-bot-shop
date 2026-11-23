@@ -137,8 +137,8 @@ public sealed class EfSessionTests
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sessions.RunEfAsync(true, binding, async (session, token) =>
             {
                 await session.RequireCustomerAsync(brand, 7001, token);
-                await session.Data.Set<User>().Where(value => value.Id == member)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.Language, "en"), token);
+                await session.UpdateAsync<User>(value => value.Id == member,
+                    setters => setters.SetProperty(value => value.Language, "en"), token);
                 cancelled.Cancel();
                 return true;
             }, cancelled.Token));
@@ -150,4 +150,55 @@ public sealed class EfSessionTests
         }
         finally { directory.Delete(recursive: true); }
     }
+    [Fact]
+    public async Task EfWritesRetainUnknownCommitFencesAfterTheContextIsDisposed()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var fixture = await BrandFixture.CreateAsync(ct);
+        await using var proxy = new DropCommitReplyProxy(fixture.Database.Data.ConnectionString);
+        await using var transport = proxy.CreateClientDataSource();
+        var writer = new DbSessionFactory(transport).ForBrandWriter(fixture.Contexts[0], 0);
+        await using (var native = await writer.BeginAsync(ct))
+        {
+            await native.RunEfAsync(true, async (session, token) =>
+            {
+                Guid member = await session.RequireCustomerAsync(fixture.Contexts[0], 7001, token);
+                var user = await session.Data.Set<User>().SingleAsync(value => value.Id == member, token);
+                user.Language = "en";
+                return true;
+            }, ct);
+            var error = await Assert.ThrowsAsync<DbOperationException>(() => native.CommitAsync(ct));
+            await proxy.CommitObserved.WaitAsync(TimeSpan.FromSeconds(10), ct);
+            Assert.Equal(DbRecovery.ReconcileBeforeRetry, error.Failure.Recovery);
+            Assert.Equal(DbSessionState.OutcomeUnknown, native.State);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => native.CommitAsync(ct));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => native.RollbackAsync(ct));
+        }
+        await fixture.Sessions.ForBrandWriter(fixture.Contexts[0], 0).RunEfAsync(false, async (session, token) =>
+        {
+            Assert.Equal("en", await session.Data.Set<User>().Where(value => value.Id == fixture.Users[0]).Select(value => value.Language).SingleAsync(token));
+            return true;
+        }, ct);
+    }
+
+    [Fact]
+    public async Task EfAdmissionLockTimeoutAbortsOnlyTheWaitingCommand()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var fixture = await BrandFixture.CreateAsync(ct);
+        var brand = fixture.Contexts[0];
+        await using var owner = await fixture.Sessions.ForBrandWriter(brand, 0).BeginAsync(ct);
+        await owner.RunEfAsync(true, async (session, token) => await session.RequireCustomerAsync(brand, 7001, token), ct);
+        var options = new DbSessionOptions { StatementTimeout = TimeSpan.FromSeconds(2), LockTimeout = TimeSpan.FromMilliseconds(100) };
+        await using var waiter = await new DbSessionFactory(fixture.Database.Data, options).ForBrandWriter(brand, 0).BeginAsync(ct);
+        var error = await Assert.ThrowsAsync<DbOperationException>(() => waiter.RunEfAsync(true,
+            async (session, token) => await session.RequireCustomerAsync(brand, 7001, token), ct));
+        Assert.Equal("55P03", error.Failure.SqlState);
+        Assert.Equal(DbRecovery.RetryWholeTransactionAfterRollback, error.Failure.Recovery);
+        Assert.Equal(DbSessionState.Aborted, waiter.State);
+        Assert.Equal(DbSessionState.Active, owner.State);
+        await waiter.RollbackAsync(ct);
+        await owner.RollbackAsync(ct);
+    }
+
 }

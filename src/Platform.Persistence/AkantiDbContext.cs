@@ -7,6 +7,26 @@ namespace Platform.Persistence;
 
 public abstract class AkantiDbContext(DbContextOptions options) : DbContext(options)
 {
+    internal EfIntegrity? Integrity { get; set; }
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) => optionsBuilder.AddInterceptors(EfMutationInterceptor.Instance);
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        if (Integrity is not null)
+        {
+            Integrity.Reject();
+            throw new InvalidOperationException("EF command sessions require asynchronous writes.");
+        }
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Integrity?.CaptureTracked();
+            return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        }
+        catch { Integrity?.Reject(); throw; }
+    }
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         bool sqlite = Database.IsSqlite();
@@ -46,12 +66,18 @@ public abstract class AkantiDbContext(DbContextOptions options) : DbContext(opti
 
 public sealed class SqliteAkantiDbContext(DbContextOptions<SqliteAkantiDbContext> options) : AkantiDbContext(options)
 {
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
         optionsBuilder.ReplaceService<IMigrationsSqlGenerator, AkantiSqliteMigrationsSqlGenerator>();
+    }
 }
 
 public sealed class PostgresAkantiDbContext(DbContextOptions<PostgresAkantiDbContext> options) : AkantiDbContext(options)
 {
-    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        base.OnConfiguring(optionsBuilder);
         optionsBuilder.UseNpgsql(provider => provider.MigrationsHistoryTable("__EFMigrationsHistory", "shop"));
+    }
 }

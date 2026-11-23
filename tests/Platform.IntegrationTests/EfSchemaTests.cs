@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Platform.Persistence;
 using Platform.Testing;
 
@@ -162,6 +163,200 @@ public sealed class EfSchemaTests
         Assert.Contains("fulfillments_order_id_manifest_generation_fk", definition, StringComparison.Ordinal);
         Assert.Contains("DEFERRABLE INITIALLY IMMEDIATE", definition, StringComparison.Ordinal);
         await VerifyTextRoundtripAsync(context, ct);
+    }
+
+    [Theory]
+    [InlineData("wallet_entries", "reason")]
+    [InlineData("fulfillments", "kind")]
+    [InlineData("telegram_deliveries", "purpose")]
+    [InlineData("jobs", "job_kind")]
+    public async Task SqliteBusinessRebuildRestoresReviewedTriggersAndDeferredForeignKeys(string table, string column)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
+        await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
+        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+        await context.Database.MigrateAsync(ct);
+        Guid brand = Guid.NewGuid(), member = Guid.NewGuid(), entry = Guid.NewGuid();
+        context.Add(SchemaBrand(brand));
+        context.Add(new Platform.Persistence.Entities.User { Id = member, BrandId = brand, TelegramId = 7001, Language = "en" });
+        context.Add(new Platform.Persistence.Entities.Wallet { UserId = member, Balance = 7m, Version = 1 });
+        context.Add(new Platform.Persistence.Entities.WalletEntry
+        {
+            Id = entry,
+            UserId = member,
+            SignedAmount = 7m,
+            BalanceAfter = 7m,
+            PostingVersion = 1,
+            MovementKind = "opening_balance",
+            IsPosting = true,
+            IdempotencyKey = "rebuild-opening",
+            LegacyImportBatch = Guid.NewGuid(),
+            Reason = "Retained history"
+        });
+        await context.SaveChangesAsync(ct);
+        context.ChangeTracker.Clear();
+        string[] before = await TriggersAsync(connection, ct);
+        Assert.Equal(27, before.Length);
+        var model = context.GetService<IDesignTimeModel>().Model;
+        var alteration = new Microsoft.EntityFrameworkCore.Migrations.Operations.AlterColumnOperation
+        {
+            Name = column,
+            Table = table,
+            ClrType = typeof(string),
+            ColumnType = "TEXT",
+            IsNullable = false,
+            MaxLength = 512,
+            OldColumn = new Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation
+            {
+                Name = column,
+                Table = table,
+                ClrType = typeof(string),
+                ColumnType = "TEXT",
+                IsNullable = false,
+                MaxLength = 256
+            }
+        };
+        var commands = context.GetService<Microsoft.EntityFrameworkCore.Migrations.IMigrationsSqlGenerator>().Generate([alteration], model);
+        Assert.Contains(commands, value => value.CommandText.Contains("ef_temp_" + table, StringComparison.Ordinal));
+        foreach (var migration in commands)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = migration.CommandText;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        Assert.Equal(before, await TriggersAsync(connection, ct));
+        var retained = await context.Set<Platform.Persistence.Entities.WalletEntry>().AsNoTracking().SingleAsync(ct);
+        Assert.Equal(entry, retained.Id);
+        Assert.Equal(7m, retained.BalanceAfter);
+        Assert.Equal("Retained history", retained.Reason);
+        await using var inspect = connection.CreateCommand();
+        inspect.CommandText = "SELECT strict FROM pragma_table_list WHERE name=$table";
+        inspect.Parameters.AddWithValue("$table", table);
+        Assert.Equal(1L, await inspect.ExecuteScalarAsync(ct));
+        inspect.Parameters.Clear();
+        inspect.CommandText = "SELECT sql FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__EF%'";
+        int references = 0;
+        await using (var reader = await inspect.ExecuteReaderAsync(ct))
+            while (await reader.ReadAsync(ct)) references += reader.GetString(0).Split("DEFERRABLE", StringSplitOptions.None).Length - 1;
+        Assert.Equal(95, references);
+        inspect.CommandText = "INSERT INTO wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason) VALUES($id,$user,'7','7',1,'opening_balance',1,'rebuilt',$batch,'Retained history')";
+        inspect.Parameters.AddWithValue("$id", Guid.NewGuid());
+        inspect.Parameters.AddWithValue("$user", Guid.NewGuid());
+        inspect.Parameters.AddWithValue("$batch", Guid.NewGuid());
+        await Assert.ThrowsAsync<SqliteException>(() => inspect.ExecuteNonQueryAsync(ct));
+        inspect.Parameters.Clear();
+        inspect.CommandText = "DELETE FROM wallet_entries";
+        var immutable = await Assert.ThrowsAsync<SqliteException>(() => inspect.ExecuteNonQueryAsync(ct));
+        Assert.Contains("immutable history", immutable.Message);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SqliteCyclicUserOrderReferencesRequireACompleteDeferredTransaction(bool complete)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
+        await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
+        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+        await context.Database.MigrateAsync(ct);
+        Guid brand = Guid.NewGuid(), product = Guid.NewGuid(), member = Guid.NewGuid(), order = Guid.NewGuid();
+        context.Add(new Platform.Persistence.Entities.Brand
+        {
+            Id = brand,
+            Code = "cycle",
+            InternalName = "Cycle",
+            PublicName = "Cycle",
+            Market = "international",
+            DefaultLanguage = "en",
+            BotUsername = "cycle_bot",
+            BotId = 1001,
+            BotTokenCiphertext = [1],
+            BotTokenKeyId = "fixture",
+            Active = true
+        });
+        context.Add(new Platform.Persistence.Entities.Product { Id = product, Title = "Cycle", FulfillmentKind = "manual", AvailabilityPolicy = "immediate" });
+        await context.SaveChangesAsync(ct);
+        await using (var transaction = connection.BeginTransaction(deferred: false))
+        {
+            await context.Database.UseTransactionAsync(transaction, ct);
+            await using var defer = connection.CreateCommand();
+            defer.Transaction = transaction;
+            defer.CommandText = "PRAGMA defer_foreign_keys=ON";
+            await defer.ExecuteNonQueryAsync(ct);
+            context.Add(new Platform.Persistence.Entities.User { Id = member, BrandId = brand, TelegramId = 7001, Language = "en", FlowOrderId = order });
+            await context.SaveChangesAsync(ct);
+            context.ChangeTracker.Clear();
+            if (complete)
+            {
+                var created = DateTime.UtcNow;
+                context.Add(new Platform.Persistence.Entities.Order
+                {
+                    Id = order,
+                    UserId = member,
+                    ProductId = product,
+                    Quantity = 1,
+                    OrderKind = "product_purchase",
+                    PaymentStatus = "awaiting_payment",
+                    FulfillmentStatus = "unfulfilled",
+                    Currency = "USDT",
+                    PaymentMethod = "crypto",
+                    UnitPriceUsdt = 1m,
+                    PricingRoundingStepSnapshot = 5000m,
+                    PriceCalculationVersion = "fixture",
+                    BrandPublicNameSnapshot = "Cycle",
+                    ProductTitleSnapshot = "Cycle",
+                    PaymentTermsSnapshot = "crypto",
+                    FulfillmentKindSnapshot = "manual",
+                    LocalFirstSnapshot = true,
+                    CreatedAt = created,
+                    UpdatedAt = created,
+                    PaymentDueAt = created.AddMinutes(30)
+                });
+                await context.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+            }
+            else
+            {
+                await Assert.ThrowsAsync<SqliteException>(() => transaction.CommitAsync(ct));
+                await transaction.RollbackAsync(ct);
+            }
+        }
+        await context.Database.UseTransactionAsync(null, ct);
+        context.ChangeTracker.Clear();
+        Assert.Equal(complete ? 1 : 0, await context.Set<Platform.Persistence.Entities.User>().CountAsync(ct));
+        if (!complete) return;
+        Assert.Equal(order, await context.Set<Platform.Persistence.Entities.User>().Select(value => value.FlowOrderId).SingleAsync(ct));
+        context.Add(new Platform.Persistence.Entities.User { Id = Guid.NewGuid(), BrandId = brand, TelegramId = 7001, Language = "en" });
+        await Assert.ThrowsAsync<DbUpdateException>(() => context.SaveChangesAsync(ct));
+    }
+
+    private static Platform.Persistence.Entities.Brand SchemaBrand(Guid id) => new()
+    {
+        Id = id,
+        Code = "cycle",
+        InternalName = "Cycle",
+        PublicName = "Cycle",
+        Market = "international",
+        DefaultLanguage = "en",
+        BotUsername = "cycle_bot",
+        BotId = 1001,
+        BotTokenCiphertext = [1],
+        BotTokenKeyId = "fixture",
+        Active = true
+    };
+
+    private static async Task<string[]> TriggersAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT sql FROM sqlite_schema WHERE type='trigger' ORDER BY name";
+        var definitions = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) definitions.Add(reader.GetString(0));
+        return definitions.ToArray();
     }
 
     private static async Task VerifyTextRoundtripAsync(AkantiDbContext context, CancellationToken ct)

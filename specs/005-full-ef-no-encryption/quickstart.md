@@ -32,7 +32,7 @@ dotnet restore Platform.sln -r linux-x64 --locked-mode
 dotnet ef dbcontext info --project src/Platform.Persistence/Platform.Persistence.csproj --context SqliteAkantiDbContext --no-build
 dotnet ef dbcontext info --project src/Platform.Persistence/Platform.Persistence.csproj --context PostgresAkantiDbContext --no-build
 ```
-Build the project first when needed. The design factories accept no runtime connection arguments and select only in-memory/credential-free design identities. These commands identify models; they do not perform adoption, conversion or deployment. Operator migration/adoption commands remain unimplemented at this checkpoint.
+Build the project first when needed. The design factories accept no runtime connection arguments and select only in-memory/credential-free design identities. These commands identify models; they do not perform adoption, conversion or deployment. Explicit synthetic creation/adoption commands are listed below; protected-data conversion is still unimplemented.
 
 ## Managed read-only schema description
 ```bash
@@ -40,3 +40,15 @@ dotnet run --project src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -- -
 dotnet run --project src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -- --describe-ef-schema postgres
 ```
 These commands only describe committed migration metadata and a deterministic script hash; design identities never connect to a target. SchemaRunner is managed because EF migration generation is incompatible with Native AOT. No existing-file adoption or data conversion is implemented by this command. Do not substitute it for schema, content or financial qualification.
+
+## Isolated schema operators
+First review the committed migration and obtain its script_sha256 through --describe-ef-schema. Set REVIEWED_SQLITE_SHA256 or REVIEWED_POSTGRES_SHA256 to that reviewed value; never accept a hash from an unreviewed executable.
+```bash
+SHOP_TEST_ALLOW_DATABASE_CREATION=1 dotnet run --project src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -- --create-ef-qualification-sqlite --expected-script-sha256 "$REVIEWED_SQLITE_SHA256"
+SHOP_TEST_ALLOW_DATABASE_CREATION=1 dotnet run --project src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -- --adopt-ef-qualification-sqlite --database "$QUALIFICATION_DATABASE" --expected-script-sha256 "$REVIEWED_SQLITE_SHA256"
+SHOP_TEST_ALLOW_DATABASE_CREATION=1 dotnet run --project src/Platform.SchemaRunner/Platform.SchemaRunner.csproj -- --create-ef-qualification-postgres --connection-file "$PRIVATE_QUALIFICATION_CONNECTION_FILE" --expected-script-sha256 "$REVIEWED_POSTGRES_SHA256"
+```
+Linux x64 only. SQLite creation returns an owner-private temporary akanti-ef-qualification-* directory and shop.db path. Adoption requires that private temporary path, WAL, exact business schema/guard fingerprint, compatible migration metadata and existing financial integrity. Drift is rejected without stamping. It does not normalize a raw legacy SQL schema. PostgreSQL requires the existing loopback shop_test_runner identity, an owned empty shop_qualification_<32hex> database and exact pinned server version; it never creates a server/database or adopts nonempty PostgreSQL data. Connection files use existing private-file checks. These tools are for disposable synthetic qualification only; inspect retained failed targets privately and clean up only their known temporary directories. No production/staging paths or protected data conversion are supported here.
+
+## Rebuild boundary
+Business rebuild scripts restore the complete reviewed SQLite trigger set because guards can reference other tables being renamed. Use only an offline exclusive disposable target with verified schema/artifact identity. No existing-file upgrade CLI is implemented; this is not an online migration path. Tests cover four business tables,27 exact triggers,95 deferred references, retained ledger content and immutable-delete rejection. Future plaintext-schema migrations must review/version the guard definitions for that representation.

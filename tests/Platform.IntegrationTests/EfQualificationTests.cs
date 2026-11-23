@@ -94,4 +94,26 @@ public sealed class EfQualificationTests
             Directory.Delete(Path.GetDirectoryName(created.Path)!, true);
         }
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QualificationAdoptionRejectsForeignMigrationHistoryWithoutRewritingIt(bool foreignMigration)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var description = EfSchemaCommand.Describe("sqlite");
+        var created = await EfSchemaCommand.CreateSqliteQualificationAsync(description.ScriptSha256, ct);
+        try
+        {
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = created.Path, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
+            await connection.OpenAsync(ct);
+            await using var change = connection.CreateCommand();
+            change.CommandText = foreignMigration ? "UPDATE __EFMigrationsHistory SET MigrationId='foreign_migration'" : "UPDATE __EFMigrationsHistory SET ProductVersion='0.0.0'";
+            Assert.Equal(1, await change.ExecuteNonQueryAsync(ct));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => EfSchemaCommand.AdoptSqliteQualificationAsync(created.Path, description.ScriptSha256, ct));
+            change.CommandText = foreignMigration ? "SELECT count(*) FROM __EFMigrationsHistory WHERE MigrationId='foreign_migration'" : "SELECT count(*) FROM __EFMigrationsHistory WHERE ProductVersion='0.0.0'";
+            Assert.Equal(1L, await change.ExecuteScalarAsync(ct));
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(created.Path)!, true); }
+    }
+
 }

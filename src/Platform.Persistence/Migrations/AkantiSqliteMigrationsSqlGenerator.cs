@@ -9,9 +9,35 @@ namespace Platform.Persistence.Migrations;
 public sealed class AkantiSqliteMigrationsSqlGenerator(MigrationsSqlGeneratorDependencies dependencies, IRelationalAnnotationProvider annotations)
     : SqliteMigrationsSqlGenerator(dependencies, annotations)
 {
+    private readonly HashSet<string> rebuilt = [];
+    public override IReadOnlyList<MigrationCommand> Generate(IReadOnlyList<MigrationOperation> operations, IModel? model = null, MigrationsSqlGenerationOptions options = MigrationsSqlGenerationOptions.Default)
+    {
+        rebuilt.Clear();
+        try
+        {
+            var commands = base.Generate(operations, model, options);
+            if (rebuilt.Count == 0) return commands;
+            var before = new MigrationCommandListBuilder(Dependencies);
+            var after = new MigrationCommandListBuilder(Dependencies);
+            foreach (var trigger in EfMigrationGuards.SqliteTriggers())
+            {
+                before.Append("DROP TRIGGER IF EXISTS ").Append(Dependencies.SqlGenerationHelper.DelimitIdentifier(trigger.Name))
+                    .AppendLine(Dependencies.SqlGenerationHelper.StatementTerminator);
+                after.Append(trigger.Sql).EndCommand();
+            }
+            before.EndCommand();
+            return before.GetCommandList().Concat(commands).Concat(after.GetCommandList()).ToArray();
+        }
+        finally { rebuilt.Clear(); }
+    }
     protected override void Generate(CreateTableOperation operation, IModel? model, MigrationCommandListBuilder builder, bool terminate = true)
     {
         var entity = FindEntity(operation.Name, model);
+        if (operation.Name.StartsWith("ef_temp_", StringComparison.Ordinal))
+        {
+            if (entity is null) throw new InvalidOperationException("A business rebuild requires the reviewed target model.");
+            rebuilt.Add(entity.GetTableName()!);
+        }
         if (entity is not null)
         {
             foreach (var annotation in entity.GetAnnotations().Where(value => value.Name.StartsWith("Akanti:DatabaseForeignKey:", StringComparison.Ordinal)))
