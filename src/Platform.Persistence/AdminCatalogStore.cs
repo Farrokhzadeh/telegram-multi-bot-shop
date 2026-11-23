@@ -27,21 +27,15 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         AdminCommand.Page(limit);
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.QueryManyAsync(new DbStatement("SELECT id,public_name,market,default_language,active,policy_version FROM shop.brands WHERE ($1 IS NULL OR id>$1) ORDER BY id LIMIT $2", AdminCommand.Id(after), DbValue.Integer(limit + 1)),
-            r => new AdminBrand(r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetBoolean(4), r.GetInt64(5)), limit + 1, ct);
-        return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
+        return await session.RunEfStepAsync(false, (data, token) => BrandAdministrationQueries.ListAsync(data, actor, after, limit, token), ct);
     }
     public async Task<BrandPolicyDetail> PolicyAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var row = await session.QuerySingleAsync(new DbStatement("""
-            SELECT public_name,default_language,active,allow_wallet,allow_crypto,allow_bank,allow_wallet_topup,zero_balance_topup,support_enabled,customer_support_admin_id,fx_enabled,logo_asset_ref,require_channel_join,policy_version
-            FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR SHARE
-            """, DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Value: new BrandPolicyEdit(r.GetString(0), r.GetString(1), r.GetBoolean(2), r.GetBoolean(3), r.GetBoolean(4), r.GetBoolean(5), r.GetBoolean(6), r.GetBoolean(7), r.GetBoolean(8), r.IsDBNull(9) ? null : r.GetGuid(9), r.GetBoolean(10), r.IsDBNull(11) ? null : r.GetString(11)), Enforce: r.GetBoolean(12), Revision: r.GetInt64(13)), ct);
-        var channels = await session.QueryManyAsync(new DbStatement("SELECT chat_id,title,invite_link FROM shop.brand_channels WHERE brand_id=$1 AND active AND required ORDER BY chat_id", DbValue.Uuid(context.BrandId)), r => new RequiredChannel(r.GetInt64(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2)), 1000, ct);
-        return new(row.Value, row.Enforce, channels.ToArray(), row.Revision);
+        return await session.RunEfStepAsync(false, (data, token) => BrandAdministrationQueries.ReadAsync(data, actor, context, token), ct);
     }
+
     public async Task<ExchangeRateMetadata> FxAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
@@ -76,19 +70,8 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Update, AuditEntity.Brand, context.BrandId, context.BrandId, AuditReason.ConfigurationChange, command, hash, revision, revision + 1), ct)) return revision + 1;
-            if (value.Support)
-            {
-                bool valid = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.admins WHERE id=$1 AND disabled_at IS NULL AND telegram_verified_at IS NOT NULL AND public_contact_handle IS NOT NULL)", AdminCommand.Id(value.ContactAdminId)), r => r.GetBoolean(0), ct);
-                if (!valid) throw new ArgumentException("A current verified public support contact is required.");
-            }
             await session.AdmitWriterAsync(context, ct);
-            int changed = await session.ExecuteAsync(new DbStatement("""
-                UPDATE shop.brands SET public_name=$1,default_language=$2,active=$3,allow_wallet=$4,allow_crypto=$5,allow_bank=$6,allow_wallet_topup=$7,
-                    zero_balance_topup=$8,support_enabled=$9,customer_support_admin_id=$10,fx_enabled=$11,logo_asset_ref=$12,policy_version=policy_version+1,updated_at=clock_timestamp()
-                WHERE id=$13 AND bot_id=$14 AND policy_version=$15
-                """, DbValue.Text(value.PublicName), DbValue.Text(value.Language), DbValue.Boolean(value.Active), DbValue.Boolean(value.Wallet), DbValue.Boolean(value.Crypto), DbValue.Boolean(value.Bank), DbValue.Boolean(value.Topup),
-                DbValue.Boolean(value.ZeroBalanceTopup), DbValue.Boolean(value.Support), AdminCommand.Id(value.ContactAdminId), DbValue.Boolean(value.Fx), AdminCommand.Text(value.Logo), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(revision)), ct);
-            if (changed != 1) throw new InvalidOperationException("Policy revision conflict.");
+            await session.RunEfStepAsync(true, (data, token) => BrandAdministrationQueries.WriteAsync(data, actor, context, value, revision, token), ct);
             await session.CommitAsync(ct);
             return revision + 1;
         }

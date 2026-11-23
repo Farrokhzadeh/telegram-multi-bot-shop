@@ -8,7 +8,7 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding? writer, Action<BrandContext, long>? markWriter = null, Action? markShared = null, EfIntegrityScope? changes = null, bool nativeWriterBoundary = false)
+internal sealed partial class EfSession(AkantiDbContext data, bool write, WriterBinding? writer, Action<BrandContext, long>? markWriter = null, Action? markShared = null, EfIntegrityScope? changes = null, bool nativeWriterBoundary = false)
 {
     private bool admitted, sharedAdmitted;
     internal void InitializeIntegrity() => _ = Integrity;
@@ -72,19 +72,14 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
         markWriter?.Invoke(context, registration.Revision);
         admitted = true;
     }
-    internal async Task RequireSharedWritersAsync(CancellationToken ct)
+    internal async Task RequireSharedWritersAsync(CancellationToken ct, bool lockRows = false)
     {
         if (writer is not { Shared: true }) throw Denied("Shared writer scope is unavailable.");
-        foreach (var registration in writer.Entries.OrderBy(value => value.Context.BrandId))
-        {
-            var query = Data.Set<Entities.Brand>().Where(value => value.Id == registration.Context.BrandId &&
-                value.BotId == registration.Context.BotId && value.Active && value.PolicyVersion == registration.Revision);
-            bool valid = write
-                ? await AdmitAsync(() => query.ExecuteUpdateAsync(setters => setters.SetProperty(value => value.PolicyVersion, value => value.PolicyVersion), ct)) == 1
-                : await query.AnyAsync(ct);
-            if (!valid) throw Denied("Shared writer revision is unavailable.");
-        }
-        if (await Data.Set<Entities.Brand>().CountAsync(value => value.Active, ct) != writer.Entries.Length)
+        var brands = await Data.Set<Entities.Brand>().AsNoTracking().OrderBy(value => value.Id).Take(1001).ToArrayAsync(ct);
+        if (brands.Length > 1000) throw Denied("The shared brand set exceeds its bound.");
+        if (write || lockRows) foreach (var brand in brands) await LockBrandAsync(brand.Id, ct);
+        var enabled = await Data.Set<Entities.Brand>().AsNoTracking().Where(value => value.Active).Select(value => new { value.Id, value.BotId, value.PolicyVersion }).Take(1001).ToArrayAsync(ct);
+        if (enabled.Length != writer.Entries.Length || writer.Entries.Any(value => !enabled.Any(brand => brand.Id == value.Context.BrandId && brand.BotId == value.Context.BotId && brand.PolicyVersion == value.Revision)))
             throw Denied("Shared writer set is unavailable.");
         markShared?.Invoke();
         sharedAdmitted = admitted = true;
@@ -160,30 +155,10 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
 
 public sealed partial class SqliteSessionFactory
 {
-    internal static async Task<T> ReadEfAsync<T>(Microsoft.Data.Sqlite.SqliteTransaction transaction, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct)
-    {
-        var connection = transaction.Connection ?? throw new InvalidOperationException("A live SQLite transaction is required.");
-        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
-        await context.Database.UseTransactionAsync(transaction, ct);
-        var session = new EfSession(context, false, null);
-        session.InitializeIntegrity();
-        T result = await operation(session, ct);
-        await session.FlushAsync(ct);
-        return result;
-    }
+    internal static Task<T> ReadEfAsync<T>(Microsoft.Data.Sqlite.SqliteTransaction transaction, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct) =>
+        StepEfAsync(transaction, false, operation, ct);
     internal Task<T> RunEfAsync<T>(bool write, WriterBinding? writer, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct) =>
-        RunAsync(write, async (connection, transaction, token) =>
-        {
-            var options = new DbContextOptionsBuilder<SqliteAkantiDbContext>()
-                .UseSqlite(connection, provider => provider.CommandTimeout(timeoutSeconds)).Options;
-            await using var context = new SqliteAkantiDbContext(options);
-            await context.Database.UseTransactionAsync(transaction, token);
-            var session = new EfSession(context, write, writer);
-            session.InitializeIntegrity();
-            T result = await operation(session, token);
-            await session.FlushAsync(token);
-            return result;
-        }, ct);
+        RunAsync(write, (_, transaction, token) => StepEfAsync(transaction, write, operation, token, writer, true), ct);
 }
 
 public sealed partial class DbSessionFactory
@@ -215,6 +190,7 @@ public sealed partial class DbSession
             await using var context = EfContext();
             await context.Database.UseTransactionAsync(transaction, ct);
             var session = new EfSession(context, write, writer, MarkWriter, () => writerAdmitted = true, efChanges ??= new(), true);
+            session.RestoreSharedAdmission(writerAdmitted);
             session.InitializeIntegrity();
             T result = await operation(session, ct);
             await session.FlushAsync(ct, !defer);

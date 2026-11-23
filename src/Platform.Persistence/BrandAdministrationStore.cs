@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -34,11 +35,19 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return revision + 1;
             await session.AdmitWriterAsync(context, ct);
-            int changed = await session.ExecuteAsync(new DbStatement("""
-                UPDATE shop.brands SET bot_token_ciphertext=$1,bot_token_key_id=$2,bot_username=$3,policy_version=policy_version+1,updated_at=clock_timestamp()
-                WHERE id=$4 AND bot_id=$5 AND policy_version=$6
-                """, DbValue.Binary(encrypted.Ciphertext), DbValue.Text(encrypted.KeyId), DbValue.Text(verified.Username), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(revision)), ct);
-            if (changed != 1) throw new InvalidOperationException("Brand configuration revision conflict.");
+            await session.RunEfStepAsync(true, async (data, cancel) =>
+            {
+                await data.RequireAdminAsync(actor, null, cancel);
+                await data.LockBrandAsync(context.BrandId, cancel);
+                var brand = await data.Data.Set<Entities.Brand>().SingleAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, cancel);
+                if (brand.PolicyVersion != revision) throw new InvalidOperationException("Brand configuration revision conflict.");
+                brand.BotTokenCiphertext = encrypted.Ciphertext.ToArray();
+                brand.BotTokenKeyId = encrypted.KeyId;
+                brand.BotUsername = verified.Username;
+                brand.PolicyVersion++;
+                brand.UpdatedAt = await data.BrandClockAsync(context.BrandId, cancel);
+                return true;
+            }, ct);
             await session.CommitAsync(ct);
             return revision + 1;
         }
@@ -73,15 +82,27 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return revision + 1;
             await session.AdmitWriterAsync(context, ct);
-            int changed = await session.ExecuteAsync(new DbStatement("UPDATE shop.brands SET policy_version=policy_version+1,updated_at=clock_timestamp() WHERE id=$1 AND bot_id=$2 AND policy_version=$3",
-                DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(revision)), ct);
-            if (changed != 1) throw new InvalidOperationException("Brand configuration revision conflict.");
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.brand_channels SET active=false,updated_at=clock_timestamp() WHERE brand_id=$1", DbValue.Uuid(context.BrandId)), ct);
-            foreach (var channel in frozen)
-                await session.ExecuteAsync(new DbStatement("""
-                    INSERT INTO shop.brand_channels(brand_id,chat_id,title,invite_link,required,active) VALUES ($1,$2,$3,$4,true,true)
-                    ON CONFLICT(brand_id,chat_id) DO UPDATE SET title=EXCLUDED.title,invite_link=EXCLUDED.invite_link,required=true,active=true,updated_at=clock_timestamp()
-                    """, DbValue.Uuid(context.BrandId), DbValue.Bigint(channel.ChatId), Text(channel.Title), Text(channel.InviteLink)), ct);
+            await session.RunEfStepAsync(true, async (data, cancel) =>
+            {
+                await data.RequireAdminAsync(actor, null, cancel);
+                await data.LockBrandAsync(context.BrandId, cancel);
+                var brand = await data.Data.Set<Entities.Brand>().SingleAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, cancel);
+                if (brand.PolicyVersion != revision) throw new InvalidOperationException("Brand configuration revision conflict.");
+                DateTime now = await data.BrandClockAsync(context.BrandId, cancel);
+                brand.PolicyVersion++;
+                brand.UpdatedAt = now;
+                await data.FlushAsync(cancel, false);
+                await data.DeactivateChannelsAsync(context.BrandId, now, cancel);
+                int count = 0;
+                foreach (var channel in frozen)
+                {
+                    var row = await data.Data.Set<Entities.BrandChannel>().SingleOrDefaultAsync(value => value.BrandId == context.BrandId && value.ChatId == channel.ChatId, cancel);
+                    if (row is null) { row = new Entities.BrandChannel { BrandId = context.BrandId, ChatId = channel.ChatId }; data.Data.Add(row); }
+                    row.Title = channel.Title; row.InviteLink = channel.InviteLink; row.Required = true; row.Active = true; row.UpdatedAt = now;
+                    if (++count % 128 == 0) { await data.FlushAsync(cancel, false); data.Data.ChangeTracker.Clear(); }
+                }
+                return true;
+            }, ct);
             await session.CommitAsync(ct);
             return revision + 1;
         }
@@ -94,8 +115,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
     }
     private static void RequireRevision(BrandConfiguration data, long revision)
     { if (data.Revision != revision) throw new InvalidOperationException("Brand configuration revision conflict."); }
-    private static Task<BrandConfiguration> ReadAsync(DbSession session, BrandContext context, CancellationToken ct) => session.QuerySingleAsync(new DbStatement(
-        "SELECT id,bot_id,bot_username,policy_version,updated_at FROM shop.brands WHERE id=$1 AND bot_id=$2", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
-        r => new BrandConfiguration(r.GetGuid(0), r.GetInt64(1), r.GetString(2), true, r.GetInt64(3), r.GetUtc(4)), ct);
-    private static DbValue Text(string? value) => value is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Text) : DbValue.Text(value);
+    private static Task<BrandConfiguration> ReadAsync(DbSession session, BrandContext context, CancellationToken ct) =>
+        session.RunEfStepAsync(false, async (data, token) => await data.Data.Set<Entities.Brand>().Where(value => value.Id == context.BrandId && value.BotId == context.BotId)
+            .Select(value => new BrandConfiguration(value.Id, value.BotId, value.BotUsername, true, value.PolicyVersion, value.UpdatedAt)).SingleAsync(token), ct);
 }

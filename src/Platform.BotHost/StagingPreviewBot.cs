@@ -95,7 +95,7 @@ internal static class StagingPreviewBot
             if (connection.Host != "127.0.0.1" || connection.Port != 5432 || connection.Database != Database ||
                 connection.Username != Reader || connection.Multiplexing || connection.IncludeErrorDetail ||
                 connection.Enlist || connection.LogParameters) throw new UnauthorizedAccessException();
-            await using var database = new NpgsqlSlimDataSourceBuilder(connection.ConnectionString).Build();
+            await using var database = new NpgsqlSlimDataSourceBuilder(connection.ConnectionString).EnableArrays().Build();
             await CheckDatabaseAsync(database, ct);
             using var http = TelegramTransport.CreateHttpClient(TimeSpan.FromSeconds(38));
             var client = TelegramTransport.Create(token, http);

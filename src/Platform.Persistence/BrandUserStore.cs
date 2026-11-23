@@ -1,4 +1,5 @@
-using NpgsqlTypes;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Configurations;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -19,13 +20,28 @@ public static class BrandUserStore
         CancellationToken ct = default, bool admit = true)
     {
         RequireIdentity(brand, verifiedActorId);
-        int changed = await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.users(id,brand_id,telegram_id,language)
-            SELECT $1,b.id,$2,b.default_language FROM shop.brands b WHERE b.id=$3 AND b.bot_id=$4 AND b.active
-            ON CONFLICT (brand_id,telegram_id) DO UPDATE SET last_seen_at=GREATEST(shop.users.last_seen_at,clock_timestamp())
-            """, DbValue.Uuid(Guid.NewGuid()), DbValue.Bigint(verifiedActorId), DbValue.Uuid(brand.BrandId), DbValue.Bigint(brand.BotId)), ct);
-        if (changed != 1) Reject(session);
-        var member = await RequireAsync(session, brand, verifiedActorId, null, ct);
+        byte[] identity = new byte[24];
+        brand.BrandId.TryWriteBytes(identity.AsSpan(0, 16), bigEndian: true, out _);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(identity.AsSpan(16), verifiedActorId);
+        byte[] digest = System.Security.Cryptography.SHA256.HashData(identity);
+        await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(digest))), ct);
+        BrandUser member = await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            var previous = await data.RequireMembershipAsync(brand, verifiedActorId, true, true, token);
+            DateTime now = await data.BrandClockAsync(brand.BrandId, token);
+            if (previous is null)
+            {
+                string language = await data.Data.Set<Entities.Brand>().Where(value => value.Id == brand.BrandId).Select(value => value.DefaultLanguage).SingleAsync(token);
+                previous = new Entities.User { Id = Guid.NewGuid(), BrandId = brand.BrandId, TelegramId = verifiedActorId, Language = language };
+                data.Data.Add(previous);
+            }
+            else
+            {
+                data.Data.Attach(previous);
+                if (previous.LastSeenAt < now) previous.LastSeenAt = now;
+            }
+            return Project(previous);
+        }, ct);
         if (admit) await session.AdmitWriterAsync(brand, ct);
         return member;
     }
@@ -47,13 +63,15 @@ public static class BrandUserStore
         RequireIdentity(brand, verifiedActorId);
         RequireLanguage(language);
         await session.AdmitCustomerWriterAsync(brand, verifiedActorId, ct: ct);
-        int changed = await session.ExecuteAsync(new DbStatement("""
-            UPDATE shop.users u SET language=$1,marketing_opt_out_at=CASE WHEN $2 THEN COALESCE(u.marketing_opt_out_at,clock_timestamp()) ELSE NULL END
-            FROM shop.brands b WHERE u.id=$3 AND u.brand_id=$4 AND u.telegram_id=$5 AND b.id=u.brand_id AND b.bot_id=$6 AND b.active
-                AND u.banned_at IS NULL AND u.blocked_at IS NULL
-            """, DbValue.Text(language), DbValue.Boolean(marketingOptOut), DbValue.Uuid(membershipId), DbValue.Uuid(brand.BrandId),
-            DbValue.Bigint(verifiedActorId), DbValue.Bigint(brand.BotId)), ct);
-        if (changed != 1) Reject(session);
+        await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            var member = await data.RequireMembershipAsync(brand, verifiedActorId, false, false, token);
+            if (member!.Id != membershipId) data.RejectScope("Customer membership is unavailable.");
+            data.Data.Attach(member);
+            member.Language = language;
+            member.MarketingOptOutAt = marketingOptOut ? member.MarketingOptOutAt ?? await data.BrandClockAsync(brand.BrandId, token) : null;
+            return true;
+        }, ct);
         await session.AdmitWriterAsync(brand, ct);
     }
 
@@ -67,18 +85,22 @@ public static class BrandUserStore
             (state == CustomerFlowState.Idle && (orderId is not null || productId is not null || anchorMessageId is not null || expiresAt is not null)))
             throw new ArgumentException("Invalid customer flow transition.");
         await session.AdmitCustomerWriterAsync(brand, verifiedActorId, productId, ct);
-        DbValue expiry = expiresAt is DateTime time ? DbValue.Utc(time) : DbValue.Null(NpgsqlDbType.TimestampTz);
-        int changed = await session.ExecuteAsync(new DbStatement("""
-            UPDATE shop.users u SET flow_state=$1,flow_revision=u.flow_revision+1,flow_order_id=$2,flow_product_id=$3,
-                flow_anchor_message_id=$4,flow_expires_at=$5
-            FROM shop.brands b WHERE u.id=$6 AND u.brand_id=$7 AND u.telegram_id=$8 AND u.flow_revision=$9
-                AND b.id=u.brand_id AND b.bot_id=$10 AND b.active AND u.banned_at IS NULL AND u.blocked_at IS NULL
-                AND ($5 IS NULL OR $5>clock_timestamp())
-                AND ($1 IN ('idle','catalog') OR u.flow_expires_at IS NULL OR u.flow_expires_at>clock_timestamp())
-            """, DbValue.Text(StateCode(state)), NullableGuid(orderId), NullableGuid(productId),
-            anchorMessageId is long anchor ? DbValue.Bigint(anchor) : DbValue.Null(NpgsqlDbType.Bigint), expiry,
-            DbValue.Uuid(membershipId), DbValue.Uuid(brand.BrandId), DbValue.Bigint(verifiedActorId), DbValue.Bigint(expectedRevision), DbValue.Bigint(brand.BotId)), ct);
-        if (changed != 1) Reject(session);
+        if (expiresAt is DateTime time) _ = DbValue.Utc(time);
+        string code = StateCode(state);
+        await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            var member = await data.RequireMembershipAsync(brand, verifiedActorId, false, false, token);
+            if (member!.Id != membershipId) data.RejectScope("Customer membership is unavailable.");
+            int changed = await data.UpdateAsync<Entities.User>(value => value.Id == membershipId && value.BrandId == brand.BrandId && value.TelegramId == verifiedActorId &&
+                value.FlowRevision == expectedRevision && value.BlockedAt == null && value.BannedAt == null &&
+                (expiresAt == null || expiresAt > EfValues.UtcNow()) &&
+                (code == "idle" || code == "catalog" || value.FlowExpiresAt == null || value.FlowExpiresAt > EfValues.UtcNow()),
+                setters => setters.SetProperty(value => value.FlowState, code).SetProperty(value => value.FlowRevision, value => value.FlowRevision + 1)
+                    .SetProperty(value => value.FlowOrderId, orderId).SetProperty(value => value.FlowProductId, productId)
+                    .SetProperty(value => value.FlowAnchorMessageId, anchorMessageId).SetProperty(value => value.FlowExpiresAt, expiresAt), token);
+            if (changed != 1) data.RejectScope("Customer flow is unavailable or changed.");
+            return true;
+        }, ct);
         await session.AdmitWriterAsync(brand, ct);
         return await RequireAsync(session, brand, verifiedActorId, membershipId, ct);
     }
@@ -86,10 +108,11 @@ public static class BrandUserStore
     public static async Task<long> ResolvePrivateDestinationAsync(DbSession session, BrandContext brand, Guid membershipId, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(brand);
-        long destination = await session.QuerySingleAsync(new DbStatement("""
-            SELECT COALESCE((SELECT u.telegram_id FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id
-                WHERE u.id=$1 AND u.brand_id=$2 AND b.bot_id=$3 AND b.active AND u.blocked_at IS NULL AND u.banned_at IS NULL),0)
-            """, DbValue.Uuid(membershipId), DbValue.Uuid(brand.BrandId), DbValue.Bigint(brand.BotId)), row => row.GetInt64(0), ct);
+        long destination = await session.RunEfStepAsync(false, async (data, token) => await (
+            from member in data.Data.Set<Entities.User>()
+            join owner in data.Data.Set<Entities.Brand>() on member.BrandId equals owner.Id
+            where member.Id == membershipId && owner.Id == brand.BrandId && owner.BotId == brand.BotId && owner.Active && member.BlockedAt == null && member.BannedAt == null
+            select member.TelegramId).SingleOrDefaultAsync(token), ct);
         if (destination <= 0) Reject(session);
         return destination;
     }
@@ -97,18 +120,18 @@ public static class BrandUserStore
     private static Task<BrandUser?> ReadAsync(DbSession session, BrandContext brand, long actorId, Guid? membershipId, CancellationToken ct)
     {
         RequireIdentity(brand, actorId);
-        return session.QuerySingleAsync(new DbStatement("""
-            SELECT u.id,u.language,u.blocked_at IS NOT NULL,u.banned_at IS NOT NULL,u.marketing_opt_out_at IS NOT NULL,
-                u.flow_state,u.flow_revision,u.flow_order_id,u.flow_product_id,u.flow_anchor_message_id,u.flow_expires_at
-            FROM (SELECT 1) seed LEFT JOIN (SELECT u.* FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id
-                WHERE u.brand_id=$1 AND u.telegram_id=$2 AND ($3 IS NULL OR u.id=$3) AND b.bot_id=$4 AND b.active) u ON true
-            """, DbValue.Uuid(brand.BrandId), DbValue.Bigint(actorId), NullableGuid(membershipId), DbValue.Bigint(brand.BotId)),
-            row => row.IsDBNull(0) ? null : new BrandUser(row.GetGuid(0), row.GetString(1), row.GetBoolean(2), row.GetBoolean(3), row.GetBoolean(4),
-                new CustomerFlow(ParseState(row.GetString(5)), row.GetInt64(6), row.IsDBNull(7) ? null : row.GetGuid(7),
-                    row.IsDBNull(8) ? null : row.GetGuid(8), row.IsDBNull(9) ? null : row.GetInt64(9), row.IsDBNull(10) ? null : row.GetUtc(10))), ct);
+        return session.RunEfStepAsync(false, async (data, token) =>
+        {
+            var member = await (from value in data.Data.Set<Entities.User>()
+                                join owner in data.Data.Set<Entities.Brand>() on value.BrandId equals owner.Id
+                                where owner.Id == brand.BrandId && owner.BotId == brand.BotId && owner.Active && value.TelegramId == actorId && (membershipId == null || value.Id == membershipId)
+                                select value).AsNoTracking().SingleOrDefaultAsync(token);
+            return member is null ? null : Project(member);
+        }, ct);
     }
+    internal static BrandUser Project(Entities.User member) => new(member.Id, member.Language, member.BlockedAt is not null, member.BannedAt is not null,
+        member.MarketingOptOutAt is not null, new CustomerFlow(ParseState(member.FlowState ?? "idle"), member.FlowRevision, member.FlowOrderId, member.FlowProductId, member.FlowAnchorMessageId, member.FlowExpiresAt));
 
-    private static DbValue NullableGuid(Guid? value) => value is Guid id ? DbValue.Uuid(id) : DbValue.Null(NpgsqlDbType.Uuid);
     private static void RequireIdentity(BrandContext brand, long actorId)
     {
         ArgumentNullException.ThrowIfNull(brand);

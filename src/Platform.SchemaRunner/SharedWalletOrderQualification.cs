@@ -33,7 +33,7 @@ internal static class SharedWalletOrderQualification
             parts.Add((job, work, WalletCopyQualification.SourceBrand(database, digest)));
         }
         if (!parts.Select(p => p.Brand).SequenceEqual(brands, StringComparer.Ordinal) || parts.Select(p => p.Directory).Distinct(StringComparer.Ordinal).Count() != 3) throw new MigrationRejectedException();
-        await using var target = new NpgsqlSlimDataSourceBuilder(connection).Build();
+        await using var target = new NpgsqlSlimDataSourceBuilder(connection).EnableArrays().Build();
         await using (var check = target.CreateCommand("SELECT current_database()=$1 AND current_user='shop_test_runner' AND current_setting('server_version_num')::integer=180006 AND pg_get_userbyid(datdba)='shop_test_runner' AND shobj_description(oid,'pg_database')=$2 AND to_regclass('shop.brands') IS NULL FROM pg_database WHERE datname=current_database()"))
         {
             check.Parameters.AddWithValue(identity.Database); check.Parameters.AddWithValue(WalletOrderCopyQualification.SharedMarker);

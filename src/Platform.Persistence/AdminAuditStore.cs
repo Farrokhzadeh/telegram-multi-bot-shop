@@ -90,36 +90,51 @@ public static class AdminAuditStore
         await AdminSessionStore.RequireActiveAsync(session, actor, command.Entity == AuditEntity.Admin ? command.EntityId : null, cancellationToken);
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)",
             DbValue.Bigint(System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(command.Id.ToByteArray(bigEndian: true)))), cancellationToken);
-        return await session.RunEfStepAsync(true, async (data, ct) =>
+        return await session.RunEfStepAsync(true, (data, ct) => AppendEfAsync(data, actor, command, ct), cancellationToken);
+    }
+    internal static async Task<bool> AppendEfAsync(EfSession data, AuthenticatedAdmin actor, AuditCommand command, CancellationToken ct)
+    {
+        await AdminSessionStore.RequireActiveAsync(data, actor, command.Entity == AuditEntity.Admin ? command.EntityId : null, ct);
+        byte[] fingerprint = command.Fingerprint(actor.AdminId);
+        var previous = await data.Data.Set<Entities.AuditEvent>().AsNoTracking().SingleOrDefaultAsync(value => value.Id == command.Id, ct);
+        if (previous is not null)
         {
-            await AdminSessionStore.RequireActiveAsync(data, actor, command.Entity == AuditEntity.Admin ? command.EntityId : null, ct);
-            byte[] fingerprint = command.Fingerprint(actor.AdminId);
-            var previous = await data.Data.Set<Entities.AuditEvent>().AsNoTracking().SingleOrDefaultAsync(value => value.Id == command.Id, ct);
-            if (previous is not null)
+            if (previous.CommandSha256 is null || !CryptographicOperations.FixedTimeEquals(fingerprint, previous.CommandSha256))
             {
-                if (previous.CommandSha256 is null || !CryptographicOperations.FixedTimeEquals(fingerprint, previous.CommandSha256))
-                    throw new FormatException("Audit command identity conflict.");
-                return false;
+                if (data.Data is SqliteAkantiDbContext) throw new UnauthorizedAccessException("Administrator command identity conflict.");
+                throw new FormatException("Audit command identity conflict.");
             }
-            data.Data.Add(new Entities.AuditEvent
-            {
-                Id = command.Id,
-                ActorKind = "admin",
-                ActorAdminId = actor.AdminId,
-                BrandId = command.BrandId,
-                Action = ActionCode(command.Action),
-                EntityKind = EntityCode(command.Entity),
-                EntityId = command.EntityId,
-                Reason = ReasonCode(command.Reason),
-                PreviousRevision = command.PreviousRevision,
-                NewRevision = command.NewRevision,
-                CorrelationId = command.CorrelationId,
-                CommandSha256 = fingerprint,
-                BeforeChannelEnforcement = command.BeforeChannelEnforcement,
-                AfterChannelEnforcement = command.AfterChannelEnforcement
-            });
-            return true;
-        }, cancellationToken);
+            return false;
+        }
+        data.Data.Add(new Entities.AuditEvent
+        {
+            Id = command.Id,
+            ActorKind = "admin",
+            ActorAdminId = actor.AdminId,
+            BrandId = command.BrandId,
+            Action = ActionCode(command.Action),
+            EntityKind = EntityCode(command.Entity),
+            EntityId = command.EntityId,
+            Reason = ReasonCode(command.Reason),
+            PreviousRevision = command.PreviousRevision,
+            NewRevision = command.NewRevision,
+            CorrelationId = command.CorrelationId,
+            CommandSha256 = fingerprint,
+            BeforeChannelEnforcement = command.BeforeChannelEnforcement,
+            AfterChannelEnforcement = command.AfterChannelEnforcement
+        });
+        return true;
+    }
+    internal static Task<bool> AppendSqliteAsync(Microsoft.Data.Sqlite.SqliteTransaction transaction, AuthenticatedAdmin actor, AuditCommand command, CancellationToken ct) =>
+        SqliteSessionFactory.StepEfAsync(transaction, true, (data, token) => AppendEfAsync(data, actor, command, token), ct);
+    internal static async Task<bool> ReplayEfAsync(EfSession data, AuthenticatedAdmin actor, AuditCommand command, CancellationToken ct)
+    {
+        await AdminSessionStore.RequireActiveAsync(data, actor, null, ct);
+        var previous = await data.Data.Set<Entities.AuditEvent>().AsNoTracking().SingleOrDefaultAsync(value => value.Id == command.Id, ct);
+        if (previous is null) return false;
+        if (previous.CommandSha256 is null || !CryptographicOperations.FixedTimeEquals(previous.CommandSha256, command.Fingerprint(actor.AdminId)))
+            throw new UnauthorizedAccessException("Administrator command identity conflict.");
+        return true;
     }
 
     internal static string ActionCode(AuditAction action) => action switch

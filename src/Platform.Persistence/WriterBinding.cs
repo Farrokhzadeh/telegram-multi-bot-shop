@@ -87,10 +87,7 @@ public sealed partial class DbSession
         if (writer is null) return;
         if (!writer.Shared) DenyWriter();
         if (writerAdmitted) return;
-        var active = await QueryManyAsync(new DbStatement("SELECT id,bot_id,active,policy_version FROM shop.brands ORDER BY id FOR NO KEY UPDATE"), r => (Id: r.GetGuid(0), Bot: r.GetInt64(1), Active: r.GetBoolean(2), Revision: r.GetInt64(3)), 1000, ct);
-        var enabled = active.Where(v => v.Active).ToArray();
-        if (enabled.Length != writer.Entries.Length || writer.Entries.Any(v => !enabled.Any(b => b.Id == v.Context.BrandId && b.Bot == v.Context.BotId && b.Revision == v.Revision))) DenyWriter();
-        writerAdmitted = true;
+        await RunEfStepAsync(false, async (data, token) => { await data.RequireSharedWritersAsync(token, true); return true; }, ct);
     }
     public void RequireOfflineImport() { if (writer is not null) DenyWriter(); }
     private void RequireWriterCommit()

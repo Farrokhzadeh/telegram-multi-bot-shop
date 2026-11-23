@@ -27,7 +27,7 @@ public static class ActivityMaintenanceQualification
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is required."))
             { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, Options = "-c role=" + role, IncludeErrorDetail = false, Pooling = false };
             SchemaManifest.ForQualification(options.ConnectionString).Validate();
-            await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+            await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
             await using (var identity = data.CreateCommand("SELECT current_user::text")) Require((string)(await identity.ExecuteScalarAsync(ct))! == role, "actual restricted database identity");
             var cleanup = await new BotActivityRetentionStore(new(data)).CleanAsync(1, ct);
             Require(cleanup.Deleted == 1 && cleanup.Backlog.Expired == 0, "restricted role cleans only independently proven expired activity");

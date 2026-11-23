@@ -44,12 +44,18 @@ public sealed partial class SqliteSessionFactory
         }
         ct.ThrowIfCancellationRequested();
         await using var transaction = connection.BeginTransaction(deferred: !write);
-        var result = await operation(connection, transaction, ct);
-        ct.ThrowIfCancellationRequested();
-        if (write) await SqliteIntegrity.ValidateAsync(connection, transaction, ct);
-        ct.ThrowIfCancellationRequested();
-        await transaction.CommitAsync(CancellationToken.None);
-        return result;
+        efTransactions.Add(transaction, new EfTransaction(write, timeoutSeconds));
+        try
+        {
+            var result = await operation(connection, transaction, ct);
+            ct.ThrowIfCancellationRequested();
+            await ValidateEfAsync(transaction, ct);
+            if (write) await SqliteIntegrity.ValidateAsync(connection, transaction, ct);
+            ct.ThrowIfCancellationRequested();
+            await transaction.CommitAsync(CancellationToken.None);
+            return result;
+        }
+        finally { efTransactions.Remove(transaction); }
     }
 
     internal Task<List<AdminProduct>> ListAdminProductsAsync(Guid? after, int count, CancellationToken ct) =>

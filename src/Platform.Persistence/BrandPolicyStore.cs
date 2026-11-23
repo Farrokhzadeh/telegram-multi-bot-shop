@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -34,23 +35,22 @@ public static class BrandPolicyStore
         bool staff = await AdminBindingStore.IsVerifiedStaffAsync(session, verifiedActorId, ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, null, ct);
         if (member.Blocked || member.Banned) Deny(session);
-        bool reachable = await session.QuerySingleAsync(new DbStatement("""
-            WITH member AS (SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 AND telegram_id=$3
-                AND blocked_at IS NULL AND banned_at IS NULL FOR SHARE)
-            SELECT EXISTS(SELECT 1 FROM member)
-            """, DbValue.Uuid(member.Id), DbValue.Uuid(context.BrandId), DbValue.Bigint(verifiedActorId)), row => row.GetBoolean(0), ct);
-        if (!reachable) Deny(session);
-        var policy = await session.QuerySingleAsync(new DbStatement("""
-            SELECT b.policy_version,b.require_channel_join,b.public_name,b.logo_asset_ref,
-                (SELECT a.public_contact_handle FROM shop.admins a WHERE a.id=b.customer_support_admin_id AND a.disabled_at IS NULL
-                    AND a.telegram_user_id IS NOT NULL AND a.telegram_verified_at IS NOT NULL AND a.telegram_verification_audit_id IS NOT NULL),b.default_language
-            FROM shop.brands b WHERE b.id=$1 AND b.bot_id=$2 AND b.active FOR SHARE OF b
-            """, DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), row =>
-                (Revision: row.GetInt64(0), Enforce: row.GetBoolean(1), Name: row.GetString(2),
-                    Logo: row.IsDBNull(3) ? null : row.GetString(3), Contact: row.IsDBNull(4) ? null : row.GetString(4), DefaultLanguage: row.GetString(5)), ct);
-        IReadOnlyList<RequiredChannel> channels = await session.QueryManyAsync(new DbStatement("""
-            SELECT chat_id,title,invite_link FROM shop.brand_channels WHERE brand_id=$1 AND active AND required ORDER BY chat_id FOR SHARE
-            """, DbValue.Uuid(context.BrandId)), row => new RequiredChannel(row.GetInt64(0), row.IsDBNull(1) ? null : row.GetString(1), row.IsDBNull(2) ? null : row.GetString(2)), 1000, ct);
+        var policy = await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            await data.LockMemberAsync(context.BrandId, verifiedActorId, token);
+            if (!await data.Data.Set<Entities.User>().AnyAsync(value => value.Id == member.Id && value.BrandId == context.BrandId && value.TelegramId == verifiedActorId && value.BlockedAt == null && value.BannedAt == null, token))
+                data.RejectScope("Brand membership is unavailable.");
+            await data.LockBrandAsync(context.BrandId, token);
+            var brand = await data.Data.Set<Entities.Brand>().AsNoTracking().SingleAsync(value => value.Id == context.BrandId && value.BotId == context.BotId && value.Active, token);
+            string? contact = await data.Data.Set<Entities.Admin>().Where(value => value.Id == brand.CustomerSupportAdminId && value.DisabledAt == null && value.TelegramUserId != null &&
+                value.TelegramVerifiedAt != null && value.TelegramVerificationAuditId != null).Select(value => value.PublicContactHandle).SingleOrDefaultAsync(token);
+            await data.LockChannelsAsync(context.BrandId, token);
+            var channels = await data.Data.Set<Entities.BrandChannel>().Where(value => value.BrandId == context.BrandId && value.Active && value.Required).OrderBy(value => value.ChatId)
+                .Select(value => new RequiredChannel(value.ChatId, value.Title, value.InviteLink)).Take(1001).ToArrayAsync(token);
+            if (channels.Length > 1000) throw new InvalidOperationException("Required channel limit exceeded.");
+            return (Revision: brand.PolicyVersion, Enforce: brand.RequireChannelJoin, Name: brand.PublicName, Logo: brand.LogoAssetRef, Contact: contact, DefaultLanguage: brand.DefaultLanguage, Channels: channels);
+        }, ct);
+        IReadOnlyList<RequiredChannel> channels = policy.Channels;
         string? contact = policy.Contact;
         if (contact is not null && (contact.Length is < 5 or > 32 || !contact.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))) contact = null;
         string language = member.Language;
@@ -78,11 +78,17 @@ public static class BrandPolicyStore
             AuditReason.ConfigurationChange, correlationId, SHA256.HashData("channel-enforcement-v1"u8), expectedRevision, expectedRevision + 1, previous, enabled);
         if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return expectedRevision + 1;
         await session.AdmitBrandWriterAsync(brandId, ct);
-        int changed = await session.ExecuteAsync(new DbStatement("""
-            UPDATE shop.brands SET require_channel_join=$1,policy_version=policy_version+1,updated_at=clock_timestamp()
-            WHERE id=$2 AND policy_version=$3 AND require_channel_join=$4
-            """, DbValue.Boolean(enabled), DbValue.Uuid(brandId), DbValue.Bigint(expectedRevision), DbValue.Boolean(previous)), ct);
-        if (changed != 1) Deny(session);
+        await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            await data.RequireAdminAsync(actor, null, token);
+            await data.LockBrandAsync(brandId, token);
+            var brand = await data.Data.Set<Entities.Brand>().SingleOrDefaultAsync(value => value.Id == brandId && value.PolicyVersion == expectedRevision && value.RequireChannelJoin == previous, token);
+            if (brand is null) data.RejectScope("Brand policy is unavailable or changed.");
+            brand.RequireChannelJoin = enabled;
+            brand.PolicyVersion++;
+            brand.UpdatedAt = await data.BrandClockAsync(brandId, token);
+            return true;
+        }, ct);
         return expectedRevision + 1;
     }
 

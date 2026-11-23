@@ -194,36 +194,10 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
         }, ct);
     }
 
-    private static async Task<bool> AuditReplayAsync(SqliteTransaction tx, AuthenticatedAdmin actor,
-        AuditCommand audit, CancellationToken ct)
+    private static Task<bool> AuditReplayAsync(SqliteTransaction tx, AuthenticatedAdmin actor, AuditCommand audit, CancellationToken ct) =>
+        SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => AdminAuditStore.ReplayEfAsync(data, actor, audit, token), ct);
+    private static async Task WriteAuditAsync(SqliteTransaction tx, AuthenticatedAdmin actor, AuditCommand audit, CancellationToken ct)
     {
-        await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, ct);
-        using var query = SqliteWallet.Command(tx, """
-            SELECT command_sha256 FROM audit_events WHERE id=$command
-            """, ("$command", audit.Id));
-        object? value = await query.ExecuteScalarAsync(ct);
-        if (value is null) return false;
-        if (value is not byte[] fingerprint ||
-            !CryptographicOperations.FixedTimeEquals(fingerprint, audit.Fingerprint(actor.AdminId)))
-            throw new UnauthorizedAccessException("Supplier review command identity conflict.");
-        return true;
-    }
-
-    private static async Task WriteAuditAsync(SqliteTransaction tx, AuthenticatedAdmin actor,
-        AuditCommand audit, CancellationToken ct)
-    {
-        using var command = SqliteWallet.Command(tx, """
-            INSERT INTO audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,
-                reason,previous_revision,new_revision,correlation_id,command_sha256)
-            VALUES ($id,'admin',$actor,$brand,$action,$entity,$entityId,$reason,$previous,$next,$correlation,$hash)
-            ON CONFLICT(id) DO NOTHING
-            """, ("$id", audit.Id), ("$actor", actor.AdminId), ("$brand", audit.BrandId),
-            ("$action", AdminAuditStore.ActionCode(audit.Action)),
-            ("$entity", AdminAuditStore.EntityCode(audit.Entity)), ("$entityId", audit.EntityId),
-            ("$reason", AdminAuditStore.ReasonCode(audit.Reason)),
-            ("$previous", audit.PreviousRevision), ("$next", audit.NewRevision),
-            ("$correlation", audit.CorrelationId), ("$hash", audit.Fingerprint(actor.AdminId)));
-        if (await command.ExecuteNonQueryAsync(ct) != 1)
-            throw new UnauthorizedAccessException("Supplier review audit identity conflict.");
+        if (!await AdminAuditStore.AppendSqliteAsync(tx, actor, audit, ct)) throw new UnauthorizedAccessException("Supplier review audit identity conflict.");
     }
 }

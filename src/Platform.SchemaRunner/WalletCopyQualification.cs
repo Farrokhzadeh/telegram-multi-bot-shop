@@ -60,7 +60,7 @@ internal static class WalletCopyQualification
                 new Guid(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + identity.Brand)).AsSpan(0, 16));
             var registry = new BotBrandRegistry([new("protected-wallet-copy", "qualification", brand, 101, batch, 1, true)]);
             if (!registry.TryResolveAuthenticated("protected-wallet-copy", new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "qualification")], "protected-wallet-copy")), out var context)) throw new MigrationRejectedException();
-            await using var sourceData = new NpgsqlSlimDataSourceBuilder(sourceConnection).Build(); await using var targetData = new NpgsqlSlimDataSourceBuilder(targetConnection).Build();
+            await using var sourceData = new NpgsqlSlimDataSourceBuilder(sourceConnection).Build(); await using var targetData = new NpgsqlSlimDataSourceBuilder(targetConnection).EnableArrays().Build();
             await using (var check = targetData.CreateCommand("SELECT current_database()=$1 AND current_user='shop_test_runner' AND current_setting('server_version_num')::integer=180006 AND pg_get_userbyid(datdba)='shop_test_runner' AND shobj_description(oid,'pg_database')=$2 FROM pg_database WHERE datname=current_database()"))
             { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue((staging ? "teleg-staging-wallet-qualification:" : "teleg-wallet-qualification:") + identity.Archive); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
             var retained = LegacyWalletRetention.OpenAll(retentionReference, SHA256.HashData(register), register, identity.Brand, identity.Archive);

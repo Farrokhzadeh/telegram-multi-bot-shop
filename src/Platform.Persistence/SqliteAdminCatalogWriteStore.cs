@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
 
@@ -23,42 +24,13 @@ public sealed class SqliteAdminCatalogWriteStore(SqliteSessionFactory sessions)
         var audit = new AuditCommand(command, AuditAction.Update, AuditEntity.Brand,
             context.BrandId, context.BrandId, AuditReason.ConfigurationChange, command,
             hash, revision, checked(revision + 1));
-        return sessions.RunAsync(true, async (_, tx, token) =>
+        return sessions.RunEfAsync(true, null, async (data, token) =>
         {
-            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            using (var scope = SqliteWallet.Command(tx,
-                "SELECT 1 FROM brands WHERE id=$brand AND bot_id=$bot",
-                ("$brand", context.BrandId), ("$bot", context.BotId)))
-                if (await scope.ExecuteScalarAsync(token) is null)
-                    throw new UnauthorizedAccessException("The brand policy scope is unavailable.");
-            if (!await AuditAsync(tx, actor, audit, token)) return checked(revision + 1);
-            if (value.Support)
-            {
-                using var contact = SqliteWallet.Command(tx, """
-                    SELECT 1 FROM admins WHERE id=$admin AND disabled_at IS NULL
-                        AND telegram_verified_at IS NOT NULL AND public_contact_handle IS NOT NULL
-                    """, ("$admin", value.ContactAdminId));
-                if (await contact.ExecuteScalarAsync(token) is null)
-                    throw new ArgumentException("A verified public support contact is required.");
-            }
-            using var save = SqliteWallet.Command(tx, """
-                UPDATE brands SET public_name=$name,default_language=$language,active=$active,
-                    allow_wallet=$wallet,allow_crypto=$crypto,allow_bank=$bank,
-                    allow_wallet_topup=$topup,zero_balance_topup=$zero,support_enabled=$support,
-                    customer_support_admin_id=$contact,fx_enabled=$fx,logo_asset_ref=$logo,
-                    policy_version=policy_version+1,updated_at=$now
-                WHERE id=$brand AND bot_id=$bot AND policy_version=$revision
-                """, ("$name", value.PublicName), ("$language", value.Language),
-                ("$active", value.Active), ("$wallet", value.Wallet),
-                ("$crypto", value.Crypto), ("$bank", value.Bank),
-                ("$topup", value.Topup), ("$zero", value.ZeroBalanceTopup),
-                ("$support", value.Support), ("$contact", value.ContactAdminId),
-                ("$fx", value.Fx), ("$logo", value.Logo),
-                ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$brand", context.BrandId),
-                ("$bot", context.BotId), ("$revision", revision));
-            if (await save.ExecuteNonQueryAsync(token) != 1)
-                throw new InvalidOperationException("Policy revision conflict.");
-            return checked(revision + 1);
+            await AdminSessionStore.RequireActiveAsync(data, actor, null, token);
+            if (!await data.Data.Set<Entities.Brand>().AnyAsync(brand => brand.Id == context.BrandId && brand.BotId == context.BotId, token))
+                throw new UnauthorizedAccessException("The brand policy scope is unavailable.");
+            if (!await AdminAuditStore.AppendEfAsync(data, actor, audit, token)) return checked(revision + 1);
+            return await BrandAdministrationQueries.WriteAsync(data, actor, context, value, revision, token);
         }, ct);
     }
 
@@ -177,37 +149,8 @@ public sealed class SqliteAdminCatalogWriteStore(SqliteSessionFactory sessions)
         }, ct);
     }
 
-    private static async Task<bool> AuditAsync(SqliteTransaction tx, AuthenticatedAdmin actor,
-        AuditCommand audit, CancellationToken ct)
-    {
-        await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, ct);
-        byte[] fingerprint = audit.Fingerprint(actor.AdminId);
-        using (var previous = SqliteWallet.Command(tx, """
-            SELECT command_sha256 FROM audit_events WHERE id=$command
-            """, ("$command", audit.Id)))
-        {
-            object? existing = await previous.ExecuteScalarAsync(ct);
-            if (existing is byte[] digest)
-            {
-                if (!CryptographicOperations.FixedTimeEquals(fingerprint, digest))
-                    throw new UnauthorizedAccessException("Administrator command identity conflict.");
-                return false;
-            }
-        }
-        using var insert = SqliteWallet.Command(tx, """
-            INSERT INTO audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,
-                entity_id,reason,previous_revision,new_revision,correlation_id,command_sha256)
-            VALUES ($id,'admin',$admin,$brand,$action,$entity,$target,'configuration_change',
-                $old,$new,$id,$hash)
-            """, ("$id", audit.Id), ("$admin", actor.AdminId),
-            ("$brand", audit.BrandId), ("$action", AdminAuditStore.ActionCode(audit.Action)),
-            ("$entity", AdminAuditStore.EntityCode(audit.Entity)), ("$target", audit.EntityId),
-            ("$old", audit.PreviousRevision), ("$new", audit.NewRevision),
-            ("$hash", fingerprint));
-        if (await insert.ExecuteNonQueryAsync(ct) != 1)
-            throw new InvalidOperationException("Administrator audit was not persisted.");
-        return true;
-    }
+    private static Task<bool> AuditAsync(SqliteTransaction tx, AuthenticatedAdmin actor, AuditCommand audit, CancellationToken ct) =>
+        AdminAuditStore.AppendSqliteAsync(tx, actor, audit, ct);
 
     private static void Label(string value, int maximum)
     {

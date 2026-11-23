@@ -20,7 +20,7 @@ public static class PreorderProcessQualification
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is missing."))
         { Database = Environment.GetEnvironmentVariable("SHOP_TEST_PREORDER_DATABASE") ?? throw new InvalidOperationException("Synthetic database is missing."), ApplicationName = Application, Pooling = false };
         _ = SchemaManifest.ForQualification(options.ConnectionString);
-        await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         await FoundationQualification.VerifySchemaAsync(data);
         using var secrets = SecretFiles.Load(root, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
         var sessions = new DbSessionFactory(data);

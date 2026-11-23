@@ -34,7 +34,7 @@ public sealed class PaymentSettlementTests
         }
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN"))
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, MaxPoolSize = 16, IncludeErrorDetail = false };
-        await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         var sessions = new DbSessionFactory(bounded);
         var results = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => new PaymentSettlementStore(sessions, f.Secrets, fixture.Catalog).SettleAsync(f.Context(0), payment, PaymentSettlementFixture.Lookup, Ct)));
         Assert.Single(results, r => r.Outcome == PaymentSettlementOutcome.Settled);

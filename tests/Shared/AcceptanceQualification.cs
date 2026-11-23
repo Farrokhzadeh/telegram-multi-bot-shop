@@ -64,7 +64,7 @@ public static class AcceptanceQualification
             await evidence.CaptureAsync(f.Context(0), notice, (_, _) => Task.FromResult("protected:synthetic/acceptance"), ct);
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is missing."))
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, MaxPoolSize = 16, IncludeErrorDetail = false };
-        await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         var settled = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => new PaymentSettlementStore(new(bounded), f.Secrets, payments.Catalog).SettleAsync(f.Context(0), payment, PaymentSettlementFixture.Lookup, ct)));
         Require(settled.Count(r => r.Outcome == PaymentSettlementOutcome.Settled) == 1 && settled.Count(r => r.Outcome == PaymentSettlementOutcome.Replayed) == 99, "hundred settlement replays");
         int postings = checked((int)await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='wallet_topup' AND signed_amount=10.25", ct));

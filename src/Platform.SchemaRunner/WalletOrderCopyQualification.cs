@@ -22,7 +22,7 @@ internal static class WalletOrderCopyQualification
         string retentionReference = staging ? StagingWalletSnapshot.RetentionReference : "protected:wallet-copy/original-native-history";
         var options = new NpgsqlConnectionStringBuilder(connection); var destination = SchemaManifest.ForQualification(connection);
         if (options.IncludeErrorDetail || options.LogParameters || options.Enlist || options.Multiplexing) throw new MigrationRejectedException();
-        await using var data = new NpgsqlSlimDataSourceBuilder(connection).Build();
+        await using var data = new NpgsqlSlimDataSourceBuilder(connection).EnableArrays().Build();
         await using (var check = data.CreateCommand("SELECT current_database()=$1 AND current_user='shop_test_runner' AND current_setting('server_version_num')::integer=180006 AND pg_get_userbyid(datdba)='shop_test_runner' AND shobj_description(oid,'pg_database')=$2 FROM pg_database WHERE datname=current_database()"))
         { check.Parameters.AddWithValue(destination.Database); check.Parameters.AddWithValue(marker); if (await check.ExecuteScalarAsync(ct) is not true) throw new MigrationRejectedException(); }
         var files = new LegacyArchiveFiles(directory, secrets);

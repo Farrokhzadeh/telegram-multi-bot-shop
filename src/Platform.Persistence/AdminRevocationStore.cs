@@ -16,8 +16,6 @@ public static class AdminRevocationStore
             correlationId, AdminBindingStore.Metadata(disableAccount ? 1 : 0, revokeTelegram ? 1 : 0), expectedVersion, expectedVersion + 1);
         if (!await AdminAuditStore.AppendAsync(session, actor, command, cancellationToken)) return false;
         await session.RunEfStepAsync(true, (data, ct) => RevokeEfAsync(data, actor, targetAdminId, expectedVersion, disableAccount, revokeTelegram, ct), cancellationToken);
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.admin_sessions SET revoked_at=clock_timestamp() WHERE admin_id=$1 AND revoked_at IS NULL",
-            DbValue.Uuid(targetAdminId)), cancellationToken);
         return true;
     }
     internal static async Task<bool> RevokeEfAsync(EfSession data, AuthenticatedAdmin actor, Guid targetAdminId,
@@ -56,6 +54,8 @@ public static class AdminRevocationStore
             entry.Property(value => value.TelegramVerificationAuditId).IsModified = true;
             entry.Property(value => value.PublicContactHandle).IsModified = true;
         }
+        await data.FlushAsync(ct, false);
+        await data.RevokeSessionsAsync(targetAdminId, ct);
         return true;
     }
 }

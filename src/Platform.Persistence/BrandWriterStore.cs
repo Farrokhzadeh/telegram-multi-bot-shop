@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -12,12 +13,7 @@ public sealed class BrandWriterStore(DbSessionFactory sessions)
         session.ValidateWriter(context, expectedRevision);
         ArgumentNullException.ThrowIfNull(context);
         if (expectedRevision < 0) throw new ArgumentOutOfRangeException(nameof(expectedRevision));
-        bool allowed = await session.QuerySingleAsync(new DbStatement("""
-            WITH locked AS MATERIALIZED (SELECT active,policy_version FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR NO KEY UPDATE)
-            SELECT COALESCE((SELECT active AND policy_version=$3 FROM locked),false)
-            """, DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(expectedRevision)), r => r.GetBoolean(0), ct);
-        if (!allowed) Deny(session);
-        session.MarkWriter(context, expectedRevision);
+        await session.RunEfStepAsync(false, async (data, token) => { await data.RequireRegisteredRevisionAsync(context, expectedRevision, token); return true; }, ct);
     }
 
     public static async Task RequireCustomerAsync(DbSession session, BrandContext context, long actor, long expectedRevision, Guid? product = null, CancellationToken ct = default)
@@ -25,9 +21,17 @@ public sealed class BrandWriterStore(DbSessionFactory sessions)
         try
         {
             ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
-            await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(actor)), r => r.GetInt64(0), ct);
-            _ = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
-            if (product is Guid id) await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(id)), r => r.GetInt64(0), ct);
+            await session.RunEfStepAsync(false, async (data, token) =>
+            {
+                await data.LockMemberAsync(context.BrandId, actor, token);
+                if (!await (from member in data.Data.Set<Entities.User>()
+                            join owner in data.Data.Set<Entities.Brand>() on member.BrandId equals owner.Id
+                            where owner.Id == context.BrandId && owner.BotId == context.BotId && owner.Active && member.TelegramId == actor
+                            select member.Id).AnyAsync(token))
+                    data.RejectScope("Customer membership is unavailable.");
+                if (product is Guid id) await data.LockProductAsync(id, token);
+                return true;
+            }, ct);
             await RequireAsync(session, context, expectedRevision, ct);
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
@@ -37,9 +41,8 @@ public sealed class BrandWriterStore(DbSessionFactory sessions)
         ArgumentNullException.ThrowIfNull(context);
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var state = await session.QuerySingleAsync<BrandWriterState?>(new DbStatement("""
-            SELECT b.id,b.active,b.policy_version FROM (SELECT 1) seed LEFT JOIN shop.brands b ON b.id=$1 AND b.bot_id=$2
-            """, DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.IsDBNull(0) ? null : new(r.GetBoolean(1), r.GetInt64(2)), ct);
+        var state = await session.RunEfStepAsync(false, async (data, token) => await data.Data.Set<Entities.Brand>()
+            .Where(value => value.Id == context.BrandId && value.BotId == context.BotId).Select(value => new BrandWriterState(value.Active, value.PolicyVersion)).SingleOrDefaultAsync(token), ct);
         if (state is null) Deny(session);
         return state!;
     }
@@ -56,11 +59,17 @@ public sealed class BrandWriterStore(DbSessionFactory sessions)
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return new(active, expectedRevision + 1);
-            int changed = await session.ExecuteAsync(new DbStatement("""
-                UPDATE shop.brands SET active=$1,policy_version=policy_version+1,updated_at=clock_timestamp()
-                WHERE id=$2 AND bot_id=$3 AND policy_version=$4 AND active<>$1
-                """, DbValue.Boolean(active), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(expectedRevision)), ct);
-            if (changed != 1) Deny(session);
+            await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireAdminAsync(actor, null, token);
+                await data.LockBrandAsync(context.BrandId, token);
+                var brand = await data.Data.Set<Entities.Brand>().SingleOrDefaultAsync(value => value.Id == context.BrandId && value.BotId == context.BotId && value.PolicyVersion == expectedRevision && value.Active != active, token);
+                if (brand is null) data.RejectScope("Brand writer is unavailable or changed.");
+                brand!.Active = active;
+                brand.PolicyVersion++;
+                brand.UpdatedAt = await data.BrandClockAsync(context.BrandId, token);
+                return true;
+            }, ct);
             await session.CommitAsync(ct);
             return new(active, expectedRevision + 1);
         }

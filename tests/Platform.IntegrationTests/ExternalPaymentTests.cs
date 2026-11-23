@@ -95,7 +95,7 @@ public sealed class ExternalPaymentTests
         var origin = await Order(f);
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is missing."))
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, MaxPoolSize = 16 };
-        await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         var sessions = new DbSessionFactory(bounded);
         var archive = new Archive();
         var tasks = Enumerable.Range(0, 100).Select(async _ =>

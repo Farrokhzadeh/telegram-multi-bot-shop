@@ -44,22 +44,10 @@ public sealed class SqliteCouponAdministrationStore(SqliteSessionFactory session
         }
         var audit = new AuditCommand(command, AuditAction.CouponEdit, AuditEntity.Discount, coupon,
             context.BrandId, reason, command, hash, revision, checked(revision + 1));
-        byte[] commitment = audit.Fingerprint(actor.AdminId);
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            using (var prior = SqliteWallet.Command(tx, """
-                SELECT command_sha256 FROM audit_events WHERE id=$command
-                """, ("$command", command)))
-            {
-                object? previous = await prior.ExecuteScalarAsync(token);
-                if (previous is byte[] earlier)
-                {
-                    if (!CryptographicOperations.FixedTimeEquals(earlier, commitment))
-                        throw new UnauthorizedAccessException("Administrator coupon command identity conflict.");
-                    return checked(revision + 1);
-                }
-            }
+            if (await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => AdminAuditStore.ReplayEfAsync(data, actor, audit, cancel), token)) return checked(revision + 1);
             if (edit.MemberId is Guid member)
             {
                 using var scope = SqliteWallet.Command(tx, """
@@ -90,17 +78,7 @@ public sealed class SqliteCouponAdministrationStore(SqliteSessionFactory session
             string? starts = edit.StartsAt is DateTime startAt ? SqliteSchema.UtcText(startAt) : null;
             string? ends = edit.EndsAt is DateTime endAt ? SqliteSchema.UtcText(endAt) : null;
             string percent = ExactDecimal.Format(edit.Percent);
-            using (var eventWrite = SqliteWallet.Command(tx, """
-                INSERT INTO audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,
-                    reason,previous_revision,new_revision,correlation_id,command_sha256)
-                VALUES ($id,'admin',$admin,$brand,'coupon_edit','discount',$coupon,
-                    $reason,$previous,$next,$id,$commitment)
-                """, ("$id", command), ("$admin", actor.AdminId),
-                ("$brand", context.BrandId), ("$coupon", coupon),
-                ("$reason", AdminAuditStore.ReasonCode(reason)), ("$previous", revision),
-                ("$next", checked(revision + 1)), ("$commitment", commitment)))
-                if (await eventWrite.ExecuteNonQueryAsync(token) != 1)
-                    throw new InvalidOperationException("Coupon audit write was not persisted.");
+            if (!await AdminAuditStore.AppendSqliteAsync(tx, actor, audit, token)) throw new InvalidOperationException("Coupon audit write was not persisted.");
             using (var change = SqliteWallet.Command(tx, """
                 UPDATE discounts SET percent_off=$percent,max_total_uses=$maximum,
                     max_uses_per_user=$per_user,usage_adjustment_units=$adjustment,starts_at=$starts,

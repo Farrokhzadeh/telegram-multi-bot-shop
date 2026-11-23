@@ -132,7 +132,7 @@ public sealed class ManualDepositTests
             Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database,
             Options = "-c search_path=receipt_probe,pg_catalog,public"
         };
-        await using var controlled = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        await using var controlled = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         var sessions = new DbSessionFactory(controlled);
         var manual = new ManualDepositService(sessions, new PaymentSettlementStore(sessions, f.Secrets, fixture.Catalog));
         Task<ManualDepositOutcome> Submit() => manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), order.Payment, "protected:synthetic/expiry-receipt", Ct);

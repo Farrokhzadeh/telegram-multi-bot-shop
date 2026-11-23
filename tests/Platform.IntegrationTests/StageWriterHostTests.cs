@@ -111,7 +111,7 @@ public sealed class StageWriterHostTests
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN"));
             Assert.Equal("shop_test_control", options.Database); Assert.Equal("shop_test_runner", options.Username);
             Assert.True(state.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) && state.Database.Length == 51 && Guid.TryParseExact(state.Database[19..], "N", out _));
-            await using var admin = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
+            await using var admin = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
             await using var drop = admin.CreateCommand("DROP DATABASE \"" + state.Database + "\" WITH (FORCE)"); await drop.ExecuteNonQueryAsync();
         }
         if (Directory.Exists(Root))

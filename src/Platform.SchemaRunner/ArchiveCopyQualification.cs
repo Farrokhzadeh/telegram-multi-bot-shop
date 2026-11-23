@@ -72,7 +72,7 @@ internal static class ArchiveCopyQualification
                 return ValueTask.CompletedTask;
             }
             await SourceCopyInspection.RunAsync(connection, plan, Path.Combine(directory, "source-start-" + Guid.NewGuid().ToString("N") + ".json"), ct, visit: Collect);
-            var options = new NpgsqlConnectionStringBuilder(connection); await using var data = new NpgsqlSlimDataSourceBuilder(connection).Build();
+            var options = new NpgsqlConnectionStringBuilder(connection); await using var data = new NpgsqlSlimDataSourceBuilder(connection).EnableArrays().Build();
             var source = new LegacySourceReader(data, new(options.Host!, options.Port, options.Database!, options.Username!));
             var retained = LegacyWalletRetention.OpenAll(retentionReference, SHA256.HashData(register), register, brandName, archiveHash);
             var wallets = await source.PlanWalletsAsync(Convert.FromHexString(wallet.SourceSchemaDigest), wallet.Batch, brand, retained, observed, ct);

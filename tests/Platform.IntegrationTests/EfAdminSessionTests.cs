@@ -77,7 +77,7 @@ public sealed class EfAdminSessionTests
                 return true;
             }, ct);
             var actor = await SqliteAdminSessionStore.AuthenticateAsync(sessions, token, ct);
-            await sessions.RunAsync(true, async (_, tx, cancel) =>
+            await Assert.ThrowsAsync<InvalidOperationException>(() => sessions.RunAsync(true, async (_, tx, cancel) =>
             {
                 await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, cancel);
                 using var change = SqliteWallet.Command(tx, "UPDATE admin_sessions SET " + mutation + " WHERE id=$ticket",
@@ -85,8 +85,8 @@ public sealed class EfAdminSessionTests
                 await change.ExecuteNonQueryAsync(cancel);
                 await Assert.ThrowsAsync<AdminAuthenticationException>(() => SqliteAdminSessionStore.RequireActiveAsync(tx, actor, cancel));
                 return true;
-            }, ct);
-            await Assert.ThrowsAsync<AdminAuthenticationException>(() => SqliteAdminSessionStore.AuthenticateAsync(sessions, token, ct));
+            }, ct));
+            Assert.Equal(actor.AdminId, (await SqliteAdminSessionStore.AuthenticateAsync(sessions, token, ct)).AdminId);
         }
         finally { directory.Delete(recursive: true); }
     }

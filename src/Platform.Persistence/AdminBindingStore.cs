@@ -68,16 +68,21 @@ public static class AdminBindingStore
             if (!CryptographicOperations.FixedTimeEquals(nonceHash, proof.NonceHash) ||
                 !CryptographicOperations.FixedTimeEquals(initial, pending.Hash)) return false;
             if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context!, revision, cancellationToken);
-            int changed = await session.ExecuteAsync(new DbStatement("""
-                UPDATE shop.admins SET binding_challenge_hash=$2 WHERE id=$1 AND binding_expires_at>clock_timestamp()
-                    AND disabled_at IS NULL AND auth_version=$3 AND binding_challenge_hash=$4
-                """, DbValue.Uuid(adminId), DbValue.Binary(confirmed), DbValue.Bigint(pending.Version), DbValue.Binary(initial)), cancellationToken);
-            if (changed == 0) return false;
-            await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.audit_events(id,actor_kind,action,entity_kind,entity_id,reason,correlation_id)
-                VALUES ($1,'system','update','admin',$2,'telegram_private_proof',$3)
-                """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(adminId), DbValue.Uuid(Guid.NewGuid())), cancellationToken);
-            return true;
+            return await session.RunEfStepAsync(true, async (data, ct) =>
+            {
+                if (await data.ConfirmBindingAsync(adminId, pending.Version, initial, confirmed, ct) == 0) return false;
+                data.Data.Add(new Entities.AuditEvent
+                {
+                    Id = Guid.NewGuid(),
+                    ActorKind = "system",
+                    Action = "update",
+                    EntityKind = "admin",
+                    EntityId = adminId,
+                    Reason = "telegram_private_proof",
+                    CorrelationId = Guid.NewGuid()
+                });
+                return true;
+            }, cancellationToken);
         }
         finally
         {
@@ -140,19 +145,22 @@ public static class AdminBindingStore
     }
 
     public static Task<bool> IsVerifiedStaffAsync(DbSession session, long telegramUserId, CancellationToken cancellationToken = default) =>
-        session.QuerySingleAsync(new DbStatement("""
-            WITH staff AS (SELECT id FROM shop.admins WHERE telegram_user_id=$1 AND disabled_at IS NULL
-                AND telegram_verified_at IS NOT NULL AND telegram_verification_audit_id IS NOT NULL FOR SHARE)
-            SELECT EXISTS(SELECT 1 FROM staff)
-            """, DbValue.Bigint(telegramUserId)), row => row.GetBoolean(0), cancellationToken);
+        session.RunEfStepAsync(false, async (data, ct) =>
+        {
+            var staff = data.Data.Set<Entities.Admin>().Where(value => value.TelegramUserId == telegramUserId && value.DisabledAt == null &&
+                value.TelegramVerifiedAt != null && value.TelegramVerificationAuditId != null);
+            Guid[] ids = await staff.OrderBy(value => value.Id).Select(value => value.Id).Take(2).ToArrayAsync(ct);
+            foreach (Guid id in ids) await data.LockAdminAsync(id, ct);
+            return await staff.AnyAsync(ct);
+        }, cancellationToken);
 
     private static Task<Pending?> PendingAsync(DbSession session, Guid adminId, CancellationToken cancellationToken) =>
-        session.QuerySingleAsync<Pending?>(new DbStatement("""
-            WITH locked AS (SELECT id,auth_version,binding_candidate_telegram_id,binding_challenge_hash FROM shop.admins
-                WHERE id=$1 AND disabled_at IS NULL AND binding_expires_at>clock_timestamp() FOR UPDATE)
-            SELECT a.id,a.auth_version,a.binding_candidate_telegram_id,a.binding_challenge_hash
-            FROM (SELECT 1) singleton LEFT JOIN locked a ON true
-            """, DbValue.Uuid(adminId)), row => row.IsDBNull(0) ? null : new Pending(row.GetInt64(1), row.GetInt64(2), row.GetBinary(3)), cancellationToken);
+        session.RunEfStepAsync(false, async (data, ct) =>
+        {
+            await data.LockAdminAsync(adminId, ct);
+            return await data.Data.Set<Entities.Admin>().AsNoTracking().Where(value => value.Id == adminId && value.DisabledAt == null && value.BindingExpiresAt > Configurations.EfValues.UtcNow())
+                .Select(value => new Pending(value.AuthVersion, value.BindingCandidateTelegramId!.Value, value.BindingChallengeHash!)).SingleOrDefaultAsync(ct);
+        }, cancellationToken);
 
     internal static byte[] Metadata(long first, long second)
     {
