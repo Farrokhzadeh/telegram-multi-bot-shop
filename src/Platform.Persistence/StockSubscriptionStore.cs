@@ -1,4 +1,6 @@
 using Platform.Security;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Configurations;
 
 namespace Platform.Persistence;
 
@@ -11,18 +13,23 @@ public static class StockSubscriptionStore
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, membershipId, ct);
         if (member.Blocked || member.Banned || !observation.OutOfStock || observation.ProductId == Guid.Empty || observation.ProductRevision < 0 || observation.ListingRevision < 0) Deny(session);
         await session.AdmitCustomerWriterAsync(context, verifiedActorId, observation.ProductId, ct);
-        bool eligible = await session.QuerySingleAsync(new DbStatement("""
-            WITH listing AS (SELECT p.id FROM shop.products p JOIN shop.brand_products b ON b.product_id=p.id
-                WHERE p.id=$1 AND b.brand_id=$2 AND p.active AND b.visible AND p.revision=$3 AND b.revision=$4
-                    AND $5<=clock_timestamp() AND $5>=clock_timestamp()-INTERVAL '30 seconds' FOR SHARE OF p,b)
-            SELECT EXISTS(SELECT 1 FROM listing)
-            """, DbValue.Uuid(observation.ProductId), DbValue.Uuid(context.BrandId), DbValue.Bigint(observation.ProductRevision),
-            DbValue.Bigint(observation.ListingRevision), DbValue.Utc(observation.ObservedAt)), row => row.GetBoolean(0), ct);
-        if (!eligible) Deny(session);
-        Guid consent = await session.QuerySingleAsync(new DbStatement("""
-            INSERT INTO shop.product_stock_subscriptions(id,user_id,product_id) VALUES ($1,$2,$3)
-            ON CONFLICT (user_id,product_id) WHERE closed_at IS NULL DO UPDATE SET product_id=EXCLUDED.product_id RETURNING id
-            """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(member.Id), DbValue.Uuid(observation.ProductId)), row => row.GetGuid(0), ct);
+        _ = DbValue.Utc(observation.ObservedAt);
+        Guid consent = await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            await data.RequireMembershipAsync(context, verifiedActorId, false, false, token);
+            await data.LockListingAsync(context.BrandId, observation.ProductId, token, true);
+            bool eligible = await (from product in data.Data.Set<Entities.Product>()
+                                   join listing in data.Data.Set<Entities.BrandProduct>() on product.Id equals listing.ProductId
+                                   where product.Id == observation.ProductId && listing.BrandId == context.BrandId && product.Active && listing.Visible &&
+                                       product.Revision == observation.ProductRevision && listing.Revision == observation.ListingRevision && observation.ObservedAt <= EfValues.UtcNow() && observation.ObservedAt >= EfValues.UtcNow().AddSeconds(-30)
+                                   select product.Id).AnyAsync(token);
+            if (!eligible) data.RejectScope("Restock consent is unavailable.");
+            var existing = await data.Data.Set<Entities.ProductStockSubscription>().SingleOrDefaultAsync(value => value.UserId == member.Id && value.ProductId == observation.ProductId && value.ClosedAt == null, token);
+            if (existing is not null) return existing.Id;
+            var consent = new Entities.ProductStockSubscription { Id = Guid.NewGuid(), UserId = member.Id, ProductId = observation.ProductId };
+            data.Data.Add(consent);
+            return consent.Id;
+        }, ct);
         await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.EvaluateRestock, observation.ProductId), consent, DateTime.UtcNow, ct);
         return consent;
     }
@@ -33,26 +40,34 @@ public static class StockSubscriptionStore
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, membershipId, ct);
         if (member.Blocked || member.Banned) Deny(session);
         await session.AdmitCustomerWriterAsync(context, verifiedActorId, productId, ct);
-        var consent = await session.QuerySingleAsync(new DbStatement("""
-            WITH consent AS (SELECT id,triggered_at FROM shop.product_stock_subscriptions WHERE user_id=$1 AND product_id=$2 AND closed_at IS NULL FOR UPDATE)
-            SELECT c.id,c.triggered_at IS NOT NULL FROM (SELECT 1) seed LEFT JOIN consent c ON true
-            """, DbValue.Uuid(member.Id), DbValue.Uuid(productId)), row => row.IsDBNull(0) ? null : new Consent(row.GetGuid(0), row.GetBoolean(1)), ct);
-        if (consent is null) return null;
-        var deliveries = await session.QueryManyAsync(new DbStatement("SELECT id,status,sent_at IS NOT NULL OR telegram_message_id IS NOT NULL FROM shop.telegram_deliveries WHERE product_stock_subscription_id=$1 FOR UPDATE", DbValue.Uuid(consent.Id)),
-            row => (Id: row.GetGuid(0), Status: row.GetString(1), Sent: row.GetBoolean(2)), 1, ct);
-        if ((consent.Triggered && deliveries.Count == 0) || deliveries.Any(d => d.Sent || d.Status is "leased" or "uncertain" or "succeeded")) Deny(session);
-        foreach (var delivery in deliveries)
+        return await session.RunEfStepAsync(true, async (data, token) =>
         {
-            var jobs = await session.QueryManyAsync(new DbStatement("SELECT id,status FROM shop.jobs WHERE telegram_delivery_id=$1 ORDER BY id FOR UPDATE", DbValue.Uuid(delivery.Id)),
-                row => (Id: row.GetGuid(0), Status: row.GetString(1)), 1000, ct);
-            if (jobs.Any(j => j.Status is "leased" or "succeeded")) Deny(session);
-            foreach (var job in jobs)
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='cancelled',locked_by=NULL,lease_until=NULL,completed_at=COALESCE(completed_at,clock_timestamp()) WHERE id=$1 AND status IN ('pending','retry','failed')", DbValue.Uuid(job.Id)), ct);
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='cancelled' WHERE id=$1", DbValue.Uuid(delivery.Id)), ct);
-        }
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.product_stock_subscriptions SET cancelled_at=clock_timestamp(),closed_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(consent.Id)), ct);
-        return consent.Id;
+            await data.RequireMembershipAsync(context, verifiedActorId, false, false, token);
+            await data.LockSubscriptionAsync(member.Id, productId, token);
+            var consent = await data.Data.Set<Entities.ProductStockSubscription>().SingleOrDefaultAsync(value => value.UserId == member.Id && value.ProductId == productId && value.ClosedAt == null, token);
+            if (consent is null) return (Guid?)null;
+            await data.LockSubscriptionDeliveriesAsync(consent.Id, token);
+            var deliveries = await data.Data.Set<Entities.TelegramDelivery>().Where(value => value.ProductStockSubscriptionId == consent.Id).Take(2).ToArrayAsync(token);
+            if (deliveries.Length > 1 || (consent.TriggeredAt != null && deliveries.Length == 0) || deliveries.Any(value => value.SentAt != null || value.TelegramMessageId != null || value.Status is "leased" or "uncertain" or "succeeded"))
+                data.RejectScope("Restock consent is unavailable.");
+            DateTime now = await data.BrandClockAsync(context.BrandId, token);
+            foreach (var delivery in deliveries)
+            {
+                await data.LockDeliveryJobsAsync(delivery.Id, token);
+                var jobs = await data.Data.Set<Entities.Job>().Where(value => value.TelegramDeliveryId == delivery.Id).OrderBy(value => value.Id).Take(1001).ToArrayAsync(token);
+                if (jobs.Length > 1000 || jobs.Any(value => value.Status is "leased" or "succeeded")) data.RejectScope("Restock consent is unavailable.");
+                int count = 0;
+                foreach (var job in jobs)
+                {
+                    if (job.Status is not ("pending" or "retry" or "failed")) continue;
+                    job.Status = "cancelled"; job.LockedBy = null; job.LeaseUntil = null; job.CompletedAt ??= now;
+                    if (++count % 128 == 0) await data.FlushAsync(token, false);
+                }
+                delivery.Status = "cancelled";
+            }
+            consent.CancelledAt = now; consent.ClosedAt = now;
+            return (Guid?)consent.Id;
+        }, ct);
     }
     private static void Deny(DbSession session) { session.RejectApplication(); throw new UnauthorizedAccessException("Restock consent is unavailable."); }
-    private sealed record Consent(Guid Id, bool Triggered);
 }

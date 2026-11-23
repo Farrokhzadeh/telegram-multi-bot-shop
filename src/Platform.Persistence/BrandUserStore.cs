@@ -137,7 +137,7 @@ public static class BrandUserStore
         ArgumentNullException.ThrowIfNull(brand);
         if (actorId <= 0) throw new ArgumentOutOfRangeException(nameof(actorId));
     }
-    private static void RequireLanguage(string language)
+    internal static void RequireLanguage(string language)
     {
         if (string.IsNullOrEmpty(language) || language.Length > 35 || language[0] == '-' || language[^1] == '-' ||
             language.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-')) throw new ArgumentException("Invalid language code.");

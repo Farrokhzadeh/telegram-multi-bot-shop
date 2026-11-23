@@ -20,7 +20,7 @@ public sealed class SqliteAdminCatalogTests
             var brand = CheckoutFixture.ResolveContexts()[0];
             using var token = AdminToken.Create();
             Guid actorId = Guid.NewGuid(), sessionId = Guid.NewGuid();
-            var productIds = Enumerable.Range(0, 7).Select(_ => Guid.NewGuid()).OrderBy(id => id).ToArray();
+            Guid[] productIds = [Guid.Parse("00000000-0000-0000-0000-000000000001"), Guid.Parse("00000000-0000-0000-0000-000000000002"), Guid.Parse("7fffffff-ffff-ffff-ffff-ffffffffffff"), Guid.Parse("80000000-0000-0000-0000-000000000000"), Guid.Parse("80000000-0000-0000-0000-000000000001"), Guid.Parse("ffffffff-ffff-ffff-ffff-fffffffffffe"), Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff")];
             await sessions.RunAsync(true, async (_, tx, cancel) =>
             {
                 using var setup = SqliteWallet.Command(tx, """

@@ -26,54 +26,23 @@ public sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)
         sessions.RunEfAsync(false, null, (data, token) => BrandAdministrationQueries.ReadAsync(data, actor, context, token), ct);
 
     public Task<ExchangeRateMetadata> FxAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default) =>
-        sessions.RunAsync(false, async (_, tx, token) =>
-        {
-            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            using var query = SqliteWallet.Command(tx, """
-                SELECT current_fx,fx_source,fx_fetched_at,fx_error_code
-                FROM brands WHERE id=$brand AND bot_id=$bot
-                """, ("$brand", context.BrandId), ("$bot", context.BotId));
-            await using var row = await query.ExecuteReaderAsync(token);
-            if (!await row.ReadAsync(token)) throw new UnauthorizedAccessException();
-            return new ExchangeRateMetadata(row.IsDBNull(0) ? null : row.GetString(0),
-                row.IsDBNull(1) ? null : row.GetString(1),
-                row.IsDBNull(2) ? null : Utc(row.GetString(2)),
-                row.IsDBNull(3) ? null : row.GetString(3));
-        }, ct);
+        sessions.RunEfAsync(false, null, async (data, token) => { await AdminSessionStore.RequireActiveAsync(data, actor, null, token); return await CatalogAdministration.FxAsync(data, context, token); }, ct);
 
     public Task<AdminPage<AdminProduct>> ProductsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default) =>
-        sessions.RunAsync(false, async (connection, tx, token) =>
+        sessions.RunEfAsync(false, null, async (data, token) =>
         {
             AdminCommand.Page(limit);
-            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            var options = new DbContextOptionsBuilder<AdminProductQuery>().UseSqlite(connection).Options;
-            await using var catalog = new AdminProductQuery(options);
-            await catalog.Database.UseTransactionAsync(tx, token);
-            var products = await catalog.ListAsync(after, limit + 1, token);
-            return new AdminPage<AdminProduct>(products.Take(limit).ToArray(),
-                products.Count > limit ? products[limit - 1].Id : null);
+            await AdminSessionStore.RequireActiveAsync(data, actor, null, token);
+            var rows = await CatalogAdministration.ProductsAsync(data, after, limit + 1, token);
+            return new AdminPage<AdminProduct>(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
         }, ct);
 
     public Task<AdminPage<InventoryMetadata>> InventoryAsync(AuthenticatedAdmin actor, Guid product, Guid? after,
         int limit, CancellationToken ct = default) =>
-        sessions.RunAsync(false, async (_, tx, token) =>
+        sessions.RunEfAsync(false, null, async (data, token) =>
         {
             AdminCommand.Page(limit);
-            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            using var query = SqliteWallet.Command(tx, """
-                SELECT id,product_id,state,origin_kind,created_at
-                FROM inventory_items WHERE product_id=$product AND ($after IS NULL OR id>$after)
-                ORDER BY id LIMIT $limit
-                """, ("$product", product), ("$after", after), ("$limit", limit + 1));
-            var items = new List<InventoryMetadata>();
-            await using var row = await query.ExecuteReaderAsync(token);
-            while (await row.ReadAsync(token))
-                items.Add(new(row.GetGuid(0), row.GetGuid(1), row.GetString(2), row.GetString(3), Utc(row.GetString(4))));
-            return new AdminPage<InventoryMetadata>(items.Take(limit).ToArray(),
-                items.Count > limit ? items[limit - 1].Id : null);
+            await AdminSessionStore.RequireActiveAsync(data, actor, null, token);
+            return await CatalogAdministration.InventoryAsync(data, product, after, limit, token);
         }, ct);
-
-    private static DateTime Utc(string text) =>
-        DateTime.ParseExact(text, "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
 }

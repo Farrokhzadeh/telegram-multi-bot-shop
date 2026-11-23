@@ -52,6 +52,11 @@ public sealed class SqliteInventoryImportTests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 importer.ImportAsync(actor, product,
                     [new InventoryImportItem(Guid.NewGuid(), credential)], Guid.NewGuid(), ct));
+            Guid rejected = Guid.NewGuid();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => importer.ImportAsync(actor, product,
+                [new(rejected, "synthetic new content before duplicate"), new(Guid.NewGuid(), credential)], Guid.NewGuid(), ct));
+            var inventory = await new SqliteAdminCatalogStore(sessions).InventoryAsync(actor, product, null, 10, ct);
+            Assert.Equal(itemId, Assert.Single(inventory.Items).Id);
             await sessions.RunAsync(false, async (_, tx, cancel) =>
             {
                 using var verify = SqliteWallet.Command(tx, """

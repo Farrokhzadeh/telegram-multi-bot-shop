@@ -50,6 +50,16 @@ public sealed class AdminCatalogAndResolutionTests
             try { Assert.Equal(items[0].Credential, Encoding.UTF8.GetString(plain)); }
             finally { CryptographicOperations.ZeroMemory(plain); }
         }
+        Guid low = Guid.Parse("7fffffff-ffff-ffff-ffff-ffffffffffff"), high = Guid.Parse("80000000-0000-0000-0000-000000000000");
+        await store.ImportAsync(admin, f.Product, [new(low, "Synthetic lower boundary stock"), new(high, "Synthetic upper boundary stock")], Guid.NewGuid(), Ct);
+        Guid[] expected = new[] { item, low, high }.OrderBy(value => value).ToArray();
+        var pages = new List<Guid>();
+        Guid? cursor = null;
+        do { var page = await store.InventoryAsync(admin, f.Product, cursor, 1, Ct); pages.Add(Assert.Single(page.Items).Id); cursor = page.Next; } while (cursor is not null && pages.Count <= expected.Length);
+        Assert.Equal(expected, pages);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.ImportAsync(admin, f.Product,
+            [new(Guid.NewGuid(), "Synthetic new content before duplicate"), new(Guid.NewGuid(), items[0].Credential)], Guid.NewGuid(), Ct));
+        Assert.Equal(expected, (await store.InventoryAsync(admin, f.Product, null, 10, Ct)).Items.Select(value => value.Id));
         var policy = new BrandPolicyEdit("Public name", "fa", true, true, false, false, false, false, false, null, false, null);
         await store.PolicyAsync(admin, f.Context(0), policy, 0, Guid.NewGuid(), Ct);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.brands WHERE public_name='Public name' AND policy_version=1", Ct));

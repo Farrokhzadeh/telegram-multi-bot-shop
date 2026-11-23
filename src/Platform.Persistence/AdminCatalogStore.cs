@@ -40,8 +40,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
     {
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        return await session.QuerySingleAsync(new DbStatement("SELECT current_fx::text,fx_source,fx_fetched_at,fx_error_code FROM shop.brands WHERE id=$1 AND bot_id=$2", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
-            r => new ExchangeRateMetadata(r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetUtc(2), r.IsDBNull(3) ? null : r.GetString(3)), ct);
+        return await session.RunEfStepAsync(false, (data, token) => CatalogAdministration.FxAsync(data, context, token), ct);
     }
     public async Task<AdminPage<AdminProduct>> ProductsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default)
     {
@@ -56,9 +55,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         AdminCommand.Page(limit);
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.QueryManyAsync(new DbStatement("SELECT id,product_id,state,origin_kind,created_at FROM shop.inventory_items WHERE product_id=$1 AND ($2 IS NULL OR id>$2) ORDER BY id LIMIT $3",
-            DbValue.Uuid(product), AdminCommand.Id(after), DbValue.Integer(limit + 1)), r => new InventoryMetadata(r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetString(3), r.GetUtc(4)), limit + 1, ct);
-        return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
+        return await session.RunEfStepAsync(false, (data, token) => CatalogAdministration.InventoryAsync(data, product, after, limit, token), ct);
     }
     public async Task<long> PolicyAsync(AuthenticatedAdmin actor, BrandContext context, BrandPolicyEdit value, long revision, Guid command, CancellationToken ct = default)
     {
@@ -87,16 +84,10 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Update, AuditEntity.Product, product, null, AuditReason.ConfigurationChange, command, hash, revision, revision + 1), ct)) return revision + 1;
-            await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.products WHERE id=$1 FOR UPDATE) p", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
+            await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(product.ToByteArray(bigEndian: true)))), ct);
+            await session.RunEfStepAsync(false, (data, token) => data.LockProductAsync(product, token), ct);
             await session.AdmitSharedWriterAsync(ct);
-            int changed = await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.products(id,title,description,icon_ref,guidance,fulfillment_kind,availability_policy,local_first,active,revision)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1)
-                ON CONFLICT(id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,icon_ref=EXCLUDED.icon_ref,guidance=EXCLUDED.guidance,
-                    fulfillment_kind=EXCLUDED.fulfillment_kind,availability_policy=EXCLUDED.availability_policy,local_first=EXCLUDED.local_first,active=EXCLUDED.active,
-                    revision=shop.products.revision+1,updated_at=clock_timestamp() WHERE shop.products.revision=$10
-                """, DbValue.Uuid(product), DbValue.Text(value.Title), AdminCommand.Text(value.Description), AdminCommand.Text(value.Icon), AdminCommand.Text(value.Guidance), DbValue.Text(value.Fulfillment), DbValue.Text(value.Availability), DbValue.Boolean(value.LocalFirst), DbValue.Boolean(value.Active), DbValue.Bigint(revision)), ct);
-            if (changed != 1 || (revision != 0 && await session.QuerySingleAsync(new DbStatement("SELECT revision FROM shop.products WHERE id=$1", DbValue.Uuid(product)), r => r.GetInt64(0), ct) != revision + 1)) throw new InvalidOperationException("Product revision conflict.");
+            await session.RunEfStepAsync(true, (data, token) => CatalogAdministration.ProductAsync(data, actor, product, value, revision, token), ct);
             await session.CommitAsync(ct); return revision + 1;
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
@@ -114,23 +105,10 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Update, AuditEntity.BrandProduct, product, context.BrandId, AuditReason.ConfigurationChange, command, hash, revision, revision + 1), ct)) return revision + 1;
-            await session.QuerySingleAsync(new DbStatement("SELECT revision FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
+            await session.RunEfStepAsync(false, (data, token) => data.LockProductAsync(product, token), ct);
             await session.AdmitWriterAsync(context, ct);
-            await session.QuerySingleAsync(new DbStatement("SELECT policy_version FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
-            int changed = await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.brand_products(brand_id,product_id,visible,title_mode,title_override,description_mode,description_override,icon_mode,icon_override,guidance_mode,guidance_override,
-                    price_usdt,price_toman,auto_price_toman,allow_wallet,allow_crypto,allow_bank,min_quantity,max_quantity,revision)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,1)
-                ON CONFLICT(brand_id,product_id) DO UPDATE SET visible=EXCLUDED.visible,title_mode=EXCLUDED.title_mode,title_override=EXCLUDED.title_override,
-                    description_mode=EXCLUDED.description_mode,description_override=EXCLUDED.description_override,icon_mode=EXCLUDED.icon_mode,icon_override=EXCLUDED.icon_override,
-                    guidance_mode=EXCLUDED.guidance_mode,guidance_override=EXCLUDED.guidance_override,price_usdt=EXCLUDED.price_usdt,price_toman=EXCLUDED.price_toman,
-                    auto_price_toman=EXCLUDED.auto_price_toman,allow_wallet=EXCLUDED.allow_wallet,allow_crypto=EXCLUDED.allow_crypto,allow_bank=EXCLUDED.allow_bank,
-                    min_quantity=EXCLUDED.min_quantity,max_quantity=EXCLUDED.max_quantity,revision=shop.brand_products.revision+1,updated_at=clock_timestamp()
-                WHERE shop.brand_products.revision=$20
-                """, DbValue.Uuid(context.BrandId), DbValue.Uuid(product), DbValue.Boolean(value.Visible), DbValue.Text(value.TitleMode), AdminCommand.Text(value.Title), DbValue.Text(value.DescriptionMode), AdminCommand.Text(value.Description), DbValue.Text(value.IconMode), AdminCommand.Text(value.Icon), DbValue.Text(value.GuidanceMode), AdminCommand.Text(value.Guidance), DbValue.Numeric(usd.Amount), toman is Money price ? DbValue.Numeric(price.Amount) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Numeric),
-                DbValue.Boolean(value.AutomaticToman), DbValue.Boolean(value.Wallet), DbValue.Boolean(value.Crypto), DbValue.Boolean(value.Bank), DbValue.Integer(value.Minimum), DbValue.Integer(value.Maximum), DbValue.Bigint(revision)), ct);
-            long actual = await session.QuerySingleAsync(new DbStatement("SELECT revision FROM shop.brand_products WHERE brand_id=$1 AND product_id=$2", DbValue.Uuid(context.BrandId), DbValue.Uuid(product)), r => r.GetInt64(0), ct);
-            if (changed != 1 || actual != revision + 1) throw new InvalidOperationException("Listing revision conflict.");
+            await session.RunEfStepAsync(false, (data, token) => data.LockBrandAsync(context.BrandId, token), ct);
+            await session.RunEfStepAsync(true, (data, token) => CatalogAdministration.ListingAsync(data, actor, context, product, value, revision, token), ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.EvaluateRestock, product), command, DateTime.UtcNow, ct);
             await session.CommitAsync(ct); return revision + 1;
         }
@@ -145,31 +123,10 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.StockImport, AuditEntity.Product, product, null, AuditReason.OperatorReview, command, hash), ct)) return;
-            await session.QuerySingleAsync(new DbStatement("SELECT revision FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetInt64(0), ct);
+            await session.RunEfStepAsync(false, (data, token) => data.LockProductAsync(product, token), ct);
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock(739285126)"), ct);
             await session.AdmitSharedWriterAsync(ct);
-            var keys = await session.QueryManyAsync(new DbStatement("SELECT DISTINCT credential_key_id FROM shop.inventory_items ORDER BY credential_key_id"), r => r.GetString(0), 32, ct);
-            string key = secrets.CurrentInventoryKeyId;
-            foreach (var item in items)
-            {
-                byte[] plain = Encoding.UTF8.GetBytes(item.Credential);
-                try
-                {
-                    byte[] fingerprint = secrets.UseInventoryKey(key, k => HMACSHA256.HashData(k, plain));
-                    bool exists = false;
-                    foreach (string previous in keys.Append(key).Distinct())
-                    {
-                        byte[] digest = secrets.UseInventoryKey(previous, k => HMACSHA256.HashData(k, plain));
-                        var duplicate = await session.QuerySingleAsync(new DbStatement("SELECT id,product_id FROM (SELECT 1) seed LEFT JOIN shop.inventory_items ON source_fingerprint=$1 LIMIT 1", DbValue.Binary(digest)), r => r.IsDBNull(0) ? null : new ExistingItem(r.GetGuid(0), r.GetGuid(1)), ct);
-                        if (duplicate is null) continue;
-                        if (duplicate.Id != item.Id || duplicate.Product != product) throw new InvalidOperationException("Duplicate inventory content.");
-                        exists = true; break;
-                    }
-                    if (!exists) await session.ExecuteAsync(new DbStatement("INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind) VALUES ($1,$2,$3,$4,$5,'local_import')",
-                        DbValue.Uuid(item.Id), DbValue.Uuid(product), DbValue.Binary(new InventoryCipher(secrets).Encrypt(item.Id, plain)), DbValue.Text(key), DbValue.Binary(fingerprint)), ct);
-                }
-                finally { CryptographicOperations.ZeroMemory(plain); }
-            }
+            await session.RunEfStepAsync(true, async (data, token) => { await CatalogAdministration.ImportAsync(data, actor, product, items, secrets, token); return true; }, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.DrainLocalPreorders, product), command, DateTime.UtcNow, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.EvaluateRestock, product), command, DateTime.UtcNow, ct);
             await session.CommitAsync(ct);
@@ -184,5 +141,4 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
     }
     private static void Label(string value, int maximum) { if (string.IsNullOrWhiteSpace(value) || value.Length > maximum || value.Any(char.IsControl)) throw new ArgumentException("Invalid display value."); }
     private static void Mode(string mode, string? value, bool clear) { if (mode is not ("inherit" or "override") && !(clear && mode == "clear") || ((mode == "override") != (value is not null))) throw new ArgumentException("Invalid field override."); }
-    private sealed record ExistingItem(Guid Id, Guid Product);
 }

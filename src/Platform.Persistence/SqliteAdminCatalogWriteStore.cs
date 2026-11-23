@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
@@ -49,29 +47,10 @@ public sealed class SqliteAdminCatalogWriteStore(SqliteSessionFactory sessions)
             value.LocalFirst.ToString(), value.Active.ToString());
         var audit = new AuditCommand(command, AuditAction.Update, AuditEntity.Product, product,
             null, AuditReason.ConfigurationChange, command, hash, revision, checked(revision + 1));
-        return sessions.RunAsync(true, async (_, tx, token) =>
+        return sessions.RunEfAsync(true, null, async (data, token) =>
         {
-            if (!await AuditAsync(tx, actor, audit, token)) return checked(revision + 1);
-            using var save = SqliteWallet.Command(tx, """
-                INSERT INTO products(id,title,description,icon_ref,guidance,fulfillment_kind,
-                    availability_policy,local_first,active,revision)
-                VALUES ($product,$title,$description,$icon,$guidance,$fulfillment,$availability,
-                    $first,$active,1)
-                ON CONFLICT(id) DO UPDATE SET title=excluded.title,description=excluded.description,
-                    icon_ref=excluded.icon_ref,guidance=excluded.guidance,
-                    fulfillment_kind=excluded.fulfillment_kind,availability_policy=excluded.availability_policy,
-                    local_first=excluded.local_first,active=excluded.active,
-                    revision=products.revision+1,updated_at=$now
-                WHERE products.revision=$revision
-                """, ("$product", product), ("$title", value.Title),
-                ("$description", value.Description), ("$icon", value.Icon),
-                ("$guidance", value.Guidance), ("$fulfillment", value.Fulfillment),
-                ("$availability", value.Availability), ("$first", value.LocalFirst),
-                ("$active", value.Active), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)),
-                ("$revision", revision));
-            if (await save.ExecuteNonQueryAsync(token) != 1)
-                throw new InvalidOperationException("Product revision conflict.");
-            return checked(revision + 1);
+            if (!await AdminAuditStore.AppendEfAsync(data, actor, audit, token)) return checked(revision + 1);
+            return await CatalogAdministration.ProductAsync(data, actor, product, value, revision, token);
         }, ct);
     }
 
@@ -102,55 +81,23 @@ public sealed class SqliteAdminCatalogWriteStore(SqliteSessionFactory sessions)
             revision, checked(revision + 1));
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
-            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            using (var identity = SqliteWallet.Command(tx, """
-                SELECT EXISTS(SELECT 1 FROM products WHERE id=$product)
-                    AND EXISTS(SELECT 1 FROM brands WHERE id=$brand AND bot_id=$bot AND active=1)
-                """, ("$product", product), ("$brand", context.BrandId), ("$bot", context.BotId)))
-                if ((long)(await identity.ExecuteScalarAsync(token))! != 1)
-                    throw new UnauthorizedAccessException("The listing scope is unavailable.");
-            if (!await AuditAsync(tx, actor, audit, token)) return checked(revision + 1);
-            using var save = SqliteWallet.Command(tx, """
-                INSERT INTO brand_products(brand_id,product_id,visible,title_mode,title_override,
-                    description_mode,description_override,icon_mode,icon_override,guidance_mode,
-                    guidance_override,price_usdt,price_toman,auto_price_toman,allow_wallet,
-                    allow_crypto,allow_bank,min_quantity,max_quantity,revision)
-                VALUES ($brand,$product,$visible,$title_mode,$title,$desc_mode,$description,
-                    $icon_mode,$icon,$guide_mode,$guidance,$usd,$toman,$automatic,$wallet,
-                    $crypto,$bank,$minimum,$maximum,1)
-                ON CONFLICT(brand_id,product_id) DO UPDATE SET visible=excluded.visible,
-                    title_mode=excluded.title_mode,title_override=excluded.title_override,
-                    description_mode=excluded.description_mode,description_override=excluded.description_override,
-                    icon_mode=excluded.icon_mode,icon_override=excluded.icon_override,
-                    guidance_mode=excluded.guidance_mode,guidance_override=excluded.guidance_override,
-                    price_usdt=excluded.price_usdt,price_toman=excluded.price_toman,
-                    auto_price_toman=excluded.auto_price_toman,allow_wallet=excluded.allow_wallet,
-                    allow_crypto=excluded.allow_crypto,allow_bank=excluded.allow_bank,
-                    min_quantity=excluded.min_quantity,max_quantity=excluded.max_quantity,
-                    revision=brand_products.revision+1,updated_at=$now
-                WHERE brand_products.revision=$revision
-                """, ("$brand", context.BrandId), ("$product", product),
-                ("$visible", value.Visible), ("$title_mode", value.TitleMode),
-                ("$title", value.Title), ("$desc_mode", value.DescriptionMode),
-                ("$description", value.Description), ("$icon_mode", value.IconMode),
-                ("$icon", value.Icon), ("$guide_mode", value.GuidanceMode),
-                ("$guidance", value.Guidance), ("$usd", ExactDecimal.Format(usd.Amount)),
-                ("$toman", toman is Money price ? ExactDecimal.Format(price.Amount) : null),
-                ("$automatic", value.AutomaticToman), ("$wallet", value.Wallet),
-                ("$crypto", value.Crypto), ("$bank", value.Bank),
-                ("$minimum", value.Minimum), ("$maximum", value.Maximum),
-                ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$revision", revision));
-            if (await save.ExecuteNonQueryAsync(token) != 1)
-                throw new InvalidOperationException("Listing revision conflict.");
+            bool changed = await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
+            {
+                await AdminSessionStore.RequireActiveAsync(data, actor, null, cancel);
+                if (!await data.Data.Set<Entities.Product>().AnyAsync(row => row.Id == product, cancel) ||
+                    !await data.Data.Set<Entities.Brand>().AnyAsync(row => row.Id == context.BrandId && row.BotId == context.BotId && row.Active, cancel))
+                    data.RejectScope("The listing scope is unavailable.");
+                if (!await AdminAuditStore.AppendEfAsync(data, actor, audit, cancel)) return false;
+                await CatalogAdministration.ListingAsync(data, actor, context, product, value, revision, cancel);
+                return true;
+            }, token);
+            if (!changed) return checked(revision + 1);
             await OutboxStore.EnqueueSqliteAsync(tx,
                 JobIntent.Product(JobKind.EvaluateRestock, product),
                 command, DateTime.UtcNow, token);
             return checked(revision + 1);
         }, ct);
     }
-
-    private static Task<bool> AuditAsync(SqliteTransaction tx, AuthenticatedAdmin actor, AuditCommand audit, CancellationToken ct) =>
-        AdminAuditStore.AppendSqliteAsync(tx, actor, audit, ct);
 
     private static void Label(string value, int maximum)
     {

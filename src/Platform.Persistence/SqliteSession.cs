@@ -59,13 +59,5 @@ public sealed partial class SqliteSessionFactory
     }
 
     internal Task<List<AdminProduct>> ListAdminProductsAsync(Guid? after, int count, CancellationToken ct) =>
-        RunAsync(false, async (connection, transaction, token) =>
-        {
-            var config = new DbContextOptionsBuilder<AdminProductQuery>()
-                .UseSqlite(connection, provider => provider.CommandTimeout(timeoutSeconds))
-                .Options;
-            await using var catalog = new AdminProductQuery(config);
-            await catalog.Database.UseTransactionAsync(transaction, token);
-            return await catalog.ListAsync(after, count, token);
-        }, ct);
+        RunEfAsync(false, null, (data, token) => CatalogAdministration.ProductsAsync(data, after, count, token), ct);
 }
