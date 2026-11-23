@@ -204,4 +204,24 @@ public sealed class EfSessionTests
         await owner.RollbackAsync(ct);
     }
 
+    [Fact]
+    public async Task PostgresSharedEfLocksCoexistAndExcludeBrandWriters()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var fixture = await BrandFixture.CreateAsync(ct);
+        Guid brand = fixture.Contexts[0].BrandId;
+        var options = new DbSessionOptions { StatementTimeout = TimeSpan.FromSeconds(2), LockTimeout = TimeSpan.FromMilliseconds(100) };
+        var sessions = new DbSessionFactory(fixture.Database.Data, options);
+        await using var first = await sessions.BeginAsync(ct);
+        await using var second = await sessions.BeginAsync(ct);
+        Assert.Equal(1, await first.RunEfStepAsync(false, (data, token) => data.LockBrandAsync(brand, token, true), ct));
+        Assert.Equal(1, await second.RunEfStepAsync(false, (data, token) => data.LockBrandAsync(brand, token, true), ct));
+        await using var writer = await sessions.BeginAsync(ct);
+        var failure = await Assert.ThrowsAsync<DbOperationException>(() => writer.RunEfStepAsync(false, (data, token) => data.LockBrandAsync(brand, token), ct));
+        Assert.Equal("55P03", failure.Failure.SqlState);
+        Assert.Equal(DbSessionState.Aborted, writer.State);
+        Assert.Equal(DbSessionState.Active, first.State);
+        Assert.Equal(DbSessionState.Active, second.State);
+    }
+
 }

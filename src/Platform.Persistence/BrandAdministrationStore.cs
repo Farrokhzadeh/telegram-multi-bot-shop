@@ -40,7 +40,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
                 await data.RequireAdminAsync(actor, null, cancel);
                 await data.LockBrandAsync(context.BrandId, cancel);
                 var brand = await data.Data.Set<Entities.Brand>().SingleAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, cancel);
-                if (brand.PolicyVersion != revision) throw new InvalidOperationException("Brand configuration revision conflict.");
+                if (brand.PolicyVersion != revision) data.RejectConflict("Brand configuration revision conflict.");
                 brand.BotTokenCiphertext = encrypted.Ciphertext.ToArray();
                 brand.BotTokenKeyId = encrypted.KeyId;
                 brand.BotUsername = verified.Username;
@@ -87,7 +87,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
                 await data.RequireAdminAsync(actor, null, cancel);
                 await data.LockBrandAsync(context.BrandId, cancel);
                 var brand = await data.Data.Set<Entities.Brand>().SingleAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, cancel);
-                if (brand.PolicyVersion != revision) throw new InvalidOperationException("Brand configuration revision conflict.");
+                if (brand.PolicyVersion != revision) data.RejectConflict("Brand configuration revision conflict.");
                 DateTime now = await data.BrandClockAsync(context.BrandId, cancel);
                 brand.PolicyVersion++;
                 brand.UpdatedAt = now;

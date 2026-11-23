@@ -45,6 +45,7 @@ public sealed class SqliteAdminCatalogWriteTests
             Assert.Equal(1, await writer.PolicyAsync(actor, brand, policy, 0, policyId, ct));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 writer.PolicyAsync(actor, brand, policy with { PublicName = "Changed" }, 0, policyId, ct));
+            await Assert.ThrowsAsync<ArgumentException>(() => writer.PolicyAsync(actor, brand, policy with { Support = true }, 1, Guid.NewGuid(), ct));
             var productEdit = new MasterProductEdit("Synthetic catalog product", null,
                 null, null, "local", "immediate", true, true);
             Assert.Equal(1, await writer.ProductAsync(actor, product, productEdit, 0, productId, ct));

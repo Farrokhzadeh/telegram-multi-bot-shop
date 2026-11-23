@@ -31,6 +31,7 @@ public sealed partial class SqliteSessionFactory
             await session.FlushAsync(ct, validate);
             return result;
         }
+        catch (EfApplicationException error) { state.Changes.Rejected = true; if (error.Argument) throw new ArgumentException(error.Message); throw new InvalidOperationException(error.Message); }
         catch { state.Changes.Rejected = true; throw; }
         finally { Interlocked.Exchange(ref state.Busy, 0); }
     }

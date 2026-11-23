@@ -66,7 +66,7 @@ internal sealed partial class EfSession(AkantiDbContext data, bool write, Writer
         var brand = Data.Set<Entities.Brand>().Where(value => value.Id == context.BrandId && value.BotId == context.BotId &&
             value.Active && value.PolicyVersion == registration.Revision);
         bool valid = write
-            ? await AdmitAsync(() => brand.ExecuteUpdateAsync(setters => setters.SetProperty(value => value.PolicyVersion, value => value.PolicyVersion), ct)) == 1
+            ? await LockRowsAsync(brand.Select(value => value.Id), EfRowLock.NoKeyUpdate, ct) == 1
             : await brand.AnyAsync(ct);
         if (!valid) throw Denied("Writer revision is unavailable.");
         markWriter?.Invoke(context, registration.Revision);
@@ -75,9 +75,9 @@ internal sealed partial class EfSession(AkantiDbContext data, bool write, Writer
     internal async Task RequireSharedWritersAsync(CancellationToken ct, bool lockRows = false)
     {
         if (writer is not { Shared: true }) throw Denied("Shared writer scope is unavailable.");
-        var brands = await Data.Set<Entities.Brand>().AsNoTracking().OrderBy(value => value.Id).Take(1001).ToArrayAsync(ct);
+        var brands = await Data.Set<Entities.Brand>().OrderBy(value => value.Id).Select(value => value.Id).Take(1001).ToArrayAsync(ct);
         if (brands.Length > 1000) throw Denied("The shared brand set exceeds its bound.");
-        if (write || lockRows) foreach (var brand in brands) await LockBrandAsync(brand.Id, ct);
+        if (write || lockRows) foreach (var brand in brands) await LockBrandAsync(brand, ct);
         var enabled = await Data.Set<Entities.Brand>().AsNoTracking().Where(value => value.Active).Select(value => new { value.Id, value.BotId, value.PolicyVersion }).Take(1001).ToArrayAsync(ct);
         if (enabled.Length != writer.Entries.Length || writer.Entries.Any(value => !enabled.Any(brand => brand.Id == value.Context.BrandId && brand.BotId == value.Context.BotId && brand.PolicyVersion == value.Revision)))
             throw Denied("Shared writer set is unavailable.");
@@ -90,7 +90,7 @@ internal sealed partial class EfSession(AkantiDbContext data, bool write, Writer
         if (write && writer?.Shared == true) throw Denied("Customer writes require a single-brand scope.");
         var members = Data.Set<Entities.User>().Where(value => value.BrandId == context.BrandId && value.TelegramId == actor &&
             value.BlockedAt == null && value.BannedAt == null);
-        if (write && await AdmitAsync(() => members.ExecuteUpdateAsync(setters => setters.SetProperty(value => value.FlowRevision, value => value.FlowRevision), ct)) != 1)
+        if (write && await LockRowsAsync(members.Select(value => value.Id), EfRowLock.Update, ct) != 1)
             throw Denied("Customer scope is unavailable.");
         var member = await members.AsNoTracking().Select(value => new { value.Id }).SingleOrDefaultAsync(ct);
         if (member is null) throw Denied("Customer scope is unavailable.");
@@ -106,8 +106,7 @@ internal sealed partial class EfSession(AkantiDbContext data, bool write, Writer
         if (write || lockRows)
         {
             foreach (Guid id in new[] { actor.AdminId, otherAdmin ?? actor.AdminId }.Distinct().Order())
-                if (await AdmitAsync(() => Data.Set<Entities.Admin>().Where(value => value.Id == id)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.AuthVersion, value => value.AuthVersion), ct)) != 1 && id == actor.AdminId)
+                if (await LockAdminAsync(id, ct) != 1 && id == actor.AdminId)
                     throw Denied("Administrator scope is unavailable.");
         }
         byte[] hash = actor.TokenHash;
@@ -123,8 +122,7 @@ internal sealed partial class EfSession(AkantiDbContext data, bool write, Writer
     internal async Task<Entities.Admin> RequirePasswordAsync(string login, ReadOnlyMemory<char> password, CancellationToken ct)
     {
         if (!write || (writer is not null && !nativeWriterBoundary)) throw Denied("Administrator login requires a writable control session.");
-        await AdmitAsync(() => Data.Set<Entities.Admin>().Where(value => value.Login == login)
-            .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.AuthVersion, value => value.AuthVersion), ct));
+        await LockRowsAsync(Data.Set<Entities.Admin>().Where(value => value.Login == login).Select(value => value.Id), EfRowLock.Update, ct);
         var account = await Data.Set<Entities.Admin>().AsNoTracking().SingleOrDefaultAsync(value => value.Login == login, ct);
         bool valid = AdminAuth.VerifyPassword(password.Span, account?.PasswordVerifier);
         if (!valid || account is null || account.DisabledAt is not null || account.AuthenticationMode != "password") RejectAuthentication();
@@ -196,6 +194,7 @@ public sealed partial class DbSession
             await session.FlushAsync(ct, !defer);
             return result;
         }
+        catch (EfApplicationException error) { LastFailure = new(DbFailureKind.InvalidData, DbRecovery.Reject); State = DbSessionState.Aborted; if (error.Argument) throw new ArgumentException(error.Message); throw new InvalidOperationException(error.Message); }
         catch (AdminAuthenticationException) { LastFailure = new(DbFailureKind.InvalidData, DbRecovery.Reject); State = DbSessionState.Aborted; throw; }
         catch (UnauthorizedAccessException) { State = DbSessionState.Aborted; throw; }
         catch (Exception error) { throw RecordFailure(error is DbUpdateException update ? update.InnerException ?? error : error, DbPhase.Executing, ct); }

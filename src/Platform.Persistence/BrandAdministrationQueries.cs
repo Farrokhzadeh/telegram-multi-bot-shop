@@ -16,7 +16,7 @@ internal static class BrandAdministrationQueries
     internal static async Task<BrandPolicyDetail> ReadAsync(EfSession data, AuthenticatedAdmin actor, BrandContext context, CancellationToken ct)
     {
         await AdminSessionStore.RequireActiveAsync(data, actor, null, ct);
-        if (data.Data is PostgresAkantiDbContext) await data.LockBrandAsync(context.BrandId, ct);
+        if (data.Data is PostgresAkantiDbContext) await data.LockBrandAsync(context.BrandId, ct, true);
         var brand = await data.Data.Set<Entities.Brand>().AsNoTracking().SingleOrDefaultAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, ct);
         if (brand is null) data.RejectScope("The brand policy scope is unavailable.");
         var channels = await data.Data.Set<Entities.BrandChannel>().Where(value => value.BrandId == context.BrandId && value.Active && value.Required).OrderBy(value => value.ChatId)
@@ -29,10 +29,10 @@ internal static class BrandAdministrationQueries
     {
         await AdminSessionStore.RequireActiveAsync(data, actor, null, ct);
         if (value.Support && !await data.Data.Set<Entities.Admin>().AnyAsync(admin => admin.Id == value.ContactAdminId && admin.DisabledAt == null && admin.TelegramVerifiedAt != null && admin.PublicContactHandle != null, ct))
-            throw new ArgumentException("A current verified public support contact is required.");
+            data.RejectArgument("A current verified public support contact is required.");
         await data.LockBrandAsync(context.BrandId, ct);
         var brand = await data.Data.Set<Entities.Brand>().SingleOrDefaultAsync(brand => brand.Id == context.BrandId && brand.BotId == context.BotId && brand.PolicyVersion == revision, ct);
-        if (brand is null) throw new InvalidOperationException("Policy revision conflict.");
+        if (brand is null) data.RejectConflict("Policy revision conflict.");
         brand.PublicName = value.PublicName; brand.DefaultLanguage = value.Language; brand.Active = value.Active;
         brand.AllowWallet = value.Wallet; brand.AllowCrypto = value.Crypto; brand.AllowBank = value.Bank; brand.AllowWalletTopup = value.Topup;
         brand.ZeroBalanceTopup = value.ZeroBalanceTopup; brand.SupportEnabled = value.Support; brand.CustomerSupportAdminId = value.ContactAdminId;

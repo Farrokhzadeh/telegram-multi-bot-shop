@@ -150,7 +150,7 @@ public static class AdminBindingStore
             var staff = data.Data.Set<Entities.Admin>().Where(value => value.TelegramUserId == telegramUserId && value.DisabledAt == null &&
                 value.TelegramVerifiedAt != null && value.TelegramVerificationAuditId != null);
             Guid[] ids = await staff.OrderBy(value => value.Id).Select(value => value.Id).Take(2).ToArrayAsync(ct);
-            foreach (Guid id in ids) await data.LockAdminAsync(id, ct);
+            foreach (Guid id in ids) await data.LockAdminAsync(id, ct, true);
             return await staff.AnyAsync(ct);
         }, cancellationToken);
 

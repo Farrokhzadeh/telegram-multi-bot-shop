@@ -5,21 +5,36 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
+internal sealed class EfApplicationException(string message, bool argument = false) : Exception(message) { internal bool Argument { get; } = argument; }
+
 internal sealed partial class EfSession
 {
     internal void RestoreSharedAdmission(bool value) => sharedAdmitted = writer?.Shared == true && value;
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     internal void RejectScope(string message) => throw Denied(message);
-    internal Task<int> LockAdminAsync(Guid id, CancellationToken ct) => AdmitAsync(() => Data.Set<Admin>().Where(value => value.Id == id)
-        .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.AuthVersion, value => value.AuthVersion), ct));
-    internal Task<int> LockMemberAsync(Guid brand, long actor, CancellationToken ct) => AdmitAsync(() => Data.Set<User>().Where(value => value.BrandId == brand && value.TelegramId == actor)
-        .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.FlowRevision, value => value.FlowRevision), ct));
-    internal Task<int> LockProductAsync(Guid id, CancellationToken ct) => AdmitAsync(() => Data.Set<Product>().Where(value => value.Id == id)
-        .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.Revision, value => value.Revision), ct));
-    internal Task<int> LockBrandAsync(Guid id, CancellationToken ct) => AdmitAsync(() => Data.Set<Entities.Brand>().Where(value => value.Id == id)
-        .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.PolicyVersion, value => value.PolicyVersion), ct));
-    internal Task<int> LockChannelsAsync(Guid brand, CancellationToken ct) => AdmitAsync(() => Data.Set<BrandChannel>().Where(value => value.BrandId == brand && value.Active && value.Required)
-        .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.UpdatedAt, value => value.UpdatedAt), ct));
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    internal void RejectConflict(string message) { Integrity.Reject(); throw new EfApplicationException(message); }
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    internal void RejectArgument(string message) { Integrity.Reject(); throw new EfApplicationException(message, true); }
+    private async Task<int> LockRowsAsync<T>(IQueryable<T> query, EfRowLock mode, CancellationToken ct)
+    {
+        Integrity.ThrowIfRejected();
+        if (Integrity.RowLock != EfRowLock.None) throw Denied("Row locks cannot overlap.");
+        try
+        {
+            if (Data is PostgresAkantiDbContext) Integrity.RowLock = mode;
+            int count = (await query.Take(1001).ToArrayAsync(ct)).Length;
+            if (count > 1000) throw Denied("The row lock batch exceeds its bound.");
+            return count;
+        }
+        catch { Integrity.Reject(); throw; }
+        finally { Integrity.RowLock = EfRowLock.None; }
+    }
+    internal Task<int> LockAdminAsync(Guid id, CancellationToken ct, bool shared = false) => LockRowsAsync(Data.Set<Admin>().Where(value => value.Id == id).Select(value => value.Id), shared ? EfRowLock.Share : EfRowLock.Update, ct);
+    internal Task<int> LockMemberAsync(Guid brand, long actor, CancellationToken ct, bool shared = false) => LockRowsAsync(Data.Set<User>().Where(value => value.BrandId == brand && value.TelegramId == actor).Select(value => value.Id), shared ? EfRowLock.Share : EfRowLock.Update, ct);
+    internal Task<int> LockProductAsync(Guid id, CancellationToken ct) => LockRowsAsync(Data.Set<Product>().Where(value => value.Id == id).Select(value => value.Id), EfRowLock.Update, ct);
+    internal Task<int> LockBrandAsync(Guid id, CancellationToken ct, bool shared = false) => LockRowsAsync(Data.Set<Entities.Brand>().Where(value => value.Id == id).Select(value => value.Id), shared ? EfRowLock.Share : EfRowLock.NoKeyUpdate, ct);
+    internal Task<int> LockChannelsAsync(Guid brand, CancellationToken ct) => LockRowsAsync(Data.Set<BrandChannel>().Where(value => value.BrandId == brand && value.Active && value.Required).OrderBy(value => value.ChatId).Select(value => value.ChatId), EfRowLock.Share, ct);
     internal async Task<DateTime> BrandClockAsync(Guid brand, CancellationToken ct)
     {
         DateTime clock = await Data.Set<Entities.Brand>().Where(value => value.Id == brand).Select(value => EfValues.UtcNow()).SingleAsync(ct);

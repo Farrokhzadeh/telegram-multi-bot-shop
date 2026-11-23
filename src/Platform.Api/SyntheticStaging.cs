@@ -90,6 +90,8 @@ internal static class SyntheticStaging
                 var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, role)], "staging"));
                 if (!registry.TryResolveAuthenticated("staging", principal, out var context)) return 78;
                 using var webhook = new TelegramWebhookVerifier(context!, File.ReadAllBytes(Path.Combine(Root, "webhook")));
+                await using (var readiness = await sessions.BeginReadOnlyAsync())
+                    if (await BrandUserStore.FindAsync(readiness, context!, Tester) is null) return 78;
                 var router = new UpdateRouter(sessions.ForBrandWriter(context!, 0), (_, _, _, _) => throw new TelegramIngressRejectedException());
                 app.MapPost("/callbacks/stage-" + role[^1], async Task<IResult> (HttpRequest request, CancellationToken ct) =>
                 {

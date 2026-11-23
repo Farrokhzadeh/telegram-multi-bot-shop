@@ -37,10 +37,10 @@ public static class BrandPolicyStore
         if (member.Blocked || member.Banned) Deny(session);
         var policy = await session.RunEfStepAsync(false, async (data, token) =>
         {
-            await data.LockMemberAsync(context.BrandId, verifiedActorId, token);
+            await data.LockMemberAsync(context.BrandId, verifiedActorId, token, true);
             if (!await data.Data.Set<Entities.User>().AnyAsync(value => value.Id == member.Id && value.BrandId == context.BrandId && value.TelegramId == verifiedActorId && value.BlockedAt == null && value.BannedAt == null, token))
                 data.RejectScope("Brand membership is unavailable.");
-            await data.LockBrandAsync(context.BrandId, token);
+            await data.LockBrandAsync(context.BrandId, token, true);
             var brand = await data.Data.Set<Entities.Brand>().AsNoTracking().SingleAsync(value => value.Id == context.BrandId && value.BotId == context.BotId && value.Active, token);
             string? contact = await data.Data.Set<Entities.Admin>().Where(value => value.Id == brand.CustomerSupportAdminId && value.DisabledAt == null && value.TelegramUserId != null &&
                 value.TelegramVerifiedAt != null && value.TelegramVerificationAuditId != null).Select(value => value.PublicContactHandle).SingleOrDefaultAsync(token);

@@ -10,12 +10,14 @@ internal sealed partial class EfIntegrity(AkantiDbContext data, Func<bool> canWr
     private HashSet<Guid> postings => changes.Postings;
     private HashSet<Guid> audits => changes.Audits;
     private HashSet<Guid> users => changes.Users;
+    private HashSet<Guid> auditUsers => changes.AuditUsers;
     private HashSet<Guid> orders => changes.Orders;
     private HashSet<Guid> discounts => changes.Discounts;
     private HashSet<Guid> allocations => changes.Allocations;
     private HashSet<Guid> payments => changes.Payments;
     private HashSet<Guid> entities => changes.Entities;
     internal bool AllowSetWrite { get; set; }
+    internal EfRowLock RowLock { get; set; }
     internal void Reject() => changes.Rejected = true;
     internal void ThrowIfRejected()
     {
@@ -56,7 +58,7 @@ internal sealed partial class EfIntegrity(AkantiDbContext data, Func<bool> canWr
             case Wallet wallet: wallets.Add(wallet.UserId); break;
             case WalletEntry entry: wallets.Add(entry.UserId); postings.Add(entry.Id); break;
             case AuditEvent audit: audits.Add(audit.Id); break;
-            case User user: users.Add(user.Id); break;
+            case User user: users.Add(user.Id); if (relatedAudit) auditUsers.Add(user.Id); break;
             case Order order: orders.Add(order.Id); break;
             case Payment payment:
                 payments.Add(payment.Id);
@@ -112,10 +114,10 @@ internal sealed partial class EfIntegrity(AkantiDbContext data, Func<bool> canWr
                         !data.Set<Order>().Any(order => order.Id == entry.OrderId && order.UserId == entry.UserId &&
                             order.ResolutionKind == entry.MovementKind && order.ResolutionWalletEntryId == entry.Id))), ct), "wallet_compensation_origin");
         }
-        if (audits.Count != 0 || users.Count != 0)
+        if (audits.Count != 0 || auditUsers.Count != 0)
         {
             await RequireAsync(!await data.Set<AuditEvent>().AnyAsync(audit => (audits.Contains(audit.Id) ||
-                (audit.ActorUserId != null && users.Contains(audit.ActorUserId.Value))) && (audit.Reason.Trim() == "" ||
+                (audit.ActorUserId != null && auditUsers.Contains(audit.ActorUserId.Value))) && (audit.Reason.Trim() == "" ||
                     (audit.ActorKind == "customer" && !data.Set<User>().Any(user => user.Id == audit.ActorUserId && user.BrandId == audit.BrandId)) ||
                     (audit.EntityKind == "platform" && ((audit.ActorKind != "system" && audit.ActorKind != "admin") || audit.BrandId != null ||
                         (audit.Action != "maintenance" && audit.Action != "legacy_import")))), ct), "audit_customer_brand");
