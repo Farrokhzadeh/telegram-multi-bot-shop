@@ -52,3 +52,6 @@ Linux x64 only. SQLite creation returns an owner-private temporary akanti-ef-qua
 
 ## Rebuild boundary
 Business rebuild scripts restore the complete reviewed SQLite trigger set because guards can reference other tables being renamed. Use only an offline exclusive disposable target with verified schema/artifact identity. No existing-file upgrade CLI is implemented; this is not an online migration path. Tests cover four business tables,27 exact triggers,95 deferred references, retained ledger content and immutable-delete rejection. Future plaintext-schema migrations must review/version the guard definitions for that representation.
+
+## PostgreSQL EF provider wiring
+EF affected-scope queries bind UUID collections. Slim PostgreSQL data sources used by converted paths must enable arrays before Build; synthetic target/proxy builders now do so. Native EF sessions use NonRetryingExecutionStrategy because the existing transaction boundary owns retry/outcome classification. Current unopened runtime paths and source-only recovery readers are not qualified by the synthetic builder change; complete their wiring with the corresponding conversion tasks.

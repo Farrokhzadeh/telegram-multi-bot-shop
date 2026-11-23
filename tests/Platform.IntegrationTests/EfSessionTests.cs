@@ -155,7 +155,10 @@ public sealed class EfSessionTests
     {
         var ct = TestContext.Current.CancellationToken;
         await using var fixture = await BrandFixture.CreateAsync(ct);
-        await using var proxy = new DropCommitReplyProxy(fixture.Database.Data.ConnectionString);
+        var connection = new Npgsql.NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")
+            ?? throw new InvalidOperationException("Synthetic control identity is missing."))
+        { Database = new Npgsql.NpgsqlConnectionStringBuilder(fixture.Database.Data.ConnectionString).Database };
+        await using var proxy = new DropCommitReplyProxy(connection.ConnectionString);
         await using var transport = proxy.CreateClientDataSource();
         var writer = new DbSessionFactory(transport).ForBrandWriter(fixture.Contexts[0], 0);
         await using (var native = await writer.BeginAsync(ct))

@@ -208,13 +208,18 @@ public sealed class EfIntegrityTests
         var ct = TestContext.Current.CancellationToken;
         await using var fixture = await BrandFixture.CreateAsync(ct);
         var writer = fixture.Sessions.ForBrandWriter(fixture.Contexts[0], 0);
+        bool validated = false;
         var error = await Assert.ThrowsAsync<DbOperationException>(() => writer.RunEfAsync(true, async (session, token) =>
         {
             Guid member = await session.RequireCustomerAsync(fixture.Contexts[0], 7001, token);
             await session.UpdateAsync<Wallet>(value => value.UserId == member,
                 setters => setters.SetProperty(value => value.Balance, 7m).SetProperty(value => value.Version, 1L), token);
+            var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() => session.FlushAsync(token));
+            Assert.Contains("EF commit rejected: wallet_posting_balance", rejected.Message);
+            validated = true;
             return true;
         }, ct));
+        Assert.True(validated);
         Assert.Equal(DbFailureKind.Unexpected, error.Failure.Kind);
         Assert.Equal(DbRecovery.Reject, error.Failure.Recovery);
     }

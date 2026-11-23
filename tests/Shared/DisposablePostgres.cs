@@ -41,7 +41,7 @@ public sealed class DisposablePostgres : IAsyncDisposable
             await command.ExecuteNonQueryAsync(cancellationToken);
             options.Database = name;
             return new DisposablePostgres(admin,
-                new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(), name);
+                new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(), name);
         }
         catch
         {

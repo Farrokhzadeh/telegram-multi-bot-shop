@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
+using Microsoft.EntityFrameworkCore.Storage;
 using Platform.Persistence.Configurations;
 using Platform.Persistence.Entities;
 using Platform.Security;
@@ -171,7 +172,8 @@ public sealed partial class DbSession
         try
         {
             var config = new DbContextOptionsBuilder<PostgresAkantiDbContext>()
-                .UseNpgsql(connection, provider => provider.CommandTimeout(options.ClientTimeoutSeconds)).Options;
+                .UseNpgsql(connection, provider => provider.CommandTimeout(options.ClientTimeoutSeconds)
+                    .ExecutionStrategy(dependencies => new NonRetryingExecutionStrategy(dependencies))).Options;
             await using var context = new PostgresAkantiDbContext(config);
             await context.Database.UseTransactionAsync(transaction, ct);
             var session = new EfSession(context, write, writer, MarkWriter, () => writerAdmitted = true);

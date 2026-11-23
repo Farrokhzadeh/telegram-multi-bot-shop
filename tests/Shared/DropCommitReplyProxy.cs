@@ -36,7 +36,7 @@ public sealed class DropCommitReplyProxy : IAsyncDisposable
             Enlist = false,
             IncludeErrorDetail = false
         };
-        return new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        return new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
     }
 
     private async Task RunAsync()

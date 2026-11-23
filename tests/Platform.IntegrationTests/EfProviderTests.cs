@@ -153,6 +153,10 @@ public sealed class EfProviderTests
         context.Rows.AddRange(originals);
         await context.SaveChangesAsync(ct);
         context.ChangeTracker.Clear();
+        Guid[] ids = [originals[0].Id, originals[2].Id];
+        var selected = ids.ToHashSet();
+        Assert.Equal(2, await context.Rows.CountAsync(row => ids.Contains(row.Id), ct));
+        Assert.Equal(2, await context.Rows.CountAsync(row => selected.Contains(row.Id), ct));
         var ordered = context.Rows.AsNoTracking().OrderBy(row => row.Amount).Select(row => row.Amount);
         string sql = ordered.ToQueryString();
         Assert.Contains("ORDER BY", sql, StringComparison.OrdinalIgnoreCase);
