@@ -111,7 +111,7 @@ public sealed class StageWriterHostTests
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN"));
             Assert.Equal("shop_test_control", options.Database); Assert.Equal("shop_test_runner", options.Username);
             Assert.True(state.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) && state.Database.Length == 51 && Guid.TryParseExact(state.Database[19..], "N", out _));
-            await using var admin = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+            await using var admin = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
             await using var drop = admin.CreateCommand("DROP DATABASE \"" + state.Database + "\" WITH (FORCE)"); await drop.ExecuteNonQueryAsync();
         }
         if (Directory.Exists(Root))
@@ -138,7 +138,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); await CutoverStageRuntime.RunAsync(Root, "telegram-init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions);
             actor = Start(); await Ready(actor); Guid accepted = Guid.NewGuid(); Request(accepted, "wallet"); Assert.Equal("Purchased", (await Result(accepted, actor)).Outcome);
             if (interrupt)
             {
@@ -211,7 +211,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); await CutoverStageRuntime.RunAsync(Root, "payment-init", Ct); await CutoverStageRuntime.RunAsync(Root, "telegram-init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions);
             long postings;
             await using (var read = await sessions.BeginReadOnlyAsync(Ct)) postings = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries"), r => r.GetInt64(0), Ct);
             string body, directory = payment ? "payment" : "telegram";
@@ -273,7 +273,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); await CutoverStageRuntime.RunAsync(Root, "payment-init", Ct); await CutoverStageRuntime.RunAsync(Root, "telegram-init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions);
             await using var login = await sessions.BeginAsync(Ct);
             using var ticket = await AdminSessionStore.LoginAsync(login, "public-checkout-admin", new string('s', 20).AsMemory(), TimeSpan.FromHours(1), Ct); await login.CommitAsync(Ct);
             Guid adjustment = Guid.NewGuid(); string body = "{\"BrandId\":\"" + context.BrandId + "\",\"Value\":{\"MemberId\":\"" + state.User + "\",\"AmountUsd\":\"1\",\"ExpectedVersion\":1,\"Reason\":\"public synthetic adjustment\",\"CommandId\":\"" + adjustment + "\"}}";
@@ -341,7 +341,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions); using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true)); var store = new DeliveryStore(sessions, secrets);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions); using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true)); var store = new DeliveryStore(sessions, secrets);
             actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);
             if (savedAnchor)
             {
@@ -404,7 +404,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data);
             string before = await WorkflowActivityQualification.DomainAsync(sessions, true, Ct);
             var invalid = mismatch switch { "database" => state with { Database = "historical_read_only_copy" }, "run" => state with { Run = Guid.NewGuid() }, "keys" => state with { Secrets = "/outside-stage/original-keys" }, _ => throw new ArgumentException() };
             CutoverStageRuntime.Write(Path.Combine(Root, "state.json"), JsonSerializer.Serialize(invalid, CutoverStageJson.Default.CutoverStageState), true);
@@ -424,7 +424,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build(); var sessions = new DbSessionFactory(data);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data);
             using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
             var store = new DeliveryStore(sessions, secrets); var context = CheckoutFixture.ResolveContexts()[0];
             actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);

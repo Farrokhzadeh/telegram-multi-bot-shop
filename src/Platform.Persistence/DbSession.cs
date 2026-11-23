@@ -215,6 +215,8 @@ public sealed partial class DbSession : IAsyncDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            await ValidateEfAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             dispatched = true; // From here, cancellation/transport loss is conservatively an unknown commit.
             await transaction.CommitAsync(cancellationToken);
             State = DbSessionState.Committed;

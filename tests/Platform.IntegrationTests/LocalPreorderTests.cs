@@ -557,7 +557,7 @@ public sealed class LocalPreorderTests
         long revision = await Revision(f, first);
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is missing."))
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, ApplicationName = "public-fifo-head-change", Pooling = false };
-        await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+        await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         Task<Guid?> running;
         await using (var nextMember = await f.Sessions.BeginAsync(Ct))
         {

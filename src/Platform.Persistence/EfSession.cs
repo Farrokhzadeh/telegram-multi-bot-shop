@@ -8,12 +8,12 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding? writer, Action<BrandContext, long>? markWriter = null, Action? markShared = null)
+internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding? writer, Action<BrandContext, long>? markWriter = null, Action? markShared = null, EfIntegrityScope? changes = null, bool nativeWriterBoundary = false)
 {
-    private bool admitted;
+    private bool admitted, sharedAdmitted;
     internal void InitializeIntegrity() => _ = Integrity;
     internal AkantiDbContext Data { get; } = data;
-    private EfIntegrity Integrity => Data.Integrity ??= new EfIntegrity(Data, () => write && admitted);
+    private EfIntegrity Integrity => Data.Integrity ??= new EfIntegrity(Data, () => write && admitted, changes);
     private async Task<int> AdmitAsync(Func<Task<int>> operation)
     {
         Integrity.AllowSetWrite = true;
@@ -62,7 +62,7 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
     {
         ArgumentNullException.ThrowIfNull(context);
         var registration = writer?.Find(context);
-        if (registration is null || (writer!.Shared && !admitted)) throw Denied("Writer scope is unavailable.");
+        if (registration is null || (writer!.Shared && !sharedAdmitted)) throw Denied("Writer scope is unavailable.");
         var brand = Data.Set<Entities.Brand>().Where(value => value.Id == context.BrandId && value.BotId == context.BotId &&
             value.Active && value.PolicyVersion == registration.Revision);
         bool valid = write
@@ -87,7 +87,7 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
         if (await Data.Set<Entities.Brand>().CountAsync(value => value.Active, ct) != writer.Entries.Length)
             throw Denied("Shared writer set is unavailable.");
         markShared?.Invoke();
-        admitted = true;
+        sharedAdmitted = admitted = true;
     }
     internal async Task<Guid> RequireCustomerAsync(BrandContext context, long actor, CancellationToken ct)
     {
@@ -105,14 +105,14 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
         if (write && writer is null) throw Denied("Customer writes require a registered writer.");
         return member.Id;
     }
-    internal async Task RequireAdminAsync(AuthenticatedAdmin actor, Guid? otherAdmin, CancellationToken ct)
+    internal async Task RequireAdminAsync(AuthenticatedAdmin actor, Guid? otherAdmin, CancellationToken ct, bool lockRows = false)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (write)
+        if (write || lockRows)
         {
             foreach (Guid id in new[] { actor.AdminId, otherAdmin ?? actor.AdminId }.Distinct().Order())
                 if (await AdmitAsync(() => Data.Set<Entities.Admin>().Where(value => value.Id == id)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.AuthVersion, value => value.AuthVersion), ct)) != 1)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.AuthVersion, value => value.AuthVersion), ct)) != 1 && id == actor.AdminId)
                     throw Denied("Administrator scope is unavailable.");
         }
         byte[] hash = actor.TokenHash;
@@ -123,9 +123,26 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
                                 session.AuthVersionAtIssue == actor.AuthVersion && session.ExpiresAt > EfValues.UtcNow()
                             select admin.Id).AnyAsync(ct);
         if (!valid) throw Denied("Administrator scope is unavailable.");
-        if (writer is null) admitted = true;
+        if (writer is null || nativeWriterBoundary) admitted = true;
     }
-    internal async Task FlushAsync(CancellationToken ct)
+    internal async Task<Entities.Admin> RequirePasswordAsync(string login, ReadOnlyMemory<char> password, CancellationToken ct)
+    {
+        if (!write || (writer is not null && !nativeWriterBoundary)) throw Denied("Administrator login requires a writable control session.");
+        await AdmitAsync(() => Data.Set<Entities.Admin>().Where(value => value.Login == login)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(value => value.AuthVersion, value => value.AuthVersion), ct));
+        var account = await Data.Set<Entities.Admin>().AsNoTracking().SingleOrDefaultAsync(value => value.Login == login, ct);
+        bool valid = AdminAuth.VerifyPassword(password.Span, account?.PasswordVerifier);
+        if (!valid || account is null || account.DisabledAt is not null || account.AuthenticationMode != "password") RejectAuthentication();
+        admitted = true;
+        return account;
+    }
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    internal void RejectAuthentication()
+    {
+        Integrity.Reject();
+        throw new AdminAuthenticationException();
+    }
+    internal async Task FlushAsync(CancellationToken ct, bool validate = true)
     {
         ct.ThrowIfCancellationRequested();
         Integrity.ThrowIfRejected();
@@ -136,13 +153,24 @@ internal sealed class EfSession(AkantiDbContext data, bool write, WriterBinding?
         }
         if (!admitted) throw Denied("A verified command scope is required.");
         await Data.SaveChangesAsync(ct);
-        await Integrity.ValidateAsync(ct);
+        if (validate) await Integrity.ValidateAsync(ct);
         ct.ThrowIfCancellationRequested();
     }
 }
 
 public sealed partial class SqliteSessionFactory
 {
+    internal static async Task<T> ReadEfAsync<T>(Microsoft.Data.Sqlite.SqliteTransaction transaction, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct)
+    {
+        var connection = transaction.Connection ?? throw new InvalidOperationException("A live SQLite transaction is required.");
+        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+        await context.Database.UseTransactionAsync(transaction, ct);
+        var session = new EfSession(context, false, null);
+        session.InitializeIntegrity();
+        T result = await operation(session, ct);
+        await session.FlushAsync(ct);
+        return result;
+    }
     internal Task<T> RunEfAsync<T>(bool write, WriterBinding? writer, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct) =>
         RunAsync(write, async (connection, transaction, token) =>
         {
@@ -171,24 +199,41 @@ public sealed partial class DbSessionFactory
 
 public sealed partial class DbSession
 {
-    internal async Task<T> RunEfAsync<T>(bool write, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct)
+    private EfIntegrityScope? efChanges;
+    internal Task<T> RunEfAsync<T>(bool write, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct) =>
+        RunEfCoreAsync(write, false, operation, ct);
+    internal Task<T> RunEfStepAsync<T>(bool write, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct) =>
+        RunEfCoreAsync(write, true, operation, ct);
+    private PostgresAkantiDbContext EfContext() => new(new DbContextOptionsBuilder<PostgresAkantiDbContext>()
+        .UseNpgsql(connection, provider => provider.CommandTimeout(options.ClientTimeoutSeconds)
+            .ExecutionStrategy(dependencies => new NonRetryingExecutionStrategy(dependencies))).Options);
+    private async Task<T> RunEfCoreAsync<T>(bool write, bool defer, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct)
     {
         EnterActive();
         try
         {
-            var config = new DbContextOptionsBuilder<PostgresAkantiDbContext>()
-                .UseNpgsql(connection, provider => provider.CommandTimeout(options.ClientTimeoutSeconds)
-                    .ExecutionStrategy(dependencies => new NonRetryingExecutionStrategy(dependencies))).Options;
-            await using var context = new PostgresAkantiDbContext(config);
+            await using var context = EfContext();
             await context.Database.UseTransactionAsync(transaction, ct);
-            var session = new EfSession(context, write, writer, MarkWriter, () => writerAdmitted = true);
+            var session = new EfSession(context, write, writer, MarkWriter, () => writerAdmitted = true, efChanges ??= new(), true);
             session.InitializeIntegrity();
             T result = await operation(session, ct);
-            await session.FlushAsync(ct);
+            await session.FlushAsync(ct, !defer);
             return result;
         }
+        catch (AdminAuthenticationException) { LastFailure = new(DbFailureKind.InvalidData, DbRecovery.Reject); State = DbSessionState.Aborted; throw; }
         catch (UnauthorizedAccessException) { State = DbSessionState.Aborted; throw; }
         catch (Exception error) { throw RecordFailure(error is DbUpdateException update ? update.InnerException ?? error : error, DbPhase.Executing, ct); }
         finally { Exit(); }
+    }
+    private async Task ValidateEfAsync(CancellationToken ct)
+    {
+        if (efChanges is null) return;
+        if (efChanges.Rejected) throw new InvalidOperationException("The EF command was rejected and cannot commit.");
+        if (efChanges.Empty) return;
+        await using var context = EfContext();
+        await context.Database.UseTransactionAsync(transaction, ct);
+        var integrity = new EfIntegrity(context, () => false, efChanges);
+        context.Integrity = integrity;
+        await integrity.ValidateAsync(ct);
     }
 }

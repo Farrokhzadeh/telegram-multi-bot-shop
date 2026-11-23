@@ -7,41 +7,14 @@ namespace Platform.Persistence;
 
 public static class SqliteAdminSessionStore
 {
-    public static async Task<AuthenticatedAdmin> AuthenticateAsync(SqliteSessionFactory sessions, AdminToken token,
-        CancellationToken ct = default)
+    public static async Task<AuthenticatedAdmin> AuthenticateAsync(SqliteSessionFactory sessions, AdminToken token, CancellationToken ct = default)
     {
         byte[] hash = token.Hash();
-        try
-        {
-            return await sessions.RunAsync(false, async (_, tx, cancel) =>
-            {
-                using var command = SqliteWallet.Command(tx, """
-                    SELECT a.id,s.id,a.auth_version
-                    FROM admin_sessions s JOIN admins a ON a.id=s.admin_id
-                    WHERE s.token_hash=$hash AND a.disabled_at IS NULL AND s.revoked_at IS NULL
-                        AND s.expires_at>$now AND s.auth_version_at_issue=a.auth_version
-                    """, ("$hash", hash), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
-                await using var row = await command.ExecuteReaderAsync(cancel);
-                if (!await row.ReadAsync(cancel)) throw new AdminAuthenticationException();
-                return new AuthenticatedAdmin(row.GetGuid(0), row.GetGuid(1), row.GetInt64(2), hash);
-            }, ct);
-        }
+        try { return await sessions.RunEfAsync(false, null, (data, cancel) => AdminSessionStore.AuthenticateAsync(data, hash, cancel), ct); }
         finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(hash); }
     }
-
-    internal static async Task RequireActiveAsync(SqliteTransaction tx, AuthenticatedAdmin actor, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(actor);
-        using var command = SqliteWallet.Command(tx, """
-            SELECT 1 FROM admins a JOIN admin_sessions s ON s.admin_id=a.id
-            WHERE a.id=$admin AND s.id=$session AND s.token_hash=$hash
-                AND a.disabled_at IS NULL AND s.revoked_at IS NULL
-                AND a.auth_version=$revision AND s.auth_version_at_issue=$revision
-                AND s.expires_at>$now LIMIT 1
-            """, ("$admin", actor.AdminId), ("$session", actor.SessionId), ("$hash", actor.TokenHash),
-            ("$revision", actor.AuthVersion), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
-        if (await command.ExecuteScalarAsync(ct) is null) throw new AdminAuthenticationException();
-    }
+    internal static Task RequireActiveAsync(SqliteTransaction tx, AuthenticatedAdmin actor, CancellationToken ct) =>
+        SqliteSessionFactory.ReadEfAsync(tx, async (data, cancel) => { await AdminSessionStore.RequireActiveAsync(data, actor, null, cancel); return true; }, ct);
 }
 
 public sealed class SqliteAdminCatalogStore(SqliteSessionFactory sessions)

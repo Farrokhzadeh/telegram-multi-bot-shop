@@ -48,7 +48,7 @@ internal static class SyntheticStaging
                 CommandTimeout = 5,
                 MaxPoolSize = 2
             };
-            await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).Build();
+            await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
             await using (var connection = await data.OpenConnectionAsync())
             await using (var query = new NpgsqlCommand("""
                 SELECT current_database()='shop_staging' AND current_user=$1

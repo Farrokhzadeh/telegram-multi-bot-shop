@@ -1,4 +1,7 @@
 # Baseline persistence and encryption inventory
+## T014 conversion checkpoint
+PostgreSQL AdminSessionStore and AdminAuditStore business queries/writes now use EfSession; the audit advisory lock remains SQL-01. Paired SqliteAdminSessionStore shares EF bearer/reauthentication queries. Remaining T014 identity/binding/revocation/brand/writer/policy and SQLite business/audit paths remain open. These dispositions qualify only after candidate CI; the inventory below retains the original work scope.
+
 **Baseline**: source unchanged from `c44dc1b`, feature specification `48eeccd`. Static source inventory is a bounded starting point, not proof of runtime path completion. Follow actual callers and dynamic/file-format dependencies during T001. All rows require a final evidence/disposition entry before closure.
 ## Source files
 Raw-command and encryption flags are lexical discovery signals, not assertions that every occurrence is target business SQL or encryption; e.g. source-only reads and authentication metadata must be classified by use. Review every current persistence file even without lexical matches.

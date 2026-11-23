@@ -163,7 +163,7 @@ public sealed class EfSessionTests
         var writer = new DbSessionFactory(transport).ForBrandWriter(fixture.Contexts[0], 0);
         await using (var native = await writer.BeginAsync(ct))
         {
-            await native.RunEfAsync(true, async (session, token) =>
+            await native.RunEfStepAsync(true, async (session, token) =>
             {
                 Guid member = await session.RequireCustomerAsync(fixture.Contexts[0], 7001, token);
                 var user = await session.Data.Set<User>().SingleAsync(value => value.Id == member, token);

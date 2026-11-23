@@ -3,16 +3,23 @@ using Platform.Persistence.Entities;
 
 namespace Platform.Persistence;
 
-internal sealed partial class EfIntegrity(AkantiDbContext data, Func<bool> canWrite)
+internal sealed partial class EfIntegrity(AkantiDbContext data, Func<bool> canWrite, EfIntegrityScope? scope = null)
 {
-    private readonly HashSet<Guid> wallets = [], postings = [], audits = [], users = [];
-    private readonly HashSet<Guid> orders = [], discounts = [], allocations = [], payments = [], entities = [];
-    private bool rejected;
+    private readonly EfIntegrityScope changes = scope ?? new();
+    private HashSet<Guid> wallets => changes.Wallets;
+    private HashSet<Guid> postings => changes.Postings;
+    private HashSet<Guid> audits => changes.Audits;
+    private HashSet<Guid> users => changes.Users;
+    private HashSet<Guid> orders => changes.Orders;
+    private HashSet<Guid> discounts => changes.Discounts;
+    private HashSet<Guid> allocations => changes.Allocations;
+    private HashSet<Guid> payments => changes.Payments;
+    private HashSet<Guid> entities => changes.Entities;
     internal bool AllowSetWrite { get; set; }
-    internal void Reject() => rejected = true;
+    internal void Reject() => changes.Rejected = true;
     internal void ThrowIfRejected()
     {
-        if (rejected) throw new InvalidOperationException("The EF command was rejected and cannot commit.");
+        if (changes.Rejected) throw new InvalidOperationException("The EF command was rejected and cannot commit.");
     }
     internal void RequireWrite()
     {

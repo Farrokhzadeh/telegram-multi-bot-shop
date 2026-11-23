@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using NpgsqlTypes;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -90,26 +90,36 @@ public static class AdminAuditStore
         await AdminSessionStore.RequireActiveAsync(session, actor, command.Entity == AuditEntity.Admin ? command.EntityId : null, cancellationToken);
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)",
             DbValue.Bigint(System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(command.Id.ToByteArray(bigEndian: true)))), cancellationToken);
-        byte[] fingerprint = command.Fingerprint(actor.AdminId);
-        bool exists = await session.QuerySingleAsync(new DbStatement("""
-            SELECT a.id,a.command_sha256 FROM (SELECT 1) singleton LEFT JOIN shop.audit_events a ON a.id=$1
-            """, DbValue.Uuid(command.Id)), row =>
+        return await session.RunEfStepAsync(true, async (data, ct) =>
         {
-            if (row.IsDBNull(0)) return false;
-            if (row.IsDBNull(1) || !CryptographicOperations.FixedTimeEquals(fingerprint, row.GetBinary(1)))
-                throw new FormatException("Audit command identity conflict.");
+            await AdminSessionStore.RequireActiveAsync(data, actor, command.Entity == AuditEntity.Admin ? command.EntityId : null, ct);
+            byte[] fingerprint = command.Fingerprint(actor.AdminId);
+            var previous = await data.Data.Set<Entities.AuditEvent>().AsNoTracking().SingleOrDefaultAsync(value => value.Id == command.Id, ct);
+            if (previous is not null)
+            {
+                if (previous.CommandSha256 is null || !CryptographicOperations.FixedTimeEquals(fingerprint, previous.CommandSha256))
+                    throw new FormatException("Audit command identity conflict.");
+                return false;
+            }
+            data.Data.Add(new Entities.AuditEvent
+            {
+                Id = command.Id,
+                ActorKind = "admin",
+                ActorAdminId = actor.AdminId,
+                BrandId = command.BrandId,
+                Action = ActionCode(command.Action),
+                EntityKind = EntityCode(command.Entity),
+                EntityId = command.EntityId,
+                Reason = ReasonCode(command.Reason),
+                PreviousRevision = command.PreviousRevision,
+                NewRevision = command.NewRevision,
+                CorrelationId = command.CorrelationId,
+                CommandSha256 = fingerprint,
+                BeforeChannelEnforcement = command.BeforeChannelEnforcement,
+                AfterChannelEnforcement = command.AfterChannelEnforcement
+            });
             return true;
         }, cancellationToken);
-        if (exists) return false;
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,
-                previous_revision,new_revision,correlation_id,command_sha256,before_channel_enforcement,after_channel_enforcement)
-            VALUES ($1,'admin',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-            """, DbValue.Uuid(command.Id), DbValue.Uuid(actor.AdminId), Uuid(command.BrandId), DbValue.Text(ActionCode(command.Action)),
-            DbValue.Text(EntityCode(command.Entity)), Uuid(command.EntityId), DbValue.Text(ReasonCode(command.Reason)),
-            Number(command.PreviousRevision), Number(command.NewRevision), DbValue.Uuid(command.CorrelationId), DbValue.Binary(fingerprint),
-            Flag(command.BeforeChannelEnforcement), Flag(command.AfterChannelEnforcement)), cancellationToken);
-        return true;
     }
 
     internal static string ActionCode(AuditAction action) => action switch
@@ -178,7 +188,4 @@ public static class AdminAuditStore
         AuditReason.CustomerRequest => "customer_request",
         _ => throw new ArgumentOutOfRangeException(nameof(reason))
     };
-    private static DbValue Uuid(Guid? value) => value.HasValue ? DbValue.Uuid(value.Value) : DbValue.Null(NpgsqlDbType.Uuid);
-    private static DbValue Number(long? value) => value.HasValue ? DbValue.Bigint(value.Value) : DbValue.Null(NpgsqlDbType.Bigint);
-    private static DbValue Flag(bool? value) => value.HasValue ? DbValue.Boolean(value.Value) : DbValue.Null(NpgsqlDbType.Boolean);
 }
