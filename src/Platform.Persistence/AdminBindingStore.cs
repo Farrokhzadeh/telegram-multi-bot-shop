@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -19,11 +20,22 @@ public static class AdminBindingStore
         byte[] hash = AdminAuth.BindingHash(nonce, actor.AdminId, actor.AuthVersion, candidateTelegramId, false);
         try
         {
-            await session.ExecuteAsync(new DbStatement("""
-                UPDATE shop.admins SET binding_challenge_hash=$2,binding_candidate_telegram_id=$3,
-                    binding_expires_at=clock_timestamp()+$4*INTERVAL '1 second' WHERE id=$1
-                """, DbValue.Uuid(actor.AdminId), DbValue.Binary(hash), DbValue.Bigint(candidateTelegramId),
-                DbValue.Integer(checked((int)lifetime.TotalSeconds))), cancellationToken);
+            await session.RunEfStepAsync(true, async (data, ct) =>
+            {
+                await AdminSessionStore.RequireActiveAsync(data, actor, actor.AdminId, ct, true);
+                var account = await data.Data.Set<Entities.Admin>().AsNoTracking().SingleAsync(value => value.Id == actor.AdminId, ct);
+                DateTime clock = await data.Data.Set<Entities.Admin>().Where(value => value.Id == actor.AdminId)
+                    .Select(value => Configurations.EfValues.UtcNow()).SingleAsync(ct);
+                DateTime now = clock.Kind == DateTimeKind.Local ? clock.ToUniversalTime() : DateTime.SpecifyKind(clock, DateTimeKind.Utc);
+                account.BindingChallengeHash = hash.ToArray();
+                account.BindingCandidateTelegramId = candidateTelegramId;
+                account.BindingExpiresAt = now.Add(lifetime);
+                var entry = data.Data.Attach(account);
+                entry.Property(value => value.BindingChallengeHash).IsModified = true;
+                entry.Property(value => value.BindingCandidateTelegramId).IsModified = true;
+                entry.Property(value => value.BindingExpiresAt).IsModified = true;
+                return true;
+            }, cancellationToken);
             return nonce;
         }
         catch { nonce.Dispose(); throw; }
@@ -86,16 +98,39 @@ public static class AdminBindingStore
             var command = new AuditCommand(commandId, AuditAction.BindTelegram, AuditEntity.Admin, actor.AdminId, null,
                 AuditReason.TelegramPossession, correlationId, expected, expectedAuthVersion, expectedAuthVersion + 1);
             if (!await AdminAuditStore.AppendAsync(session, actor, command, cancellationToken)) return false;
-            var pending = await PendingAsync(session, actor.AdminId, cancellationToken);
-            if (pending is null || pending.Version != expectedAuthVersion || pending.TelegramId != candidateTelegramId ||
-                !CryptographicOperations.FixedTimeEquals(expected, pending.Hash)) AdminSessionStore.Reject(session);
-            int changed = await session.ExecuteAsync(new DbStatement("""
-                UPDATE shop.admins SET telegram_user_id=$2,telegram_verified_by_admin_id=$1,telegram_verified_at=clock_timestamp(),
-                    telegram_verification_audit_id=$3,public_contact_handle=NULL,auth_version=auth_version+1,
-                    binding_challenge_hash=NULL,binding_candidate_telegram_id=NULL,binding_expires_at=NULL
-                WHERE id=$1 AND auth_version=$4 AND disabled_at IS NULL AND binding_expires_at>clock_timestamp()
-                """, DbValue.Uuid(actor.AdminId), DbValue.Bigint(candidateTelegramId), DbValue.Uuid(commandId), DbValue.Bigint(expectedAuthVersion)), cancellationToken);
-            if (changed != 1) AdminSessionStore.Reject(session);
+            await session.RunEfStepAsync(true, async (data, ct) =>
+            {
+                await AdminSessionStore.RequireActiveAsync(data, actor, actor.AdminId, ct, true);
+                var account = await data.Data.Set<Entities.Admin>().AsNoTracking().SingleAsync(value => value.Id == actor.AdminId, ct);
+                if (account.AuthVersion != expectedAuthVersion || account.DisabledAt is not null || account.BindingExpiresAt is null ||
+                    account.BindingCandidateTelegramId != candidateTelegramId ||
+                    !CryptographicOperations.FixedTimeEquals(expected, account.BindingChallengeHash ?? Array.Empty<byte>()))
+                    AdminSessionStore.Reject(session);
+                DateTime clock = await data.Data.Set<Entities.Admin>().Where(value => value.Id == actor.AdminId)
+                    .Select(value => Configurations.EfValues.UtcNow()).SingleAsync(ct);
+                DateTime now = clock.Kind == DateTimeKind.Local ? clock.ToUniversalTime() : DateTime.SpecifyKind(clock, DateTimeKind.Utc);
+                if (account.BindingExpiresAt <= now) AdminSessionStore.Reject(session);
+                account.TelegramUserId = candidateTelegramId;
+                account.TelegramVerifiedByAdminId = actor.AdminId;
+                account.TelegramVerifiedAt = now;
+                account.TelegramVerificationAuditId = commandId;
+                account.PublicContactHandle = null;
+                account.AuthVersion += 1;
+                account.BindingChallengeHash = null;
+                account.BindingCandidateTelegramId = null;
+                account.BindingExpiresAt = null;
+                var entry = data.Data.Attach(account);
+                entry.Property(value => value.TelegramUserId).IsModified = true;
+                entry.Property(value => value.TelegramVerifiedByAdminId).IsModified = true;
+                entry.Property(value => value.TelegramVerifiedAt).IsModified = true;
+                entry.Property(value => value.TelegramVerificationAuditId).IsModified = true;
+                entry.Property(value => value.PublicContactHandle).IsModified = true;
+                entry.Property(value => value.AuthVersion).IsModified = true;
+                entry.Property(value => value.BindingChallengeHash).IsModified = true;
+                entry.Property(value => value.BindingCandidateTelegramId).IsModified = true;
+                entry.Property(value => value.BindingExpiresAt).IsModified = true;
+                return true;
+            }, cancellationToken);
             return true;
         }
         finally { CryptographicOperations.ZeroMemory(expected); }
