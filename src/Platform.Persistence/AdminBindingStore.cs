@@ -98,42 +98,45 @@ public static class AdminBindingStore
             var command = new AuditCommand(commandId, AuditAction.BindTelegram, AuditEntity.Admin, actor.AdminId, null,
                 AuditReason.TelegramPossession, correlationId, expected, expectedAuthVersion, expectedAuthVersion + 1);
             if (!await AdminAuditStore.AppendAsync(session, actor, command, cancellationToken)) return false;
-            await session.RunEfStepAsync(true, async (data, ct) =>
-            {
-                await AdminSessionStore.RequireActiveAsync(data, actor, actor.AdminId, ct, true);
-                var account = await data.Data.Set<Entities.Admin>().AsNoTracking().SingleAsync(value => value.Id == actor.AdminId, ct);
-                if (account.AuthVersion != expectedAuthVersion || account.DisabledAt is not null || account.BindingExpiresAt is null ||
-                    account.BindingCandidateTelegramId != candidateTelegramId ||
-                    !CryptographicOperations.FixedTimeEquals(expected, account.BindingChallengeHash ?? Array.Empty<byte>()))
-                    AdminSessionStore.Reject(session);
-                DateTime clock = await data.Data.Set<Entities.Admin>().Where(value => value.Id == actor.AdminId)
-                    .Select(value => Configurations.EfValues.UtcNow()).SingleAsync(ct);
-                DateTime now = clock.Kind == DateTimeKind.Local ? clock.ToUniversalTime() : DateTime.SpecifyKind(clock, DateTimeKind.Utc);
-                if (account.BindingExpiresAt <= now) AdminSessionStore.Reject(session);
-                account.TelegramUserId = candidateTelegramId;
-                account.TelegramVerifiedByAdminId = actor.AdminId;
-                account.TelegramVerifiedAt = now;
-                account.TelegramVerificationAuditId = commandId;
-                account.PublicContactHandle = null;
-                account.AuthVersion += 1;
-                account.BindingChallengeHash = null;
-                account.BindingCandidateTelegramId = null;
-                account.BindingExpiresAt = null;
-                var entry = data.Data.Attach(account);
-                entry.Property(value => value.TelegramUserId).IsModified = true;
-                entry.Property(value => value.TelegramVerifiedByAdminId).IsModified = true;
-                entry.Property(value => value.TelegramVerifiedAt).IsModified = true;
-                entry.Property(value => value.TelegramVerificationAuditId).IsModified = true;
-                entry.Property(value => value.PublicContactHandle).IsModified = true;
-                entry.Property(value => value.AuthVersion).IsModified = true;
-                entry.Property(value => value.BindingChallengeHash).IsModified = true;
-                entry.Property(value => value.BindingCandidateTelegramId).IsModified = true;
-                entry.Property(value => value.BindingExpiresAt).IsModified = true;
-                return true;
-            }, cancellationToken);
+            await session.RunEfStepAsync(true, (data, ct) => CompleteEfAsync(data, actor, candidateTelegramId, expectedAuthVersion, expected, commandId, ct), cancellationToken);
             return true;
         }
         finally { CryptographicOperations.ZeroMemory(expected); }
+    }
+
+    internal static async Task<bool> CompleteEfAsync(EfSession data, AuthenticatedAdmin actor, long candidateTelegramId,
+        long expectedAuthVersion, byte[] expected, Guid commandId, CancellationToken ct)
+    {
+        await AdminSessionStore.RequireActiveAsync(data, actor, actor.AdminId, ct, true);
+        var account = await data.Data.Set<Entities.Admin>().SingleAsync(value => value.Id == actor.AdminId, ct);
+        if (account.AuthVersion != expectedAuthVersion || account.DisabledAt is not null || account.BindingExpiresAt is null ||
+            account.BindingCandidateTelegramId != candidateTelegramId ||
+            !CryptographicOperations.FixedTimeEquals(expected, account.BindingChallengeHash ?? Array.Empty<byte>()))
+            data.RejectAuthentication();
+        DateTime clock = await data.Data.Set<Entities.Admin>().Where(value => value.Id == actor.AdminId)
+            .Select(value => Configurations.EfValues.UtcNow()).SingleAsync(ct);
+        DateTime now = clock.Kind == DateTimeKind.Local ? clock.ToUniversalTime() : DateTime.SpecifyKind(clock, DateTimeKind.Utc);
+        if (account.BindingExpiresAt <= now) data.RejectAuthentication();
+        account.TelegramUserId = candidateTelegramId;
+        account.TelegramVerifiedByAdminId = actor.AdminId;
+        account.TelegramVerifiedAt = now;
+        account.TelegramVerificationAuditId = commandId;
+        account.PublicContactHandle = null;
+        account.AuthVersion += 1;
+        account.BindingChallengeHash = null;
+        account.BindingCandidateTelegramId = null;
+        account.BindingExpiresAt = null;
+        var entry = data.Data.Entry(account);
+        entry.Property(value => value.TelegramUserId).IsModified = true;
+        entry.Property(value => value.TelegramVerifiedByAdminId).IsModified = true;
+        entry.Property(value => value.TelegramVerifiedAt).IsModified = true;
+        entry.Property(value => value.TelegramVerificationAuditId).IsModified = true;
+        entry.Property(value => value.PublicContactHandle).IsModified = true;
+        entry.Property(value => value.AuthVersion).IsModified = true;
+        entry.Property(value => value.BindingChallengeHash).IsModified = true;
+        entry.Property(value => value.BindingCandidateTelegramId).IsModified = true;
+        entry.Property(value => value.BindingExpiresAt).IsModified = true;
+        return true;
     }
 
     public static Task<bool> IsVerifiedStaffAsync(DbSession session, long telegramUserId, CancellationToken cancellationToken = default) =>

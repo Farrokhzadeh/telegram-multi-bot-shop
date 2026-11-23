@@ -90,6 +90,60 @@ public sealed class EfAdminSessionTests
         }
         finally { directory.Delete(recursive: true); }
     }
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SqliteBindingAndRevocationAdvanceTheOriginalAuthenticationVersion(bool bind)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Directory.CreateTempSubdirectory("akanti-ef-admin-version-");
+        try
+        {
+            string path = Path.Combine(directory.FullName, "shop.db");
+            await SqliteSchema.InitializeAsync(path, ct);
+            var sessions = new SqliteSessionFactory(path);
+            Guid admin = Guid.NewGuid(), command = Guid.NewGuid();
+            using var nonce = AdminToken.Create();
+            byte[] expected = AdminAuth.BindingHash(nonce, admin, 0, 7001, true);
+            await sessions.RunAsync(true, async (_, tx, cancel) =>
+            {
+                using var seed = SqliteWallet.Command(tx, """
+                    INSERT INTO admins(id,login,authentication_mode,password_verifier,binding_challenge_hash,binding_candidate_telegram_id,binding_expires_at)
+                    VALUES ($admin,'ef-version','password',$verifier,$hash,7001,$expires);
+                    INSERT INTO audit_events(id,actor_kind,actor_admin_id,action,entity_kind,entity_id,reason,correlation_id,command_sha256)
+                    VALUES ($command,'admin',$admin,$action,'admin',$admin,'account_revocation',$command,$hash)
+                    """, ("$admin", admin), ("$verifier", Verifier.Value), ("$hash", expected),
+                    ("$expires", SqliteSchema.UtcText(DateTime.UtcNow.AddMinutes(5))), ("$command", command), ("$action", bind ? "bind_telegram" : "update"));
+                await seed.ExecuteNonQueryAsync(cancel);
+                return true;
+            }, ct);
+            using var ticket = await sessions.RunEfAsync(true, null,
+                (data, cancel) => AdminSessionStore.LoginAsync(data, "ef-version", new string('s', 20).AsMemory(), TimeSpan.FromMinutes(5), cancel), ct);
+            var actor = await SqliteAdminSessionStore.AuthenticateAsync(sessions, ticket.Token, ct);
+            await sessions.RunEfAsync(true, null, (data, cancel) => bind
+                ? AdminBindingStore.CompleteEfAsync(data, actor, 7001, 0, expected, command, cancel)
+                : AdminRevocationStore.RevokeEfAsync(data, actor, admin, 0, false, false, cancel), ct);
+            await sessions.RunEfAsync(false, null, async (data, cancel) =>
+            {
+                var account = await data.Data.Set<Admin>().AsNoTracking().SingleAsync(cancel);
+                Assert.Equal(1, account.AuthVersion);
+                Assert.Null(account.BindingChallengeHash);
+                Assert.Null(account.BindingCandidateTelegramId);
+                Assert.Null(account.BindingExpiresAt);
+                Assert.Equal(bind ? 7001L : (long?)null, account.TelegramUserId);
+                Assert.Equal(bind ? command : (Guid?)null, account.TelegramVerificationAuditId);
+                return true;
+            }, ct);
+            await Assert.ThrowsAsync<AdminAuthenticationException>(() => SqliteAdminSessionStore.AuthenticateAsync(sessions, ticket.Token, ct));
+            using var current = await sessions.RunEfAsync(true, null,
+                (data, cancel) => AdminSessionStore.LoginAsync(data, "ef-version", new string('s', 20).AsMemory(), TimeSpan.FromMinutes(5), cancel), ct);
+            var fresh = await SqliteAdminSessionStore.AuthenticateAsync(sessions, current.Token, ct);
+            await Assert.ThrowsAsync<AdminAuthenticationException>(() => sessions.RunEfAsync(true, null, (data, cancel) => bind
+                ? AdminBindingStore.CompleteEfAsync(data, fresh, 7001, 0, expected, command, cancel)
+                : AdminRevocationStore.RevokeEfAsync(data, fresh, admin, 0, false, false, cancel), ct));
+        }
+        finally { directory.Delete(recursive: true); }
+    }
     [Fact]
     public async Task PostgresAuditStepsValidateReferencesAtNativeCommitAfterBusinessCreation()
     {
