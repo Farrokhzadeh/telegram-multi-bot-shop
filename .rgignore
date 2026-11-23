@@ -1,9 +1,6 @@
 specs/001-multibrand-redesign/archive/
 specs/001-multibrand-redesign/research.md
 ops/evidence/
-ops/T068_REHEARSAL.md
-ops/LEGACY_RECORD_IMPORT.md
-ops/*_QUALIFICATION.md
 **/packages.lock.json
 **/bin/
 **/obj/
