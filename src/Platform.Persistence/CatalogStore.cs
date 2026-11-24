@@ -264,13 +264,14 @@ public sealed class CatalogStore
     private async Task<CheckoutQuote> BuildQuoteAsync(DbSession session, BrandContext context, Data data, CatalogQuery query, CancellationToken ct)
     {
         if (query.Quantity < data.Minimum || query.Quantity > data.Maximum || !PaymentAllowed(data, query.Payment)) throw new PricingRejectedException();
-        return await session.RunEfStepAsync(false, async (ef, token) =>
+        var snapshot = await session.RunEfStepAsync(false, async (ef, token) =>
         {
             var coupons = await CatalogQueries.CouponsAsync(ef, secrets, context, data.ProductId, data.Member, token, true);
             DateTime now = await ef.BrandClockAsync(context.BrandId, token);
-            if (Supply(data with { Now = now }, query.Quantity, query.Kind) is null) throw new PricingRejectedException();
-            return CheckoutQuote.Create(new(data.UnitUsdt, data.UnitToman, data.AutoToman, data.FxEnabled, data.Fx, data.MaximumFxAge), data.Presentation, query.Quantity, query.Payment, coupons, now);
+            return (Coupons: coupons, Now: now);
         }, ct);
+        if (Supply(data with { Now = snapshot.Now }, query.Quantity, query.Kind) is null) throw new PricingRejectedException();
+        return CheckoutQuote.Create(new(data.UnitUsdt, data.UnitToman, data.AutoToman, data.FxEnabled, data.Fx, data.MaximumFxAge), data.Presentation, query.Quantity, query.Payment, snapshot.Coupons, snapshot.Now);
     }
 
     private async Task<Data?> LoadAsync(DbSession session, BrandContext context, long actor, Guid product, CancellationToken ct, long? writerRevision = null)
