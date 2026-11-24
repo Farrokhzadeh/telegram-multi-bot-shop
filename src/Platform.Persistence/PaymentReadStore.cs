@@ -1,4 +1,6 @@
 using Platform.Core;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Configurations;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -18,19 +20,39 @@ public static class PaymentReadStore
         BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
         return await ReadAsync(session, context.BrandId, member.Id, payment, ct);
     }
-    private static Task<PaymentStatusView?> ReadAsync(DbSession session, Guid brand, Guid? member, Guid payment, CancellationToken ct) =>
-        session.QuerySingleAsync<PaymentStatusView?>(new DbStatement("""
-            SELECT p.id,p.order_id,p.payment_method,p.status,p.quote_currency,p.amount_due::text,p.amount_received::text,o.payment_status,o.fulfillment_status,o.review_code,
-                w.movement_kind,w.signed_amount::text,c.status,c.status='released' AND d.kind='promotion' AND d.ends_at<=clock_timestamp()
-            FROM (SELECT 1) seed LEFT JOIN (shop.payments p LEFT JOIN shop.orders o ON o.id=p.order_id JOIN shop.users u ON u.id=COALESCE(p.topup_user_id,o.user_id)
-                LEFT JOIN shop.wallet_entries w ON w.id=p.compensating_wallet_entry_id AND w.user_id=u.id AND w.payment_id=p.id
-                LEFT JOIN shop.discount_uses c ON c.order_id=o.id LEFT JOIN shop.discounts d ON d.id=c.discount_id)
-                ON p.id=$1 AND u.brand_id=$2 AND ($3 IS NULL OR u.id=$3)
-            """, DbValue.Uuid(payment), DbValue.Uuid(brand), member is Guid id ? DbValue.Uuid(id) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid)), r => r.IsDBNull(0) ? null :
-            new PaymentStatusView(r.GetGuid(0), r.IsDBNull(1) ? null : r.GetGuid(1), r.GetString(2), State(r.GetString(2), r.GetString(3), Text(r, 7), Text(r, 8)),
-                r.GetString(4), ExactDecimal.Format(ExactDecimal.Parse(r.GetString(5))), r.IsDBNull(6) ? null : ExactDecimal.Format(ExactDecimal.Parse(r.GetString(6))), Text(r, 7), Text(r, 8), Text(r, 9),
-                Text(r, 10), r.IsDBNull(11) ? null : ExactDecimal.Format(ExactDecimal.Parse(r.GetString(11))), Text(r, 12), !r.IsDBNull(13) && r.GetBoolean(13)), ct);
+    private static async Task<PaymentStatusView?> ReadAsync(DbSession session, Guid brand, Guid? member, Guid payment, CancellationToken ct)
+    {
+        var row = await session.RunEfStepAsync(false, (data, token) =>
+            (from value in data.Data.Set<Entities.Payment>()
+             join order in data.Data.Set<Entities.Order>() on value.OrderId equals order.Id into orders
+             from order in orders.DefaultIfEmpty()
+             join user in data.Data.Set<Entities.User>() on (value.TopupUserId ?? (Guid?)order.UserId) equals user.Id
+             join entry in data.Data.Set<Entities.WalletEntry>() on value.CompensatingWalletEntryId equals entry.Id into entries
+             from entry in entries.Where(entry => entry.UserId == user.Id && entry.PaymentId == value.Id).DefaultIfEmpty()
+             join claim in data.Data.Set<Entities.DiscountUse>() on order.Id equals claim.OrderId into claims
+             from claim in claims.DefaultIfEmpty()
+             join discount in data.Data.Set<Entities.Discount>() on claim.DiscountId equals discount.Id into discounts
+             from discount in discounts.DefaultIfEmpty()
+             where value.Id == payment && user.BrandId == brand && (member == null || user.Id == member)
+             select new
+             {
+                 value.Id,
+                 value.OrderId,
+                 Method = value.PaymentMethod,
+                 value.Status,
+                 value.QuoteCurrency,
+                 value.AmountDue,
+                 value.AmountReceived,
+                 OrderPayment = order == null ? null : order.PaymentStatus,
+                 Fulfillment = order == null ? null : order.FulfillmentStatus,
+                 Review = order == null ? null : order.ReviewCode,
+                 Movement = entry == null ? null : entry.MovementKind,
+                 Credit = entry == null ? (decimal?)null : entry.SignedAmount,
+                 Coupon = claim == null ? null : claim.Status,
+                 Expired = claim != null && claim.Status == "released" && discount.Kind == "promotion" && discount.EndsAt <= EfValues.UtcNow()
+             }).SingleOrDefaultAsync(token), ct);
+        return row is null ? null : new(row.Id, row.OrderId, row.Method, State(row.Method, row.Status, row.OrderPayment, row.Fulfillment), row.QuoteCurrency, ExactDecimal.Format(row.AmountDue), row.AmountReceived is decimal received ? ExactDecimal.Format(received) : null, row.OrderPayment, row.Fulfillment, row.Review, row.Movement, row.Credit is decimal credit ? ExactDecimal.Format(credit) : null, row.Coupon, row.Expired);
+    }
     private static string State(string method, string payment, string? order, string? fulfillment) => method == "bank" && payment == "rejected" ? "denied_unverified" :
         payment == "settled" && order == "paid" && fulfillment is "waiting_stock" or "requires_admin" ? "paid_unfulfilled" : payment;
-    private static string? Text(DbRow r, int column) => r.IsDBNull(column) ? null : r.GetString(column);
 }

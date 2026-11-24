@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
 
@@ -18,12 +19,18 @@ public sealed partial class PaymentEvidenceStore
         await AdmitAsync(session, context, writerRevision, ct);
         Payment before = await LoadAsync(session, context, null, origin, false, ct);
         if (before.Member != member.Id || member.Blocked || member.Banned) Reject(session);
-        if (before.Order is Guid order) await session.ExecuteAsync(new DbStatement("SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE", DbValue.Uuid(order)), ct);
+        if (before.Order is Guid order) await session.RunEfStepAsync(false, (data, token) => data.LockOrderAsync(order, token), ct);
         Payment data = await LoadAsync(session, context, before.Id, null, true, ct);
         await RequirePayableAsync(session, data, ct);
         if (data.HostedStarted && data.HostedUrl is null) throw new InvalidOperationException("Previous invoice creation requires reconciliation.");
         if (!data.HostedStarted)
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.payments SET provider_code='nowpayments',hosted_invoice_started_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(data.Id)), ct);
+            await session.RunEfStepAsync(true, async (ef, token) =>
+            {
+                await ef.RequirePaymentCommandAsync(context, data.Id, token);
+                var row = await ef.Data.Set<Entities.Payment>().SingleAsync(value => value.Id == data.Id, token);
+                row.ProviderCode = "nowpayments"; row.HostedInvoiceStartedAt = await ef.BrandClockAsync(context.BrandId, token);
+                return true;
+            }, ct);
         await session.CommitAsync(ct);
         return new(data.Id, data.Origin, data.Due, data.Asset == "USDTBSC" ? CryptoAsset.UsdtBsc : CryptoAsset.UsdtTrc20,
             data.HostedReference, data.HostedUrl is null ? null : new Uri(data.HostedUrl));
@@ -41,12 +48,17 @@ public sealed partial class PaymentEvidenceStore
         await AdmitAsync(session, context, writerRevision, ct);
         Payment before = await LoadAsync(session, context, payment, null, false, ct);
         if (before.Member != member.Id) Reject(session);
-        if (before.Order is Guid order) await session.ExecuteAsync(new DbStatement("SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE", DbValue.Uuid(order)), ct);
+        if (before.Order is Guid order) await session.RunEfStepAsync(false, (data, token) => data.LockOrderAsync(order, token), ct);
         Payment data = await LoadAsync(session, context, payment, null, true, ct);
         if (!data.HostedStarted || data.ProviderCode != "nowpayments") Reject(session);
         if (data.HostedReference is null)
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.payments SET hosted_invoice_ref=$1,hosted_invoice_url=$2 WHERE id=$3",
-                DbValue.Text(reference), DbValue.Text(checkoutUrl.AbsoluteUri), DbValue.Uuid(payment)), ct);
+            await session.RunEfStepAsync(true, async (ef, token) =>
+            {
+                await ef.RequirePaymentCommandAsync(context, payment, token);
+                var row = await ef.Data.Set<Entities.Payment>().SingleAsync(value => value.Id == payment, token);
+                row.HostedInvoiceRef = reference; row.HostedInvoiceUrl = checkoutUrl.AbsoluteUri;
+                return true;
+            }, ct);
         else if (data.HostedReference != reference || data.HostedUrl != checkoutUrl.AbsoluteUri) Reject(session);
         bool payable = !member.Blocked && !member.Banned && await IsPayableAsync(session, data, ct);
         if (payable && data.HostedReference is null && data.Order is Guid payableOrder)
@@ -66,6 +78,6 @@ public sealed partial class PaymentEvidenceStore
             data.Status is not ("created" or "awaiting") || data.Asset is not ("USDTTRC20" or "USDTBSC")) return false;
         if (data.Order is null) return true;
         return data.OrderStatus == "awaiting_payment" && data.Deadline >=
-            await session.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
+            await session.RunEfStepAsync(false, (ef, token) => ef.ClockAsync(ef.Data.Set<Entities.Payment>().Where(value => value.Id == data.Id), token), ct);
     }
 }

@@ -210,21 +210,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
     private static async Task QueueInstructionAsync(SqliteTransaction tx, BrandContext context, Guid member,
         Guid order, string cause, CancellationToken ct)
     {
-        string dedupe = "instruction-" + cause + ":" + order.ToString("D");
-        Guid actual = await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
-        {
-            await data.RequireOrderCommandAsync(context, order, token);
-            Guid? prior = await data.Data.Set<Entities.TelegramDelivery>().Where(value => value.DedupeKey == dedupe).Select(value => (Guid?)value.Id).SingleOrDefaultAsync(token);
-            if (prior is Guid existing)
-            {
-                if (!await data.Data.Set<Entities.TelegramDelivery>().AnyAsync(value => value.Id == existing && value.BrandId == context.BrandId && value.OrderId == order, token)) data.RejectScope("Payment instruction scope is unavailable.");
-                return existing;
-            }
-            long? message = await data.Data.Set<Entities.TelegramDelivery>().Where(value => value.OrderId == order && value.Purpose == "order_status" && value.Status == "succeeded" && value.TelegramMessageId != null).OrderBy(value => value.CreatedAt).ThenBy(value => value.Id).Select(value => value.TelegramMessageId).FirstOrDefaultAsync(token);
-            Guid id = Guid.CreateVersion7();
-            data.Data.Add(new Entities.TelegramDelivery { Id = id, BrandId = context.BrandId, RecipientKind = "customer_dm", UserId = member, Purpose = "order_status", Action = message is null ? "send" : "edit", TargetMessageId = message, DedupeKey = dedupe, OrderId = order });
-            return id;
-        }, ct);
+        Guid actual = await SqliteSessionFactory.StepEfAsync(tx, true, (data, token) => PaymentInstructionQueries.EnqueueAsync(data, context, order, cause, token), ct);
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(context.BrandId, actual), actual,
             DateTime.UtcNow, ct);
     }

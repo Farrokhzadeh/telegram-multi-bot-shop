@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Configurations;
+using Entities = Platform.Persistence.Entities;
 using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
@@ -13,12 +16,12 @@ public sealed class PaymentExpiryService(DbSessionFactory sessions, SecretSnapsh
         await using var session = await sessions.BeginAsync(ct);
         try
         {
-            Guid payment = await session.QuerySingleAsync(new DbStatement("SELECT p.id FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE o.id=$1 AND b.id=$2 AND b.bot_id=$3", DbValue.Uuid(order), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetGuid(0), ct);
+            Guid payment = await session.RunEfStepAsync(false, (data, token) => (from value in data.Data.Set<Entities.Payment>() join source in data.Data.Set<Entities.Order>() on value.OrderId equals source.Id join user in data.Data.Set<Entities.User>() on source.UserId equals user.Id join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id where source.Id == order && brand.Id == context.BrandId && brand.BotId == context.BotId select value.Id).SingleAsync(token), ct);
             var before = await PaymentSettlementStore.LoadAsync(session, context, payment, ct);
             await PaymentSettlementStore.LockAsync(session, context, before, ct);
             await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(1), ct);
             var data = await PaymentSettlementStore.LoadAsync(session, context, payment, ct);
-            var proof = await session.QuerySingleAsync(new DbStatement("SELECT receipt_asset_ref IS NOT NULL,clock_timestamp() FROM shop.payments WHERE id=$1", DbValue.Uuid(payment)), r => (Receipt: r.GetBoolean(0), Now: r.GetUtc(1)), ct);
+            var proof = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Payment>().Where(value => value.Id == payment).Select(value => new { Receipt = value.ReceiptAssetRef != null, Now = EfValues.UtcNow() }).SingleAsync(token), ct);
             bool evidence = proof.Receipt || data.First is not null || data.Status is not ("created" or "awaiting");
             PaymentExpiryOutcome outcome;
             if (data.OrderStatus is not ("awaiting_payment" or "under_review" or "confirmation_pending")) outcome = PaymentExpiryOutcome.Terminal;
@@ -31,8 +34,8 @@ public sealed class PaymentExpiryService(DbSessionFactory sessions, SecretSnapsh
             }
             else
             {
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='expired',fulfillment_status='cancelled',resolution_kind='unpaid_expiry',resolution_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(order)), ct);
-                Guid? held = await session.QuerySingleAsync(new DbStatement("SELECT discount_id FROM (SELECT 1) seed LEFT JOIN shop.discount_uses ON order_id=$1 AND status='held'", DbValue.Uuid(order)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct);
+                await session.RunEfStepAsync(true, (data, token) => PaymentStateQueries.ExpireAsync(data, context, order, proof.Now, token), ct);
+                Guid? held = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.DiscountUse>().Where(value => value.OrderId == order && value.Status == "held").Select(value => (Guid?)value.DiscountId).SingleOrDefaultAsync(token), ct);
                 if (held is Guid discount) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, discount, order, false, ct);
                 await PaymentInstructionStore.EnqueueAsync(session, context, order, "expired", ct);
                 outcome = PaymentExpiryOutcome.Expired;

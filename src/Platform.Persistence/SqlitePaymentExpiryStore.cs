@@ -1,4 +1,4 @@
-using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -19,21 +19,16 @@ public sealed class SqlitePaymentExpiryStore(SqliteSessionFactory sessions)
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             JobLease renewed = await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(60), token);
-            using var query = SqliteWallet.Command(tx, """
-                SELECT p.id,p.status,p.first_payment_observed_at,p.receipt_asset_ref,
-                    o.payment_status,o.payment_due_at,o.user_id
-                FROM orders o JOIN payments p ON p.order_id=o.id
-                    JOIN users u ON u.id=o.user_id JOIN brands b ON b.id=u.brand_id
-                WHERE o.id=$order AND b.id=$brand AND b.bot_id=$bot AND b.active=1
-                """, ("$order", order), ("$brand", context.BrandId), ("$bot", context.BotId));
-            await using var row = await query.ExecuteReaderAsync(token);
-            if (!await row.ReadAsync(token)) throw new UnauthorizedAccessException("Payment expiry target is unavailable.");
-            string status = row.GetString(1), orderStatus = row.GetString(4);
-            bool evidence = !row.IsDBNull(2) || !row.IsDBNull(3) ||
-                status is not ("created" or "awaiting");
-            string due = row.IsDBNull(5) ? "" : row.GetString(5);
-            Guid member = row.GetGuid(6);
-            await row.CloseAsync();
+            var target = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) =>
+                (from source in data.Data.Set<Entities.Order>()
+                 join payment in data.Data.Set<Entities.Payment>() on source.Id equals payment.OrderId
+                 join user in data.Data.Set<Entities.User>() on source.UserId equals user.Id
+                 join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
+                 where source.Id == order && brand.Id == context.BrandId && brand.BotId == context.BotId && brand.Active
+                 select new { payment.Status, payment.FirstPaymentObservedAt, payment.ReceiptAssetRef, OrderStatus = source.PaymentStatus, Deadline = source.PaymentDueAt }).SingleOrDefaultAsync(cancel), token);
+            if (target is null) throw new UnauthorizedAccessException("Payment expiry target is unavailable.");
+            string status = target.Status, orderStatus = target.OrderStatus;
+            bool evidence = target.FirstPaymentObservedAt != null || target.ReceiptAssetRef != null || status is not ("created" or "awaiting");
             if (orderStatus is not ("awaiting_payment" or "under_review" or "confirmation_pending"))
             {
                 await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
@@ -44,10 +39,8 @@ public sealed class SqlitePaymentExpiryStore(SqliteSessionFactory sessions)
                 await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
                 return SqlitePaymentExpiryOutcome.Protected;
             }
-            DateTime now = DateTime.UtcNow;
-            DateTime deadline = DateTime.ParseExact(due, "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'",
-                System.Globalization.CultureInfo.InvariantCulture,
-                System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
+            DateTime now = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.BrandClockAsync(context.BrandId, cancel), token);
+            DateTime deadline = target.Deadline ?? throw new InvalidOperationException("Payment deadline is unavailable.");
             if (now <= deadline)
             {
                 int delay = Math.Clamp(checked((int)Math.Ceiling((deadline - now).TotalSeconds)) + 1, 1, 300);
@@ -55,44 +48,10 @@ public sealed class SqlitePaymentExpiryStore(SqliteSessionFactory sessions)
                     int.MaxValue, JobError.Busy, token);
                 return SqlitePaymentExpiryOutcome.NotDue;
             }
-            string expired = SqliteSchema.UtcText(now);
-            using (var change = SqliteWallet.Command(tx, """
-                UPDATE orders SET payment_status='expired',fulfillment_status='cancelled',
-                    resolution_kind='unpaid_expiry',resolution_at=$now,revision=revision+1,updated_at=$now
-                WHERE id=$order AND payment_status='awaiting_payment'
-                """, ("$now", expired), ("$order", order)))
-                if (await change.ExecuteNonQueryAsync(token) != 1)
-                    throw new InvalidOperationException("Expiry state was superseded.");
+            await SqliteSessionFactory.StepEfAsync(tx, true, (data, cancel) => PaymentStateQueries.ExpireAsync(data, context, order, now, cancel), token);
             await SqliteDiscountClaimStore.TransitionAsync(tx, context, order, false, token);
-            Guid delivery = Guid.CreateVersion7();
-            using (var intent = SqliteWallet.Command(tx, """
-                INSERT INTO telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,
-                    target_message_id,dedupe_key,order_id)
-                SELECT $id,$brand,'customer_dm',$member,'order_status',
-                    CASE WHEN a.message IS NULL THEN 'send' ELSE 'edit' END,
-                    a.message,$dedupe,$order
-                FROM (SELECT 1) seed LEFT JOIN (
-                    SELECT telegram_message_id message FROM telegram_deliveries
-                    WHERE order_id=$order AND purpose='order_status' AND status='succeeded'
-                        AND telegram_message_id IS NOT NULL
-                    ORDER BY created_at,id LIMIT 1
-                ) a ON true WHERE true
-                ON CONFLICT(dedupe_key) DO NOTHING
-                """, ("$id", delivery), ("$brand", context.BrandId), ("$member", member),
-                ("$dedupe", "instruction-expired:" + order.ToString("D")), ("$order", order)))
-                await intent.ExecuteNonQueryAsync(token);
-            using (var lookup = SqliteWallet.Command(tx, """
-                SELECT id FROM telegram_deliveries WHERE brand_id=$brand AND order_id=$order
-                    AND dedupe_key=$dedupe
-                """, ("$brand", context.BrandId), ("$order", order),
-                ("$dedupe", "instruction-expired:" + order.ToString("D"))))
-            {
-                if (await lookup.ExecuteScalarAsync(token) is not string id)
-                    throw new InvalidOperationException("Expiry notification was not persisted.");
-                Guid actual = Guid.Parse(id);
-                await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(context.BrandId, actual),
-                    actual, now, token);
-            }
+            Guid delivery = await SqliteSessionFactory.StepEfAsync(tx, true, (data, cancel) => PaymentInstructionQueries.EnqueueAsync(data, context, order, "expired", cancel), token);
+            await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(context.BrandId, delivery), delivery, now, token);
             await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
             return SqlitePaymentExpiryOutcome.Expired;
         }, ct);
