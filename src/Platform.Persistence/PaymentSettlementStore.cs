@@ -150,18 +150,8 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
     private static async Task<Guid> CreditAsync(DbSession session, State data, string movement, CancellationToken ct)
     {
         Money amount = ExternalPaymentPolicy.FrozenCredit(data.Due);
-        await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1) ON CONFLICT(user_id) DO NOTHING", DbValue.Uuid(data.Member)), ct);
-        var wallet = await session.QuerySingleAsync(new DbStatement("SELECT balance::text,version FROM shop.wallets WHERE user_id=$1 FOR UPDATE", DbValue.Uuid(data.Member)),
-            r => (Balance: DbValue.ReadMoney(r, 0, Currency.Usd), Version: r.GetInt64(1)), ct);
-        Money balance = wallet.Balance.Add(amount);
-        Guid entry = Guid.CreateVersion7();
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=version+1,updated_at=clock_timestamp() WHERE user_id=$2", DbValue.Numeric(balance.Amount), DbValue.Uuid(data.Member)), ct);
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,order_id,payment_id,reason)
-            VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,$9,'verified_original_invoice')
-            """, DbValue.Uuid(entry), DbValue.Uuid(data.Member), DbValue.Numeric(amount.Amount), DbValue.Numeric(balance.Amount), DbValue.Bigint(checked(wallet.Version + 1)),
-            DbValue.Text(movement), DbValue.Text("payment-credit:" + data.Id.ToString("D")), Uuid(data.Order), DbValue.Uuid(data.Id)), ct);
-        return entry;
+        return await WalletOperations.PostAsync(session, data.Member, amount, null,
+            new Entities.WalletEntry { Id = Guid.CreateVersion7(), MovementKind = movement, IdempotencyKey = "payment-credit:" + data.Id.ToString("D"), OrderId = data.Order, PaymentId = data.Id, Reason = "verified_original_invoice" }, ct);
     }
     private async Task ReleaseAsync(DbSession session, BrandContext context, Guid order, CancellationToken ct)
     {

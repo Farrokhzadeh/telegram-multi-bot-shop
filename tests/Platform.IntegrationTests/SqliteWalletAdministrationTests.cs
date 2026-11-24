@@ -41,6 +41,10 @@ public sealed class SqliteWalletAdministrationTests
             var actor = await SqliteAdminSessionStore.AuthenticateAsync(sessions, adminToken, ct);
             var store = new SqliteWalletAdministrationStore(sessions);
             var add = new WalletAdjustment(member, "10.125", 0, "Synthetic approved credit", Guid.NewGuid());
+            await Assert.ThrowsAsync<InvalidOperationException>(() => store.AdjustAsync(actor, brand,
+                add with { AmountUsd = "-1", CommandId = Guid.NewGuid() }, ct));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => store.AdjustAsync(actor, brand,
+                add with { ExpectedVersion = 9, CommandId = Guid.NewGuid() }, ct));
             Assert.Equal(add.CommandId, await store.AdjustAsync(actor, brand, add, ct));
             Assert.Equal(add.CommandId, await new SqliteWalletAdministrationStore(new SqliteSessionFactory(path))
                 .AdjustAsync(actor, brand, add, ct));

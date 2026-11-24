@@ -38,8 +38,6 @@ public sealed class SqliteTopupSettlementStore(SqliteSessionFactory sessions)
                 return new(PaymentSettlementOutcome.Review, ExternalSettlementRoute.Review);
             }
 
-            using var ensure = SqliteWallet.Command(tx, "INSERT INTO wallets(user_id) VALUES ($member) ON CONFLICT(user_id) DO NOTHING", ("$member", current.Member));
-            await ensure.ExecuteNonQueryAsync(token);
             var wallet = await SqliteWallet.ReadAsync(tx, current.Member, token);
             Guid credit = await SqliteWallet.PostAsync(tx, current.Member, wallet, ExternalPaymentPolicy.FrozenCredit(current.Invoice.UsdDue),
                 payment, true, SqliteSchema.UtcText(DateTime.UtcNow), token);

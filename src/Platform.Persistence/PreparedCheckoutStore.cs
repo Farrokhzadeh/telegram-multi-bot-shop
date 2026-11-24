@@ -65,9 +65,7 @@ public sealed partial class CheckoutStore
                 AND (p.first_payment_observed_at IS NOT NULL OR p.receipt_asset_ref IS NOT NULL OR p.status IN ('observed','confirming','settled','review')))
             """, DbValue.Uuid(prepared.Member)), row => row.GetBoolean(0), ct);
         if (evidence) return new(CheckoutOutcome.Unavailable);
-        var wallet = await session.QuerySingleAsync(new DbStatement("""
-            SELECT w.balance::text,w.version FROM (SELECT 1) seed LEFT JOIN (SELECT * FROM shop.wallets WHERE user_id=$1 FOR UPDATE) w ON true
-            """, DbValue.Uuid(prepared.Member)), row => (Balance: row.IsDBNull(0) ? new Money(0, Currency.Usd) : DbValue.ReadMoney(row, 0, Currency.Usd), Version: row.IsDBNull(1) ? 0 : row.GetInt64(1)), ct);
+        var wallet = await WalletOperations.ReadAsync(session, prepared.Member, ct);
         if (!free && !unpaid && wallet.Balance.Amount < quote.TotalUsd.Amount) return new(CheckoutOutcome.InsufficientBalance);
         int local = unpaid || request.Kind == CheckoutKind.PrepaidUnits ? 0 : prepared.Supply.LocalUnits;
         var stock = await ReadStockAsync(session, request.ProductId, local, ct);
@@ -103,12 +101,8 @@ public sealed partial class CheckoutStore
         if (terms.DiscountId is Guid coupon) await pricing.HoldAsync(session, context, actor, coupon, request.OrderId, ct);
         if (!free && !unpaid)
         {
-            Money balance = wallet.Balance.Subtract(quote.TotalUsd);
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=version+1,updated_at=clock_timestamp() WHERE user_id=$2", DbValue.Money(balance, Currency.Usd), DbValue.Uuid(prepared.Member)), ct);
-            await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,order_id,reason)
-                VALUES (gen_random_uuid(),$1,$2,$3,$4,'purchase_debit',true,$5,$6,'customer_request')
-                """, DbValue.Uuid(prepared.Member), DbValue.Numeric(-quote.TotalUsd.Amount), DbValue.Money(balance, Currency.Usd), DbValue.Bigint(checked(wallet.Version + 1)), DbValue.Text("checkout:" + request.OrderId.ToString("D")), DbValue.Uuid(request.OrderId)), ct);
+            await WalletOperations.PostAsync(session, prepared.Member, new Money(-quote.TotalUsd.Amount, Currency.Usd), wallet.Version,
+                new Entities.WalletEntry { Id = Guid.CreateVersion7(), MovementKind = "purchase_debit", IdempotencyKey = "checkout:" + request.OrderId.ToString("D"), OrderId = request.OrderId, Reason = "customer_request" }, ct);
         }
         if (unpaid)
         {

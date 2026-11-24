@@ -231,9 +231,6 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         }
         if (request.Kind == CheckoutKind.PrepaidUnits && request.Payment == CheckoutPayment.Wallet)
         {
-            using (var ensure = SqliteWallet.Command(tx,
-                "INSERT INTO wallets(user_id) VALUES ($member) ON CONFLICT(user_id) DO NOTHING",
-                ("$member", member))) await ensure.ExecuteNonQueryAsync(ct);
             var wallet = await SqliteWallet.ReadAsync(tx, member, ct);
             if (wallet.Balance.Amount < quote.TotalUsd.Amount)
                 throw new PricingRejectedException();

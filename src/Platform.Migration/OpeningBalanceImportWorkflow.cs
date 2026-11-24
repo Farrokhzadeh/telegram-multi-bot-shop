@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using System.Text;
 using NpgsqlTypes;
@@ -78,21 +79,28 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
         }
         if (first)
         {
-            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1)", DbValue.Uuid(row.TargetUser)), ct);
-            if (row.BalanceUsd > 0)
+            await session.RunEfStepAsync(true, async (data, token) =>
             {
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=1 WHERE user_id=$2", DbValue.Numeric(row.BalanceUsd), DbValue.Uuid(row.TargetUser)), ct);
-                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason) VALUES ($1,$2,$3,$3,1,'opening_balance',true,$4,$5,'Frozen authoritative USD opening; history is non-posting')",
-                    DbValue.Uuid(row.TargetOpening), DbValue.Uuid(row.TargetUser), DbValue.Numeric(row.BalanceUsd), DbValue.Text("opening:" + row.TargetOpening.ToString("D")), DbValue.Uuid(manifest.Batch)), ct);
-            }
+                await data.RequireWalletCommandAsync(row.TargetUser, token);
+                if (await data.Data.Set<Platform.Persistence.Entities.Wallet>().AnyAsync(value => value.UserId == row.TargetUser, token)) data.RejectScope("Opening wallet already exists.");
+                data.Data.Add(new Platform.Persistence.Entities.Wallet { UserId = row.TargetUser });
+                await data.FlushAsync(token, false);
+                if (row.BalanceUsd > 0) await WalletOperations.PostAsync(data, row.TargetUser, new Money(row.BalanceUsd, Currency.Usd), 0,
+                    new Platform.Persistence.Entities.WalletEntry { Id = row.TargetOpening, MovementKind = "opening_balance", IdempotencyKey = "opening:" + row.TargetOpening.ToString("D"), LegacyImportBatch = manifest.Batch, Reason = "Frozen authoritative USD opening; history is non-posting" }, token);
+                return true;
+            }, ct);
             await session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,correlation_id,command_sha256) VALUES ($1,'system',$2,'legacy_import','wallet',$3,$4,$5,$6)", DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(context.BrandId), DbValue.Uuid(row.TargetUser), DbValue.Text(row.Retention?.Reference ?? "Frozen manifest-bound USD opening; no financial history replay"), DbValue.Uuid(manifest.Batch), row.Retention is null ? DbValue.Null(NpgsqlDbType.Bytea) : DbValue.Binary(row.Retention.Digest.Span)), ct);
         }
         foreach (var history in row.History)
         {
             var proof = proofs.Single(p => p.Projection == LegacyProjection.Transaction && p.LegacyId == history.LegacyId);
             if (await LegacyMapStore.EnsureAsync(session, manifest, proof, ct))
-                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,movement_kind,is_posting,idempotency_key,legacy_import_batch,reason,created_at) VALUES ($1,$2,$3,$4,'legacy_history',false,$5,$6,'Non-posting source evidence; see protected frozen snapshot',$7)",
-                    DbValue.Uuid(history.TargetEntry), DbValue.Uuid(row.TargetUser), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlDbType.Numeric), DbValue.Text("history:" + history.TargetEntry.ToString("D")), DbValue.Uuid(manifest.Batch), DbValue.Utc(history.OccurredAt)), ct);
+                await session.RunEfStepAsync(true, async (data, token) =>
+                {
+                    await data.RequireWalletCommandAsync(row.TargetUser, token);
+                    data.Data.Add(new Platform.Persistence.Entities.WalletEntry { Id = history.TargetEntry, UserId = row.TargetUser, SignedAmount = history.SignedAmount, BalanceAfter = history.BalanceAfter, MovementKind = "legacy_history", IsPosting = false, IdempotencyKey = "history:" + history.TargetEntry.ToString("D"), LegacyImportBatch = manifest.Batch, Reason = "Non-posting source evidence; see protected frozen snapshot", CreatedAt = history.OccurredAt });
+                    return true;
+                }, ct);
             if (!await MatchesHistoryAsync(session, manifest.Batch, row.TargetUser, history, ct)) throw new MigrationRejectedException();
         }
         if (!await MatchesWalletAsync(session, manifest, row, ct)) throw new MigrationRejectedException();

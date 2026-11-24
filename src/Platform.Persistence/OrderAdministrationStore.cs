@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
 
@@ -136,22 +137,21 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
     }
     private static async Task<Guid> MemberAsync(DbSession session, BrandContext context, Guid member, CancellationToken ct)
     {
-        long count = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT u.id FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=$1 AND b.id=$2 AND b.bot_id=$3 FOR UPDATE OF u) member", DbValue.Uuid(member), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetInt64(0), ct);
+        int count = await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            if (!await data.Data.Set<Entities.Brand>().AnyAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, token)) return 0;
+            return await data.LockUserAsync(member, context.BrandId, token);
+        }, ct);
         if (count != 1) throw new SafeOperationException(ErrorKind.NotFound);
         return member;
     }
     private static async Task PostAsync(DbSession session, AuthenticatedAdmin actor, Guid member, Money amount, long? expected, Guid entry, string movement, Guid? order, Guid? request, string reason, CancellationToken ct)
     {
-        await session.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1) ON CONFLICT(user_id) DO NOTHING", DbValue.Uuid(member)), ct);
-        var wallet = await session.QuerySingleAsync(new DbStatement("SELECT balance::text,version FROM shop.wallets WHERE user_id=$1 FOR UPDATE", DbValue.Uuid(member)), r => (Balance: new Money(ExactDecimal.Parse(r.GetString(0)), Currency.Usd), Version: r.GetInt64(1)), ct);
-        if (expected is long version && version != wallet.Version) throw new InvalidOperationException("Wallet version conflict.");
-        Money balance = wallet.Balance.Add(amount);
-        if (balance.Amount < 0) throw new InvalidOperationException("Wallet funds are insufficient.");
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=version+1,updated_at=clock_timestamp() WHERE user_id=$2", DbValue.Numeric(balance.Amount), DbValue.Uuid(member)), ct);
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,order_id,supplier_request_id,admin_id,audit_event_id,reason)
-            VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8,$9,$10,$1,$11)
-            """, DbValue.Uuid(entry), DbValue.Uuid(member), DbValue.Numeric(amount.Amount), DbValue.Numeric(balance.Amount), DbValue.Bigint(checked(wallet.Version + 1)), DbValue.Text(movement), DbValue.Text("admin:" + entry.ToString("D")), AdminCommand.Id(order), AdminCommand.Id(request), DbValue.Uuid(actor.AdminId), DbValue.Text(reason)), ct);
+        await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            await data.RequireAdminAsync(actor, null, token);
+            return await WalletOperations.PostAsync(data, member, amount, expected, new Entities.WalletEntry { Id = entry, MovementKind = movement, IdempotencyKey = "admin:" + entry.ToString("D"), OrderId = order, SupplierRequestId = request, AdminId = actor.AdminId, AuditEventId = entry, Reason = reason }, token);
+        }, ct);
     }
     private sealed record State(long Revision, string Payment, string Fulfillment, bool Preorder, bool Held, bool Released, string? Resolution, string Method, decimal Unit, int Quantity, decimal Percent);
 }

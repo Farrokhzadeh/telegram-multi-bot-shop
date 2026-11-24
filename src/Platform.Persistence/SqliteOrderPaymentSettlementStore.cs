@@ -163,25 +163,8 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
 
     private static async Task<Guid> CreditAsync(SqliteTransaction tx, State state, string kind, string now, CancellationToken ct)
     {
-        using (var ensure = SqliteWallet.Command(tx, "INSERT INTO wallets(user_id) VALUES ($member) ON CONFLICT(user_id) DO NOTHING",
-            ("$member", state.Member))) await ensure.ExecuteNonQueryAsync(ct);
-        var wallet = await SqliteWallet.ReadAsync(tx, state.Member, ct);
-        Money increase = ExternalPaymentPolicy.FrozenCredit(state.Due);
-        Guid entry = Guid.CreateVersion7();
-        using (var command = SqliteWallet.Command(tx, """
-            UPDATE wallets SET balance=$new,version=version+1,updated_at=$now WHERE user_id=$member AND version=$version
-            """, ("$new", ExactDecimal.Format(wallet.Balance.Add(increase).Amount)), ("$now", now),
-            ("$member", state.Member), ("$version", wallet.Version)))
-            if (await command.ExecuteNonQueryAsync(ct) != 1) throw new InvalidOperationException("Wallet version lost.");
-        await Change(tx, """
-            INSERT INTO wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,
-                idempotency_key,order_id,payment_id,reason)
-            VALUES ($entry,$member,$amount,$new,$version,$kind,1,$key,$order,$payment,'verified_original_invoice')
-            """, ct, ("$entry", entry), ("$member", state.Member), ("$amount", ExactDecimal.Format(increase.Amount)),
-            ("$new", ExactDecimal.Format(wallet.Balance.Add(increase).Amount)), ("$version", checked(wallet.Version + 1)),
-            ("$kind", kind), ("$key", "payment-credit:" + state.PaymentId.ToString("D")), ("$order", state.Order),
-            ("$payment", state.PaymentId));
-        return entry;
+        return await SqliteSessionFactory.StepEfAsync(tx, true, (data, token) => WalletOperations.PostAsync(data, state.Member, ExternalPaymentPolicy.FrozenCredit(state.Due), null,
+            new Entities.WalletEntry { Id = Guid.CreateVersion7(), MovementKind = kind, IdempotencyKey = "payment-credit:" + state.PaymentId.ToString("D"), OrderId = state.Order, PaymentId = state.PaymentId, Reason = "verified_original_invoice" }, token, DateTime.ParseExact(now, "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)), ct);
     }
 
     internal async Task AcquireAsync(SqliteTransaction tx, BrandContext context, Guid order,

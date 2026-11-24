@@ -92,9 +92,7 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
             """, DbValue.Uuid(member.Id), DbValue.Uuid(request.ProductId), DbValue.Uuid(context.BrandId)), row => row.GetBoolean(0), ct);
         if (guarded) return new(CheckoutOutcome.Unavailable);
         Money total = new Money(listing.Price, Currency.Usd).MultiplyQuantity(request.Quantity);
-        var wallet = await session.QuerySingleAsync(new DbStatement("""
-            SELECT w.balance::text,w.version FROM (SELECT 1) seed LEFT JOIN (SELECT * FROM shop.wallets WHERE user_id=$1 FOR UPDATE) w ON true
-            """, DbValue.Uuid(member.Id)), row => (Balance: row.IsDBNull(0) ? Money.Parse("0", Currency.Usd) : DbValue.ReadMoney(row, 0, Currency.Usd), Version: row.IsDBNull(1) ? 0 : row.GetInt64(1)), ct);
+        var wallet = await WalletOperations.ReadAsync(session, member.Id, ct);
         if (wallet.Balance.Amount < total.Amount) return new(CheckoutOutcome.InsufficientBalance);
         var stock = await session.QueryManyAsync(new DbStatement("SELECT id,credential_ciphertext,credential_key_id FROM shop.inventory_items WHERE product_id=$1 AND state='available' ORDER BY id LIMIT $2 FOR UPDATE", DbValue.Uuid(request.ProductId), DbValue.Integer(request.Quantity)),
             row => new Stock(row.GetGuid(0), row.GetBinary(1), row.GetString(2)), request.Quantity, ct);
@@ -111,12 +109,8 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
             """, DbValue.Uuid(request.OrderId), DbValue.Uuid(member.Id), DbValue.Uuid(request.ProductId), DbValue.Integer(request.Quantity), DbValue.Numeric(listing.Price),
             DbValue.Text(brand.Name), DbValue.Text(listing.Title), NullableText(listing.Description), NullableText(listing.Icon), NullableText(listing.Guidance), DbValue.Boolean(product.LocalFirst)), ct);
         await BotActivityWriter.CheckoutAsync(session, context, verifiedActorId, request.OrderId, ct);
-        Money balance = wallet.Balance.Subtract(total);
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.wallets SET balance=$1,version=version+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=$2", DbValue.Money(balance, Currency.Usd), DbValue.Uuid(member.Id)), ct);
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.wallet_entries(id,user_id,signed_amount,balance_after,posting_version,movement_kind,is_posting,idempotency_key,order_id,reason)
-            VALUES (gen_random_uuid(),$1,$2,$3,$4,'purchase_debit',true,$5,$6,'customer_request')
-            """, DbValue.Uuid(member.Id), DbValue.Numeric(-total.Amount), DbValue.Money(balance, Currency.Usd), DbValue.Bigint(checked(wallet.Version + 1)), DbValue.Text("checkout:" + request.OrderId.ToString("D")), DbValue.Uuid(request.OrderId)), ct);
+        await WalletOperations.PostAsync(session, member.Id, new Money(-total.Amount, Currency.Usd), wallet.Version,
+            new Entities.WalletEntry { Id = Guid.CreateVersion7(), MovementKind = "purchase_debit", IdempotencyKey = "checkout:" + request.OrderId.ToString("D"), OrderId = request.OrderId, Reason = "customer_request" }, ct);
         await AcquireAsync(session, context, request.OrderId, stock, ct);
         await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, request.OrderId), request.OrderId, DateTime.UtcNow, ct);
         return new(CheckoutOutcome.Purchased, request.OrderId);
