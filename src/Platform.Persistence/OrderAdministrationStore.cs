@@ -15,11 +15,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
         AdminCommand.Page(limit);
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.QueryManyAsync(new DbStatement("""
-            SELECT o.id,u.brand_id,o.user_id,o.product_id,o.quantity,o.payment_status,o.fulfillment_status,o.is_preorder,o.hold_at IS NOT NULL,o.review_code,o.revision,o.product_title_snapshot,o.created_at
-            FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE ($1 IS NULL OR u.brand_id=$1) AND ($2 IS NULL OR o.user_id=$2) AND ($3 IS NULL OR o.id=$3) AND ($4 IS NULL OR o.id>$4) ORDER BY o.id LIMIT $5
-            """, AdminCommand.Id(brand), AdminCommand.Id(member), AdminCommand.Id(order), AdminCommand.Id(after), DbValue.Integer(limit + 1)),
-            r => new AdminOrder(r.GetGuid(0), r.GetGuid(1), r.GetGuid(2), r.IsDBNull(3) ? null : r.GetGuid(3), r.GetInt32(4), r.GetString(5), r.GetString(6), r.GetBoolean(7), r.GetBoolean(8), r.IsDBNull(9) ? null : r.GetString(9), r.GetInt64(10), r.GetString(11), r.GetUtc(12)), limit + 1, ct);
+        var rows = await session.RunEfStepAsync(false, (data, token) => (from value in data.Data.Set<Entities.Order>() join user in data.Data.Set<Entities.User>() on value.UserId equals user.Id where (brand == null || user.BrandId == brand) && (member == null || value.UserId == member) && (order == null || value.Id == order) && (after == null || value.Id.CompareTo(after.Value) > 0) orderby value.Id select new AdminOrder(value.Id, user.BrandId, value.UserId, value.ProductId, value.Quantity, value.PaymentStatus, value.FulfillmentStatus, value.IsPreorder, value.HoldAt != null, value.ReviewCode, value.Revision, value.ProductTitleSnapshot, value.CreatedAt)).Take(limit + 1).ToListAsync(token), ct);
         return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
     }
     public async Task<Guid> AdjustAsync(AuthenticatedAdmin actor, BrandContext context, WalletAdjustment value, CancellationToken ct = default)
@@ -62,28 +58,26 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(value.CommandId, action, retry ? AuditEntity.SupplierRequest : AuditEntity.Order, retry ? value.SupplierRequestId : order, context.BrandId, AuditReason.OperatorReview, value.CommandId, hash, revision, revision + 1), ct)) return;
-            var identity = await session.QuerySingleAsync(new DbStatement("SELECT o.user_id,o.product_id FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE o.id=$1 AND u.brand_id=$2", DbValue.Uuid(order), DbValue.Uuid(context.BrandId)), r => (Member: r.GetGuid(0), Product: r.GetGuid(1)), ct);
+            var identity = await session.RunEfStepAsync(false, (data, token) => (from value in data.Data.Set<Entities.Order>() join user in data.Data.Set<Entities.User>() on value.UserId equals user.Id where value.Id == order && user.BrandId == context.BrandId select new { Member = user.Id, Product = value.ProductId!.Value }).SingleAsync(token), ct);
             await MemberAsync(session, context, identity.Member, ct);
-            await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(identity.Product)), r => r.GetGuid(0), ct);
+            await session.RunEfStepAsync(false, (data, token) => data.LockProductAsync(identity.Product, token), ct);
             await session.AdmitWriterAsync(context, ct);
-            var data = await session.QuerySingleAsync(new DbStatement("""
-                SELECT revision,payment_status,fulfillment_status,is_preorder,hold_at IS NOT NULL,release_authorized_at IS NOT NULL,resolution_kind,
-                    payment_method,unit_price_usdt::text,quantity,COALESCE(discount_pct_snapshot,0)::text FROM shop.orders WHERE id=$1 FOR UPDATE
-                """, DbValue.Uuid(order)), r => new State(r.GetInt64(0), r.GetString(1), r.GetString(2), r.GetBoolean(3), r.GetBoolean(4), r.GetBoolean(5), r.IsDBNull(6) ? null : r.GetString(6), r.GetString(7), ExactDecimal.Parse(r.GetString(8)), r.GetInt32(9), ExactDecimal.Parse(r.GetString(10))), ct);
+            var data = await session.RunEfStepAsync(false, async (ef, token) =>
+            {
+                await ef.LockOrderAsync(order, token);
+                return await ef.Data.Set<Entities.Order>().Where(value => value.Id == order).Select(value => new State(value.Revision, value.PaymentStatus, value.FulfillmentStatus, value.IsPreorder, value.HoldAt != null, value.ReleaseAuthorizedAt != null, value.ResolutionKind, value.PaymentMethod, value.UnitPriceUsdt, value.Quantity, value.DiscountPctSnapshot ?? 0m)).SingleAsync(token);
+            }, ct);
             if (data.Revision != value.ExpectedRevision || data.Payment is not ("paid" or "not_required") || data.Released || data.Resolution is not null || data.Fulfillment is "completed" or "cancelled" or "compensated") throw new InvalidOperationException("Order is no longer eligible for resolution.");
             if (action is AuditAction.HoldPreorder or AuditAction.ResumePreorder or AuditAction.CancelPreorder)
             {
-                if (!data.Preorder || data.Fulfillment is not ("waiting_stock" or "requires_admin") || await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.fulfillments WHERE order_id=$1 AND status<>'unfilled')", DbValue.Uuid(order)), r => r.GetBoolean(0), ct)) throw new InvalidOperationException("Preorder allocation already started.");
+                if (!data.Preorder || data.Fulfillment is not ("waiting_stock" or "requires_admin") || await session.RunEfStepAsync(false, (ef, token) => ef.Data.Set<Entities.Fulfillment>().AnyAsync(value => value.OrderId == order && value.Status != "unfilled", token), ct)) throw new InvalidOperationException("Preorder allocation already started.");
                 if (action == AuditAction.HoldPreorder && !data.Held)
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET hold_at=clock_timestamp(),hold_admin_id=$1,hold_reason=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3", DbValue.Uuid(actor.AdminId), DbValue.Text(value.Reason), DbValue.Uuid(order)), ct);
+                    await PaymentSettlementStore.ChangeOrderAsync(session, order, (row, now) => { row.HoldAt = now; row.HoldAdminId = actor.AdminId; row.HoldReason = value.Reason; }, ct);
                 else if (action == AuditAction.ResumePreorder && data.Held)
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET hold_at=NULL,hold_admin_id=NULL,hold_reason=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(order)), ct);
+                    await PaymentSettlementStore.ChangeOrderAsync(session, order, (row, _) => { row.HoldAt = null; row.HoldAdminId = null; row.HoldReason = null; }, ct);
                 else if (action == AuditAction.CancelPreorder)
                 {
-                    await session.ExecuteAsync(new DbStatement("""
-                        UPDATE shop.orders SET fulfillment_status='cancelled',hold_at=NULL,hold_admin_id=NULL,hold_reason=NULL,resolution_kind='local_preorder_cancellation',
-                            resolution_admin_id=$1,resolution_at=clock_timestamp(),resolution_audit_event_id=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3
-                        """, DbValue.Uuid(actor.AdminId), DbValue.Uuid(value.CommandId), DbValue.Uuid(order)), ct);
+                    await PaymentSettlementStore.ChangeOrderAsync(session, order, (row, now) => { row.FulfillmentStatus = "cancelled"; row.HoldAt = null; row.HoldAdminId = null; row.HoldReason = null; row.ResolutionKind = "local_preorder_cancellation"; row.ResolutionAdminId = actor.AdminId; row.ResolutionAt = now; row.ResolutionAuditEventId = value.CommandId; }, ct);
                     await ReleaseAsync(session, context, order, ct);
                 }
                 else throw new InvalidOperationException("Preorder hold state conflict.");
@@ -92,23 +86,30 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
             else
             {
                 Guid request = value.SupplierRequestId!.Value;
-                var remote = await session.QuerySingleAsync(new DbStatement("SELECT revision,status,cost_baseline_amount IS NOT NULL,approval_audit_id IS NOT NULL FROM shop.supplier_requests WHERE id=$1 AND order_id=$2 FOR UPDATE", DbValue.Uuid(request), DbValue.Uuid(order)), r => (Revision: r.GetInt64(0), Status: r.GetString(1), Cost: r.GetBoolean(2), Override: r.GetBoolean(3)), ct);
+                var remote = await session.RunEfStepAsync(false, async (ef, token) =>
+                {
+                    await ef.LockRequestAsync(request, token);
+                    return await ef.Data.Set<Entities.SupplierRequest>().Where(row => row.Id == request && row.OrderId == order).Select(row => new { row.Revision, row.Status, Cost = row.CostBaselineAmount != null, Override = row.ApprovalAuditId != null }).SingleAsync(token);
+                }, ct);
                 if (remote.Revision != value.ExpectedRequestRevision || remote.Status != "failed") throw new InvalidOperationException("Supplier outcome requires reconciliation or cost review.");
-                bool unsafeEffect = await session.QuerySingleAsync(new DbStatement("""
-                    SELECT EXISTS(SELECT 1 FROM shop.jobs WHERE supplier_request_id=$1 AND status='leased') OR
-                        EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled') OR
-                        EXISTS(SELECT 1 FROM shop.supplier_request_attempts a WHERE a.supplier_request_id=$1 AND a.operation='submit' AND
-                            ((a.outcome='failed' AND a.error_code='confirmed_no_effect' AND a.evidence_ref IS NOT NULL) OR
-                                (a.outcome IN ('unknown','timeout') AND EXISTS(SELECT 1 FROM shop.supplier_request_attempts lookup WHERE lookup.parent_submit_attempt_id=a.id
-                                    AND lookup.operation='status_lookup' AND lookup.outcome='failed' AND lookup.error_code='confirmed_no_effect' AND lookup.evidence_ref IS NOT NULL))) IS NOT TRUE)
-                    """, DbValue.Uuid(request)), r => r.GetBoolean(0), ct);
+                bool unsafeEffect = await session.RunEfStepAsync(false, async (ef, token) =>
+                    await ef.Data.Set<Entities.Job>().AnyAsync(row => row.SupplierRequestId == request && row.Status == "leased", token) ||
+                    await ef.Data.Set<Entities.Fulfillment>().AnyAsync(row => row.SupplierRequestId == request && row.Status != "unfilled", token) ||
+                    await ef.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.SupplierRequestId == request && row.Operation == "submit" && !((row.Outcome == "failed" && row.ErrorCode == "confirmed_no_effect" && row.EvidenceRef != null) || ((row.Outcome == "unknown" || row.Outcome == "timeout") && ef.Data.Set<Entities.SupplierRequestAttempt>().Any(lookup => lookup.ParentSubmitAttemptId == row.Id && lookup.Operation == "status_lookup" && lookup.Outcome == "failed" && lookup.ErrorCode == "confirmed_no_effect" && lookup.EvidenceRef != null))), token), ct);
                 if (unsafeEffect) throw new InvalidOperationException("Supplier effects remain unresolved.");
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='cancelled',completed_at=clock_timestamp() WHERE supplier_request_id=$1 AND status IN ('pending','retry')", DbValue.Uuid(request)), ct);
+                await session.RunEfStepAsync(true, async (ef, token) =>
+                {
+                    await ef.RequireOrderCommandAsync(context, order, token); await ef.LockSupplierJobsAsync(request, token);
+                    var jobs = await ef.Data.Set<Entities.Job>().Where(row => row.SupplierRequestId == request && (row.Status == "pending" || row.Status == "retry")).Take(1001).ToArrayAsync(token);
+                    if (jobs.Length > 1000) ef.RejectScope("Supplier job bound exceeded.");
+                    DateTime now = await ef.BrandClockAsync(context.BrandId, token); foreach (var job in jobs) { job.Status = "cancelled"; job.CompletedAt = now; }
+                    return true;
+                }, ct);
                 if (retry)
                 {
                     if (!remote.Cost) throw new InvalidOperationException("Original supplier cost is unverified.");
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='pending',review_code=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(request)), ct);
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='acquiring',review_code=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(order)), ct);
+                    await SupplierQueries.ChangeAsync(session, context, request, (row, now) => { row.Status = "pending"; row.ReviewCode = null; row.Revision++; row.UpdatedAt = now; }, ct);
+                    await PaymentSettlementStore.FulfillmentAsync(session, order, "acquiring", null, ct);
                     await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, request, value.CommandId, remote.Revision + 1), value.CommandId, DateTime.UtcNow, ct);
                 }
                 else
@@ -116,13 +117,17 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
                     if (data.Method == "no_payment_required") throw new InvalidOperationException("A zero-money obligation cannot create a wallet credit.");
                     Money credit = data.Method == "bank" ? new(ExactDecimal.Parse(value.BankCreditUsd ?? throw new ArgumentException("An explicit confirmed USD credit is required.")), Currency.Usd) : PricingPolicy.DiscountTotal(data.Unit, data.Quantity, data.Percent, Currency.Usd);
                     if (credit.Amount <= 0 || (data.Method != "bank" && value.BankCreditUsd is not null)) throw new ArgumentException("Invalid credit input.");
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='resolved',review_code=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(request)), ct);
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.fulfillments SET status='retained_admin',resolution_admin_id=$1,resolution_note=$2 WHERE order_id=$3 AND status='acquired'", DbValue.Uuid(actor.AdminId), DbValue.Text(value.Reason), DbValue.Uuid(order)), ct);
+                    await SupplierQueries.ChangeAsync(session, context, request, (row, now) => { row.Status = "resolved"; row.ReviewCode = null; row.Revision++; row.UpdatedAt = now; }, ct);
+                    await session.RunEfStepAsync(true, async (ef, token) =>
+                    {
+                        await ef.RequireOrderCommandAsync(context, order, token);
+                        var units = await ef.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order && row.Status == "acquired").Take(1001).ToArrayAsync(token);
+                        if (units.Length > 1000) ef.RejectScope("Supplier retention bound exceeded.");
+                        foreach (var unit in units) { unit.Status = "retained_admin"; unit.ResolutionAdminId = actor.AdminId; unit.ResolutionNote = value.Reason; }
+                        return true;
+                    }, ct);
                     await PostAsync(session, actor, identity.Member, credit, null, value.CommandId, "supplier_wallet_credit", order, request, value.Reason, ct);
-                    await session.ExecuteAsync(new DbStatement("""
-                        UPDATE shop.orders SET fulfillment_status='compensated',review_code=NULL,resolution_kind='supplier_wallet_credit',resolution_admin_id=$1,resolution_at=clock_timestamp(),
-                            resolution_audit_event_id=$2,resolution_wallet_entry_id=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3
-                        """, DbValue.Uuid(actor.AdminId), DbValue.Uuid(value.CommandId), DbValue.Uuid(order)), ct);
+                    await PaymentSettlementStore.ChangeOrderAsync(session, order, (row, now) => { row.FulfillmentStatus = "compensated"; row.ReviewCode = null; row.ResolutionKind = "supplier_wallet_credit"; row.ResolutionAdminId = actor.AdminId; row.ResolutionAt = now; row.ResolutionAuditEventId = value.CommandId; row.ResolutionWalletEntryId = value.CommandId; }, ct);
                     await ReleaseAsync(session, context, order, ct);
                 }
             }
@@ -132,7 +137,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
     }
     private async Task ReleaseAsync(DbSession session, BrandContext context, Guid order, CancellationToken ct)
     {
-        Guid? coupon = await session.QuerySingleAsync(new DbStatement("SELECT discount_id FROM (SELECT 1) seed LEFT JOIN shop.discount_uses ON order_id=$1 AND status='held'", DbValue.Uuid(order)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct);
+        Guid? coupon = await session.RunEfStepAsync(false, (ef, token) => ef.Data.Set<Entities.DiscountUse>().Where(row => row.OrderId == order && row.Status == "held").Select(row => (Guid?)row.DiscountId).SingleOrDefaultAsync(token), ct);
         if (coupon is Guid id) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, id, order, false, ct);
     }
     private static async Task<Guid> MemberAsync(DbSession session, BrandContext context, Guid member, CancellationToken ct)

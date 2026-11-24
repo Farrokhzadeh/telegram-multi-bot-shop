@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
 
@@ -7,7 +8,7 @@ namespace Platform.Persistence;
 public sealed record SupplierAttempt(SupplierBinding Binding, Guid Id, Guid? ParentSubmit, string Operation, string? PurchaseReference, string? PurchaseKey = null);
 public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapshot secrets, long? trustedStaffChat = null, TimeSpan? remoteLeaseDuration = null)
 {
-    private const string BindingColumns = "r.id,r.order_id,o.product_id,r.product_supplier_source_id,r.source_revision,r.provider_code,r.account_ref,r.external_product_id,r.external_variant_id,r.local_intent_key,r.requested_quantity,r.cost_baseline_amount::text,r.cost_currency,r.approved_cost_ceiling::text";
+    private static IQueryable<SupplierBinding> Binding(EfSession data, Guid request) => from value in data.Data.Set<Entities.SupplierRequest>() join order in data.Data.Set<Entities.Order>() on value.OrderId equals order.Id where value.Id == request select new SupplierBinding(value.Id, order.Id, order.ProductId!.Value, value.ProductSupplierSourceId!.Value, value.SourceRevision!.Value, value.ProviderCode!, value.AccountRef!, value.ExternalProductId!, value.ExternalVariantId, value.LocalIntentKey, value.RequestedQuantity, value.CostBaselineAmount!.Value, value.CostCurrency!, value.ApprovedCostCeiling);
     public async Task ApproveCompleteAsync(AuthenticatedAdmin actor, BrandContext context, Guid order, Guid request, long revision, Guid command, string reason, CancellationToken ct = default)
     {
         AdminCommand.Revision(revision); AdminCommand.Reason(reason);
@@ -16,21 +17,12 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.ManualFulfillment, AuditEntity.Order, order, context.BrandId, AuditReason.OperatorReview, command, hash, revision, revision + 1), ct)) return;
-            bool owned = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND o.id=$2 AND b.id=$3 AND b.bot_id=$4)", DbValue.Uuid(request), DbValue.Uuid(order), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
+            bool owned = await session.RunEfStepAsync(false, (data, token) => (from value in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on value.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where value.Id == request && o.Id == order && b.Id == context.BrandId && b.BotId == context.BotId select value.Id).AnyAsync(token), ct);
             if (!owned) throw new UnauthorizedAccessException("Supplier review is unavailable.");
             await LockAsync(session, context, request, ct);
-            var state = await session.QuerySingleAsync(new DbStatement("""
-                SELECT o.quantity,COALESCE(o.revision=$2 AND o.fulfillment_status='requires_admin' AND o.review_code='partial_acquisition'
-                    AND o.release_authorized_at IS NULL AND o.delivery_generation IS NULL AND r.status='succeeded' AND r.review_code IS NULL
-                    AND r.remote_ref IS NOT NULL AND r.evidence_ref IS NOT NULL
-                    AND (SELECT count(*) FROM shop.fulfillments f WHERE f.order_id=o.id)=o.quantity
-                    AND (SELECT count(*) FROM shop.fulfillments f WHERE f.supplier_request_id=r.id AND f.kind='supplier' AND f.status='acquired')=r.requested_quantity
-                    AND EXISTS(SELECT 1 FROM shop.supplier_request_attempts a WHERE a.supplier_request_id=r.id AND a.outcome='succeeded'
-                        AND a.error_code IS NULL AND a.evidence_ref=r.evidence_ref AND a.remote_ref IS NOT NULL AND a.finished_at IS NOT NULL),false)
-                FROM shop.orders o JOIN shop.supplier_requests r ON r.order_id=o.id WHERE r.id=$1
-                """, DbValue.Uuid(request), DbValue.Bigint(revision)), r => (Quantity: r.GetInt32(0), Valid: r.GetBoolean(1)), ct);
+            var state = await session.RunEfStepAsync(false, (data, token) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id where r.Id == request select new { Quantity = o.Quantity, Valid = o.Revision == revision && o.FulfillmentStatus == "requires_admin" && o.ReviewCode == "partial_acquisition" && o.ReleaseAuthorizedAt == null && o.DeliveryGeneration == null && r.Status == "succeeded" && r.ReviewCode == null && r.RemoteRef != null && r.EvidenceRef != null && data.Data.Set<Entities.Fulfillment>().Count(f => f.OrderId == o.Id) == o.Quantity && data.Data.Set<Entities.Fulfillment>().Count(f => f.SupplierRequestId == r.Id && f.Kind == "supplier" && f.Status == "acquired") == r.RequestedQuantity && data.Data.Set<Entities.SupplierRequestAttempt>().Any(a => a.SupplierRequestId == r.Id && a.Outcome == "succeeded" && a.ErrorCode == null && a.EvidenceRef == r.EvidenceRef && a.RemoteRef != null && a.FinishedAt != null) }).SingleAsync(token), ct);
             if (!state.Valid || !await new DeliveryStore(sessions, secrets).HasCompleteAcquisitionAsync(session, context, order, state.Quantity, ct)) throw new InvalidOperationException("Complete verified supplier acquisition requires current review.");
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='acquiring',review_code=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(order)), ct);
+            await PaymentSettlementStore.ChangeOrderAsync(session, order, (row, now) => { row.FulfillmentStatus = "acquiring"; row.ReviewCode = null; }, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, order), order, DateTime.UtcNow, ct);
             await session.CommitAsync(ct);
         }
@@ -41,8 +33,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         Require(context, lease);
         await using var session = await sessions.BeginAsync(ct);
         await session.AdmitWriterAsync(context, ct);
-        return await session.QuerySingleAsync(new DbStatement("SELECT " + BindingColumns + " FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND b.id=$2 AND b.bot_id=$3",
-            DbValue.Uuid(lease.Intent.OriginId!.Value), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), ReadBinding, ct);
+        return await session.RunEfStepAsync(false, async (data, token) => { await data.RequireOrderCommandAsync(context, await data.Data.Set<Entities.SupplierRequest>().Where(row => row.Id == lease.Intent.OriginId!.Value).Select(row => row.OrderId).SingleAsync(token), token); return await Binding(data, lease.Intent.OriginId!.Value).SingleAsync(token); }, ct);
     }
     public async Task<SupplierAttempt?> BeginAsync(BrandContext context, JobLease lease, SupplierQuote? quote, CancellationToken ct = default, bool usesPurchaseKey = false, bool provenIntentLookup = false, bool supportsExport = false)
     {
@@ -54,7 +45,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             TimeSpan duration = remoteLeaseDuration ?? TimeSpan.FromMinutes(2);
             if (duration < TimeSpan.FromSeconds(1) || duration > TimeSpan.FromMinutes(2)) throw new ArgumentOutOfRangeException(nameof(remoteLeaseDuration));
             await OutboxStore.RenewAsync(session, lease, duration, ct);
-            var state = await session.QuerySingleAsync(new DbStatement("SELECT r.status,o.review_code,r.remote_ref,s.enabled AND s.revision=r.source_revision,clock_timestamp() FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.product_supplier_sources s ON s.id=r.product_supplier_source_id WHERE r.id=$1", DbValue.Uuid(binding.RequestId)), r => (Status: r.GetString(0), Review: r.IsDBNull(1) ? null : r.GetString(1), Remote: r.IsDBNull(2) ? null : r.GetString(2), Source: r.GetBoolean(3), Now: r.GetUtc(4)), ct);
+            var state = await session.RunEfStepAsync(false, async (data, token) => { var row = await (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join source in data.Data.Set<Entities.ProductSupplierSource>() on r.ProductSupplierSourceId equals source.Id where r.Id == binding.RequestId select new { r.Status, Review = o.ReviewCode, Remote = r.RemoteRef, Source = source.Enabled && source.Revision == r.SourceRevision }).SingleAsync(token); return (row.Status, row.Review, row.Remote, row.Source, Now: await data.BrandClockAsync(context.BrandId, token)); }, ct);
             bool submit = lease.Intent.Kind == JobKind.SubmitSupplier;
             if (state.Status is "resolved" or "succeeded") { await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return null; }
             if (submit)
@@ -68,7 +59,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
                     await session.CommitAsync(ct); return null;
                 }
             }
-            Guid? parent = submit ? null : await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.supplier_request_attempts WHERE supplier_request_id=$1 AND operation='submit' ORDER BY attempt_no DESC LIMIT 1", DbValue.Uuid(binding.RequestId)), r => r.GetGuid(0), ct);
+            Guid? parent = submit ? null : await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupplierRequestAttempt>().Where(row => row.SupplierRequestId == binding.RequestId && row.Operation == "submit").OrderByDescending(row => row.AttemptNo).Select(row => row.Id).FirstAsync(token), ct);
             string? purchaseReference = parent is Guid original ? await PurchaseReferenceAsync(session, original, ct) : null;
             Guid attempt = AttemptId(lease.Id, lease.Attempt);
             bool export = lease.Intent.Kind == JobKind.ExportSupplier;
@@ -80,12 +71,13 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             }
             string? purchaseKey = submit && usesPurchaseKey ? "purchase:" + attempt.ToString("D") : null;
             string operation = submit ? "submit" : export ? "export" : "status_lookup";
-            await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.supplier_request_attempts(id,supplier_request_id,attempt_no,operation,parent_submit_attempt_id,admin_authorization_audit_id,max_charge_amount,purchase_idempotency_key)
-                SELECT $1,$2,COALESCE(max(attempt_no),0)+1,$3,$4,$5,$6,$7 FROM shop.supplier_request_attempts WHERE supplier_request_id=$2
-                """, DbValue.Uuid(attempt), DbValue.Uuid(binding.RequestId), DbValue.Text(operation), AdminCommand.Id(parent), AdminCommand.Id(submit ? lease.Intent.AuditId : null),
-                submit ? DbValue.Numeric(SupplierRules.UnitCeiling(binding)) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Numeric), AdminCommand.Text(purchaseKey)), ct);
-            if (submit) await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='in_flight',updated_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(binding.RequestId)), ct);
+            await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireOrderCommandAsync(context, binding.OrderId, token);
+                long number = (await data.Data.Set<Entities.SupplierRequestAttempt>().Where(row => row.SupplierRequestId == binding.RequestId).MaxAsync(row => (long?)row.AttemptNo, token) ?? 0) + 1;
+                data.Data.Add(new Entities.SupplierRequestAttempt { Id = attempt, SupplierRequestId = binding.RequestId, AttemptNo = number, Operation = operation, Outcome = "in_flight", ParentSubmitAttemptId = parent, AdminAuthorizationAuditId = submit ? lease.Intent.AuditId : null, MaxChargeAmount = submit ? SupplierRules.UnitCeiling(binding) : null, PurchaseIdempotencyKey = purchaseKey }); return true;
+            }, ct);
+            if (submit) await SupplierQueries.ChangeAsync(session, context, binding.RequestId, (row, now) => { row.Status = "in_flight"; row.UpdatedAt = now; }, ct);
             await session.CommitAsync(ct); return new(binding, attempt, parent, operation, purchaseReference, purchaseKey);
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
@@ -100,12 +92,12 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             var binding = await LockAsync(session, context, attempt.Binding.RequestId, ct);
             if (binding != attempt.Binding) throw new InvalidOperationException("Supplier binding changed.");
             await OutboxStore.CompleteAsync(session, lease, ct);
-            bool active = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE id=$1 AND supplier_request_id=$2 AND operation=$3 AND outcome='in_flight' AND parent_submit_attempt_id IS NOT DISTINCT FROM $4)", DbValue.Uuid(attempt.Id), DbValue.Uuid(binding.RequestId), DbValue.Text(attempt.Operation), AdminCommand.Id(attempt.ParentSubmit)), r => r.GetBoolean(0), ct);
+            bool active = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.Id == attempt.Id && row.SupplierRequestId == binding.RequestId && row.Operation == attempt.Operation && row.Outcome == "in_flight" && row.ParentSubmitAttemptId == attempt.ParentSubmit, token), ct);
             if (!active) throw new InvalidOperationException("Supplier attempt is stale.");
-            string requestStatus = await session.QuerySingleAsync(new DbStatement("SELECT status FROM shop.supplier_requests WHERE id=$1", DbValue.Uuid(binding.RequestId)), r => r.GetString(0), ct);
+            string requestStatus = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupplierRequest>().Where(row => row.Id == binding.RequestId).Select(row => row.Status).SingleAsync(token), ct);
             if (requestStatus is "succeeded" or "resolved")
             {
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome='unknown',error_code='terminal_obligation',evidence_ref=$1,finished_at=clock_timestamp() WHERE id=$2", AdminCommand.Text(evidence), DbValue.Uuid(attempt.Id)), ct);
+                await SupplierQueries.AttemptAsync(session, context, attempt.Id, (row, now) => { row.Outcome = "unknown"; row.ErrorCode = "terminal_obligation"; row.EvidenceRef = evidence; row.FinishedAt = now; }, ct);
                 await session.CommitAsync(ct); return;
             }
             string? review = SupplierRules.Validate(binding, result);
@@ -119,50 +111,44 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
                 if (await ExistingItemsMatchAsync(session, context, binding, result, ct)) await CaptureAsync(session, context, binding, result, ct);
                 else { identity = false; review = "identity_mismatch"; }
             }
-            bool acquired = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled') OR EXISTS(SELECT 1 FROM shop.inventory_items WHERE supplier_request_id=$1 AND origin_kind='supplier_bonus')", DbValue.Uuid(binding.RequestId)), r => r.GetBoolean(0), ct);
+            bool acquired = await session.RunEfStepAsync(false, async (data, token) => await data.Data.Set<Entities.Fulfillment>().AnyAsync(row => row.SupplierRequestId == binding.RequestId && row.Status != "unfilled", token) || await data.Data.Set<Entities.InventoryItem>().AnyAsync(row => row.SupplierRequestId == binding.RequestId && row.OriginKind == "supplier_bonus", token), ct);
             if (acquired && result.Kind == SupplierOutcomeKind.ConfirmedNoEffect) { identity = false; review = "identity_mismatch"; }
             bool noEffect = archived && identity && result.Kind == SupplierOutcomeKind.ConfirmedNoEffect;
             bool complete = archived && identity && review is null;
             string outcome = noEffect ? "failed" : complete ? "succeeded" : "unknown";
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome=$1,error_code=$2,remote_ref=$3,evidence_ref=$4,finished_at=clock_timestamp() WHERE id=$5",
-                DbValue.Text(outcome), AdminCommand.Text(noEffect ? "confirmed_no_effect" : review), AdminCommand.Text(identity ? result.PurchaseReference : null), AdminCommand.Text(archived ? evidence : null), DbValue.Uuid(attempt.Id)), ct);
+            await SupplierQueries.AttemptAsync(session, context, attempt.Id, (row, now) => { row.Outcome = outcome; row.ErrorCode = noEffect ? "confirmed_no_effect" : review; row.RemoteRef = identity ? result.PurchaseReference : null; row.EvidenceRef = archived ? evidence : null; row.FinishedAt = now; }, ct);
             if (complete)
             {
-                var reviews = await session.QuerySingleAsync(new DbStatement("SELECT o.review_code,r.review_code FROM shop.orders o JOIN shop.supplier_requests r ON r.order_id=o.id WHERE r.id=$1", DbValue.Uuid(binding.RequestId)), r => (Order: r.IsDBNull(0) ? null : r.GetString(0), Request: r.IsDBNull(1) ? null : r.GetString(1)), ct);
+                var reviews = await session.RunEfStepAsync(false, (data, token) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id where r.Id == binding.RequestId select new { Order = o.ReviewCode, Request = r.ReviewCode }).SingleAsync(token), ct);
                 bool transient = reviews.Order == "provider_unknown" && reviews.Request == "provider_unknown";
                 bool protectedReview = reviews.Order is not null && !transient;
-                if (transient) await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET review_code=NULL,fulfillment_status='acquiring',revision=revision+1 WHERE id=$1", DbValue.Uuid(binding.OrderId)), ct);
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status='succeeded',remote_ref=COALESCE(remote_ref,$1),evidence_ref=$2,review_code=NULL,updated_at=clock_timestamp() WHERE id=$3", AdminCommand.Text(result.PurchaseReference), DbValue.Text(evidence!), DbValue.Uuid(binding.RequestId)), ct);
+                if (transient) await SupplierQueries.OrderAsync(session, context, binding.OrderId, (row, now) => { row.ReviewCode = null; row.FulfillmentStatus = "acquiring"; row.Revision++; }, ct);
+                await SupplierQueries.ChangeAsync(session, context, binding.RequestId, (row, now) => { row.Status = "succeeded"; row.RemoteRef ??= result.PurchaseReference; row.EvidenceRef = evidence; row.ReviewCode = null; row.UpdatedAt = now; }, ct);
                 if (!protectedReview) await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, binding.OrderId), binding.OrderId, DateTime.UtcNow, ct);
                 else await NoticeAsync(session, context, binding, attempt.Id, false, ct);
             }
             else
             {
                 string status = noEffect ? "failed" : result.Items.Count > 0 && archived && identity ? "partial_pending_admin" : "unknown";
-                if (identity && result.PurchaseReference is not null) await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET remote_ref=COALESCE(remote_ref,$1) WHERE id=$2", DbValue.Text(result.PurchaseReference), DbValue.Uuid(binding.RequestId)), ct);
+                if (identity && result.PurchaseReference is not null) await SupplierQueries.ChangeAsync(session, context, binding.RequestId, (row, now) => row.RemoteRef ??= result.PurchaseReference, ct);
                 await ReviewAsync(session, context, binding, status, review ?? "provider_unknown", attempt.Id, archived ? evidence : null, ct);
                 if (!noEffect && status == "unknown") await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.ReconcileSupplier, context.BrandId, binding.RequestId), attempt.Id, DateTime.UtcNow.AddSeconds(5), ct);
             }
-            bool bonus = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.inventory_items WHERE supplier_request_id=$1 AND origin_kind='supplier_bonus')", DbValue.Uuid(binding.RequestId)), r => r.GetBoolean(0), ct);
+            bool bonus = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.InventoryItem>().AnyAsync(row => row.SupplierRequestId == binding.RequestId && row.OriginKind == "supplier_bonus", token), ct);
             if (bonus) await NoticeAsync(session, context, binding, attempt.Id, true, ct);
             await session.CommitAsync(ct);
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
-    private static Task<string?> PurchaseReferenceAsync(DbSession session, Guid submit, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("""
-        SELECT COALESCE(a.remote_ref,(SELECT l.remote_ref FROM shop.supplier_request_attempts l WHERE l.parent_submit_attempt_id=a.id AND l.remote_ref IS NOT NULL ORDER BY l.attempt_no DESC LIMIT 1))
-        FROM shop.supplier_request_attempts a WHERE a.id=$1 AND a.operation='submit'
-        """, DbValue.Uuid(submit)), r => r.IsDBNull(0) ? null : r.GetString(0), ct);
+    private static Task<string?> PurchaseReferenceAsync(DbSession session, Guid submit, CancellationToken ct) => session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupplierRequestAttempt>().Where(row => row.Id == submit && row.Operation == "submit").Select(row => row.RemoteRef ?? data.Data.Set<Entities.SupplierRequestAttempt>().Where(child => child.ParentSubmitAttemptId == row.Id && child.RemoteRef != null).OrderByDescending(child => child.AttemptNo).Select(child => child.RemoteRef).FirstOrDefault()).SingleAsync(token), ct);
     private async Task<bool> ExistingItemsMatchAsync(DbSession session, BrandContext context, SupplierBinding binding, SupplierOutcome result, CancellationToken ct)
     {
         int newCustomers = 0;
-        int available = await session.QuerySingleAsync(new DbStatement("SELECT quantity-(SELECT count(*)::integer FROM shop.fulfillments WHERE order_id=$1 AND status<>'unfilled') FROM shop.orders WHERE id=$1", DbValue.Uuid(binding.OrderId)), r => r.GetInt32(0), ct);
+        int available = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Order>().Where(row => row.Id == binding.OrderId).Select(row => row.Quantity - data.Data.Set<Entities.Fulfillment>().Count(f => f.OrderId == row.Id && f.Status != "unfilled")).SingleAsync(token), ct);
         foreach (var item in result.Items)
         {
-            var existing = await session.QueryManyAsync(new DbStatement("""
-                SELECT id,supplier_request_id,'customer',delivered_content,delivered_content_key_id,content_kind FROM shop.fulfillments WHERE supplier_item_key=$1
-                UNION ALL SELECT id,supplier_request_id,'bonus',credential_ciphertext,credential_key_id,NULL::text FROM shop.inventory_items WHERE supplier_item_key=$1
-                """, DbValue.Binary(SupplierRules.ItemKey(binding, item.Reference))), r => (Id: r.GetGuid(0), Request: r.GetGuid(1), Kind: r.GetString(2), Bytes: r.GetBinary(3), Key: r.GetString(4), ContentKind: r.IsDBNull(5) ? null : r.GetString(5)), 2, ct);
+            byte[] key = SupplierRules.ItemKey(binding, item.Reference);
+            var existing = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Fulfillment>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "customer", Bytes = row.DeliveredContent!, Key = row.DeliveredContentKeyId!, row.ContentKind }).Concat(data.Data.Set<Entities.InventoryItem>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "bonus", Bytes = row.CredentialCiphertext, Key = row.CredentialKeyId, ContentKind = (string?)null })).Take(3).ToListAsync(token), ct);
             if (existing.Count == 0) { if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++; continue; }
             if (existing.Count != 1 || existing[0].Request != binding.RequestId || existing[0].Kind != (item.Disposition == SupplierItemDisposition.Customer ? "customer" : "bonus")) return false;
             var value = existing[0];
@@ -178,46 +164,59 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         foreach (var item in result.Items.OrderBy(i => i.Reference, StringComparer.Ordinal))
         {
             byte[] key = SupplierRules.ItemKey(binding, item.Reference);
-            bool exists = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_item_key=$1) OR EXISTS(SELECT 1 FROM shop.inventory_items WHERE supplier_item_key=$1)", DbValue.Binary(key)), r => r.GetBoolean(0), ct);
+            bool exists = await session.RunEfStepAsync(false, async (data, token) => await data.Data.Set<Entities.Fulfillment>().AnyAsync(row => row.SupplierItemKey == key, token) || await data.Data.Set<Entities.InventoryItem>().AnyAsync(row => row.SupplierItemKey == key, token), ct);
             if (exists) continue;
             if (item.Disposition == SupplierItemDisposition.Customer)
             {
-                var slots = await session.QueryManyAsync(new DbStatement("SELECT id FROM shop.fulfillments WHERE order_id=$1 AND status='unfilled' ORDER BY unit_no LIMIT 1 FOR UPDATE", DbValue.Uuid(binding.OrderId)), r => r.GetGuid(0), 1, ct);
-                Guid id = slots.Count == 1 ? slots[0] : Guid.CreateVersion7();
-                if (slots.Count == 0) await session.ExecuteAsync(new DbStatement("""
-                    INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,supplier_request_id)
-                    SELECT $1,$2,(SELECT min(n) FROM generate_series(1,o.quantity) n WHERE NOT EXISTS(SELECT 1 FROM shop.fulfillments f WHERE f.order_id=o.id AND f.unit_no=n)),'supplier',$3
-                    FROM shop.orders o WHERE o.id=$2
-                    """, DbValue.Uuid(id), DbValue.Uuid(binding.OrderId), DbValue.Uuid(binding.RequestId)), ct);
+                Guid id = await session.RunEfStepAsync(true, async (data, token) =>
+                {
+                    await data.RequireOrderCommandAsync(context, binding.OrderId, token);
+                    Guid? slot = await data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == binding.OrderId && row.Status == "unfilled").OrderBy(row => row.UnitNo).Select(row => (Guid?)row.Id).FirstOrDefaultAsync(token);
+                    if (slot is Guid existing) { await data.LockFulfillmentAsync(existing, token); return existing; }
+                    int quantity = await data.Data.Set<Entities.Order>().Where(row => row.Id == binding.OrderId).Select(row => row.Quantity).SingleAsync(token);
+                    var used = await data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == binding.OrderId).Select(row => row.UnitNo).Take(quantity + 1).ToListAsync(token);
+                    int number = Enumerable.Range(1, quantity).First(value => !used.Contains(value));
+                    Guid created = Guid.CreateVersion7(); data.Data.Add(new Entities.Fulfillment { Id = created, OrderId = binding.OrderId, UnitNo = number, Kind = "supplier", SupplierRequestId = binding.RequestId, Status = "unfilled" }); return created;
+                }, ct);
                 byte[] cipher = new BrandCipher(secrets).Encrypt(context, "fulfillments", id, "delivered_content", item.Content.Span);
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.fulfillments SET kind='supplier',status='acquired',supplier_request_id=$1,remote_item_ref=$2,supplier_item_key=$3,delivered_content=$4,delivered_content_key_id=$5,content_kind=$6 WHERE id=$7",
-                    DbValue.Uuid(binding.RequestId), DbValue.Text(item.Reference), DbValue.Binary(key), DbValue.Binary(cipher), DbValue.Text(secrets.CurrentBrandKeyId(context)), DbValue.Text(item.ContentKind), DbValue.Uuid(id)), ct);
+                await session.RunEfStepAsync(true, async (data, token) =>
+                {
+                    await data.RequireOrderCommandAsync(context, binding.OrderId, token);
+                    var row = await data.Data.Set<Entities.Fulfillment>().SingleAsync(row => row.Id == id, token);
+                    row.Kind = "supplier"; row.Status = "acquired"; row.SupplierRequestId = binding.RequestId; row.RemoteItemRef = item.Reference; row.SupplierItemKey = key; row.DeliveredContent = cipher; row.DeliveredContentKeyId = secrets.CurrentBrandKeyId(context); row.ContentKind = item.ContentKind; return true;
+                }, ct);
             }
             else
             {
                 Guid id = Guid.NewGuid(); byte[] cipher = new InventoryCipher(secrets).Encrypt(id, item.Content.Span);
                 byte[] fingerprint = secrets.UseInventoryKey(secrets.CurrentInventoryKeyId, k => HMACSHA256.HashData(k, item.Content.Span));
-                await session.ExecuteAsync(new DbStatement("INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind,supplier_request_id,remote_item_ref,supplier_item_key,state) VALUES ($1,$2,$3,$4,$5,'supplier_bonus',$6,$7,$8,'admin_held')",
-                    DbValue.Uuid(id), DbValue.Uuid(binding.ProductId), DbValue.Binary(cipher), DbValue.Text(secrets.CurrentInventoryKeyId), DbValue.Binary(fingerprint), DbValue.Uuid(binding.RequestId), DbValue.Text(item.Reference), DbValue.Binary(key)), ct);
+                await session.RunEfStepAsync(true, async (data, token) => { await data.RequireOrderCommandAsync(context, binding.OrderId, token); data.Data.Add(new Entities.InventoryItem { Id = id, ProductId = binding.ProductId, CredentialCiphertext = cipher, CredentialKeyId = secrets.CurrentInventoryKeyId, SourceFingerprint = fingerprint, OriginKind = "supplier_bonus", SupplierRequestId = binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, State = "admin_held" }); return true; }, ct);
             }
         }
     }
     private async Task ReviewAsync(DbSession session, BrandContext context, SupplierBinding binding, string status, string review, Guid generation, string? evidence, CancellationToken ct)
     {
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status=$1,review_code=$2,evidence_ref=COALESCE($3,evidence_ref),updated_at=clock_timestamp() WHERE id=$4", DbValue.Text(status), DbValue.Text(review), AdminCommand.Text(evidence), DbValue.Uuid(binding.RequestId)), ct);
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='requires_admin',review_code=CASE WHEN review_code='provider_unknown' AND $1='partial_acquisition' THEN $1 ELSE COALESCE(review_code,$1) END,revision=revision+1,updated_at=clock_timestamp() WHERE id=$2", DbValue.Text(review), DbValue.Uuid(binding.OrderId)), ct);
+        await SupplierQueries.ChangeAsync(session, context, binding.RequestId, (row, now) => { row.Status = status; row.ReviewCode = review; row.EvidenceRef = evidence ?? row.EvidenceRef; row.UpdatedAt = now; }, ct);
+        await PaymentSettlementStore.ChangeOrderAsync(session, binding.OrderId, (row, now) => { row.FulfillmentStatus = "requires_admin"; row.ReviewCode = row.ReviewCode == "provider_unknown" && review == "partial_acquisition" ? review : row.ReviewCode ?? review; }, ct);
         await NoticeAsync(session, context, binding, generation, false, ct);
     }
     private async Task NoticeAsync(DbSession session, BrandContext context, SupplierBinding binding, Guid generation, bool bonus, CancellationToken ct)
     {
         Guid audit = new(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(generation.ToString("D") + (bonus ? ":bonus" : ":case"))).AsSpan(0, 16));
-        await session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,correlation_id) VALUES ($1,'system',$2,'update','supplier_request',$3,$4,$5) ON CONFLICT(id) DO NOTHING",
-            DbValue.Uuid(audit), DbValue.Uuid(context.BrandId), DbValue.Uuid(binding.RequestId), DbValue.Text(bonus ? "Protected supplier bonus acquired" : "Supplier obligation requires review"), DbValue.Uuid(generation)), ct);
+        await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            await data.RequireOrderCommandAsync(context, binding.OrderId, token);
+            if (!await data.Data.Set<Entities.AuditEvent>().AnyAsync(row => row.Id == audit, token)) data.Data.Add(new Entities.AuditEvent { Id = audit, ActorKind = "system", BrandId = context.BrandId, Action = "update", EntityKind = "supplier_request", EntityId = binding.RequestId, Reason = bonus ? "Protected supplier bonus acquired" : "Supplier obligation requires review", CorrelationId = generation }); return true;
+        }, ct);
         if (trustedStaffChat is not < 0) return;
-        Guid delivery = await session.QuerySingleAsync(new DbStatement("""
-            INSERT INTO shop.telegram_deliveries(id,brand_id,recipient_kind,staff_chat_id,purpose,action,dedupe_key,supplier_request_id,audit_event_id,delivery_generation)
-            VALUES ($1,$2,'staff_chat',$3,$4,'send',$5,$6,$7,$8) ON CONFLICT(dedupe_key) DO UPDATE SET dedupe_key=EXCLUDED.dedupe_key RETURNING id
-            """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(context.BrandId), DbValue.Bigint(trustedStaffChat.Value), DbValue.Text(bonus ? "staff_supplier_bonus" : "staff_supplier_case"), DbValue.Text("supplier-notice:" + audit.ToString("D")), DbValue.Uuid(binding.RequestId), DbValue.Uuid(audit), DbValue.Uuid(generation)), r => r.GetGuid(0), ct);
+        string dedupe = "supplier-notice:" + audit.ToString("D");
+        Guid delivery = await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            await data.RequireOrderCommandAsync(context, binding.OrderId, token);
+            Guid? existing = await data.Data.Set<Entities.TelegramDelivery>().Where(row => row.DedupeKey == dedupe).Select(row => (Guid?)row.Id).SingleOrDefaultAsync(token);
+            if (existing is Guid id) return id;
+            Guid created = Guid.NewGuid(); data.Data.Add(new Entities.TelegramDelivery { Id = created, BrandId = context.BrandId, RecipientKind = "staff_chat", StaffChatId = trustedStaffChat, Purpose = bonus ? "staff_supplier_bonus" : "staff_supplier_case", Action = "send", DedupeKey = dedupe, SupplierRequestId = binding.RequestId, AuditEventId = audit, DeliveryGeneration = generation, Status = "pending" }); return created;
+        }, ct);
         await OutboxStore.EnqueueAsync(session, JobIntent.Telegram(context.BrandId, delivery), delivery, DateTime.UtcNow, ct);
     }
     public async Task<bool> RecoverExpiredAsync(BrandContext context, CancellationToken ct = default)
@@ -225,18 +224,24 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         await using var session = await sessions.BeginAsync(ct);
         try
         {
-            var candidates = await session.QueryManyAsync(new DbStatement("SELECT id,supplier_request_id,attempts FROM shop.jobs WHERE brand_id=$1 AND job_kind IN ('submit_supplier','reconcile_supplier','export_supplier') AND status='leased' AND lease_until<=clock_timestamp() ORDER BY lease_until,id LIMIT 1", DbValue.Uuid(context.BrandId)), r => (Id: r.GetGuid(0), Request: r.GetGuid(1), Number: r.GetInt64(2)), 1, ct);
+            var candidates = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Job>().Where(row => row.BrandId == context.BrandId && (row.JobKind == "submit_supplier" || row.JobKind == "reconcile_supplier" || row.JobKind == "export_supplier") && row.Status == "leased" && row.LeaseUntil <= Platform.Persistence.Configurations.EfValues.UtcNow()).OrderBy(row => row.LeaseUntil).ThenBy(row => row.Id).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Number = row.Attempts }).Take(1).ToListAsync(token), ct);
             if (candidates.Count == 0) return false;
             var job = candidates[0];
             var binding = await LockAsync(session, context, job.Request, ct);
-            var locked = await session.QueryManyAsync(new DbStatement("SELECT id FROM shop.jobs WHERE id=$1 AND attempts=$2 AND status='leased' AND lease_until<=clock_timestamp() FOR UPDATE", DbValue.Uuid(job.Id), DbValue.Bigint(job.Number)), r => r.GetGuid(0), 1, ct);
-            if (locked.Count == 0) return false;
+            bool recovered = await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireOrderCommandAsync(context, binding.OrderId, token); await data.LockJobAsync(job.Id, token);
+                var row = await data.Data.Set<Entities.Job>().SingleOrDefaultAsync(row => row.Id == job.Id && row.Attempts == job.Number && row.Status == "leased" && row.LeaseUntil <= Platform.Persistence.Configurations.EfValues.UtcNow(), token);
+                if (row is null) return false;
+                Guid id = AttemptId(job.Id, job.Number); bool begun = await data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(value => value.Id == id && value.SupplierRequestId == job.Request, token);
+                DateTime now = await data.BrandClockAsync(context.BrandId, token); row.Status = begun ? "failed" : "retry"; row.LockedBy = null; row.LeaseUntil = null; row.CompletedAt = begun ? now : null; row.LastErrorCode = begun ? "remote_outcome_unknown" : null; return true;
+            }, ct);
+            if (!recovered) return false;
             Guid attempt = AttemptId(job.Id, job.Number);
-            bool started = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE id=$1 AND supplier_request_id=$2)", DbValue.Uuid(attempt), DbValue.Uuid(job.Request)), r => r.GetBoolean(0), ct);
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status=$1,locked_by=NULL,lease_until=NULL,completed_at=CASE WHEN $2 THEN clock_timestamp() ELSE NULL END,last_error_code=$3 WHERE id=$4", DbValue.Text(started ? "failed" : "retry"), DbValue.Boolean(started), AdminCommand.Text(started ? "remote_outcome_unknown" : null), DbValue.Uuid(job.Id)), ct);
+            bool started = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.Id == attempt && row.SupplierRequestId == job.Request, token), ct);
             if (started)
             {
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_request_attempts SET outcome='unknown',error_code='provider_unknown',finished_at=clock_timestamp() WHERE id=$1 AND outcome='in_flight'", DbValue.Uuid(attempt)), ct);
+                await SupplierQueries.AttemptAsync(session, context, attempt, (row, now) => { if (row.Outcome == "in_flight") { row.Outcome = "unknown"; row.ErrorCode = "provider_unknown"; row.FinishedAt = now; } }, ct);
                 await ReviewAsync(session, context, binding, "unknown", "provider_unknown", attempt, null, ct);
                 await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.ReconcileSupplier, context.BrandId, binding.RequestId), attempt, DateTime.UtcNow, ct);
             }
@@ -254,23 +259,13 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.ApproveCost, AuditEntity.SupplierRequest, request, context.BrandId, AuditReason.OperatorReview, command,
                 AdminCommand.Hash("supplier-cost-approval-v1", request.ToString("D"), expectedRevision.ToString(System.Globalization.CultureInfo.InvariantCulture), ExactDecimal.Format(maximumUnitCost), currency), expectedRevision, expectedRevision + 1), ct)) return;
             var binding = await LockAsync(session, context, request, ct);
-            bool priorSubmit = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.supplier_request_attempts WHERE supplier_request_id=$1 AND operation='submit')", DbValue.Uuid(request)), r => r.GetBoolean(0), ct);
-            bool safe = await session.QuerySingleAsync(new DbStatement("""
-                SELECT status='blocked' AND review_code='cost_limit' AND revision=$2
-                    AND NOT EXISTS(SELECT 1 FROM shop.jobs WHERE supplier_request_id=$1 AND status='leased')
-                    AND NOT EXISTS(SELECT 1 FROM shop.fulfillments WHERE supplier_request_id=$1 AND status<>'unfilled')
-                    AND NOT EXISTS(SELECT 1 FROM shop.inventory_items WHERE supplier_request_id=$1)
-                    AND NOT EXISTS(SELECT 1 FROM shop.supplier_request_attempts a WHERE a.supplier_request_id=$1 AND a.operation='submit' AND
-                        ((a.outcome='failed' AND a.error_code='confirmed_no_effect' AND a.evidence_ref IS NOT NULL) OR
-                         (a.outcome IN ('unknown','timeout') AND EXISTS(SELECT 1 FROM shop.supplier_request_attempts l WHERE l.parent_submit_attempt_id=a.id
-                            AND l.operation='status_lookup' AND l.outcome='failed' AND l.error_code='confirmed_no_effect' AND l.evidence_ref IS NOT NULL))) IS NOT TRUE)
-                FROM shop.supplier_requests WHERE id=$1
-                """, DbValue.Uuid(request), DbValue.Bigint(expectedRevision)), r => r.GetBoolean(0), ct);
+            bool priorSubmit = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.SupplierRequestId == request && row.Operation == "submit", token), ct);
+            bool safe = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupplierRequest>().Where(row => row.Id == request).Select(row => row.Status == "blocked" && row.ReviewCode == "cost_limit" && row.Revision == expectedRevision && !data.Data.Set<Entities.Job>().Any(job => job.SupplierRequestId == request && job.Status == "leased") && !data.Data.Set<Entities.Fulfillment>().Any(f => f.SupplierRequestId == request && f.Status != "unfilled") && !data.Data.Set<Entities.InventoryItem>().Any(i => i.SupplierRequestId == request) && !data.Data.Set<Entities.SupplierRequestAttempt>().Any(a => a.SupplierRequestId == request && a.Operation == "submit" && !((a.Outcome == "failed" && a.ErrorCode == "confirmed_no_effect" && a.EvidenceRef != null) || ((a.Outcome == "unknown" || a.Outcome == "timeout") && data.Data.Set<Entities.SupplierRequestAttempt>().Any(l => l.ParentSubmitAttemptId == a.Id && l.Operation == "status_lookup" && l.Outcome == "failed" && l.ErrorCode == "confirmed_no_effect" && l.EvidenceRef != null))))).SingleAsync(token), ct);
             if (!safe || currency != binding.Currency || maximumUnitCost <= binding.UnitBaseline) throw new InvalidOperationException("Original cost review is unavailable.");
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.supplier_requests SET status=$4,review_code=NULL,approved_cost_ceiling=$1,approval_audit_id=$2,revision=revision+1,updated_at=clock_timestamp() WHERE id=$3", DbValue.Numeric(maximumUnitCost), DbValue.Uuid(command), DbValue.Uuid(request), DbValue.Text(priorSubmit ? "failed" : "pending")), ct);
+            await SupplierQueries.ChangeAsync(session, context, request, (row, now) => { row.Status = priorSubmit ? "failed" : "pending"; row.ReviewCode = null; row.ApprovedCostCeiling = maximumUnitCost; row.ApprovalAuditId = command; row.Revision++; row.UpdatedAt = now; }, ct);
             if (!priorSubmit)
             {
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.orders SET review_code=NULL,fulfillment_status='acquiring',revision=revision+1 WHERE id=$1 AND review_code='cost_limit'", DbValue.Uuid(binding.OrderId)), ct);
+                await SupplierQueries.OrderAsync(session, context, binding.OrderId, (row, now) => { if (row.ReviewCode == "cost_limit") { row.ReviewCode = null; row.FulfillmentStatus = "acquiring"; row.Revision++; } }, ct);
                 await OutboxStore.EnqueueAsync(session, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, request), command, DateTime.UtcNow, ct);
             }
             await session.CommitAsync(ct);
@@ -281,7 +276,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     {
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.QueryManyAsync(new DbStatement("SELECT i.remote_item_ref,i.credential_ciphertext,i.credential_key_id FROM shop.inventory_items i JOIN shop.supplier_requests r ON r.id=i.supplier_request_id JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE i.id=$1 AND r.id=$2 AND i.state='admin_held' AND i.origin_kind='supplier_bonus' AND b.id=$3 AND b.bot_id=$4", DbValue.Uuid(item), DbValue.Uuid(request), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Reference: r.GetString(0), Cipher: r.GetBinary(1), Key: r.GetString(2)), 1, ct);
+        var rows = await session.RunEfStepAsync(false, (data, token) => (from i in data.Data.Set<Entities.InventoryItem>() join r in data.Data.Set<Entities.SupplierRequest>() on i.SupplierRequestId equals r.Id join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where i.Id == item && r.Id == request && i.State == "admin_held" && i.OriginKind == "supplier_bonus" && b.Id == context.BrandId && b.BotId == context.BotId select new { Reference = i.RemoteItemRef!, Cipher = i.CredentialCiphertext, Key = i.CredentialKeyId }).Take(1).ToListAsync(token), ct);
         if (rows.Count != 1) throw new UnauthorizedAccessException("Protected supplier bonus is unavailable.");
         var data = rows[0];
         await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Maintenance, AuditEntity.SupplierRequest, request, context.BrandId, AuditReason.OperatorReview, command, AdminCommand.Hash("supplier-bonus-access-v1", request.ToString("D"), item.ToString("D"))), ct);
@@ -296,13 +291,15 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     }
     private static async Task<SupplierBinding> LockAsync(DbSession session, BrandContext context, Guid request, CancellationToken ct)
     {
-        var id = await session.QuerySingleAsync(new DbStatement("SELECT o.user_id,o.product_id,o.id FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE r.id=$1 AND b.id=$2 AND b.bot_id=$3", DbValue.Uuid(request), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Member: r.GetGuid(0), Product: r.GetGuid(1), Order: r.GetGuid(2)), ct);
-        await session.ExecuteAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Member)), ct);
-        await session.ExecuteAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Product)), ct);
+        var id = await session.RunEfStepAsync(false, (data, token) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where r.Id == request && b.Id == context.BrandId && b.BotId == context.BotId select new { Member = u.Id, Product = o.ProductId!.Value, Order = o.Id }).SingleAsync(token), ct);
+        await session.RunEfStepAsync(false, async (data, token) => { await data.LockUserAsync(id.Member, context.BrandId, token); return await data.LockProductAsync(id.Product, token); }, ct);
         await session.AdmitWriterAsync(context, ct);
-        bool accepted = await session.QuerySingleAsync(new DbStatement("SELECT payment_status IN ('paid','not_required') AND fulfillment_status NOT IN ('cancelled','compensated','completed') AND hold_at IS NULL FROM shop.orders WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Order)), r => r.GetBoolean(0), ct);
-        if (!accepted) throw new InvalidOperationException("Supplier obligation is terminal or held.");
-        return await session.QuerySingleAsync(new DbStatement("SELECT " + BindingColumns + " FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id WHERE r.id=$1 FOR UPDATE OF r", DbValue.Uuid(request)), ReadBinding, ct);
+        return await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            await data.LockOrderAsync(id.Order, token);
+            bool accepted = await data.Data.Set<Entities.Order>().AnyAsync(row => row.Id == id.Order && (row.PaymentStatus == "paid" || row.PaymentStatus == "not_required") && row.FulfillmentStatus != "cancelled" && row.FulfillmentStatus != "compensated" && row.FulfillmentStatus != "completed" && row.HoldAt == null, token);
+            if (!accepted) throw new InvalidOperationException("Supplier obligation is terminal or held.");
+            await data.LockRequestAsync(request, token); return await Binding(data, request).SingleAsync(token);
+        }, ct);
     }
-    private static SupplierBinding ReadBinding(DbRow r) => new(r.GetGuid(0), r.GetGuid(1), r.GetGuid(2), r.GetGuid(3), r.GetInt64(4), r.GetString(5), r.GetString(6), r.GetString(7), r.IsDBNull(8) ? null : r.GetString(8), r.GetString(9), r.GetInt32(10), ExactDecimal.Parse(r.GetString(11)), r.GetString(12), r.IsDBNull(13) ? null : ExactDecimal.Parse(r.GetString(13)));
 }

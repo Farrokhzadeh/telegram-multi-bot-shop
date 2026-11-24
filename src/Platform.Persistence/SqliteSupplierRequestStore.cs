@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
 
@@ -45,11 +46,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             {
                 if (state.Status != "pending" || state.RequestReview is not null)
                     throw new UnauthorizedAccessException("The supplier submission requires review.");
-                using var existing = SqliteWallet.Command(tx, """
-                    SELECT 1 FROM supplier_request_attempts WHERE supplier_request_id=$request AND operation='submit' LIMIT 1
-                    """, ("$request", state.Binding.RequestId));
-                if (await existing.ExecuteScalarAsync(token) is not null)
-                    throw new UnauthorizedAccessException("An original supplier submission already exists.");
+                if (await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.SupplierRequestId == state.Binding.RequestId && row.Operation == "submit", cancel), token)) throw new UnauthorizedAccessException("An original supplier submission already exists.");
                 string? blocker = !state.SourceEnabled || state.SourceRevision != state.Binding.SourceRevision
                     ? "source_disabled" : quote is null ? "cost_unverified" :
                     SupplierRules.Preflight(state.Binding, quote, DateTime.UtcNow);
@@ -64,16 +61,8 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             string? remote = null;
             if (!submit)
             {
-                using var original = SqliteWallet.Command(tx, """
-                    SELECT id,remote_ref FROM supplier_request_attempts
-                    WHERE supplier_request_id=$request AND operation='submit'
-                    ORDER BY attempt_no DESC LIMIT 1
-                    """, ("$request", state.Binding.RequestId));
-                await using var row = await original.ExecuteReaderAsync(token);
-                if (!await row.ReadAsync(token))
-                    throw new UnauthorizedAccessException("The original supplier attempt is unavailable.");
-                parent = row.GetGuid(0);
-                remote = row.IsDBNull(1) ? null : row.GetString(1);
+                var original = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.SupplierRequestAttempt>().Where(row => row.SupplierRequestId == state.Binding.RequestId && row.Operation == "submit").OrderByDescending(row => row.AttemptNo).Select(row => new { row.Id, row.RemoteRef }).FirstOrDefaultAsync(cancel), token) ?? throw new UnauthorizedAccessException("The original supplier attempt is unavailable.");
+                parent = original.Id; remote = original.RemoteRef;
                 if (lease.Intent.Kind == JobKind.ExportSupplier ? !supportsExport || remote is null :
                     !provenIntentLookup && remote is null)
                 {
@@ -85,26 +74,14 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             string operation = submit ? "submit" :
                 lease.Intent.Kind == JobKind.ExportSupplier ? "export" : "status_lookup";
             Guid attempt = AttemptId(lease.Id, lease.Attempt);
-            using var insert = SqliteWallet.Command(tx, """
-                INSERT INTO supplier_request_attempts(id,supplier_request_id,attempt_no,operation,
-                    parent_submit_attempt_id,admin_authorization_audit_id,max_charge_amount,purchase_idempotency_key)
-                SELECT $id,$request,coalesce(max(attempt_no),0)+1,$operation,$parent,$audit,$charge,$key
-                FROM supplier_request_attempts WHERE supplier_request_id=$request
-                """, ("$id", attempt), ("$request", state.Binding.RequestId), ("$operation", operation),
-                ("$parent", parent), ("$audit", submit ? lease.Intent.AuditId : null),
-                ("$charge", submit ? ExactDecimal.Format(SupplierRules.UnitCeiling(state.Binding)) : null),
-                ("$key", submit && usesPurchaseKey ? "purchase:" + attempt.ToString("D") : null));
-            if (await insert.ExecuteNonQueryAsync(token) != 1)
-                throw new InvalidOperationException("Supplier attempt was not persisted.");
-            if (submit)
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
             {
-                using var active = SqliteWallet.Command(tx, """
-                    UPDATE supplier_requests SET status='in_flight',updated_at=$now
-                    WHERE id=$request AND status='pending'
-                    """, ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$request", state.Binding.RequestId));
-                if (await active.ExecuteNonQueryAsync(token) != 1)
-                    throw new InvalidOperationException("Supplier request was superseded.");
-            }
+                await data.RequireOrderCommandAsync(context, state.Binding.OrderId, cancel);
+                long number = (await data.Data.Set<Entities.SupplierRequestAttempt>().Where(row => row.SupplierRequestId == state.Binding.RequestId).MaxAsync(row => (long?)row.AttemptNo, cancel) ?? 0) + 1;
+                data.Data.Add(new Entities.SupplierRequestAttempt { Id = attempt, SupplierRequestId = state.Binding.RequestId, AttemptNo = number, Operation = operation, Outcome = "in_flight", ParentSubmitAttemptId = parent, AdminAuthorizationAuditId = submit ? lease.Intent.AuditId : null, MaxChargeAmount = submit ? SupplierRules.UnitCeiling(state.Binding) : null, PurchaseIdempotencyKey = submit && usesPurchaseKey ? "purchase:" + attempt.ToString("D") : null });
+                if (submit) { var row = await data.Data.Set<Entities.SupplierRequest>().SingleAsync(row => row.Id == state.Binding.RequestId && row.Status == "pending", cancel); row.Status = "in_flight"; row.UpdatedAt = DateTime.UtcNow; }
+                return true;
+            }, token);
             return new SupplierAttempt(state.Binding, attempt, parent, operation, remote,
                 submit && usesPurchaseKey ? "purchase:" + attempt.ToString("D") : null);
         }, ct);
@@ -126,29 +103,13 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             State state = await ReadStateAsync(tx, context, attempt.Binding.RequestId, token);
             if (state.Binding != attempt.Binding)
                 throw new UnauthorizedAccessException("The original supplier binding changed.");
-            using (var query = SqliteWallet.Command(tx, """
-                SELECT operation,outcome,parent_submit_attempt_id FROM supplier_request_attempts
-                WHERE id=$attempt AND supplier_request_id=$request
-                """, ("$attempt", attempt.Id), ("$request", state.Binding.RequestId)))
-            await using (var row = await query.ExecuteReaderAsync(token))
-            {
-                if (!await row.ReadAsync(token) || row.GetString(0) != attempt.Operation ||
-                    row.GetString(1) != "in_flight" ||
-                    (row.IsDBNull(2) ? null : row.GetGuid(2)) != attempt.ParentSubmit)
-                    throw new UnauthorizedAccessException("The supplier result is not an active attempt.");
-            }
+            bool active = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.Id == attempt.Id && row.SupplierRequestId == state.Binding.RequestId && row.Operation == attempt.Operation && row.Outcome == "in_flight" && row.ParentSubmitAttemptId == attempt.ParentSubmit, cancel), token);
+            if (!active) throw new UnauthorizedAccessException("The supplier result is not an active attempt.");
             JobLease renewed = lease.Intent.Kind == JobKind.SubmitSupplier ? lease :
                 await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(90), token);
             if (state.Status is "succeeded" or "resolved")
             {
-                using var terminal = SqliteWallet.Command(tx, """
-                    UPDATE supplier_request_attempts SET outcome='unknown',
-                        error_code='terminal_obligation',evidence_ref=$evidence,finished_at=$now
-                    WHERE id=$attempt AND outcome='in_flight'
-                    """, ("$evidence", evidence), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)),
-                    ("$attempt", attempt.Id));
-                if (await terminal.ExecuteNonQueryAsync(token) != 1)
-                    throw new UnauthorizedAccessException("Supplier terminal attempt was superseded.");
+                await AttemptAsync(tx, context, attempt.Id, (row, now) => { row.Outcome = "unknown"; row.ErrorCode = "terminal_obligation"; row.EvidenceRef = evidence; row.FinishedAt = now; }, token);
                 await OutboxStore.CompleteSqliteAsync(tx, renewed, token);
                 return 0;
             }
@@ -158,13 +119,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
                 result.Items.All(item => item.Reference.Length <= 160);
             if (attempt.ParentSubmit is Guid parent)
             {
-                using var origin = SqliteWallet.Command(tx, """
-                    SELECT coalesce(a.remote_ref,(SELECT r.remote_ref FROM supplier_request_attempts r
-                        WHERE r.parent_submit_attempt_id=a.id AND r.remote_ref IS NOT NULL
-                        ORDER BY r.attempt_no DESC LIMIT 1))
-                    FROM supplier_request_attempts a WHERE a.id=$parent AND a.operation='submit'
-                    """, ("$parent", parent));
-                object? reference = await origin.ExecuteScalarAsync(token);
+                string? reference = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.SupplierRequestAttempt>().Where(row => row.Id == parent && row.Operation == "submit").Select(row => row.RemoteRef ?? data.Data.Set<Entities.SupplierRequestAttempt>().Where(child => child.ParentSubmitAttemptId == row.Id && child.RemoteRef != null).OrderByDescending(child => child.AttemptNo).Select(child => child.RemoteRef).FirstOrDefault()).SingleOrDefaultAsync(cancel), token);
                 if (reference is string previous && result.PurchaseReference is string current &&
                     previous != current) identity = false;
             }
@@ -188,35 +143,13 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             bool noEffect = archived && identity && result.Kind == SupplierOutcomeKind.ConfirmedNoEffect;
             bool complete = archived && identity && review is null && result.Kind == SupplierOutcomeKind.Completed;
             string status = noEffect ? "failed" : complete ? "succeeded" : "unknown";
-            string now = SqliteSchema.UtcText(DateTime.UtcNow);
-            using (var finish = SqliteWallet.Command(tx, """
-                UPDATE supplier_request_attempts SET outcome=$outcome,error_code=$error,
-                    remote_ref=$remote,evidence_ref=$evidence,finished_at=$now
-                WHERE id=$attempt AND outcome='in_flight'
-                """, ("$outcome", status), ("$error", noEffect ? "confirmed_no_effect" : review),
-                ("$remote", identity ? result.PurchaseReference : null),
-                ("$evidence", archived ? evidence : null), ("$now", now), ("$attempt", attempt.Id)))
-                if (await finish.ExecuteNonQueryAsync(token) != 1)
-                    throw new UnauthorizedAccessException("Supplier attempt was superseded.");
+            await AttemptAsync(tx, context, attempt.Id, (row, now) => { row.Outcome = status; row.ErrorCode = noEffect ? "confirmed_no_effect" : review; row.RemoteRef = identity ? result.PurchaseReference : null; row.EvidenceRef = archived ? evidence : null; row.FinishedAt = now; }, token);
             if (complete)
             {
-                using (var update = SqliteWallet.Command(tx, """
-                    UPDATE supplier_requests SET status='succeeded',review_code=NULL,
-                        remote_ref=coalesce(remote_ref,$remote),evidence_ref=$evidence,updated_at=$now
-                    WHERE id=$request AND status IN ('pending','in_flight','unknown','partial_pending_admin')
-                    """, ("$remote", result.PurchaseReference), ("$evidence", evidence), ("$now", now),
-                    ("$request", state.Binding.RequestId)))
-                    if (await update.ExecuteNonQueryAsync(token) != 1)
-                        throw new InvalidOperationException("The original supplier obligation changed.");
+                await RequestAsync(tx, context, state.Binding.RequestId, row => row.Status == "pending" || row.Status == "in_flight" || row.Status == "unknown" || row.Status == "partial_pending_admin", (row, now) => { row.Status = "succeeded"; row.ReviewCode = null; row.RemoteRef ??= result.PurchaseReference; row.EvidenceRef = evidence; row.UpdatedAt = now; }, token);
                 if (state.OrderReview is null || state.OrderReview == "provider_unknown")
                 {
-                    using var clear = SqliteWallet.Command(tx, """
-                        UPDATE orders SET fulfillment_status='acquiring',review_code=NULL,
-                            revision=revision+1,updated_at=$now
-                        WHERE id=$order AND (review_code IS NULL OR review_code='provider_unknown')
-                        """, ("$now", now), ("$order", state.Binding.OrderId));
-                    if (await clear.ExecuteNonQueryAsync(token) != 1)
-                        throw new InvalidOperationException("Supplier fulfillment was superseded.");
+                    await OrderAsync(tx, context, state.Binding.OrderId, row => row.ReviewCode == null || row.ReviewCode == "provider_unknown", (row, now) => { row.FulfillmentStatus = "acquiring"; row.ReviewCode = null; row.Revision++; row.UpdatedAt = now; }, token);
                     await OutboxStore.EnqueueSqliteAsync(tx,
                         JobIntent.Order(JobKind.PrepareManifest, context.BrandId, state.Binding.OrderId),
                         state.Binding.OrderId, DateTime.UtcNow, token);
@@ -241,50 +174,22 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
     public Task<bool> RecoverExpiredAsync(BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(true, async (_, tx, token) =>
         {
-            using var find = SqliteWallet.Command(tx, """
-                SELECT j.id,j.supplier_request_id,j.attempts,j.job_kind
-                FROM jobs j WHERE j.brand_id=$brand AND j.job_kind IN (
-                    'submit_supplier','reconcile_supplier','export_supplier')
-                    AND j.status='leased' AND j.lease_until<=$now
-                ORDER BY j.lease_until,j.id LIMIT 1
-                """, ("$brand", context.BrandId), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
-            Guid job, request;
-            long number;
-            string kind;
-            await using (var row = await find.ExecuteReaderAsync(token))
-            {
-                if (!await row.ReadAsync(token)) return false;
-                job = row.GetGuid(0);
-                request = row.GetGuid(1);
-                number = row.GetInt64(2);
-                kind = row.GetString(3);
-            }
+            var selected = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Job>().Where(row => row.BrandId == context.BrandId && (row.JobKind == "submit_supplier" || row.JobKind == "reconcile_supplier" || row.JobKind == "export_supplier") && row.Status == "leased" && row.LeaseUntil <= Platform.Persistence.Configurations.EfValues.UtcNow()).OrderBy(row => row.LeaseUntil).ThenBy(row => row.Id).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, row.Attempts, row.JobKind }).FirstOrDefaultAsync(cancel), token);
+            if (selected is null) return false;
+            Guid job = selected.Id, request = selected.Request; long number = selected.Attempts; string kind = selected.JobKind;
             State state = await ReadStateAsync(tx, context, request, token);
             Guid attempt = AttemptId(job, number);
-            bool started;
-            using (var check = SqliteWallet.Command(tx, """
-                SELECT 1 FROM supplier_request_attempts
-                WHERE id=$attempt AND supplier_request_id=$request
-                """, ("$attempt", attempt), ("$request", request)))
-                started = await check.ExecuteScalarAsync(token) is not null;
-            string now = SqliteSchema.UtcText(DateTime.UtcNow);
-            using (var fix = SqliteWallet.Command(tx, """
-                UPDATE jobs SET status=$status,locked_by=NULL,lease_until=NULL,
-                    available_at=$now,completed_at=$completed,last_error_code=$error
-                WHERE id=$job AND status='leased' AND attempts=$attempts AND lease_until<=$now
-                """, ("$status", started ? "failed" : "retry"), ("$now", now),
-                ("$completed", started ? now : null),
-                ("$error", started ? "remote_outcome_unknown" : null),
-                ("$job", job), ("$attempts", number)))
-                if (await fix.ExecuteNonQueryAsync(token) != 1)
-                    throw new UnauthorizedAccessException("The supplier lease changed.");
+            bool started = await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
+            {
+                await data.RequireOrderCommandAsync(context, state.Binding.OrderId, cancel);
+                bool begun = await data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.Id == attempt && row.SupplierRequestId == request, cancel);
+                var row = await data.Data.Set<Entities.Job>().SingleOrDefaultAsync(row => row.Id == job && row.Status == "leased" && row.Attempts == number && row.LeaseUntil <= Platform.Persistence.Configurations.EfValues.UtcNow(), cancel) ?? throw new UnauthorizedAccessException("The supplier lease changed.");
+                DateTime now = DateTime.UtcNow; row.Status = begun ? "failed" : "retry"; row.LockedBy = null; row.LeaseUntil = null; row.AvailableAt = now; row.CompletedAt = begun ? now : null; row.LastErrorCode = begun ? "remote_outcome_unknown" : null;
+                if (begun) { var original = await data.Data.Set<Entities.SupplierRequestAttempt>().SingleAsync(row => row.Id == attempt, cancel); if (original.Outcome == "in_flight") { original.Outcome = "unknown"; original.ErrorCode = "provider_unknown"; original.FinishedAt = now; } }
+                return begun;
+            }, token);
             if (started)
             {
-                using (var update = SqliteWallet.Command(tx, """
-                    UPDATE supplier_request_attempts SET outcome='unknown',error_code='provider_unknown',
-                        finished_at=$now WHERE id=$attempt AND outcome='in_flight'
-                    """, ("$now", now), ("$attempt", attempt)))
-                    await update.ExecuteNonQueryAsync(token);
                 await ReviewAsync(tx, state, "provider_unknown", "unknown", token);
                 if (kind == "submit_supplier")
                     await OutboxStore.EnqueueSqliteAsync(tx,
@@ -294,55 +199,26 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             return true;
         }, ct);
 
-    private async Task<bool> ExistingItemsMatchAsync(SqliteTransaction tx, BrandContext context,
-        State state, SupplierOutcome result, CancellationToken ct)
+    private async Task<bool> ExistingItemsMatchAsync(SqliteTransaction tx, BrandContext context, State state, SupplierOutcome result, CancellationToken ct)
     {
+        var binding = state.Binding;
         int newCustomers = 0;
-        using (var count = SqliteWallet.Command(tx, """
-            SELECT quantity-(SELECT count(*) FROM fulfillments
-                WHERE order_id=$order AND status<>'unfilled')
-            FROM orders WHERE id=$order
-            """, ("$order", state.Binding.OrderId)))
+        int available = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Order>().Where(row => row.Id == binding.OrderId).Select(row => row.Quantity - data.Data.Set<Entities.Fulfillment>().Count(f => f.OrderId == row.Id && f.Status != "unfilled")).SingleAsync(token), ct);
+        if (available < 0) return false;
+        foreach (var item in result.Items)
         {
-            if (await count.ExecuteScalarAsync(ct) is not long available || available < 0)
-                return false;
-            foreach (SupplierItem item in result.Items)
-            {
-                using var query = SqliteWallet.Command(tx, """
-                    SELECT id,supplier_request_id,'customer',delivered_content,delivered_content_key_id,content_kind
-                    FROM fulfillments WHERE supplier_item_key=$key
-                    UNION ALL
-                    SELECT id,supplier_request_id,'bonus',credential_ciphertext,credential_key_id,NULL
-                    FROM inventory_items WHERE supplier_item_key=$key
-                    """, ("$key", SupplierRules.ItemKey(state.Binding, item.Reference)));
-                await using var rows = await query.ExecuteReaderAsync(ct);
-                if (!await rows.ReadAsync(ct))
-                {
-                    if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++;
-                    continue;
-                }
-                Guid id = rows.GetGuid(0), request = rows.GetGuid(1);
-                string kind = rows.GetString(2);
-                byte[] encrypted = rows.GetFieldValue<byte[]>(3);
-                string key = rows.GetString(4);
-                string? contentKind = rows.IsDBNull(5) ? null : rows.GetString(5);
-                if (await rows.ReadAsync(ct) || request != state.Binding.RequestId ||
-                    kind != (item.Disposition == SupplierItemDisposition.Customer ? "customer" : "bonus") ||
-                    contentKind is not null && contentKind != item.ContentKind)
-                    return false;
-                byte[] plain = kind == "customer"
-                    ? new BrandCipher(secrets).Decrypt(context, "fulfillments", id, "delivered_content", key, encrypted)
-                    : new InventoryCipher(secrets).Decrypt(id, key, encrypted);
-                try
-                {
-                    if (!CryptographicOperations.FixedTimeEquals(plain, item.Content.Span)) return false;
-                }
-                finally { CryptographicOperations.ZeroMemory(plain); }
-            }
-            return newCustomers <= available;
+            byte[] key = SupplierRules.ItemKey(binding, item.Reference);
+            var existing = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Fulfillment>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "customer", Bytes = row.DeliveredContent!, Key = row.DeliveredContentKeyId!, row.ContentKind }).Concat(data.Data.Set<Entities.InventoryItem>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "bonus", Bytes = row.CredentialCiphertext, Key = row.CredentialKeyId, ContentKind = (string?)null })).Take(3).ToListAsync(token), ct);
+            if (existing.Count == 0) { if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++; continue; }
+            if (existing.Count != 1 || existing[0].Request != binding.RequestId || existing[0].Kind != (item.Disposition == SupplierItemDisposition.Customer ? "customer" : "bonus")) return false;
+            var value = existing[0];
+            if (value.ContentKind is not null && value.ContentKind != item.ContentKind) return false;
+            byte[] plain = value.Kind == "customer" ? new BrandCipher(secrets).Decrypt(context, "fulfillments", value.Id, "delivered_content", value.Key, value.Bytes) : new InventoryCipher(secrets).Decrypt(value.Id, value.Key, value.Bytes);
+            try { if (!CryptographicOperations.FixedTimeEquals(plain, item.Content.Span)) return false; }
+            finally { CryptographicOperations.ZeroMemory(plain); }
         }
+        return newCustomers <= available;
     }
-
     private async Task<bool> CaptureAsync(SqliteTransaction tx, BrandContext context,
         State state, SupplierOutcome result, CancellationToken ct)
     {
@@ -352,14 +228,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
         foreach (SupplierItem item in result.Items.OrderBy(x => x.Reference, StringComparer.Ordinal))
         {
             byte[] key = SupplierRules.ItemKey(state.Binding, item.Reference);
-            Guid? otherRequest = null;
-            using (var previous = SqliteWallet.Command(tx, """
-                SELECT supplier_request_id FROM fulfillments WHERE supplier_item_key=$key
-                UNION ALL
-                SELECT supplier_request_id FROM inventory_items WHERE supplier_item_key=$key
-                """, ("$key", key)))
-            await using (var row = await previous.ExecuteReaderAsync(ct))
-                if (await row.ReadAsync(ct)) otherRequest = row.GetGuid(0);
+            Guid? otherRequest = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Fulfillment>().Where(row => row.SupplierItemKey == key).Select(row => row.SupplierRequestId).Concat(data.Data.Set<Entities.InventoryItem>().Where(row => row.SupplierItemKey == key).Select(row => row.SupplierRequestId)).FirstOrDefaultAsync(token), ct);
             if (otherRequest is Guid id)
             {
                 if (id != state.Binding.RequestId)
@@ -368,27 +237,13 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             }
             if (item.Disposition == SupplierItemDisposition.Customer)
             {
-                var occupied = new HashSet<int>();
-                using (var slots = SqliteWallet.Command(tx, """
-                    SELECT unit_no FROM fulfillments WHERE order_id=$order
-                    """, ("$order", state.Binding.OrderId)))
-                await using (var row = await slots.ExecuteReaderAsync(ct))
-                    while (await row.ReadAsync(ct)) occupied.Add(row.GetInt32(0));
+                var occupied = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == state.Binding.OrderId).Select(row => row.UnitNo).Take(state.Quantity + 1).ToListAsync(token), ct);
                 int unit = Enumerable.Range(1, state.Quantity).FirstOrDefault(n => !occupied.Contains(n));
                 if (unit == 0) throw new InvalidOperationException("Supplier item would exceed the accepted order.");
                 Guid fulfillment = Guid.CreateVersion7();
                 byte[] cipher = brandCipher.Encrypt(context, "fulfillments", fulfillment,
                     "delivered_content", item.Content.Span);
-                using var insert = SqliteWallet.Command(tx, """
-                    INSERT INTO fulfillments(id,order_id,unit_no,kind,status,supplier_request_id,
-                        remote_item_ref,supplier_item_key,delivered_content,delivered_content_key_id,content_kind)
-                    VALUES ($id,$order,$unit,'supplier','acquired',$request,$remote,$key,$content,$cipherKey,$kind)
-                    """, ("$id", fulfillment), ("$order", state.Binding.OrderId), ("$unit", unit),
-                    ("$request", state.Binding.RequestId), ("$remote", item.Reference), ("$key", key),
-                    ("$content", cipher), ("$cipherKey", secrets.CurrentBrandKeyId(context)),
-                    ("$kind", item.ContentKind));
-                if (await insert.ExecuteNonQueryAsync(ct) != 1)
-                    throw new InvalidOperationException("Supplier fulfillment was not persisted.");
+                await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { await data.RequireOrderCommandAsync(context, state.Binding.OrderId, token); data.Data.Add(new Entities.Fulfillment { Id = fulfillment, OrderId = state.Binding.OrderId, UnitNo = unit, Kind = "supplier", Status = "acquired", SupplierRequestId = state.Binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, DeliveredContent = cipher, DeliveredContentKeyId = secrets.CurrentBrandKeyId(context), ContentKind = item.ContentKind }); return true; }, ct);
             }
             else
             {
@@ -396,16 +251,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
                 byte[] cipher = inventory.Encrypt(inventoryId, item.Content.Span);
                 byte[] digest = secrets.UseInventoryKey(secrets.CurrentInventoryKeyId,
                     key => HMACSHA256.HashData(key, item.Content.Span));
-                using var insert = SqliteWallet.Command(tx, """
-                    INSERT INTO inventory_items(id,product_id,credential_ciphertext,credential_key_id,
-                        source_fingerprint,origin_kind,supplier_request_id,remote_item_ref,supplier_item_key,state)
-                    VALUES ($id,$product,$cipher,$cipherKey,$digest,'supplier_bonus',$request,$remote,$key,'admin_held')
-                    """, ("$id", inventoryId), ("$product", state.Binding.ProductId),
-                    ("$cipher", cipher), ("$cipherKey", secrets.CurrentInventoryKeyId),
-                    ("$digest", digest), ("$request", state.Binding.RequestId),
-                    ("$remote", item.Reference), ("$key", key));
-                if (await insert.ExecuteNonQueryAsync(ct) != 1)
-                    throw new InvalidOperationException("Supplier bonus was not persisted.");
+                await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { await data.RequireOrderCommandAsync(context, state.Binding.OrderId, token); data.Data.Add(new Entities.InventoryItem { Id = inventoryId, ProductId = state.Binding.ProductId, CredentialCiphertext = cipher, CredentialKeyId = secrets.CurrentInventoryKeyId, SourceFingerprint = digest, OriginKind = "supplier_bonus", SupplierRequestId = state.Binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, State = "admin_held" }); return true; }, ct);
             }
             acquired = true;
         }
@@ -415,55 +261,24 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
     private static async Task ReviewAsync(SqliteTransaction tx, State state, string code, string status,
         CancellationToken ct, string? evidence = null, string? remote = null)
     {
-        using (var request = SqliteWallet.Command(tx, """
-            UPDATE supplier_requests SET status=$status,review_code=$code,
-                evidence_ref=coalesce($evidence,evidence_ref),
-                remote_ref=coalesce(remote_ref,$remote),updated_at=$now
-            WHERE id=$request AND status NOT IN ('succeeded','resolved')
-            """, ("$status", status), ("$code", code),
-            ("$evidence", evidence), ("$remote", remote),
-            ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$request", state.Binding.RequestId)))
-            if (await request.ExecuteNonQueryAsync(ct) != 1)
-                throw new InvalidOperationException("Supplier review could not be recorded.");
-        using var order = SqliteWallet.Command(tx, """
-            UPDATE orders SET fulfillment_status='requires_admin',
-                review_code=coalesce(review_code,$code),revision=revision+1,updated_at=$now
-            WHERE id=$order AND payment_status IN ('paid','not_required')
-            """, ("$code", code), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)),
-            ("$order", state.Binding.OrderId));
-        if (await order.ExecuteNonQueryAsync(ct) != 1)
-            throw new InvalidOperationException("Supplier obligation is no longer payable.");
+        Guid order = state.Binding.OrderId;
+        await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
+        {
+            Guid member = await data.Data.Set<Entities.Order>().Where(row => row.Id == order).Select(row => row.UserId).SingleAsync(token); await data.RequireWalletCommandAsync(member, token);
+            var request = await data.Data.Set<Entities.SupplierRequest>().SingleOrDefaultAsync(row => row.Id == state.Binding.RequestId && row.Status != "succeeded" && row.Status != "resolved", token) ?? throw new InvalidOperationException("Supplier review could not be recorded.");
+            request.Status = status; request.ReviewCode = code; request.EvidenceRef = evidence ?? request.EvidenceRef; request.RemoteRef ??= remote; request.UpdatedAt = DateTime.UtcNow;
+            var row = await data.Data.Set<Entities.Order>().SingleOrDefaultAsync(row => row.Id == order && (row.PaymentStatus == "paid" || row.PaymentStatus == "not_required"), token) ?? throw new InvalidOperationException("Supplier obligation is no longer payable.");
+            row.FulfillmentStatus = "requires_admin"; row.ReviewCode ??= code; row.Revision++; row.UpdatedAt = DateTime.UtcNow; return true;
+        }, ct);
     }
-
-    private static async Task<State> ReadStateAsync(SqliteTransaction tx, BrandContext context, Guid request,
-        CancellationToken ct)
+    private static async Task<State> ReadStateAsync(SqliteTransaction tx, BrandContext context, Guid request, CancellationToken ct)
     {
-        using var query = SqliteWallet.Command(tx, """
-            SELECT r.id,r.order_id,o.product_id,r.product_supplier_source_id,r.source_revision,r.provider_code,
-                r.account_ref,r.external_product_id,r.external_variant_id,r.local_intent_key,r.requested_quantity,
-                r.cost_baseline_amount,r.cost_currency,r.approved_cost_ceiling,
-                r.status,r.review_code,o.payment_status,o.fulfillment_status,o.hold_at IS NOT NULL,
-                o.review_code,s.enabled,s.revision,o.quantity
-            FROM supplier_requests r JOIN orders o ON o.id=r.order_id
-                JOIN users u ON u.id=o.user_id JOIN brands b ON b.id=u.brand_id
-                LEFT JOIN product_supplier_sources s ON s.id=r.product_supplier_source_id
-                    AND s.product_id=o.product_id
-            WHERE r.id=$request AND b.id=$brand AND b.bot_id=$bot AND b.active=1
-            """, ("$request", request), ("$brand", context.BrandId), ("$bot", context.BotId));
-        await using var row = await query.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct) || row.IsDBNull(3) || row.IsDBNull(4) || row.IsDBNull(5) ||
-            row.IsDBNull(6) || row.IsDBNull(7) || row.IsDBNull(11) || row.IsDBNull(12))
-            throw new UnauthorizedAccessException("Supplier source binding is unavailable.");
-        var binding = new SupplierBinding(row.GetGuid(0), row.GetGuid(1), row.GetGuid(2),
-            row.GetGuid(3), row.GetInt64(4), row.GetString(5), row.GetString(6), row.GetString(7),
-            row.IsDBNull(8) ? null : row.GetString(8), row.GetString(9), row.GetInt32(10),
-            ExactDecimal.Parse(row.GetString(11)), row.GetString(12),
-            row.IsDBNull(13) ? null : ExactDecimal.Parse(row.GetString(13)));
-        return new(binding, row.GetString(14), row.IsDBNull(15) ? null : row.GetString(15),
-            row.GetString(16), row.GetString(17), row.GetBoolean(18),
-            row.IsDBNull(19) ? null : row.GetString(19), !row.IsDBNull(20) && row.GetBoolean(20),
-            row.IsDBNull(21) ? 0 : row.GetInt64(21), row.GetInt32(22));
+        var result = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id join source in data.Data.Set<Entities.ProductSupplierSource>() on new { Id = r.ProductSupplierSourceId, Product = o.ProductId } equals new { Id = (Guid?)source.Id, Product = (Guid?)source.ProductId } into sources from source in sources.DefaultIfEmpty() where r.Id == request && b.Id == context.BrandId && b.BotId == context.BotId && b.Active && r.ProductSupplierSourceId != null && r.SourceRevision != null && r.ProviderCode != null && r.AccountRef != null && r.ExternalProductId != null && r.CostBaselineAmount != null && r.CostCurrency != null select new State(new SupplierBinding(r.Id, o.Id, o.ProductId!.Value, r.ProductSupplierSourceId!.Value, r.SourceRevision!.Value, r.ProviderCode!, r.AccountRef!, r.ExternalProductId!, r.ExternalVariantId, r.LocalIntentKey, r.RequestedQuantity, r.CostBaselineAmount!.Value, r.CostCurrency!, r.ApprovedCostCeiling), r.Status, r.ReviewCode, o.PaymentStatus, o.FulfillmentStatus, o.HoldAt != null, o.ReviewCode, source != null && source.Enabled, source == null ? 0 : source.Revision, o.Quantity)).SingleOrDefaultAsync(token), ct);
+        return result ?? throw new UnauthorizedAccessException("Supplier source binding is unavailable.");
     }
+    private static Task<bool> RequestAsync(SqliteTransaction tx, BrandContext context, Guid request, System.Linq.Expressions.Expression<Func<Entities.SupplierRequest, bool>> predicate, Action<Entities.SupplierRequest, DateTime> change, CancellationToken ct) => SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { var row = await data.Data.Set<Entities.SupplierRequest>().Where(predicate).SingleOrDefaultAsync(row => row.Id == request, token) ?? throw new InvalidOperationException("Supplier obligation was superseded."); await data.RequireOrderCommandAsync(context, row.OrderId, token); change(row, DateTime.UtcNow); return true; }, ct);
+    private static Task<bool> OrderAsync(SqliteTransaction tx, BrandContext context, Guid order, System.Linq.Expressions.Expression<Func<Entities.Order, bool>> predicate, Action<Entities.Order, DateTime> change, CancellationToken ct) => SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { await data.RequireOrderCommandAsync(context, order, token); var row = await data.Data.Set<Entities.Order>().Where(predicate).SingleOrDefaultAsync(row => row.Id == order, token) ?? throw new InvalidOperationException("Supplier fulfillment was superseded."); change(row, DateTime.UtcNow); return true; }, ct);
+    private static Task<bool> AttemptAsync(SqliteTransaction tx, BrandContext context, Guid attempt, Action<Entities.SupplierRequestAttempt, DateTime> change, CancellationToken ct) => SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { var row = await data.Data.Set<Entities.SupplierRequestAttempt>().SingleOrDefaultAsync(row => row.Id == attempt && row.Outcome == "in_flight", token) ?? throw new UnauthorizedAccessException("Supplier attempt was superseded."); Guid order = await data.Data.Set<Entities.SupplierRequest>().Where(value => value.Id == row.SupplierRequestId).Select(value => value.OrderId).SingleAsync(token); await data.RequireOrderCommandAsync(context, order, token); change(row, DateTime.UtcNow); return true; }, ct);
 
     private static Guid AttemptId(Guid job, long number) =>
         new(SHA256.HashData(Encoding.ASCII.GetBytes("supplier-attempt-v1:" + job.ToString("D") + ":" +

@@ -175,7 +175,7 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
         await ef.RequirePaymentCommandAsync(context, payment, token);
         var row = await ef.Data.Set<Entities.Payment>().SingleAsync(value => value.Id == payment, token); change(row); return true;
     }, ct);
-    private static Task<bool> ChangeOrderAsync(DbSession session, Guid order, Action<Entities.Order, DateTime> change, CancellationToken ct) => session.RunEfStepAsync(true, async (ef, token) =>
+    internal static Task<bool> ChangeOrderAsync(DbSession session, Guid order, Action<Entities.Order, DateTime> change, CancellationToken ct) => session.RunEfStepAsync(true, async (ef, token) =>
     {
         Guid member = await ef.Data.Set<Entities.Order>().Where(value => value.Id == order).Select(value => value.UserId).SingleAsync(token);
         await ef.RequireWalletCommandAsync(member, token); await ef.LockOrderAsync(order, token);

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
 
@@ -22,64 +23,21 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             if (await AuditReplayAsync(tx, actor, audit, token)) return 0;
-            using var query = SqliteWallet.Command(tx, """
-                SELECT r.order_id,r.cost_baseline_amount,r.cost_currency,r.status,r.review_code,r.revision,
-                    o.payment_status,o.fulfillment_status,o.hold_at IS NOT NULL,
-                    EXISTS(SELECT 1 FROM supplier_request_attempts WHERE supplier_request_id=r.id AND operation='submit')
-                FROM supplier_requests r JOIN orders o ON o.id=r.order_id
-                JOIN users u ON u.id=o.user_id JOIN brands b ON b.id=u.brand_id
-                WHERE r.id=$request AND b.id=$brand AND b.bot_id=$bot AND b.active=1
-                """, ("$request", request), ("$brand", context.BrandId), ("$bot", context.BotId));
-            Guid order;
-            bool prior;
-            await using (var row = await query.ExecuteReaderAsync(token))
-            {
-                if (!await row.ReadAsync(token) || row.IsDBNull(1) || row.IsDBNull(2) ||
-                    row.GetString(2) != currency || ExactDecimal.Parse(row.GetString(1)) >= maximumUnitCost ||
-                    row.GetString(3) != "blocked" || row.GetString(4) != "cost_limit" ||
-                    row.GetInt64(5) != expectedRevision || row.GetString(6) is not ("paid" or "not_required") ||
-                    row.GetString(7) is "completed" or "compensated" or "cancelled" || row.GetBoolean(8))
-                    throw new InvalidOperationException("Original supplier cost review is unavailable.");
-                order = row.GetGuid(0);
-                prior = row.GetBoolean(9);
-            }
-            using (var evidence = SqliteWallet.Command(tx, """
-                SELECT EXISTS(SELECT 1 FROM jobs WHERE supplier_request_id=$request AND status='leased')
-                    OR EXISTS(SELECT 1 FROM fulfillments
-                        WHERE supplier_request_id=$request AND status<>'unfilled')
-                    OR EXISTS(SELECT 1 FROM inventory_items WHERE supplier_request_id=$request)
-                    OR EXISTS(SELECT 1 FROM supplier_request_attempts a
-                        WHERE a.supplier_request_id=$request AND a.operation='submit' AND
-                            (a.outcome IN ('in_flight','unknown','timeout','succeeded')
-                            OR a.outcome='failed' AND a.error_code<>'confirmed_no_effect'))
-                """, ("$request", request)))
-                if ((long)(await evidence.ExecuteScalarAsync(token))! != 0)
-                    throw new InvalidOperationException("Supplier cost outcome requires reconciliation.");
+            var original = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where r.Id == request && b.Id == context.BrandId && b.BotId == context.BotId && b.Active select new { r.OrderId, r.CostBaselineAmount, r.CostCurrency, r.Status, r.ReviewCode, r.Revision, o.PaymentStatus, o.FulfillmentStatus, o.HoldAt, Prior = data.Data.Set<Entities.SupplierRequestAttempt>().Any(a => a.SupplierRequestId == r.Id && a.Operation == "submit") }).SingleOrDefaultAsync(cancel), token);
+            if (original is null || original.CostBaselineAmount == null || original.CostCurrency != currency || original.CostBaselineAmount >= maximumUnitCost || original.Status != "blocked" || original.ReviewCode != "cost_limit" || original.Revision != expectedRevision || original.PaymentStatus is not ("paid" or "not_required") || original.FulfillmentStatus is "completed" or "compensated" or "cancelled" || original.HoldAt != null) throw new InvalidOperationException("Original supplier cost review is unavailable.");
+            Guid order = original.OrderId; bool prior = original.Prior;
+            bool unresolved = await SqliteSessionFactory.StepEfAsync(tx, false, async (data, cancel) => await data.Data.Set<Entities.Job>().AnyAsync(row => row.SupplierRequestId == request && row.Status == "leased", cancel) || await data.Data.Set<Entities.Fulfillment>().AnyAsync(row => row.SupplierRequestId == request && row.Status != "unfilled", cancel) || await data.Data.Set<Entities.InventoryItem>().AnyAsync(row => row.SupplierRequestId == request, cancel) || await data.Data.Set<Entities.SupplierRequestAttempt>().AnyAsync(row => row.SupplierRequestId == request && row.Operation == "submit" && (row.Outcome == "in_flight" || row.Outcome == "unknown" || row.Outcome == "timeout" || row.Outcome == "succeeded" || row.Outcome == "failed" && row.ErrorCode != null && row.ErrorCode != "confirmed_no_effect"), cancel), token);
+            if (unresolved) throw new InvalidOperationException("Supplier cost outcome requires reconciliation.");
             await WriteAuditAsync(tx, actor, audit, token);
-            using (var update = SqliteWallet.Command(tx, """
-                UPDATE supplier_requests SET status=$status,review_code=NULL,
-                    approved_cost_ceiling=$ceiling,approval_audit_id=$audit,
-                    revision=revision+1,updated_at=$now
-                WHERE id=$request AND status='blocked' AND review_code='cost_limit'
-                    AND revision=$revision
-                """, ("$status", prior ? "failed" : "pending"), ("$ceiling", ExactDecimal.Format(maximumUnitCost)),
-                ("$audit", command), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)),
-                ("$request", request), ("$revision", expectedRevision)))
-                if (await update.ExecuteNonQueryAsync(token) != 1)
-                    throw new InvalidOperationException("Supplier cost approval was superseded.");
-            if (!prior)
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
             {
-                using var orderUpdate = SqliteWallet.Command(tx, """
-                    UPDATE orders SET review_code=NULL,fulfillment_status='acquiring',
-                        revision=revision+1,updated_at=$now
-                    WHERE id=$order AND review_code='cost_limit'
-                    """, ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$order", order));
-                if (await orderUpdate.ExecuteNonQueryAsync(token) != 1)
-                    throw new InvalidOperationException("Supplier cost hold was superseded.");
-                await OutboxStore.EnqueueSqliteAsync(tx,
-                    JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, request), command,
-                    DateTime.UtcNow, token);
-            }
+                await data.RequireOrderCommandAsync(context, order, cancel);
+                var row = await data.Data.Set<Entities.SupplierRequest>().SingleOrDefaultAsync(row => row.Id == request && row.Status == "blocked" && row.ReviewCode == "cost_limit" && row.Revision == expectedRevision, cancel) ?? throw new InvalidOperationException("Supplier cost approval was superseded.");
+                row.Status = prior ? "failed" : "pending"; row.ReviewCode = null; row.ApprovedCostCeiling = maximumUnitCost; row.ApprovalAuditId = command; row.Revision++; row.UpdatedAt = DateTime.UtcNow;
+                if (!prior) { var accepted = await data.Data.Set<Entities.Order>().SingleOrDefaultAsync(row => row.Id == order && row.ReviewCode == "cost_limit", cancel) ?? throw new InvalidOperationException("Supplier cost hold was superseded."); accepted.ReviewCode = null; accepted.FulfillmentStatus = "acquiring"; accepted.Revision++; accepted.UpdatedAt = DateTime.UtcNow; }
+                return true;
+            }, token);
+            if (!prior) await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Supplier(JobKind.SubmitSupplier, context.BrandId, request), command, DateTime.UtcNow, token);
             return 0;
         }, ct);
     }
@@ -97,59 +55,25 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             if (await AuditReplayAsync(tx, actor, audit, token)) return 0;
-            using var query = SqliteWallet.Command(tx, """
-                SELECT o.quantity,r.requested_quantity
-                FROM supplier_requests r JOIN orders o ON o.id=r.order_id
-                    JOIN users u ON u.id=o.user_id JOIN brands b ON b.id=u.brand_id
-                WHERE r.id=$request AND o.id=$order AND b.id=$brand AND b.bot_id=$bot
-                    AND b.active=1 AND o.revision=$revision AND o.payment_status IN ('paid','not_required')
-                    AND o.fulfillment_status='requires_admin' AND o.review_code='partial_acquisition'
-                    AND o.release_authorized_at IS NULL AND o.delivery_generation IS NULL
-                    AND r.status='succeeded' AND r.review_code IS NULL
-                    AND r.remote_ref IS NOT NULL AND r.evidence_ref IS NOT NULL
-                    AND (SELECT count(*) FROM fulfillments f WHERE f.order_id=$order)=o.quantity
-                    AND (SELECT count(*) FROM fulfillments f
-                        WHERE f.supplier_request_id=$request AND f.kind='supplier'
-                            AND f.status='acquired')=r.requested_quantity
-                    AND EXISTS(SELECT 1 FROM supplier_request_attempts a
-                        WHERE a.supplier_request_id=$request AND a.outcome='succeeded'
-                        AND a.error_code IS NULL AND a.evidence_ref=r.evidence_ref
-                        AND a.remote_ref IS NOT NULL AND a.finished_at IS NOT NULL)
-                """, ("$request", request), ("$order", order), ("$brand", context.BrandId),
-                ("$bot", context.BotId), ("$revision", revision));
-            int quantity;
-            await using (var row = await query.ExecuteReaderAsync(token))
-            {
-                if (!await row.ReadAsync(token))
-                    throw new InvalidOperationException("Complete verified supplier acquisition requires current review.");
-                quantity = row.GetInt32(0);
-            }
+            int? count = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where r.Id == request && o.Id == order && b.Id == context.BrandId && b.BotId == context.BotId && b.Active && o.Revision == revision && (o.PaymentStatus == "paid" || o.PaymentStatus == "not_required") && o.FulfillmentStatus == "requires_admin" && o.ReviewCode == "partial_acquisition" && o.ReleaseAuthorizedAt == null && o.DeliveryGeneration == null && r.Status == "succeeded" && r.ReviewCode == null && r.RemoteRef != null && r.EvidenceRef != null && data.Data.Set<Entities.Fulfillment>().Count(f => f.OrderId == order) == o.Quantity && data.Data.Set<Entities.Fulfillment>().Count(f => f.SupplierRequestId == request && f.Kind == "supplier" && f.Status == "acquired") == r.RequestedQuantity && data.Data.Set<Entities.SupplierRequestAttempt>().Any(a => a.SupplierRequestId == request && a.Outcome == "succeeded" && a.ErrorCode == null && a.EvidenceRef == r.EvidenceRef && a.RemoteRef != null && a.FinishedAt != null) select (int?)o.Quantity).SingleOrDefaultAsync(cancel), token);
+            int quantity = count ?? throw new InvalidOperationException("Complete verified supplier acquisition requires current review.");
             var slots = new HashSet<int>();
-            using (var contents = SqliteWallet.Command(tx, """
-                SELECT id,unit_no,delivered_content,delivered_content_key_id,content_kind
-                FROM fulfillments WHERE order_id=$order
-                """, ("$order", order)))
-            await using (var row = await contents.ExecuteReaderAsync(token))
-                while (await row.ReadAsync(token))
+            int offset = 0;
+            while (true)
+            {
+                var contents = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order).OrderBy(row => row.UnitNo).Skip(offset).Take(1000).Select(row => new { row.Id, row.UnitNo, row.DeliveredContent, row.DeliveredContentKeyId, row.ContentKind }).ToListAsync(cancel), token);
+                foreach (var row in contents)
                 {
-                    if (!slots.Add(row.GetInt32(1)) || row.IsDBNull(2) || row.IsDBNull(3) || row.IsDBNull(4))
-                        throw new InvalidOperationException("Incomplete verified supplier manifest.");
-                    byte[] plain = new BrandCipher(secrets).Decrypt(context, "fulfillments", row.GetGuid(0),
-                        "delivered_content", row.GetString(3), row.GetFieldValue<byte[]>(2));
-                    try { if (plain.Length == 0) throw new InvalidOperationException("Empty supplier credential."); }
-                    finally { CryptographicOperations.ZeroMemory(plain); }
+                    if (!slots.Add(row.UnitNo) || row.DeliveredContent == null || row.DeliveredContentKeyId == null || row.ContentKind == null) throw new InvalidOperationException("Incomplete verified supplier manifest.");
+                    byte[] plain = new BrandCipher(secrets).Decrypt(context, "fulfillments", row.Id, "delivered_content", row.DeliveredContentKeyId, row.DeliveredContent);
+                    try { if (plain.Length == 0) throw new InvalidOperationException("Empty supplier credential."); } finally { CryptographicOperations.ZeroMemory(plain); }
                 }
+                if (contents.Count < 1000) break; offset += contents.Count;
+            }
             if (slots.Count != quantity || Enumerable.Range(1, quantity).Any(n => !slots.Contains(n)))
                 throw new InvalidOperationException("Incomplete supplier unit allocation.");
             await WriteAuditAsync(tx, actor, audit, token);
-            using var update = SqliteWallet.Command(tx, """
-                UPDATE orders SET fulfillment_status='acquiring',review_code=NULL,
-                    revision=revision+1,updated_at=$now
-                WHERE id=$order AND revision=$revision AND review_code='partial_acquisition'
-                """, ("$now", SqliteSchema.UtcText(DateTime.UtcNow)), ("$order", order),
-                ("$revision", revision));
-            if (await update.ExecuteNonQueryAsync(token) != 1)
-                throw new InvalidOperationException("Supplier completion review was superseded.");
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) => { await data.RequireOrderCommandAsync(context, order, cancel); var row = await data.Data.Set<Entities.Order>().SingleOrDefaultAsync(row => row.Id == order && row.Revision == revision && row.ReviewCode == "partial_acquisition", cancel) ?? throw new InvalidOperationException("Supplier completion review was superseded."); row.FulfillmentStatus = "acquiring"; row.ReviewCode = null; row.Revision++; row.UpdatedAt = DateTime.UtcNow; return true; }, token);
             await OutboxStore.EnqueueSqliteAsync(tx,
                 JobIntent.Order(JobKind.PrepareManifest, context.BrandId, order), order,
                 DateTime.UtcNow, token);
@@ -168,25 +92,8 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             bool replay = await AuditReplayAsync(tx, actor, audit, token);
-            using var query = SqliteWallet.Command(tx, """
-                SELECT i.remote_item_ref,i.credential_ciphertext,i.credential_key_id
-                FROM inventory_items i JOIN supplier_requests r ON r.id=i.supplier_request_id
-                    JOIN orders o ON o.id=r.order_id JOIN users u ON u.id=o.user_id
-                    JOIN brands b ON b.id=u.brand_id
-                WHERE i.id=$inventory AND r.id=$request AND i.state='admin_held'
-                    AND i.origin_kind='supplier_bonus' AND b.id=$brand AND b.bot_id=$bot
-                """, ("$inventory", inventory), ("$request", request),
-                ("$brand", context.BrandId), ("$bot", context.BotId));
-            string reference, key;
-            byte[] encrypted;
-            await using (var row = await query.ExecuteReaderAsync(token))
-            {
-                if (!await row.ReadAsync(token))
-                    throw new UnauthorizedAccessException("Protected supplier bonus is unavailable.");
-                reference = row.GetString(0);
-                encrypted = row.GetFieldValue<byte[]>(1);
-                key = row.GetString(2);
-            }
+            var original = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => (from i in data.Data.Set<Entities.InventoryItem>() join r in data.Data.Set<Entities.SupplierRequest>() on i.SupplierRequestId equals r.Id join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where i.Id == inventory && r.Id == request && i.State == "admin_held" && i.OriginKind == "supplier_bonus" && b.Id == context.BrandId && b.BotId == context.BotId select new { Reference = i.RemoteItemRef!, Encrypted = i.CredentialCiphertext, Key = i.CredentialKeyId }).SingleOrDefaultAsync(cancel), token) ?? throw new UnauthorizedAccessException("Protected supplier bonus is unavailable.");
+            string reference = original.Reference, key = original.Key; byte[] encrypted = original.Encrypted;
             if (!replay) await WriteAuditAsync(tx, actor, audit, token);
             byte[] plain = new InventoryCipher(secrets).Decrypt(inventory, key, encrypted);
             try { return new SupplierItem(reference, SupplierItemDisposition.Bonus, "code", plain); }

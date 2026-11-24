@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
 using Platform.Security;
 
@@ -11,11 +12,7 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
         AdminCommand.Page(limit);
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.QueryManyAsync(new DbStatement("""
-            SELECT s.id,s.provider_code,s.external_product_id,s.external_variant_id,s.enabled,s.revision,COALESCE(p.active_supplier_source_id=s.id,false)
-            FROM shop.product_supplier_sources s JOIN shop.products p ON p.id=s.product_id
-            WHERE s.product_id=$1 AND ($2 IS NULL OR s.id>$2) ORDER BY s.id LIMIT $3
-            """, DbValue.Uuid(product), AdminCommand.Id(after), DbValue.Integer(limit + 1)), r => new SupplierSourceMetadata(r.GetGuid(0), r.GetString(1), r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3), r.GetBoolean(4), r.GetInt64(5), r.GetBoolean(6)), limit + 1, ct);
+        var rows = await session.RunEfStepAsync(false, (data, token) => (from source in data.Data.Set<Entities.ProductSupplierSource>() join master in data.Data.Set<Entities.Product>() on source.ProductId equals master.Id where source.ProductId == product && (after == null || source.Id.CompareTo(after.Value) > 0) orderby source.Id select new SupplierSourceMetadata(source.Id, source.ProviderCode, source.ExternalProductId, source.ExternalVariantId, source.Enabled, source.Revision, master.ActiveSupplierSourceId == source.Id)).Take(limit + 1).ToListAsync(token), ct);
         return new(rows.Take(limit).ToArray(), rows.Count > limit ? rows[limit - 1].Id : null);
     }
     public Task<long> CreateAsync(AuthenticatedAdmin actor, Guid product, Guid source, string provider, string externalProduct, string? variant, Guid command, CancellationToken ct = default)
@@ -36,10 +33,14 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Create, AuditEntity.ProductSupplierSource, source, null, AuditReason.ConfigurationChange, command, hash, 0, 1), ct)) return 1;
-            var current = await session.QuerySingleAsync(new DbStatement("SELECT fulfillment_kind,revision FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => (Kind: r.GetString(0), Revision: r.GetInt64(1)), ct);
+            var current = await MasterAsync(session, product, ct);
             await session.AdmitSharedWriterAsync(ct);
             if (current.Kind != "supplier" || (productRevision.HasValue && current.Revision != productRevision.Value)) throw new InvalidOperationException("Supplier product revision conflict.");
-            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.product_supplier_sources(id,product_id,provider_code,external_product_id,external_variant_id) VALUES ($1,$2,$3,$4,$5)", DbValue.Uuid(source), DbValue.Uuid(product), DbValue.Text(provider), DbValue.Text(externalProduct), AdminCommand.Text(variant)), ct);
+            await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireAdminAsync(actor, null, token);
+                data.Data.Add(new Entities.ProductSupplierSource { Id = source, ProductId = product, ProviderCode = provider, ExternalProductId = externalProduct, ExternalVariantId = variant }); return true;
+            }, ct);
             await session.CommitAsync(ct); return 1;
         }
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
@@ -70,7 +71,12 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
             if (!await AdminAuditStore.AppendAsync(session, actor, audit, ct)) return revision + 1;
             Source current = await ReadSourceAsync(session, product, source, revision, enabled, ct);
             if (enabled && (before!.ProductRevision != current.ProductRevision || Stopwatch.GetElapsedTime(issued) > TimeSpan.FromSeconds(30))) throw new InvalidOperationException("Source inspection expired or changed.");
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET enabled=$1,revision=revision+1,updated_at=clock_timestamp() WHERE id=$2", DbValue.Boolean(enabled), DbValue.Uuid(source)), ct);
+            await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireAdminAsync(actor, null, token);
+                var row = await data.Data.Set<Entities.ProductSupplierSource>().SingleAsync(value => value.Id == source, token);
+                row.Enabled = enabled; row.Revision++; row.UpdatedAt = await data.ClockAsync(data.Data.Set<Entities.ProductSupplierSource>().Where(value => value.Id == source), token); return true;
+            }, ct);
             if (inspected is { } observation) await CatalogStore.WriteObservationAsync(session, source, revision + 1, current.Observation, observation.Account, observation.Result, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.EvaluateRestock, product), command, DateTime.UtcNow, ct);
             if (enabled && Stopwatch.GetElapsedTime(issued) > TimeSpan.FromSeconds(30)) throw new InvalidOperationException("Source inspection expired.");
@@ -87,15 +93,21 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
         try
         {
             if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.SelectSource, AuditEntity.Product, product, null, AuditReason.ConfigurationChange, command, hash, productRevision, productRevision + 1), ct)) return productRevision + 1;
-            var current = await session.QuerySingleAsync(new DbStatement("SELECT revision,fulfillment_kind FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => (Revision: r.GetInt64(0), Kind: r.GetString(1)), ct);
+            var current = await MasterAsync(session, product, ct);
             await session.AdmitSharedWriterAsync(ct);
             if (current.Revision != productRevision || current.Kind != "supplier") throw new InvalidOperationException("Product revision or supplier policy conflict.");
-            bool valid = await session.QuerySingleAsync(new DbStatement("""
-                SELECT s.id IS NOT NULL FROM (SELECT 1) seed LEFT JOIN LATERAL
-                    (SELECT id FROM shop.product_supplier_sources WHERE id=$1 AND product_id=$2 AND revision=$3 AND enabled FOR UPDATE) s ON true
-                """, DbValue.Uuid(source), DbValue.Uuid(product), DbValue.Bigint(sourceRevision)), r => r.GetBoolean(0), ct);
+            bool valid = await session.RunEfStepAsync(false, async (data, token) =>
+            {
+                await data.LockSourceAsync(source, token);
+                return await data.Data.Set<Entities.ProductSupplierSource>().AnyAsync(value => value.Id == source && value.ProductId == product && value.Revision == sourceRevision && value.Enabled, token);
+            }, ct);
             if (!valid) throw new InvalidOperationException("Supplier source revision or eligibility conflict.");
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.products SET active_supplier_source_id=$1,revision=revision+1,updated_at=clock_timestamp() WHERE id=$2", DbValue.Uuid(source), DbValue.Uuid(product)), ct);
+            await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireAdminAsync(actor, null, token);
+                var row = await data.Data.Set<Entities.Product>().SingleAsync(value => value.Id == product, token);
+                row.ActiveSupplierSourceId = source; row.Revision++; row.UpdatedAt = await data.ClockAsync(data.Data.Set<Entities.Product>().Where(value => value.Id == product), token); return true;
+            }, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.EvaluateRestock, product), command, DateTime.UtcNow, ct);
             await session.CommitAsync(ct); return productRevision + 1;
         }
@@ -103,12 +115,22 @@ public sealed class SupplierSourceSelectionStore(DbSessionFactory sessions)
     }
     private static async Task<Source> ReadSourceAsync(DbSession session, Guid product, Guid source, long revision, bool enabled, CancellationToken ct)
     {
-        var master = await session.QuerySingleAsync(new DbStatement("SELECT revision,fulfillment_kind FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => (Revision: r.GetInt64(0), Kind: r.GetString(1)), ct);
+        var master = await MasterAsync(session, product, ct);
         await session.AdmitSharedWriterAsync(ct);
-        var row = await session.QuerySingleAsync(new DbStatement("SELECT provider_code,external_product_id,external_variant_id,revision,enabled,observation_revision FROM shop.product_supplier_sources WHERE id=$1 AND product_id=$2 FOR UPDATE", DbValue.Uuid(source), DbValue.Uuid(product)), r => (Provider: r.GetString(0), Product: r.GetString(1), Variant: r.IsDBNull(2) ? null : r.GetString(2), Revision: r.GetInt64(3), Enabled: r.GetBoolean(4), Observation: r.GetInt64(5)), ct);
+        var row = await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            await data.LockSourceAsync(source, token);
+            return await data.Data.Set<Entities.ProductSupplierSource>().Where(value => value.Id == source && value.ProductId == product).Select(value => new { Provider = value.ProviderCode, Product = value.ExternalProductId, Variant = value.ExternalVariantId, value.Revision, value.Enabled, Observation = value.ObservationRevision }).SingleAsync(token);
+        }, ct);
         if (row.Revision != revision || row.Enabled == enabled || (enabled && master.Kind != "supplier")) throw new InvalidOperationException("Source revision or lifecycle conflict.");
         return new(row.Provider, row.Product, row.Variant, row.Observation, master.Revision);
     }
+    private static Task<Master> MasterAsync(DbSession session, Guid product, CancellationToken ct) => session.RunEfStepAsync(false, async (data, token) =>
+    {
+        await data.LockProductAsync(product, token);
+        return await data.Data.Set<Entities.Product>().Where(value => value.Id == product).Select(value => new Master(value.Revision, value.FulfillmentKind)).SingleAsync(token);
+    }, ct);
+    private sealed record Master(long Revision, string Kind);
     private static bool Label(string? value) => value is { Length: > 0 and <= 160 } && !string.IsNullOrWhiteSpace(value) && !value.Any(char.IsControl);
     private sealed record Source(string Provider, string Product, string? Variant, long Observation, long ProductRevision);
 }
