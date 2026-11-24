@@ -78,7 +78,7 @@ internal sealed partial class EfIntegrity(AkantiDbContext data, Func<bool> canWr
     }
     private void RequireScopeBound()
     {
-        if (wallets.Count + postings.Count + audits.Count + users.Count + orders.Count + discounts.Count + allocations.Count + payments.Count + entities.Count > 1024)
+        if (wallets.Count + postings.Count + audits.Count + users.Count + orders.Count + discounts.Count + allocations.Count + payments.Count + entities.Count > 32768)
             throw new InvalidOperationException("The EF command affected scope exceeds its bound.");
     }
     internal async Task ValidateAsync(CancellationToken ct)

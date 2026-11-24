@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -22,16 +23,13 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
         {
             await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BitConverter.ToInt64(batch.ToByteArray(), 0))), ct);
-            var current = await session.QueryManyAsync(new DbStatement("SELECT id FROM shop.campaigns WHERE batch_id=$1 ORDER BY id", DbValue.Uuid(batch)), r => r.GetGuid(0), 100, ct);
+            var current = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Campaign>().Where(row => row.BatchId == batch).OrderBy(row => row.Id).Select(row => row.Id).Take(101).ToListAsync(token), ct);
             if (current.Count != 0 && !current.SequenceEqual(frozen.Select(v => v.Id))) throw new InvalidOperationException("Campaign launch identity conflict.");
             await session.AdmitSharedWriterAsync(ct);
             foreach (var variant in frozen)
             {
                 if (!await AdminAuditStore.AppendAsync(session, actor, new(variant.Id, AuditAction.Create, AuditEntity.Campaign, variant.Id, variant.BrandId, AuditReason.OperatorReview, batch, hash), ct)) continue;
-                await session.ExecuteAsync(new DbStatement("""
-                    INSERT INTO shop.campaigns(id,batch_id,brand_id,language,audience_kind,active_since,audience_language,message_text,media_ref,created_by_admin_id)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-                    """, DbValue.Uuid(variant.Id), DbValue.Uuid(batch), DbValue.Uuid(variant.BrandId), DbValue.Text(variant.Language), DbValue.Text(variant.Audience), AdminCommand.Time(variant.ActiveSince), AdminCommand.Text(variant.AudienceLanguage), AdminCommand.Text(variant.Text), AdminCommand.Text(variant.Media), DbValue.Uuid(actor.AdminId)), ct);
+                await session.RunEfStepAsync(true, async (data, token) => { await data.RequireAdminAsync(actor, null, token); data.Data.Add(new Entities.Campaign { Id = variant.Id, BatchId = batch, BrandId = variant.BrandId, Language = variant.Language, AudienceKind = variant.Audience, ActiveSince = variant.ActiveSince, AudienceLanguage = variant.AudienceLanguage, MessageText = variant.Text, MediaRef = variant.Media, CreatedByAdminId = actor.AdminId }); return true; }, ct);
             }
             await session.CommitAsync(ct); return batch;
         }
@@ -46,7 +44,8 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
         {
             await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BitConverter.ToInt64(batch.ToByteArray(), 0))), ct);
-            var rows = await session.QueryManyAsync(new DbStatement("SELECT id,brand_id,status FROM shop.campaigns WHERE batch_id=$1 ORDER BY id FOR UPDATE", DbValue.Uuid(batch)), r => (Id: r.GetGuid(0), Brand: r.GetGuid(1), Status: r.GetString(2)), 100, ct);
+            var rows = await session.RunEfStepAsync(false, async (data, token) => { await data.LockCampaignBatchAsync(batch, token); return await data.Data.Set<Entities.Campaign>().Where(row => row.BatchId == batch).OrderBy(row => row.Id).Select(row => new { row.Id, Brand = row.BrandId, row.Status }).Take(101).ToListAsync(token); }, ct);
+            if (rows.Count > 100) throw new InvalidOperationException("Campaign batch bound exceeded.");
             if (rows.Count == 0) throw new InvalidOperationException("Campaign batch is unavailable.");
             await session.AdmitSharedWriterAsync(ct);
             foreach (var row in rows)
@@ -57,13 +56,17 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
                 if (row.Status is "completed" or "cancelled") throw new InvalidOperationException("Campaign batch is terminal.");
                 if (cancel)
                 {
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.campaigns SET status='cancelled',completed_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(row.Id)), ct);
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='cancelled' WHERE campaign_id=$1 AND status IN ('pending','retry')", DbValue.Uuid(row.Id)), ct);
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='cancelled',completed_at=clock_timestamp() WHERE status IN ('pending','retry') AND (campaign_id=$1 OR telegram_delivery_id IN (SELECT id FROM shop.telegram_deliveries WHERE campaign_id=$1 AND status='cancelled'))", DbValue.Uuid(row.Id)), ct);
+                    await session.RunEfStepAsync(true, async (data, token) =>
+                    {
+                        await data.RequireAdminAsync(actor, null, token); var campaign = await data.Data.Set<Entities.Campaign>().SingleAsync(value => value.Id == row.Id, token); campaign.Status = "cancelled"; campaign.CompletedAt = await data.BrandClockAsync(row.Brand, token); await data.FlushAsync(token, false);
+                        while (true) { var deliveries = await data.Data.Set<Entities.TelegramDelivery>().Where(value => value.CampaignId == row.Id && (value.Status == "pending" || value.Status == "retry")).Take(128).ToListAsync(token); if (deliveries.Count == 0) break; foreach (var delivery in deliveries) delivery.Status = "cancelled"; await data.FlushAsync(token, false); }
+                        while (true) { var jobs = await data.Data.Set<Entities.Job>().Where(value => (value.Status == "pending" || value.Status == "retry") && (value.CampaignId == row.Id || data.Data.Set<Entities.TelegramDelivery>().Any(delivery => delivery.Id == value.TelegramDeliveryId && delivery.CampaignId == row.Id && delivery.Status == "cancelled"))).Take(128).ToListAsync(token); if (jobs.Count == 0) break; DateTime now = await data.BrandClockAsync(row.Brand, token); foreach (var job in jobs) { job.Status = "cancelled"; job.CompletedAt = now; } await data.FlushAsync(token, false); }
+                        return true;
+                    }, ct);
                 }
                 else
                 {
-                    await session.ExecuteAsync(new DbStatement("UPDATE shop.campaigns SET status='approved',approved_at=COALESCE(approved_at,clock_timestamp()) WHERE id=$1 AND status='draft'", DbValue.Uuid(row.Id)), ct);
+                    await session.RunEfStepAsync(true, async (data, token) => { await data.RequireAdminAsync(actor, null, token); var campaign = await data.Data.Set<Entities.Campaign>().SingleAsync(value => value.Id == row.Id, token); if (campaign.Status == "draft") { campaign.Status = "approved"; campaign.ApprovedAt ??= await data.BrandClockAsync(row.Brand, token); } return true; }, ct);
                     await OutboxStore.EnqueueAsync(session, JobIntent.Campaign(row.Brand, row.Id), row.Id, DateTime.UtcNow, ct);
                 }
             }
@@ -78,21 +81,12 @@ public sealed partial class CampaignStore(DbSessionFactory sessions)
         try
         {
             await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-            bool valid = await session.QuerySingleAsync(new DbStatement("""
-                SELECT EXISTS(SELECT 1 FROM shop.supplier_requests r JOIN shop.orders o ON o.id=r.order_id JOIN shop.users u ON u.id=o.user_id
-                    JOIN shop.audit_events a ON a.id=$2 WHERE r.id=$1 AND u.brand_id=$3 AND a.brand_id=$3 AND a.actor_kind='admin'
-                    AND ((a.entity_kind='supplier_request' AND a.entity_id=r.id) OR (a.entity_kind='order' AND a.entity_id=o.id)))
-                    AND (NOT $4 OR EXISTS(SELECT 1 FROM shop.inventory_items i JOIN shop.supplier_requests r ON r.id=i.supplier_request_id
-                        WHERE i.supplier_request_id=$1 AND i.origin_kind='supplier_bonus' AND i.state='admin_held' AND i.supplier_item_key IS NOT NULL AND i.remote_item_ref IS NOT NULL AND r.evidence_ref IS NOT NULL))
-                """, DbValue.Uuid(request), DbValue.Uuid(audit), DbValue.Uuid(context.BrandId), DbValue.Boolean(bonus)), r => r.GetBoolean(0), ct);
+            bool valid = await session.RunEfStepAsync(false, (data, token) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id from a in data.Data.Set<Entities.AuditEvent>() where r.Id == request && a.Id == audit && u.BrandId == context.BrandId && a.BrandId == context.BrandId && a.ActorKind == "admin" && (a.EntityKind == "supplier_request" && a.EntityId == r.Id || a.EntityKind == "order" && a.EntityId == o.Id) && (!bonus || data.Data.Set<Entities.InventoryItem>().Any(i => i.SupplierRequestId == request && i.OriginKind == "supplier_bonus" && i.State == "admin_held" && i.SupplierItemKey != null && i.RemoteItemRef != null && r.EvidenceRef != null)) select r.Id).AnyAsync(token), ct);
             if (!valid) throw new UnauthorizedAccessException("Staff notice origin is unavailable.");
             await session.AdmitWriterAsync(context, ct);
             string purpose = bonus ? "staff_supplier_bonus" : "staff_supplier_case";
             string dedupe = purpose + ":" + AuditId(audit, generation).ToString("D") + ":" + request.ToString("D");
-            Guid id = await session.QuerySingleAsync(new DbStatement("""
-                INSERT INTO shop.telegram_deliveries(id,brand_id,recipient_kind,staff_chat_id,purpose,action,dedupe_key,supplier_request_id,audit_event_id,delivery_generation)
-                VALUES ($1,$2,'staff_chat',$3,$4,'send',$5,$6,$7,$8) ON CONFLICT(dedupe_key) DO UPDATE SET dedupe_key=EXCLUDED.dedupe_key RETURNING id
-                """, DbValue.Uuid(Guid.CreateVersion7()), DbValue.Uuid(context.BrandId), DbValue.Bigint(trustedChat), DbValue.Text(purpose), DbValue.Text(dedupe), DbValue.Uuid(request), DbValue.Uuid(audit), DbValue.Uuid(generation)), r => r.GetGuid(0), ct);
+            Guid id = await session.RunEfStepAsync(true, async (data, token) => { await data.RequireAdminAsync(actor, null, token); var existing = await data.Data.Set<Entities.TelegramDelivery>().Where(row => row.DedupeKey == dedupe).Select(row => (Guid?)row.Id).SingleOrDefaultAsync(token); if (existing is Guid prior) return prior; Guid created = Guid.CreateVersion7(); data.Data.Add(new Entities.TelegramDelivery { Id = created, BrandId = context.BrandId, RecipientKind = "staff_chat", StaffChatId = trustedChat, Purpose = purpose, Action = "send", DedupeKey = dedupe, SupplierRequestId = request, AuditEventId = audit, DeliveryGeneration = generation }); return created; }, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Telegram(context.BrandId, id), id, DateTime.UtcNow, ct);
             await session.CommitAsync(ct); return id;
         }

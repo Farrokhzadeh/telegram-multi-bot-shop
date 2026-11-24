@@ -5,6 +5,7 @@ namespace Platform.Persistence.Configurations;
 
 internal static class EfValues
 {
+    internal static DateTime TransactionTime() => throw new InvalidOperationException("The transaction clock cannot run on the client.");
     internal static DateTime UtcNow() => throw new InvalidOperationException("The database clock cannot run on the client.");
     internal static ValueConverter<DateTime, string> UtcTime { get; } = new(
         value => SqliteSchema.UtcText(value),

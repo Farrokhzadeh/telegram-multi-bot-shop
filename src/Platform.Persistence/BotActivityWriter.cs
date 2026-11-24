@@ -1,4 +1,5 @@
-using NpgsqlTypes;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Configurations;
 using Platform.Core;
 using Platform.Security;
 
@@ -8,8 +9,7 @@ internal static class BotActivityWriter
 {
     internal static async Task CheckoutAsync(DbSession session, BrandContext context, long actor, Guid order, CancellationToken ct)
     {
-        var original = await session.QuerySingleAsync(new DbStatement("SELECT o.user_id,o.product_id,o.quantity,o.created_at FROM shop.orders o JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE o.id=$1 AND u.brand_id=$2 AND u.telegram_id=$3 AND b.bot_id=$4 AND b.active",
-            DbValue.Uuid(order), DbValue.Uuid(context.BrandId), DbValue.Bigint(actor), DbValue.Bigint(context.BotId)), r => (Member: r.GetGuid(0), Product: r.GetGuid(1), Quantity: r.GetInt32(2), At: r.GetUtc(3)), ct);
+        var original = await session.RunEfStepAsync(false, (data, token) => (from o in data.Data.Set<Entities.Order>() join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where o.Id == order && u.BrandId == context.BrandId && u.TelegramId == actor && b.BotId == context.BotId && b.Active select new { Member = u.Id, Product = o.ProductId!.Value, o.Quantity, At = o.CreatedAt }).SingleAsync(token), ct);
         await RecordAsync(session, context, actor, original.Member, BotActivityAction.CheckoutCreated, BotActivitySource.Flow, BotActivityOutcome.Accepted,
             new(original.Product, order, Quantity: original.Quantity), order, original.At, ct);
     }
@@ -18,51 +18,41 @@ internal static class BotActivityWriter
     {
         BotActivityRegistry.Validate(action, source, outcome, links);
         if (identity == Guid.Empty || originalAt.Kind != DateTimeKind.Utc) throw new ArgumentException("Invalid original activity identity.");
+        originalAt = new DateTime(originalAt.Ticks - originalAt.Ticks % 10, DateTimeKind.Utc);
         var owner = await BrandUserStore.RequireAsync(session, context, actor, member, ct);
         if (owner.Blocked || owner.Banned) throw new UnauthorizedAccessException("Activity origin is unavailable.");
-        var clock = await session.QuerySingleAsync(new DbStatement("SELECT clock_timestamp(),CURRENT_TIMESTAMP"), r => (Now: r.GetUtc(0), AsOf: r.GetUtc(1)), ct);
-        if (originalAt > clock.Now) throw new ArgumentException("Activity occurrence is in the future.");
-        if (originalAt < clock.AsOf.AddHours(-4320)) return false;
-        var definition = BotActivityRegistry.Get(action);
-        string key = links.TelegramUpdate is long telegram ? BotActivityRegistry.TelegramIdentity(telegram) : "workflow:" + definition.Code + ":" + identity.ToString("N");
-        var values = new[] { DbValue.Uuid(member), DbValue.Text(definition.EventType), DbValue.Text(BotActivityRegistry.Source(source)), DbValue.Text(definition.Code), Id(links.Product), Id(links.Order), Id(links.Ticket),
-            links.Quantity is int quantity ? DbValue.Integer(quantity) : DbValue.Null(NpgsqlDbType.Integer), links.FlowRevision is long revision ? DbValue.Bigint(revision) : DbValue.Null(NpgsqlDbType.Bigint),
-            links.TelegramUpdate is long update ? DbValue.Bigint(update) : DbValue.Null(NpgsqlDbType.Bigint), DbValue.Text(BotActivityRegistry.Outcome(outcome)), DbValue.Text(key), DbValue.Utc(originalAt) };
-        int inserted = await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,order_id,support_ticket_id,quantity_selected,flow_revision,telegram_update_id,outcome_code,idempotency_key,occurred_at)
-            VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT(user_id,idempotency_key) DO NOTHING
-            """, values), ct);
-        if (inserted == 0)
+        return await session.RunEfStepAsync(true, async (data, token) =>
         {
-            bool same = await session.QuerySingleAsync(new DbStatement("""
-                SELECT EXISTS(SELECT 1 FROM shop.bot_activity_events WHERE user_id=$1 AND idempotency_key=$12 AND
-                    ROW(event_type,source_kind,action_code,product_id,order_id,support_ticket_id,quantity_selected,flow_revision,telegram_update_id,outcome_code,occurred_at)
-                    IS NOT DISTINCT FROM ROW($2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$13))
-                """, values), r => r.GetBoolean(0), ct);
-            if (!same) { session.RejectApplication(); throw new InvalidOperationException("Activity identity content conflicts."); }
-        }
-        return inserted != 0;
+            await data.RequireMembershipAsync(context, actor, false, false, token);
+            var clock = await data.Data.Set<Entities.Brand>().Where(row => row.Id == context.BrandId).Select(row => new { Now = EfValues.UtcNow(), AsOf = EfValues.TransactionTime() }).SingleAsync(token);
+            if (originalAt > clock.Now) data.RejectArgument("Activity occurrence is in the future.");
+            if (originalAt < clock.AsOf.AddHours(-4320)) return false;
+            var definition = BotActivityRegistry.Get(action); string sourceCode = BotActivityRegistry.Source(source), outcomeCode = BotActivityRegistry.Outcome(outcome);
+            string key = links.TelegramUpdate is long telegram ? BotActivityRegistry.TelegramIdentity(telegram) : "workflow:" + definition.Code + ":" + identity.ToString("N");
+            var existing = await data.Data.Set<Entities.BotActivityEvent>().SingleOrDefaultAsync(row => row.UserId == member && row.IdempotencyKey == key, token);
+            if (existing is not null)
+            {
+                if (existing.EventType != definition.EventType || existing.SourceKind != sourceCode || existing.ActionCode != definition.Code || existing.ProductId != links.Product || existing.OrderId != links.Order || existing.SupportTicketId != links.Ticket || existing.QuantitySelected != links.Quantity || existing.FlowRevision != links.FlowRevision || existing.TelegramUpdateId != links.TelegramUpdate || existing.OutcomeCode != outcomeCode || existing.OccurredAt != originalAt) data.RejectConflict("Activity identity content conflicts."); return false;
+            }
+            data.Data.Add(new Entities.BotActivityEvent { Id = Guid.NewGuid(), UserId = member, EventType = definition.EventType, SourceKind = sourceCode, ActionCode = definition.Code, ProductId = links.Product, OrderId = links.Order, SupportTicketId = links.Ticket, QuantitySelected = links.Quantity, FlowRevision = links.FlowRevision, TelegramUpdateId = links.TelegramUpdate, OutcomeCode = outcomeCode, IdempotencyKey = key, OccurredAt = originalAt }); return true;
+        }, ct);
     }
     internal static async Task FlowLeftAsync(DbSession session, BrandContext context, long actor, BrandUser before, BrandUser after, CancellationToken ct)
     {
         if (before.Flow.State is CustomerFlowState.Idle or CustomerFlowState.Catalog ||
             (before.Flow.State == after.Flow.State && before.Flow.ProductId == after.Flow.ProductId && before.Flow.OrderId == after.Flow.OrderId)) return;
-        DateTime now = await session.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
+        DateTime now = await session.RunEfStepAsync(false, (data, token) => data.BrandClockAsync(context.BrandId, token), ct);
         bool expired = before.Flow.ExpiresAt is DateTime at && at < now;
         await RecordAsync(session, context, actor, before.Id, expired ? BotActivityAction.FlowExpired : BotActivityAction.FlowAbandoned, BotActivitySource.System, BotActivityOutcome.Cancelled,
             new(before.Flow.ProductId, before.Flow.OrderId, FlowRevision: before.Flow.Revision), CustomerFlowExpiryStore.Identity(before.Id, before.Flow.Revision), expired ? before.Flow.ExpiresAt!.Value : now, ct);
     }
     internal static async Task CheckoutRejectedAsync(DbSession session, BrandContext context, long actor, Guid product, int quantity, CancellationToken ct)
     {
-        await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(actor)), r => r.GetInt64(0), ct);
+        await session.RunEfStepAsync(false, (data, token) => data.LockMemberAsync(context.BrandId, actor, token), ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, context, actor, null, ct);
         if (member.Blocked || member.Banned) return;
-        var origin = await session.QuerySingleAsync(new DbStatement("""
-            SELECT EXISTS(SELECT 1 FROM shop.brand_products l JOIN shop.products p ON p.id=l.product_id
-                WHERE l.brand_id=$1 AND l.product_id=$2 AND l.visible AND p.active),clock_timestamp()
-            """, DbValue.Uuid(context.BrandId), DbValue.Uuid(product)), r => (Allowed: r.GetBoolean(0), Now: r.GetUtc(1)), ct);
+        var origin = await session.RunEfStepAsync(false, async (data, token) => (Allowed: await (from l in data.Data.Set<Entities.BrandProduct>() join p in data.Data.Set<Entities.Product>() on l.ProductId equals p.Id where l.BrandId == context.BrandId && l.ProductId == product && l.Visible && p.Active select p.Id).AnyAsync(token), Now: await data.BrandClockAsync(context.BrandId, token)), ct);
         if (origin.Allowed) await BotActivityWriter.RecordAsync(session, context, actor, member.Id, BotActivityAction.CheckoutRejected, BotActivitySource.Flow, BotActivityOutcome.Rejected,
             new(product, Quantity: quantity), Guid.NewGuid(), origin.Now, ct);
     }
-    private static DbValue Id(Guid? value) => value is Guid id ? DbValue.Uuid(id) : DbValue.Null(NpgsqlDbType.Uuid);
 }

@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
-using NpgsqlTypes;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -26,9 +26,6 @@ public sealed class JobLease
 /// </summary>
 public static partial class OutboxStore
 {
-    private const string Columns = "j.id,j.brand_id,j.job_kind,coalesce(j.payment_id,j.order_id,j.fulfillment_id,j.campaign_id,j.discount_id,j.support_message_id,j.telegram_delivery_id,j.product_stock_subscription_id,j.supplier_request_id,j.product_id,j.product_supplier_source_id),j.audit_event_id,j.origin_revision,j.attempts,j.lease_until";
-    private const string Fence = " WHERE j.id=$1 AND j.status='leased' AND j.locked_by=$2 AND j.attempts=$3 AND j.lease_until>clock_timestamp() AND (j.origin_revision IS NULL OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.revision=j.origin_revision))";
-
     public static async Task<Guid> EnqueueAsync(DbSession session, JobIntent intent, Guid deduplicationId,
         DateTime availableAt, CancellationToken cancellationToken = default)
     {
@@ -40,27 +37,7 @@ public static partial class OutboxStore
         // Hash collisions only serialize unrelated work; UNIQUE(dedupe_key) remains authoritative.
         long lockId = BinaryPrimitives.ReadInt64BigEndian(SHA256.HashData(Encoding.ASCII.GetBytes(dedupe)));
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(lockId)), cancellationToken);
-        Guid? existing = await session.QuerySingleAsync(new DbStatement("SELECT " + Columns +
-            " FROM (SELECT 1) singleton LEFT JOIN shop.jobs j ON j.dedupe_key=$1", DbValue.Text(dedupe)), row =>
-        {
-            if (row.IsDBNull(0)) return (Guid?)null;
-            if (ReadIntent(row) != intent) throw new InvalidOperationException("Job identity conflicts with its immutable origin.");
-            return row.GetGuid(0);
-        }, cancellationToken);
-        if (existing.HasValue) return existing.Value;
-        Guid id = Guid.NewGuid();
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.jobs(id,brand_id,job_kind,payment_id,order_id,campaign_id,discount_id,support_message_id,
-                telegram_delivery_id,supplier_request_id,product_id,product_supplier_source_id,audit_event_id,origin_revision,dedupe_key,available_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-            """, DbValue.Uuid(id), Uuid(intent.BrandId), DbValue.Text(intent.Code), Origin(JobOrigin.Payment), Origin(JobOrigin.Order),
-            Origin(JobOrigin.Campaign), Origin(JobOrigin.Discount), Origin(JobOrigin.Support), Origin(JobOrigin.Telegram),
-            Origin(JobOrigin.Supplier), Origin(JobOrigin.Product), Origin(JobOrigin.Source), Uuid(intent.AuditId),
-            intent.OriginRevision.HasValue ? DbValue.Bigint(intent.OriginRevision.Value) : DbValue.Null(NpgsqlDbType.Bigint),
-            DbValue.Text(dedupe), DbValue.Utc(availableAt)), cancellationToken);
-        return id;
-
-        DbValue Origin(JobOrigin origin) => Uuid(intent.Origin == origin ? intent.OriginId : null);
+        return await session.RunEfStepAsync(true, (data, token) => OutboxQueries.EnqueueAsync(data, intent, dedupe, availableAt, token), cancellationToken);
     }
 
     public static async Task<JobLease?> ClaimAsync(DbSession session, JobKind kind, Guid worker, TimeSpan duration,
@@ -82,34 +59,13 @@ public static partial class OutboxStore
     {
         if (worker == Guid.Empty) throw new ArgumentException("Worker identity is required.");
         string code = JobIntent.CodeOf(kind);
-        bool recover = kind is not (JobKind.SubmitSupplier or JobKind.ReconcileSupplier or JobKind.ExportSupplier or JobKind.SendTelegram);
-        return session.QuerySingleAsync<JobLease?>(new DbStatement("""
-            WITH candidate AS (
-                SELECT j.id FROM shop.jobs j
-                WHERE j.job_kind=$1 AND j.available_at<=clock_timestamp() AND j.attempts<9223372036854775807 AND ($5 IS NULL OR j.brand_id=$5) AND (NOT $6 OR j.brand_id IS NULL)
-                  AND (j.status IN ('pending','retry') OR ($4 AND j.status='leased' AND j.lease_until<=clock_timestamp()))
-                  AND ($1<>'submit_supplier' OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.status='pending'))
-                  AND (j.origin_revision IS NULL OR EXISTS (SELECT 1 FROM shop.supplier_requests r WHERE r.id=j.supplier_request_id AND r.revision=j.origin_revision))
-                ORDER BY j.available_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED
-            ), claimed AS (
-                UPDATE shop.jobs j SET status='leased',locked_by=$2,lease_until=clock_timestamp()+$3*INTERVAL '1 second',attempts=j.attempts+1
-                FROM candidate c WHERE j.id=c.id RETURNING j.*
-            )
-            """ + " SELECT " + Columns + " FROM (SELECT 1) singleton LEFT JOIN claimed j ON true",
-            DbValue.Text(code), DbValue.Text(worker.ToString("D")), DbValue.Integer(Seconds(duration)), DbValue.Boolean(recover), Uuid(brandId), DbValue.Boolean(session.IsSharedWriterScoped)),
-            row => row.IsDBNull(0) ? null : new JobLease(row.GetGuid(0), ReadIntent(row), worker, row.GetInt64(6), row.GetUtc(7)), cancellationToken);
+        return session.RunEfStepAsync(true, (data, token) => data.ClaimJobAsync(brandId, false, session.IsSharedWriterScoped, kind, worker, Seconds(duration), token), cancellationToken);
     }
 
-    public static async Task<JobLease> RenewAsync(DbSession session, JobLease lease, TimeSpan duration,
-        CancellationToken cancellationToken = default)
+    public static async Task<JobLease> RenewAsync(DbSession session, JobLease lease, TimeSpan duration, CancellationToken cancellationToken = default)
     {
         await session.AdmitLeaseWriterAsync(lease, cancellationToken);
-        await session.ExecuteLeaseFencedAsync(new DbStatement(
-            "UPDATE shop.jobs j SET lease_until=clock_timestamp()+$4*INTERVAL '1 second'" + Fence,
-            DbValue.Uuid(lease.Id), DbValue.Text(lease.Worker.ToString("D")), DbValue.Bigint(lease.Attempt), DbValue.Integer(Seconds(duration))), cancellationToken);
-        DateTime until = await session.QuerySingleAsync(new DbStatement("SELECT lease_until FROM shop.jobs WHERE id=$1", DbValue.Uuid(lease.Id)),
-            row => row.GetUtc(0), cancellationToken);
-        return new JobLease(lease.Id, lease.Intent, lease.Worker, lease.Attempt, until);
+        return await session.RunEfStepAsync(true, async (data, token) => { var row = await data.RequireJobLeaseAsync(lease, false, token); row.LeaseUntil = (await data.ClockAsync(data.Data.Set<Entities.Job>().Where(value => value.Id == row.Id), token)).AddSeconds(Seconds(duration)); return new JobLease(lease.Id, lease.Intent, lease.Worker, lease.Attempt, row.LeaseUntil.Value); }, cancellationToken);
     }
 
     public static Task CompleteAsync(DbSession session, JobLease lease, CancellationToken cancellationToken = default) =>
@@ -128,28 +84,14 @@ public static partial class OutboxStore
         string status = lease.Attempt >= maximumAttempts ? "failed" : "retry";
         string code = status == "failed" ? ErrorCode(JobError.AttemptLimit) : ErrorCode(error);
         await session.AdmitLeaseWriterAsync(lease, cancellationToken);
-        await session.ExecuteLeaseFencedAsync(new DbStatement("""
-            UPDATE shop.jobs j SET status=$4,locked_by=NULL,lease_until=NULL,
-                available_at=clock_timestamp()+$5*INTERVAL '1 second',
-                completed_at=CASE WHEN $4='failed' THEN clock_timestamp() ELSE NULL END,last_error_code=$6
-            """ + Fence, DbValue.Uuid(lease.Id), DbValue.Text(lease.Worker.ToString("D")), DbValue.Bigint(lease.Attempt),
-            DbValue.Text(status), DbValue.Integer(Seconds(delay)), DbValue.Text(code)), cancellationToken);
+        await session.RunEfStepAsync(true, async (data, token) => { var row = await data.RequireJobLeaseAsync(lease, false, token); DateTime now = await data.ClockAsync(data.Data.Set<Entities.Job>().Where(value => value.Id == row.Id), token); row.Status = status; row.LockedBy = null; row.LeaseUntil = null; row.AvailableAt = now.AddSeconds(Seconds(delay)); row.CompletedAt = status == "failed" ? now : null; row.LastErrorCode = code; return true; }, cancellationToken);
     }
-
     private static async Task FinishAsync(DbSession session, JobLease lease, string status, string? code, CancellationToken cancellationToken)
     {
         await session.AdmitLeaseWriterAsync(lease, cancellationToken);
-        await session.ExecuteLeaseFencedAsync(new DbStatement("""
-            UPDATE shop.jobs j SET status=$4,locked_by=NULL,lease_until=NULL,completed_at=clock_timestamp(),last_error_code=$5
-            """ + Fence, DbValue.Uuid(lease.Id), DbValue.Text(lease.Worker.ToString("D")), DbValue.Bigint(lease.Attempt),
-            DbValue.Text(status), code is null ? DbValue.Null(NpgsqlDbType.Text) : DbValue.Text(code)), cancellationToken);
+        await session.RunEfStepAsync(true, async (data, token) => { var row = await data.RequireJobLeaseAsync(lease, false, token); DateTime now = await data.ClockAsync(data.Data.Set<Entities.Job>().Where(value => value.Id == row.Id), token); row.Status = status; row.LockedBy = null; row.LeaseUntil = null; row.CompletedAt = now; row.LastErrorCode = code; return true; }, cancellationToken);
     }
 
-    private static JobIntent ReadIntent(DbRow row) => JobIntent.Read(row.GetString(2),
-        row.IsDBNull(1) ? null : row.GetGuid(1), row.IsDBNull(3) ? null : row.GetGuid(3),
-        row.IsDBNull(4) ? null : row.GetGuid(4), row.IsDBNull(5) ? null : row.GetInt64(5));
-
-    private static DbValue Uuid(Guid? value) => value.HasValue ? DbValue.Uuid(value.Value) : DbValue.Null(NpgsqlDbType.Uuid);
     private static int Seconds(TimeSpan value) => value >= TimeSpan.FromSeconds(1) && value <= TimeSpan.FromMinutes(5) && value.Ticks % TimeSpan.TicksPerSecond == 0
         ? checked((int)value.TotalSeconds) : throw new ArgumentOutOfRangeException(nameof(value), "Duration requires 1–300 whole seconds.");
     private static string ErrorCode(JobError error) => error switch

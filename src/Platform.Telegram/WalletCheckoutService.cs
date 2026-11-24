@@ -25,7 +25,7 @@ public sealed class WalletCheckoutService(DbSessionFactory sessions, CheckoutSto
         {
             BrandUser member = await BrandUserStore.RequireAsync(observation, context, verifiedActorId, null, ct);
             await AdmitAsync(observation, context, verifiedActorId, null, writerRevision, ct);
-            DateTime at = await observation.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), r => r.GetUtc(0), ct);
+            DateTime at = await observation.RunEfStepAsync(false, (data, token) => data.BrandClockAsync(context.BrandId, token), ct);
             await BotActivityWriter.RecordAsync(observation, context, verifiedActorId, member.Id, BotActivityAction.PolicyCheck, BotActivitySource.System,
                 access is null ? BotActivityOutcome.Blocked : BotActivityOutcome.Accepted, new(), Guid.NewGuid(), at, ct);
             await observation.CommitAsync(ct);

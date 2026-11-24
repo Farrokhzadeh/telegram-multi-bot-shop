@@ -1,4 +1,6 @@
 using Platform.Core;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using Platform.Persistence;
 using Platform.Security;
 
@@ -16,30 +18,7 @@ public static class CustomerHistoricalTypedAliasReader
         string cursor = "";
         while (true)
         {
-            var batch = await session.QueryManyAsync(new DbStatement("""
-                SELECT m.legacy_id,o.created_at,o.quantity,
-                    (CASE WHEN o.payment_status='not_required' THEN 0::numeric
-                        WHEN o.currency='TOMAN' THEN o.unit_price_toman*o.quantity
-                        ELSE o.unit_price_usdt*o.quantity END)::text,
-                    CASE WHEN o.currency='TOMAN' THEN 'IRR' ELSE 'USD' END,
-                    o.product_title_snapshot,
-                    CASE WHEN o.payment_method='no_payment_required' THEN NULL ELSE o.payment_method END
-                FROM shop.legacy_id_map m
-                JOIN shop.orders o ON o.id=m.target_id
-                JOIN shop.users u ON u.id=o.user_id
-                JOIN shop.brands b ON b.id=u.brand_id
-                WHERE m.source_table='orders.record' AND m.source_key_kind='primary' AND m.target_kind='order'
-                    AND m.target_brand_id=$1 AND u.brand_id=$1 AND u.id=$2 AND b.bot_id=$3 AND b.active
-                    AND u.blocked_at IS NULL AND u.banned_at IS NULL AND o.order_kind='product_purchase'
-                    AND o.price_calculation_version='legacy-net-v1' AND o.review_code='credential_recovery'
-                    AND o.fulfillment_status='requires_admin' AND o.payment_status IN ('paid','not_required')
-                    AND o.currency IN ('USDT','TOMAN') AND o.product_id IS NULL AND o.release_authorized_at IS NULL
-                    AND o.delivery_generation IS NULL AND o.resolution_kind IS NULL
-                    AND ($4='' OR m.legacy_id COLLATE "C" > $4 COLLATE "C")
-                ORDER BY m.legacy_id COLLATE "C" LIMIT 1000
-                """, DbValue.Uuid(brand.BrandId), DbValue.Uuid(member), DbValue.Bigint(brand.BotId), DbValue.Text(cursor)),
-                r => new CustomerHistoricalOrder(r.GetString(0), r.GetUtc(1), r.GetInt32(2), ExactDecimal.Parse(r.GetString(3)),
-                    r.GetString(4), r.IsDBNull(5) ? null : r.GetString(5), r.IsDBNull(6) ? null : r.GetString(6), false), 1000, ct);
+            var batch = await session.RunEfStepAsync(false, (data, token) => (from m in data.Data.Set<LegacyIdMap>() join o in data.Data.Set<Order>() on m.TargetId equals o.Id join u in data.Data.Set<User>() on o.UserId equals u.Id join b in data.Data.Set<Brand>() on u.BrandId equals b.Id where m.SourceTable == "orders.record" && m.SourceKeyKind == "primary" && m.TargetKind == "order" && m.TargetBrandId == brand.BrandId && u.BrandId == brand.BrandId && u.Id == member && b.BotId == brand.BotId && b.Active && u.BlockedAt == null && u.BannedAt == null && o.OrderKind == "product_purchase" && o.PriceCalculationVersion == "legacy-net-v1" && o.ReviewCode == "credential_recovery" && o.FulfillmentStatus == "requires_admin" && (o.PaymentStatus == "paid" || o.PaymentStatus == "not_required") && (o.Currency == "USDT" || o.Currency == "TOMAN") && o.ProductId == null && o.ReleaseAuthorizedAt == null && o.DeliveryGeneration == null && o.ResolutionKind == null && (cursor == "" || EF.Functions.Collate(m.LegacyId, "C").CompareTo(EF.Functions.Collate(cursor, "C")) > 0) orderby EF.Functions.Collate(m.LegacyId, "C") select new CustomerHistoricalOrder(m.LegacyId, o.CreatedAt, o.Quantity, o.PaymentStatus == "not_required" ? 0m : o.Currency == "TOMAN" ? o.UnitPriceToman!.Value * o.Quantity : o.UnitPriceUsdt * o.Quantity, o.Currency == "TOMAN" ? "IRR" : "USD", o.ProductTitleSnapshot, o.PaymentMethod == "no_payment_required" ? null : o.PaymentMethod, false)).Take(1000).ToListAsync(token), ct);
             if (result.Count + batch.Count > 10000) throw new UnauthorizedAccessException("Historical order count rejected.");
             result.AddRange(batch);
             if (batch.Count < 1000) break;

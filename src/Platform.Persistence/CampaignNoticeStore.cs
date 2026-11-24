@@ -1,4 +1,6 @@
 using Platform.Security;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Configurations;
 
 namespace Platform.Persistence;
 
@@ -20,22 +22,13 @@ public sealed class NoticeDispatch
 }
 public sealed partial class CampaignStore
 {
-    private const string NoticePurposes = "('campaign','restock_notice','staff_supplier_case','staff_supplier_bonus')";
+    private static readonly string[] NoticePurposes = ["campaign", "restock_notice", "staff_supplier_case", "staff_supplier_bonus"];
     public async Task<JobLease?> ClaimNoticeAsync(Guid worker, CancellationToken ct = default)
     {
         if (worker == Guid.Empty) throw new ArgumentException("Worker identity is required.");
         await using var session = await sessions.BeginAsync(ct);
         Guid? scopeBrand = await session.AdmitClaimWriterAsync(true, ct);
-        var lease = await session.QuerySingleAsync<JobLease?>(new DbStatement("""
-            WITH candidate AS (SELECT j.id FROM shop.jobs j JOIN shop.telegram_deliveries d ON d.id=j.telegram_delivery_id
-                WHERE ($2 IS NULL OR j.brand_id=$2) AND j.job_kind='send_telegram' AND j.status IN ('pending','retry') AND j.available_at<=clock_timestamp()
-                    AND d.status IN ('pending','retry') AND d.next_attempt_at<=clock_timestamp() AND d.purpose IN
-            """ + NoticePurposes + """
-                ORDER BY j.available_at,j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED), claimed AS (
-                UPDATE shop.jobs j SET status='leased',locked_by=$1,lease_until=clock_timestamp()+INTERVAL '60 seconds',attempts=attempts+1
-                FROM candidate c WHERE j.id=c.id RETURNING j.*)
-            SELECT j.id,j.brand_id,j.telegram_delivery_id,j.attempts,j.lease_until FROM (SELECT 1) seed LEFT JOIN claimed j ON true
-            """, DbValue.Text(worker.ToString("D")), scopeBrand is Guid brand ? DbValue.Uuid(brand) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid)), r => r.IsDBNull(0) ? null : new JobLease(r.GetGuid(0), JobIntent.Telegram(r.GetGuid(1), r.GetGuid(2)), worker, r.GetInt64(3), r.GetUtc(4)), ct);
+        var lease = await session.RunEfStepAsync(true, (data, token) => data.ClaimNoticeAsync(scopeBrand, worker, NoticePurposes, token), ct);
         await session.CommitAsync(ct); return lease;
     }
     public async Task<NoticeDispatch?> BeginNoticeAsync(BrandContext context, JobLease lease, TimeSpan spacing, long? trustedStaffChat, IReadOnlyDictionary<string, string> supplierAccounts, CancellationToken ct = default)
@@ -48,16 +41,7 @@ public sealed partial class CampaignStore
             var identity = await IdentityAsync(session, delivery, context, ct);
             await LockNoticeOriginAsync(session, identity, ct);
             await OutboxStore.RenewAsync(session, lease, TimeSpan.FromMinutes(1), ct);
-            var data = await session.QuerySingleAsync(new DbStatement("""
-                SELECT d.status,d.recipient_kind,d.staff_chat_id,d.purpose,u.telegram_id,u.blocked_at IS NOT NULL OR u.banned_at IS NOT NULL,u.marketing_opt_out_at IS NOT NULL,
-                    COALESCE(d.recipient_language,split_part(lower(u.language),'-',1),'en'),b.active,b.bot_id,c.status,c.message_text,c.media_ref,
-                    sub.closed_at IS NOT NULL OR sub.cancelled_at IS NOT NULL,CASE WHEN bp.title_mode='override' THEN bp.title_override ELSE p.title END,
-                    c.language,split_part(lower(u.language),'-',1),c.active_since,u.last_seen_at
-                FROM shop.telegram_deliveries d JOIN shop.brands b ON b.id=d.brand_id LEFT JOIN shop.users u ON u.id=d.user_id
-                    LEFT JOIN shop.campaigns c ON c.id=d.campaign_id LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id
-                    LEFT JOIN shop.products p ON p.id=sub.product_id LEFT JOIN shop.brand_products bp ON bp.product_id=p.id AND bp.brand_id=d.brand_id
-                WHERE d.id=$1 FOR UPDATE OF d
-                """, DbValue.Uuid(delivery)), r => new NoticeState(r.GetString(0), r.GetString(1), Long(r, 2), r.GetString(3), Long(r, 4), !r.IsDBNull(5) && r.GetBoolean(5), !r.IsDBNull(6) && r.GetBoolean(6), r.GetString(7), r.GetBoolean(8), r.GetInt64(9), Text(r, 10), Text(r, 11), Text(r, 12), !r.IsDBNull(13) && r.GetBoolean(13), Text(r, 14), Text(r, 15), Text(r, 16), Time(r, 17), Time(r, 18)), ct);
+            var data = await ReadNoticeAsync(session, delivery, ct);
             if (data.Status is "succeeded" or "cancelled" or "failed") { await OutboxStore.CompleteAsync(session, lease, ct); await session.CommitAsync(ct); return null; }
             if (data.Status is not ("pending" or "retry")) throw new InvalidOperationException("Notice requires explicit recovery.");
             if (data.Bot != context.BotId) throw new UnauthorizedAccessException();
@@ -68,21 +52,25 @@ public sealed partial class CampaignStore
             if (!data.Active || (identity.Product is Guid product && !await AvailableAsync(session, context.BrandId, product, supplierAccounts, ct)))
             { await DeferAsync(session, lease, delivery, 60, "eligibility_deferred", ct); await session.CommitAsync(ct); return null; }
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(context.BotId)), ct);
-            long wait = await session.QuerySingleAsync(new DbStatement("""
-                SELECT CEIL(GREATEST(0,EXTRACT(EPOCH FROM GREATEST(
-                    COALESCE(max(last_attempt_at)+$2*INTERVAL '1 millisecond',clock_timestamp()),
-                    COALESCE(max(next_attempt_at) FILTER(WHERE last_error_code='rate_limited'),clock_timestamp()))-clock_timestamp())))::bigint
-                FROM shop.telegram_deliveries WHERE brand_id=$1
-                """, DbValue.Uuid(context.BrandId), DbValue.Bigint((long)Math.Ceiling(spacing.TotalMilliseconds))), r => r.GetInt64(0), ct);
+            long wait = await session.RunEfStepAsync(false, async (data, token) =>
+            {
+                var query = data.Data.Set<Entities.TelegramDelivery>().Where(row => row.BrandId == context.BrandId);
+                DateTime? attempted = await query.MaxAsync(row => row.LastAttemptAt, token);
+                DateTime? limited = await query.Where(row => row.LastErrorCode == "rate_limited").MaxAsync(row => (DateTime?)row.NextAttemptAt, token);
+                DateTime now = await data.BrandClockAsync(context.BrandId, token);
+                DateTime next = attempted?.AddMilliseconds(Math.Ceiling(spacing.TotalMilliseconds)) ?? now;
+                if (limited > next) next = limited.Value;
+                return (long)Math.Ceiling(Math.Max(0, (next - now).TotalSeconds));
+            }, ct);
             if (wait > 0) { await DeferAsync(session, lease, delivery, Math.Max(1, checked((int)wait)), "bot_backoff", ct); await session.CommitAsync(ct); return null; }
             string? text = data.Text, media = data.Media;
             if (data.Purpose == "restock_notice") { text = data.ProductTitle; media = null; }
             if (data.Recipient == "staff_chat")
             {
-                Guid order = await session.QuerySingleAsync(new DbStatement("SELECT r.order_id FROM shop.supplier_requests r JOIN shop.telegram_deliveries d ON d.supplier_request_id=r.id WHERE d.id=$1", DbValue.Uuid(delivery)), r => r.GetGuid(0), ct);
+                Guid order = await session.RunEfStepAsync(false, (data, token) => (from r in data.Data.Set<Entities.SupplierRequest>() join d in data.Data.Set<Entities.TelegramDelivery>() on r.Id equals d.SupplierRequestId where d.Id == delivery select r.OrderId).SingleAsync(token), ct);
                 text = "Supplier review required. Order " + order.ToString("D"); media = null;
             }
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='leased',attempts=$1,last_attempt_at=clock_timestamp(),eligibility_checked_at=clock_timestamp() WHERE id=$2", DbValue.Bigint(lease.Attempt), DbValue.Uuid(delivery)), ct);
+            await ChangeNoticeAsync(session, context.BrandId, delivery, (row, now) => { row.Status = "leased"; row.Attempts = lease.Attempt; row.LastAttemptAt = now; row.EligibilityCheckedAt = now; }, ct);
             await session.CommitAsync(ct);
             return new(delivery, context.BotId, data.Recipient == "staff_chat" ? data.StaffChat!.Value : data.Chat!.Value, data.Recipient, data.Purpose, data.Language, text, media);
         }
@@ -97,26 +85,23 @@ public sealed partial class CampaignStore
         {
             var identity = await IdentityAsync(session, delivery, context, ct);
             await LockNoticeOriginAsync(session, identity, ct);
-            var attempt = await session.QuerySingleAsync(new DbStatement("SELECT attempts,status FROM shop.jobs WHERE id=$1 AND telegram_delivery_id=$2 FOR UPDATE", DbValue.Uuid(lease.Id), DbValue.Uuid(delivery)), r => (Attempt: r.GetInt64(0), Status: r.GetString(1)), ct);
-            var current = await session.QuerySingleAsync(new DbStatement("SELECT status,attempts,telegram_message_id FROM shop.telegram_deliveries WHERE id=$1 FOR UPDATE", DbValue.Uuid(delivery)), r => (Status: r.GetString(0), Attempt: r.GetInt64(1), Message: Long(r, 2)), ct);
+            var attempt = await session.RunEfStepAsync(false, async (data, token) => { await data.LockJobAsync(lease.Id, token); return await data.Data.Set<Entities.Job>().Where(row => row.Id == lease.Id && row.TelegramDeliveryId == delivery).Select(row => new { Attempt = row.Attempts, row.Status }).SingleAsync(token); }, ct);
+            var current = await session.RunEfStepAsync(false, async (data, token) => { await data.LockMessageAsync(delivery, token); return await data.Data.Set<Entities.TelegramDelivery>().Where(row => row.Id == delivery).Select(row => new { row.Status, Attempt = row.Attempts, Message = row.TelegramMessageId }).SingleAsync(token); }, ct);
             if (current.Status == "succeeded") { if (outcome.Kind == NoticeOutcomeKind.Sent && outcome.MessageId != current.Message) throw new InvalidOperationException("Known receipt identity conflict."); return; }
             if (attempt.Attempt != lease.Attempt || current.Attempt != lease.Attempt || current.Status is not ("leased" or "uncertain")) throw new InvalidOperationException("Stale notice outcome.");
             bool canRetry = true;
-            if (identity.Campaign is Guid campaign) canRetry = await session.QuerySingleAsync(new DbStatement("SELECT status IN ('approved','running') FROM shop.campaigns WHERE id=$1", DbValue.Uuid(campaign)), r => r.GetBoolean(0), ct);
-            if (identity.Subscription is Guid subscription) canRetry &= await session.QuerySingleAsync(new DbStatement("SELECT closed_at IS NULL AND cancelled_at IS NULL FROM shop.product_stock_subscriptions WHERE id=$1", DbValue.Uuid(subscription)), r => r.GetBoolean(0), ct);
+            if (identity.Campaign is Guid campaign) canRetry = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Campaign>().Where(row => row.Id == campaign).Select(row => row.Status == "approved" || row.Status == "running").SingleAsync(token), ct);
+            if (identity.Subscription is Guid subscription) canRetry &= await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.ProductStockSubscription>().Where(row => row.Id == subscription).Select(row => row.ClosedAt == null && row.CancelledAt == null).SingleAsync(token), ct);
             if (outcome.Kind == NoticeOutcomeKind.RateLimited && canRetry)
                 await DeferAsync(session, lease, delivery, outcome.RetryAfterSeconds!.Value, "rate_limited", ct);
             else
             {
                 string state = outcome.Kind switch { NoticeOutcomeKind.Sent => "succeeded", NoticeOutcomeKind.Unknown => "uncertain", NoticeOutcomeKind.RateLimited => "cancelled", _ => "failed" };
                 string error = outcome.Kind switch { NoticeOutcomeKind.Blocked => "recipient_blocked", NoticeOutcomeKind.Unknown => "remote_outcome_unknown", NoticeOutcomeKind.Failed => "permanent_failure", _ => "none" };
-                await session.ExecuteAsync(new DbStatement("""
-                    UPDATE shop.telegram_deliveries SET status=$1,telegram_message_id=$2,sent_at=CASE WHEN $1='succeeded' THEN clock_timestamp() ELSE sent_at END,last_error_code=$3 WHERE id=$4
-                    """, DbValue.Text(state), outcome.MessageId is long message ? DbValue.Bigint(message) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Bigint), DbValue.Text(error), DbValue.Uuid(delivery)), ct);
-                await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status=$1,locked_by=NULL,lease_until=NULL,completed_at=clock_timestamp(),last_error_code=$2 WHERE id=$3 AND attempts=$4",
-                    DbValue.Text(state == "succeeded" ? "succeeded" : state == "cancelled" ? "cancelled" : "failed"), DbValue.Text(error), DbValue.Uuid(lease.Id), DbValue.Bigint(lease.Attempt)), ct);
-                if (outcome.Kind == NoticeOutcomeKind.Blocked && identity.Member is Guid member) await session.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=COALESCE(blocked_at,clock_timestamp()) WHERE id=$1", DbValue.Uuid(member)), ct);
-                if (state != "uncertain" && identity.Subscription is Guid consent) await session.ExecuteAsync(new DbStatement("UPDATE shop.product_stock_subscriptions SET closed_at=clock_timestamp() WHERE id=$1 AND closed_at IS NULL", DbValue.Uuid(consent)), ct);
+                await ChangeNoticeAsync(session, context.BrandId, delivery, (row, now) => { row.Status = state; row.TelegramMessageId = outcome.MessageId; if (state == "succeeded") row.SentAt = now; row.LastErrorCode = error; }, ct);
+                await ChangeNoticeJobAsync(session, context.BrandId, lease.Id, row => row.Attempts == lease.Attempt, (row, now) => { row.Status = state == "succeeded" ? "succeeded" : state == "cancelled" ? "cancelled" : "failed"; row.LockedBy = null; row.LeaseUntil = null; row.CompletedAt = now; row.LastErrorCode = error; }, ct);
+                if (outcome.Kind == NoticeOutcomeKind.Blocked && identity.Member is Guid member) await session.RunEfStepAsync(true, async (data, token) => { await data.RequireJobCommandAsync(context.BrandId, token); var row = await data.Data.Set<Entities.User>().SingleAsync(row => row.Id == member, token); row.BlockedAt ??= await data.BrandClockAsync(context.BrandId, token); return true; }, ct);
+                if (state != "uncertain" && identity.Subscription is Guid consent) await CloseNoticeSubscriptionAsync(session, context.BrandId, consent, ct);
                 if (identity.Campaign is Guid id) await CompleteCampaignAsync(session, id, ct);
             }
             await session.CommitAsync(ct);
@@ -126,63 +111,68 @@ public sealed partial class CampaignStore
     public async Task<int> RecoverExpiredNoticesAsync(CancellationToken ct = default)
     {
         await using var session = await sessions.BeginAsync(ct);
-        var ids = await session.QueryManyAsync(new DbStatement("SELECT j.id,j.telegram_delivery_id FROM shop.jobs j JOIN shop.telegram_deliveries d ON d.id=j.telegram_delivery_id WHERE ($1 IS NULL OR d.brand_id=$1) AND j.status='leased' AND j.lease_until<=clock_timestamp() AND d.purpose IN " + NoticePurposes + " ORDER BY j.id LIMIT 100", session.WriterBrand is Guid scope ? DbValue.Uuid(scope) : DbValue.Null(NpgsqlTypes.NpgsqlDbType.Uuid)), r => (Job: r.GetGuid(0), Delivery: r.GetGuid(1)), 100, ct);
+        Guid? scope = session.WriterBrand;
+        var ids = await session.RunEfStepAsync(false, (data, token) => (from j in data.Data.Set<Entities.Job>() join d in data.Data.Set<Entities.TelegramDelivery>() on j.TelegramDeliveryId equals d.Id where (scope == null || d.BrandId == scope) && j.Status == "leased" && j.LeaseUntil <= EfValues.UtcNow() && NoticePurposes.Contains(d.Purpose) orderby j.Id select new { Job = j.Id, Delivery = d.Id }).Take(100).ToListAsync(token), ct);
         if (session.IsWriterScoped)
         {
             var origins = new List<NoticeIdentity>();
-            foreach (var id in ids) origins.Add(await session.QuerySingleAsync(new DbStatement("SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id,d.brand_id FROM shop.telegram_deliveries d LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id WHERE d.id=$1", DbValue.Uuid(id.Delivery)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3), r.GetGuid(4)), ct));
-            foreach (Guid campaign in origins.Where(v => v.Campaign is not null).Select(v => v.Campaign!.Value).Distinct().Order()) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.campaigns WHERE id=$1 FOR UPDATE", DbValue.Uuid(campaign)), r => r.GetGuid(0), ct);
-            foreach (Guid member in origins.Where(v => v.Member is not null).Select(v => v.Member!.Value).Distinct().Order()) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member)), r => r.GetGuid(0), ct);
-            foreach (Guid product in origins.Where(v => v.Product is not null).Select(v => v.Product!.Value).Distinct().Order()) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetGuid(0), ct);
+            foreach (var id in ids) origins.Add(await ReadNoticeIdentityAsync(session, id.Delivery, null, ct));
+            await session.RunEfStepAsync(false, async (data, token) => { foreach (Guid campaign in origins.Where(v => v.Campaign != null).Select(v => v.Campaign!.Value).Distinct().Order()) await data.LockCampaignAsync(campaign, token); foreach (Guid member in origins.Where(v => v.Member != null).Select(v => v.Member!.Value).Distinct().Order()) await data.LockNoticeMemberAsync(member, token); foreach (Guid product in origins.Where(v => v.Product != null).Select(v => v.Product!.Value).Distinct().Order()) await data.LockProductAsync(product, token); return true; }, ct);
             if (session.WriterBrand is Guid brand) await session.AdmitBrandWriterAsync(brand, ct);
         }
         int recovered = 0;
         foreach (var id in ids)
         {
-            var origin = await session.QuerySingleAsync(new DbStatement("SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id,d.brand_id FROM shop.telegram_deliveries d LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id WHERE d.id=$1", DbValue.Uuid(id.Delivery)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3), r.GetGuid(4)), ct);
+            var origin = await ReadNoticeIdentityAsync(session, id.Delivery, null, ct);
             await LockNoticeOriginAsync(session, origin, ct);
-            bool expired = await session.QuerySingleAsync(new DbStatement("SELECT status='leased' AND lease_until<=clock_timestamp() FROM shop.jobs WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Job)), r => r.GetBoolean(0), ct);
-            if (!expired) continue;
-            recovered++;
-            string status = await session.QuerySingleAsync(new DbStatement("SELECT status FROM shop.telegram_deliveries WHERE id=$1 FOR UPDATE", DbValue.Uuid(id.Delivery)), r => r.GetString(0), ct);
-            bool uncertain = status is "leased" or "uncertain";
-            if (uncertain) await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='uncertain',last_error_code='remote_outcome_unknown' WHERE id=$1", DbValue.Uuid(id.Delivery)), ct);
-            string recoveredStatus = uncertain ? "failed" : status is "succeeded" or "failed" or "cancelled" ? status : "retry";
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status=$1,locked_by=NULL,lease_until=NULL,available_at=clock_timestamp(),completed_at=CASE WHEN $1='retry' THEN NULL ELSE clock_timestamp() END,last_error_code=$2 WHERE id=$3",
-                DbValue.Text(recoveredStatus), DbValue.Text(uncertain ? "remote_outcome_unknown" : "pre_dispatch_recovery"), DbValue.Uuid(id.Job)), ct);
+            bool changed = await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireJobCommandAsync(origin.Brand, token); await data.LockJobAsync(id.Job, token);
+                var job = await data.Data.Set<Entities.Job>().SingleAsync(row => row.Id == id.Job, token);
+                DateTime now = await data.BrandClockAsync(origin.Brand, token); if (job.Status != "leased" || job.LeaseUntil > now) return false;
+                await data.LockMessageAsync(id.Delivery, token); var row = await data.Data.Set<Entities.TelegramDelivery>().SingleAsync(row => row.Id == id.Delivery, token);
+                bool uncertain = row.Status is "leased" or "uncertain"; string status = row.Status;
+                if (uncertain) { row.Status = "uncertain"; row.LastErrorCode = "remote_outcome_unknown"; }
+                string recoveredStatus = uncertain ? "failed" : status is "succeeded" or "failed" or "cancelled" ? status : "retry";
+                job.Status = recoveredStatus; job.LockedBy = null; job.LeaseUntil = null; job.AvailableAt = now; job.CompletedAt = recoveredStatus == "retry" ? null : now; job.LastErrorCode = uncertain ? "remote_outcome_unknown" : "pre_dispatch_recovery"; return true;
+            }, ct);
+            if (changed) recovered++;
         }
         await session.CommitAsync(ct); return recovered;
     }
     private static async Task DeferAsync(DbSession session, JobLease lease, Guid delivery, int seconds, string reason, CancellationToken ct)
     {
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status='retry',next_attempt_at=clock_timestamp()+$1*INTERVAL '1 second',last_error_code=$2 WHERE id=$3", DbValue.Integer(seconds), DbValue.Text(reason), DbValue.Uuid(delivery)), ct);
-        int changed = await session.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET status='retry',locked_by=NULL,lease_until=NULL,completed_at=NULL,available_at=clock_timestamp()+$1*INTERVAL '1 second',last_error_code=$2 WHERE id=$3 AND attempts=$4 AND status IN ('leased','failed')", DbValue.Integer(seconds), DbValue.Text(reason), DbValue.Uuid(lease.Id), DbValue.Bigint(lease.Attempt)), ct);
-        if (changed != 1) throw new InvalidOperationException("Notice lease changed.");
+        Guid brand = lease.Intent.BrandId!.Value;
+        await ChangeNoticeAsync(session, brand, delivery, (row, now) => { row.Status = "retry"; row.NextAttemptAt = now.AddSeconds(seconds); row.LastErrorCode = reason; }, ct);
+        bool changed = await ChangeNoticeJobAsync(session, brand, lease.Id, row => row.Attempts == lease.Attempt && row.Status is "leased" or "failed", (row, now) => { row.Status = "retry"; row.LockedBy = null; row.LeaseUntil = null; row.CompletedAt = null; row.AvailableAt = now.AddSeconds(seconds); row.LastErrorCode = reason; }, ct);
+        if (!changed) throw new InvalidOperationException("Notice lease changed.");
     }
     private static async Task FinishWithoutSendAsync(DbSession session, JobLease lease, NoticeIdentity identity, string status, CancellationToken ct)
     {
-        await session.ExecuteAsync(new DbStatement("UPDATE shop.telegram_deliveries SET status=$1 WHERE id=$2", DbValue.Text(status), DbValue.Uuid(lease.Intent.OriginId!.Value)), ct);
+        await ChangeNoticeAsync(session, identity.Brand, lease.Intent.OriginId!.Value, (row, now) => row.Status = status, ct);
         await OutboxStore.CompleteAsync(session, lease, ct);
-        if (identity.Subscription is Guid consent) await session.ExecuteAsync(new DbStatement("UPDATE shop.product_stock_subscriptions SET closed_at=clock_timestamp() WHERE id=$1 AND closed_at IS NULL", DbValue.Uuid(consent)), ct);
+        if (identity.Subscription is Guid consent) await CloseNoticeSubscriptionAsync(session, identity.Brand, consent, ct);
         if (identity.Campaign is Guid campaign) await CompleteCampaignAsync(session, campaign, ct);
     }
     private static Guid NoticeId(BrandContext context, JobLease lease) => lease.Intent.Kind == JobKind.SendTelegram && lease.Intent.BrandId == context.BrandId && lease.Intent.OriginId is Guid id ? id : throw new UnauthorizedAccessException();
-    private static Task<NoticeIdentity> IdentityAsync(DbSession session, Guid delivery, BrandContext context, CancellationToken ct) => session.QuerySingleAsync(new DbStatement("""
-        SELECT d.campaign_id,d.user_id,d.product_stock_subscription_id,sub.product_id,d.brand_id FROM shop.telegram_deliveries d
-        LEFT JOIN shop.product_stock_subscriptions sub ON sub.id=d.product_stock_subscription_id WHERE d.id=$1 AND d.brand_id=$2 AND d.purpose IN
-        """ + NoticePurposes, DbValue.Uuid(delivery), DbValue.Uuid(context.BrandId)), r => new NoticeIdentity(Id(r, 0), Id(r, 1), Id(r, 2), Id(r, 3), r.GetGuid(4)), ct);
-    private static async Task LockNoticeOriginAsync(DbSession session, NoticeIdentity data, CancellationToken ct)
+    private static Task<NoticeIdentity> IdentityAsync(DbSession session, Guid delivery, BrandContext context, CancellationToken ct) => ReadNoticeIdentityAsync(session, delivery, context.BrandId, ct);
+    private static Task<NoticeIdentity> ReadNoticeIdentityAsync(DbSession session, Guid delivery, Guid? brand, CancellationToken ct) => session.RunEfStepAsync(false, (data, token) => (from d in data.Data.Set<Entities.TelegramDelivery>() join sub in data.Data.Set<Entities.ProductStockSubscription>() on d.ProductStockSubscriptionId equals sub.Id into subscriptions from sub in subscriptions.DefaultIfEmpty() where d.Id == delivery && (brand == null || d.BrandId == brand && NoticePurposes.Contains(d.Purpose)) select new NoticeIdentity(d.CampaignId, d.UserId, d.ProductStockSubscriptionId, sub == null ? null : (Guid?)sub.ProductId, d.BrandId)).SingleAsync(token), ct);
+    private static async Task LockNoticeOriginAsync(DbSession session, NoticeIdentity origin, CancellationToken ct)
     {
-        if (data.Campaign is Guid campaign) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.campaigns WHERE id=$1 FOR UPDATE", DbValue.Uuid(campaign)), r => r.GetGuid(0), ct);
-        if (data.Member is Guid member) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member)), r => r.GetGuid(0), ct);
-        if (data.Product is Guid product) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(product)), r => r.GetGuid(0), ct);
-        await session.AdmitBrandWriterAsync(data.Brand, ct);
-        if (data.Subscription is Guid subscription) await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.product_stock_subscriptions WHERE id=$1 FOR UPDATE", DbValue.Uuid(subscription)), r => r.GetGuid(0), ct);
+        await session.RunEfStepAsync(false, async (data, token) => { if (origin.Campaign is Guid campaign) await data.LockCampaignAsync(campaign, token); if (origin.Member is Guid member) await data.LockNoticeMemberAsync(member, token); if (origin.Product is Guid product) await data.LockProductAsync(product, token); return true; }, ct);
+        await session.AdmitBrandWriterAsync(origin.Brand, ct);
+        if (origin.Subscription is Guid subscription) await session.RunEfStepAsync(false, (data, token) => data.LockNoticeSubscriptionAsync(subscription, token), ct);
     }
-    private static Guid? Id(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetGuid(i);
-    private static long? Long(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetInt64(i);
-    private static string? Text(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
-    private static DateTime? Time(DbRow r, int i) => r.IsDBNull(i) ? null : r.GetUtc(i);
+    private static Task<bool> ChangeNoticeAsync(DbSession session, Guid brand, Guid id, Action<Entities.TelegramDelivery, DateTime> change, CancellationToken ct) => session.RunEfStepAsync(true, async (data, token) => { await data.RequireJobCommandAsync(brand, token); await data.LockMessageAsync(id, token); var row = await data.Data.Set<Entities.TelegramDelivery>().SingleAsync(row => row.Id == id && row.BrandId == brand, token); change(row, await data.BrandClockAsync(brand, token)); return true; }, ct);
+    private static Task<bool> ChangeNoticeJobAsync(DbSession session, Guid brand, Guid id, Func<Entities.Job, bool> predicate, Action<Entities.Job, DateTime> change, CancellationToken ct) => session.RunEfStepAsync(true, async (data, token) => { await data.RequireJobCommandAsync(brand, token); await data.LockJobAsync(id, token); var row = await data.Data.Set<Entities.Job>().SingleAsync(row => row.Id == id, token); if (!predicate(row)) return false; change(row, await data.BrandClockAsync(brand, token)); return true; }, ct);
+    private static Task<bool> CloseNoticeSubscriptionAsync(DbSession session, Guid brand, Guid id, CancellationToken ct) => session.RunEfStepAsync(true, async (data, token) => { await data.RequireJobCommandAsync(brand, token); var row = await data.Data.Set<Entities.ProductStockSubscription>().SingleAsync(row => row.Id == id, token); row.ClosedAt ??= await data.BrandClockAsync(brand, token); return true; }, ct);
+    private static async Task<NoticeState> ReadNoticeAsync(DbSession session, Guid id, CancellationToken ct) => await session.RunEfStepAsync(false, async (data, token) =>
+    {
+        await data.LockMessageAsync(id, token);
+        var row = await (from d in data.Data.Set<Entities.TelegramDelivery>() join b in data.Data.Set<Entities.Brand>() on d.BrandId equals b.Id join u in data.Data.Set<Entities.User>() on d.UserId equals u.Id into users from u in users.DefaultIfEmpty() join c in data.Data.Set<Entities.Campaign>() on d.CampaignId equals c.Id into campaigns from c in campaigns.DefaultIfEmpty() join sub in data.Data.Set<Entities.ProductStockSubscription>() on d.ProductStockSubscriptionId equals sub.Id into subscriptions from sub in subscriptions.DefaultIfEmpty() join p in data.Data.Set<Entities.Product>() on sub.ProductId equals p.Id into products from p in products.DefaultIfEmpty() join bp in data.Data.Set<Entities.BrandProduct>() on new { Product = (Guid?)p.Id, Brand = d.BrandId } equals new { Product = (Guid?)bp.ProductId, Brand = bp.BrandId } into listings from bp in listings.DefaultIfEmpty() where d.Id == id select new { d.Status, d.RecipientKind, d.StaffChatId, d.Purpose, Chat = u == null ? null : (long?)u.TelegramId, Blocked = u != null && (u.BlockedAt != null || u.BannedAt != null), OptedOut = u != null && u.MarketingOptOutAt != null, d.RecipientLanguage, MemberLanguage = u == null ? null : u.Language, b.Active, b.BotId, CampaignStatus = c == null ? null : c.Status, Text = c == null ? null : c.MessageText, Media = c == null ? null : c.MediaRef, Closed = sub != null && (sub.ClosedAt != null || sub.CancelledAt != null), ProductTitle = bp != null && bp.TitleMode == "override" ? bp.TitleOverride : p == null ? null : p.Title, CampaignLanguage = c == null ? null : c.Language, ActiveSince = c == null ? null : c.ActiveSince, LastSeen = u == null ? null : (DateTime?)u.LastSeenAt }).SingleAsync(token);
+        string? language = row.MemberLanguage?.ToLowerInvariant().Split('-')[0];
+        return new NoticeState(row.Status, row.RecipientKind, row.StaffChatId, row.Purpose, row.Chat, row.Blocked, row.OptedOut, row.RecipientLanguage ?? language ?? "en", row.Active, row.BotId, row.CampaignStatus, row.Text, row.Media, row.Closed, row.ProductTitle, row.CampaignLanguage, language, row.ActiveSince, row.LastSeen);
+    }, ct);
     private sealed record NoticeIdentity(Guid? Campaign, Guid? Member, Guid? Subscription, Guid? Product, Guid Brand);
     private sealed record NoticeState(string Status, string Recipient, long? StaffChat, string Purpose, long? Chat, bool Blocked, bool OptedOut, string Language, bool Active, long Bot,
         string? CampaignStatus, string? Text, string? Media, bool ConsentClosed, string? ProductTitle, string? CampaignLanguage, string? MemberLanguage, DateTime? ActiveSince, DateTime? LastSeen);

@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -34,35 +35,20 @@ public sealed class SqliteStagingJobs(SqliteSessionFactory sessions)
             throw new UnauthorizedAccessException();
         return sessions.RunAsync(false, async (_, tx, token) =>
         {
-            using var command = SqliteWallet.Command(tx, """
-                SELECT purpose FROM telegram_deliveries WHERE id=$id AND brand_id=$brand
-                """, ("$id", id), ("$brand", context.BrandId));
-            return (string?)await command.ExecuteScalarAsync(token) ??
-                throw new UnauthorizedAccessException("Staging Telegram purpose is unavailable.");
+            return await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.TelegramDelivery>().Where(row => row.Id == id && row.BrandId == context.BrandId).Select(row => row.Purpose).SingleOrDefaultAsync(cancel), token) ?? throw new UnauthorizedAccessException("Staging Telegram purpose is unavailable.");
         }, ct);
     }
 
     public Task<Guid[]> ExpiredCredentialsAsync(BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
-            using var command = SqliteWallet.Command(tx, """
-                SELECT d.id FROM telegram_deliveries d JOIN jobs j ON j.telegram_delivery_id=d.id
-                WHERE d.brand_id=$brand AND d.purpose='order_credentials' AND d.status='leased'
-                    AND j.status='leased' AND j.lease_until<=$now ORDER BY j.lease_until,j.id LIMIT 50
-                """, ("$brand", context.BrandId), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)));
-            var rows = new List<Guid>();
-            await using var reader = await command.ExecuteReaderAsync(token);
-            while (await reader.ReadAsync(token)) rows.Add(reader.GetGuid(0));
-            return rows.ToArray();
+            return await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => (from d in data.Data.Set<Entities.TelegramDelivery>() join j in data.Data.Set<Entities.Job>() on d.Id equals j.TelegramDeliveryId where d.BrandId == context.BrandId && d.Purpose == "order_credentials" && d.Status == "leased" && j.Status == "leased" && j.LeaseUntil <= Platform.Persistence.Configurations.EfValues.UtcNow() orderby j.LeaseUntil, j.Id select d.Id).Take(50).ToArrayAsync(cancel), token);
         }, ct);
 
     public Task<int> PendingAsync(BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
-            using var command = SqliteWallet.Command(tx, """
-                SELECT count(*) FROM jobs WHERE brand_id=$brand AND status IN ('pending','retry')
-                """, ("$brand", context.BrandId));
-            return Convert.ToInt32(await command.ExecuteScalarAsync(token));
+            return await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Job>().CountAsync(row => row.BrandId == context.BrandId && (row.Status == "pending" || row.Status == "retry"), cancel), token);
         }, ct);
 }
 
@@ -87,19 +73,10 @@ public sealed class SqliteStatusDeliveryStore(SqliteSessionFactory sessions)
                 throw new UnauthorizedAccessException("Status dispatch is not authorized.");
             if (state.Action == "edit")
             {
-                using var anchor = SqliteWallet.Command(tx, """
-                    SELECT 1 FROM telegram_deliveries
-                    WHERE brand_id=$brand AND order_id=$order AND user_id=$member AND purpose='order_status'
-                        AND telegram_message_id=$target AND status='succeeded' LIMIT 1
-                    """, ("$brand", context.BrandId), ("$order", state.Order), ("$member", state.Member), ("$target", state.Target));
-                if (await anchor.ExecuteScalarAsync(token) is null) throw new UnauthorizedAccessException("Status edit anchor is unavailable.");
+                bool anchor = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.TelegramDelivery>().AnyAsync(row => row.BrandId == context.BrandId && row.OrderId == state.Order && row.UserId == state.Member && row.Purpose == "order_status" && row.TelegramMessageId == state.Target && row.Status == "succeeded", cancel), token);
+                if (!anchor) throw new UnauthorizedAccessException("Status edit anchor is unavailable.");
             }
-            string now = SqliteSchema.UtcText(DateTime.UtcNow);
-            using var command = SqliteWallet.Command(tx, """
-                UPDATE telegram_deliveries SET status='leased',attempts=$attempt,last_attempt_at=$now
-                WHERE id=$id AND status IN ('pending','retry')
-                """, ("$attempt", renewed.Attempt), ("$now", now), ("$id", id));
-            if (await command.ExecuteNonQueryAsync(token) != 1) throw new UnauthorizedAccessException();
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) => { await data.RequireJobCommandAsync(context.BrandId, cancel); var row = await data.Data.Set<Entities.TelegramDelivery>().SingleOrDefaultAsync(row => row.Id == id && (row.Status == "pending" || row.Status == "retry"), cancel) ?? throw new UnauthorizedAccessException(); row.Status = "leased"; row.Attempts = renewed.Attempt; row.LastAttemptAt = DateTime.UtcNow; return true; }, token);
             string text = "Akanti staging order\n" + state.Title + "\nPayment: " + state.Payment +
                 "\nDelivery: " + state.Delivery + "\nOrder: " + state.Order.ToString("N")[..12];
             if (text.Length > 4000) throw new UnauthorizedAccessException("Status message is too large.");
@@ -121,31 +98,17 @@ public sealed class SqliteStatusDeliveryStore(SqliteSessionFactory sessions)
                 (state.Target is null || state.Target == outcome.MessageId);
             bool retry = !success && state.Target is not null &&
                 outcome.Kind is (DeliveryOutcomeKind.Retry or DeliveryOutcomeKind.Unknown);
-            string now = SqliteSchema.UtcText(DateTime.UtcNow);
-            string future = SqliteSchema.UtcText(DateTime.UtcNow.AddSeconds(5));
-            string deliveryState = success ? "succeeded" : retry ? "retry" :
-                outcome.Kind == DeliveryOutcomeKind.Unknown ? "uncertain" : "failed";
+            string deliveryState = success ? "succeeded" : retry ? "retry" : outcome.Kind == DeliveryOutcomeKind.Unknown ? "uncertain" : "failed";
             string jobState = success ? "succeeded" : retry ? "retry" : "failed";
-            using (var job = SqliteWallet.Command(tx, """
-                UPDATE jobs SET status=$status,locked_by=NULL,lease_until=NULL,
-                    available_at=$available,completed_at=CASE WHEN $status='retry' THEN NULL ELSE $now END,
-                    last_error_code=$code
-                WHERE id=$job AND brand_id=$brand AND telegram_delivery_id=$delivery
-                    AND status='leased' AND attempts=$attempt AND locked_by=$worker AND lease_until>$now
-                """, ("$status", jobState), ("$available", future), ("$now", now),
-                ("$code", success ? "known_success" : retry ? "idempotent_edit_retry" : "remote_outcome_unknown"),
-                ("$job", lease.Id), ("$brand", context.BrandId), ("$delivery", id), ("$attempt", lease.Attempt),
-                ("$worker", lease.Worker.ToString("D"))))
-                if (await job.ExecuteNonQueryAsync(token) != 1) throw new UnauthorizedAccessException("Status job lease expired.");
-            using (var update = SqliteWallet.Command(tx, """
-                UPDATE telegram_deliveries SET status=$status,telegram_message_id=$message,
-                    sent_at=CASE WHEN $status='succeeded' THEN $now ELSE NULL END,
-                    last_error_code=$code,next_attempt_at=$available
-                WHERE id=$id AND status='leased' AND attempts=$attempt
-                """, ("$status", deliveryState), ("$message", success ? outcome.MessageId : null), ("$now", now),
-                ("$code", success ? "known_success" : retry ? "idempotent_edit_retry" : "remote_outcome_unknown"),
-                ("$available", future), ("$id", id), ("$attempt", lease.Attempt)))
-                if (await update.ExecuteNonQueryAsync(token) != 1) throw new UnauthorizedAccessException("Status dispatch state changed.");
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
+            {
+                await data.RequireJobCommandAsync(context.BrandId, cancel);
+                var job = await data.Data.Set<Entities.Job>().SingleOrDefaultAsync(row => row.Id == lease.Id && row.BrandId == context.BrandId && row.TelegramDeliveryId == id && row.Status == "leased" && row.Attempts == lease.Attempt && row.LockedBy == lease.Worker.ToString("D") && row.LeaseUntil > Platform.Persistence.Configurations.EfValues.UtcNow(), cancel) ?? throw new UnauthorizedAccessException("Status job lease expired.");
+                var row = await data.Data.Set<Entities.TelegramDelivery>().SingleOrDefaultAsync(row => row.Id == id && row.Status == "leased" && row.Attempts == lease.Attempt, cancel) ?? throw new UnauthorizedAccessException("Status dispatch state changed.");
+                DateTime now = DateTime.UtcNow; string code = success ? "known_success" : retry ? "idempotent_edit_retry" : "remote_outcome_unknown";
+                job.Status = jobState; job.LockedBy = null; job.LeaseUntil = null; job.AvailableAt = now.AddSeconds(5); job.CompletedAt = retry ? null : now; job.LastErrorCode = code;
+                row.Status = deliveryState; row.TelegramMessageId = success ? outcome.MessageId : null; row.SentAt = success ? now : null; row.LastErrorCode = code; row.NextAttemptAt = now.AddSeconds(5); return true;
+            }, token);
             if (success && (state.Payment is "paid" or "not_required") && state.Delivery == "acquiring")
                 await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Order(JobKind.PrepareManifest,
                     context.BrandId, state.Order), state.Order, DateTime.UtcNow, token);
@@ -156,33 +119,18 @@ public sealed class SqliteStatusDeliveryStore(SqliteSessionFactory sessions)
     public Task RecoverExpiredAsync(BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(true, async (_, tx, token) =>
         {
-            string now = SqliteSchema.UtcText(DateTime.UtcNow);
-            using var query = SqliteWallet.Command(tx, """
-                SELECT d.id,d.target_message_id IS NOT NULL
-                FROM telegram_deliveries d JOIN jobs j ON j.telegram_delivery_id=d.id
-                WHERE d.brand_id=$brand AND d.purpose='order_status' AND d.status='leased'
-                    AND j.status='leased' AND j.lease_until<=$now
-                ORDER BY d.id LIMIT 200
-                """, ("$brand", context.BrandId), ("$now", now));
-            var expired = new List<(Guid Id, bool Edit)>();
-            await using (var row = await query.ExecuteReaderAsync(token))
-                while (await row.ReadAsync(token)) expired.Add((row.GetGuid(0), row.GetBoolean(1)));
-            foreach (var (id, edit) in expired)
+            var expired = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => (from d in data.Data.Set<Entities.TelegramDelivery>() join j in data.Data.Set<Entities.Job>() on d.Id equals j.TelegramDeliveryId where d.BrandId == context.BrandId && d.Purpose == "order_status" && d.Status == "leased" && j.Status == "leased" && j.LeaseUntil <= Platform.Persistence.Configurations.EfValues.UtcNow() orderby d.Id select new { d.Id, Edit = d.TargetMessageId != null }).Take(200).ToListAsync(cancel), token);
+            foreach (var item in expired)
             {
-                using var fix = SqliteWallet.Command(tx, """
-                    UPDATE jobs SET status=$status,locked_by=NULL,lease_until=NULL,available_at=$now,
-                        completed_at=CASE WHEN $status='failed' THEN $now ELSE NULL END,
-                        last_error_code='remote_outcome_unknown'
-                    WHERE telegram_delivery_id=$id AND status='leased' AND lease_until<=$now
-                    """, ("$status", edit ? "retry" : "failed"), ("$id", id), ("$now", now));
-                if (await fix.ExecuteNonQueryAsync(token) == 1)
+                await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
                 {
-                    using var mark = SqliteWallet.Command(tx, """
-                        UPDATE telegram_deliveries SET status=$status,last_error_code='remote_outcome_unknown'
-                        WHERE id=$id AND status='leased'
-                        """, ("$status", edit ? "retry" : "uncertain"), ("$id", id));
-                    if (await mark.ExecuteNonQueryAsync(token) != 1) throw new UnauthorizedAccessException();
-                }
+                    await data.RequireJobCommandAsync(context.BrandId, cancel);
+                    var jobs = await data.Data.Set<Entities.Job>().Where(row => row.TelegramDeliveryId == item.Id && row.Status == "leased" && row.LeaseUntil <= Platform.Persistence.Configurations.EfValues.UtcNow()).Take(1001).ToListAsync(cancel);
+                    if (jobs.Count > 1000) data.RejectScope("Status job bound exceeded.");
+                    DateTime now = DateTime.UtcNow; foreach (var job in jobs) { job.Status = item.Edit ? "retry" : "failed"; job.LockedBy = null; job.LeaseUntil = null; job.AvailableAt = now; job.CompletedAt = item.Edit ? null : now; job.LastErrorCode = "remote_outcome_unknown"; }
+                    if (jobs.Count == 1) { var row = await data.Data.Set<Entities.TelegramDelivery>().SingleOrDefaultAsync(row => row.Id == item.Id && row.Status == "leased", cancel) ?? throw new UnauthorizedAccessException(); row.Status = item.Edit ? "retry" : "uncertain"; row.LastErrorCode = "remote_outcome_unknown"; }
+                    return true;
+                }, token);
             }
             return expired.Count;
         }, ct);
@@ -194,19 +142,8 @@ public sealed class SqliteStatusDeliveryStore(SqliteSessionFactory sessions)
 
     private static async Task<State> ReadAsync(SqliteTransaction tx, BrandContext context, Guid id, CancellationToken ct)
     {
-        using var query = SqliteWallet.Command(tx, """
-            SELECT d.order_id,d.user_id,u.telegram_id,d.target_message_id,d.action,d.status,d.attempts,
-                o.product_title_snapshot,o.payment_status,o.fulfillment_status
-            FROM telegram_deliveries d JOIN users u ON u.id=d.user_id
-                JOIN orders o ON o.id=d.order_id JOIN brands b ON b.id=d.brand_id
-            WHERE d.id=$id AND d.brand_id=$brand AND u.brand_id=$brand AND o.user_id=d.user_id
-                AND d.purpose='order_status' AND d.recipient_kind='customer_dm'
-                AND b.bot_id=$bot AND b.active=1 AND u.blocked_at IS NULL AND u.banned_at IS NULL
-            """, ("$id", id), ("$brand", context.BrandId), ("$bot", context.BotId));
-        await using var row = await query.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct)) throw new UnauthorizedAccessException("Telegram status delivery is unavailable.");
-        return new(row.GetGuid(0), row.GetGuid(1), row.GetInt64(2), row.IsDBNull(3) ? null : row.GetInt64(3),
-            row.GetString(4), row.GetString(5), row.GetInt64(6), row.GetString(7), row.GetString(8), row.GetString(9));
+        var result = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => (from d in data.Data.Set<Entities.TelegramDelivery>() join u in data.Data.Set<Entities.User>() on d.UserId equals u.Id join o in data.Data.Set<Entities.Order>() on d.OrderId equals o.Id join b in data.Data.Set<Entities.Brand>() on d.BrandId equals b.Id where d.Id == id && d.BrandId == context.BrandId && u.BrandId == context.BrandId && o.UserId == d.UserId && d.Purpose == "order_status" && d.RecipientKind == "customer_dm" && b.BotId == context.BotId && b.Active && u.BlockedAt == null && u.BannedAt == null select new State(o.Id, u.Id, u.TelegramId, d.TargetMessageId, d.Action, d.Status, d.Attempts, o.ProductTitleSnapshot, o.PaymentStatus, o.FulfillmentStatus)).SingleOrDefaultAsync(token), ct);
+        return result ?? throw new UnauthorizedAccessException("Telegram status delivery is unavailable.");
     }
 
     private sealed record State(Guid Order, Guid Member, long Telegram, long? Target, string Action, string Status,

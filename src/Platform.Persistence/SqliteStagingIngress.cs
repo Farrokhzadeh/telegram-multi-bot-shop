@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -12,23 +13,15 @@ public sealed class SqliteStagingIngress(SqliteSessionFactory sessions)
         if (update < 0 || update > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(update));
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
-            using var command = SqliteWallet.Command(tx, """
-                UPDATE brands SET telegram_update_highwater=$update
-                WHERE id=$brand AND bot_id=$bot AND active=1 AND telegram_update_highwater<$update
-                """, ("$update", update), ("$brand", context.BrandId), ("$bot", context.BotId));
-            return await command.ExecuteNonQueryAsync(token) == 1;
+            return await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) => { await data.RequireJobCommandAsync(context.BrandId, cancel); var row = await data.Data.Set<Entities.Brand>().SingleOrDefaultAsync(row => row.Id == context.BrandId && row.BotId == context.BotId && row.Active && row.TelegramUpdateHighwater < update, cancel); if (row is null) return false; row.TelegramUpdateHighwater = update; return true; }, token);
         }, ct);
     }
 
     public Task<long> NextOffsetAsync(BrandContext context, CancellationToken ct = default) =>
         sessions.RunAsync(false, async (_, tx, token) =>
         {
-            using var command = SqliteWallet.Command(tx, """
-                SELECT telegram_update_highwater FROM brands WHERE id=$brand AND bot_id=$bot AND active=1
-                """, ("$brand", context.BrandId), ("$bot", context.BotId));
-            object? current = await command.ExecuteScalarAsync(token);
-            if (current is not long id) throw new UnauthorizedAccessException("Bot update cursor is unavailable.");
-            return checked(id + 1);
+            long? current = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Brand>().Where(row => row.Id == context.BrandId && row.BotId == context.BotId && row.Active).Select(row => (long?)row.TelegramUpdateHighwater).SingleOrDefaultAsync(cancel), token);
+            return current is long id ? checked(id + 1) : throw new UnauthorizedAccessException("Bot update cursor is unavailable.");
         }, ct);
 
     public Task<SqliteStagingFlow> ReadFlowAsync(BrandContext context, long actor, CancellationToken ct = default) =>
@@ -44,17 +37,7 @@ public sealed class SqliteStagingIngress(SqliteSessionFactory sessions)
             throw new UnauthorizedAccessException("Invalid staged customer flow.");
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
-            using var command = SqliteWallet.Command(tx, """
-                UPDATE users SET flow_state=$state,flow_product_id=$product,flow_order_id=$order,
-                    flow_anchor_message_id=$anchor,flow_revision=flow_revision+1,
-                    flow_expires_at=$expires
-                WHERE brand_id=$brand AND telegram_id=$actor AND flow_revision=$revision
-                    AND blocked_at IS NULL AND banned_at IS NULL
-                """, ("$state", state), ("$product", product), ("$order", order), ("$anchor", anchor),
-                ("$expires", state == "idle" ? null : SqliteSchema.UtcText(DateTime.UtcNow.AddMinutes(15))),
-                ("$brand", context.BrandId), ("$actor", actor), ("$revision", expectedRevision));
-            if (await command.ExecuteNonQueryAsync(token) != 1)
-                throw new UnauthorizedAccessException("Staging flow was superseded.");
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) => { await data.RequireJobCommandAsync(context.BrandId, cancel); var row = await data.Data.Set<Entities.User>().SingleOrDefaultAsync(row => row.BrandId == context.BrandId && row.TelegramId == actor && row.FlowRevision == expectedRevision && row.BlockedAt == null && row.BannedAt == null, cancel) ?? throw new UnauthorizedAccessException("Staging flow was superseded."); row.FlowState = state; row.FlowProductId = product; row.FlowOrderId = order; row.FlowAnchorMessageId = anchor; row.FlowRevision++; row.FlowExpiresAt = state == "idle" ? null : DateTime.UtcNow.AddMinutes(15); return true; }, token);
             return await ReadAsync(tx, context, actor, token);
         }, ct);
     }
@@ -62,19 +45,7 @@ public sealed class SqliteStagingIngress(SqliteSessionFactory sessions)
     private static async Task<SqliteStagingFlow> ReadAsync(SqliteTransaction tx, BrandContext context, long actor,
         CancellationToken ct)
     {
-        using var command = SqliteWallet.Command(tx, """
-            SELECT flow_state,flow_product_id,flow_order_id,flow_anchor_message_id,flow_revision,
-                flow_expires_at
-            FROM users u JOIN brands b ON b.id=u.brand_id
-            WHERE u.brand_id=$brand AND b.bot_id=$bot AND b.active=1 AND u.telegram_id=$actor
-                AND u.blocked_at IS NULL AND u.banned_at IS NULL
-            """, ("$brand", context.BrandId), ("$bot", context.BotId), ("$actor", actor));
-        await using var row = await command.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct)) throw new UnauthorizedAccessException("Staging customer is unavailable.");
-        string state = row.GetString(0);
-        if (!row.IsDBNull(5) && string.CompareOrdinal(row.GetString(5), SqliteSchema.UtcText(DateTime.UtcNow)) <= 0)
-            state = "idle";
-        return new(state, row.IsDBNull(1) ? null : row.GetGuid(1), row.IsDBNull(2) ? null : row.GetGuid(2),
-            row.IsDBNull(3) ? null : row.GetInt64(3), row.GetInt64(4));
+        var row = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => (from u in data.Data.Set<Entities.User>() join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where u.BrandId == context.BrandId && b.BotId == context.BotId && b.Active && u.TelegramId == actor && u.BlockedAt == null && u.BannedAt == null select new { u.FlowState, u.FlowProductId, u.FlowOrderId, u.FlowAnchorMessageId, u.FlowRevision, u.FlowExpiresAt }).SingleOrDefaultAsync(token), ct) ?? throw new UnauthorizedAccessException("Staging customer is unavailable.");
+        return new(row.FlowExpiresAt <= DateTime.UtcNow ? "idle" : row.FlowState, row.FlowProductId, row.FlowOrderId, row.FlowAnchorMessageId, row.FlowRevision);
     }
 }

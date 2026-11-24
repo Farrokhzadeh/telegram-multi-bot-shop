@@ -99,10 +99,14 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
                 if (unsafeEffect) throw new InvalidOperationException("Supplier effects remain unresolved.");
                 await session.RunEfStepAsync(true, async (ef, token) =>
                 {
-                    await ef.RequireOrderCommandAsync(context, order, token); await ef.LockSupplierJobsAsync(request, token);
-                    var jobs = await ef.Data.Set<Entities.Job>().Where(row => row.SupplierRequestId == request && (row.Status == "pending" || row.Status == "retry")).Take(1001).ToArrayAsync(token);
-                    if (jobs.Length > 1000) ef.RejectScope("Supplier job bound exceeded.");
-                    DateTime now = await ef.BrandClockAsync(context.BrandId, token); foreach (var job in jobs) { job.Status = "cancelled"; job.CompletedAt = now; }
+                    await ef.RequireOrderCommandAsync(context, order, token);
+                    while (true)
+                    {
+                        var jobs = await ef.Data.Set<Entities.Job>().Where(row => row.SupplierRequestId == request && (row.Status == "pending" || row.Status == "retry")).OrderBy(row => row.Id).Take(128).ToArrayAsync(token);
+                        if (jobs.Length == 0) break;
+                        DateTime now = await ef.BrandClockAsync(context.BrandId, token); foreach (var job in jobs) { await ef.LockJobAsync(job.Id, token); await ef.Data.Entry(job).ReloadAsync(token); if (job.Status is "pending" or "retry") { job.Status = "cancelled"; job.CompletedAt = now; } }
+                        await ef.FlushAsync(token, false);
+                    }
                     return true;
                 }, ct);
                 if (retry)
@@ -121,9 +125,13 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
                     await session.RunEfStepAsync(true, async (ef, token) =>
                     {
                         await ef.RequireOrderCommandAsync(context, order, token);
-                        var units = await ef.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order && row.Status == "acquired").Take(1001).ToArrayAsync(token);
-                        if (units.Length > 1000) ef.RejectScope("Supplier retention bound exceeded.");
-                        foreach (var unit in units) { unit.Status = "retained_admin"; unit.ResolutionAdminId = actor.AdminId; unit.ResolutionNote = value.Reason; }
+                        while (true)
+                        {
+                            var units = await ef.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order && row.Status == "acquired").Take(128).ToArrayAsync(token);
+                            if (units.Length == 0) break;
+                            foreach (var unit in units) { unit.Status = "retained_admin"; unit.ResolutionAdminId = actor.AdminId; unit.ResolutionNote = value.Reason; }
+                            await ef.FlushAsync(token, false);
+                        }
                         return true;
                     }, ct);
                     await PostAsync(session, actor, identity.Member, credit, null, value.CommandId, "supplier_wallet_credit", order, request, value.Reason, ct);

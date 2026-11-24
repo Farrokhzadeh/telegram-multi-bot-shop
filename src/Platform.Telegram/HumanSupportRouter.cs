@@ -1,4 +1,5 @@
-using System.Globalization;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Persistence;
@@ -25,21 +26,14 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
         await using var session = await sessions.BeginAsync(ct);
         if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(Guid.Empty, false, true);
         BrandUser member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct);
-        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member.Id)), r => r.GetGuid(0), ct);
+        await session.RunEfStepAsync(false, (data, token) => data.LockUserAsync(member.Id, update.Context.BrandId, token), ct);
         member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
         if (member.Banned || member.Blocked) throw new TelegramIngressRejectedException();
         if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, update.Context, revision, ct);
         bool fresh = await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct);
-        bool enabled = await session.QuerySingleAsync(new DbStatement("""
-            SELECT b.support_enabled AND EXISTS(SELECT 1 FROM shop.admins a WHERE a.id=b.customer_support_admin_id
-                AND a.disabled_at IS NULL AND a.telegram_user_id IS NOT NULL AND a.public_contact_handle IS NOT NULL)
-            FROM shop.brands b WHERE b.id=$1 AND b.bot_id=$2 AND b.active FOR SHARE OF b
-            """, DbValue.Uuid(update.Context.BrandId), DbValue.Bigint(update.Context.BotId)), row => row.GetBoolean(0), ct);
+        bool enabled = await session.RunEfStepAsync(false, async (data, token) => { await data.LockBrandAsync(update.Context.BrandId, token, true); return await data.Data.Set<Brand>().Where(b => b.Id == update.Context.BrandId && b.BotId == update.Context.BotId && b.Active).Select(b => b.SupportEnabled && data.Data.Set<Admin>().Any(a => a.Id == b.CustomerSupportAdminId && a.DisabledAt == null && a.TelegramUserId != null && a.PublicContactHandle != null)).SingleAsync(token); }, ct);
         if (!enabled) throw new TelegramIngressRejectedException();
-        Guid? replay = await session.QuerySingleAsync(new DbStatement("""
-            SELECT t.id FROM (SELECT 1) seed LEFT JOIN (SELECT t.id FROM shop.support_messages m JOIN shop.support_tickets t ON t.id=m.ticket_id
-                WHERE t.user_id=$1 AND m.sender_kind='customer' AND m.telegram_message_id=$2) t ON true
-            """, DbValue.Uuid(member.Id), DbValue.Bigint(update.MessageId)), row => row.IsDBNull(0) ? (Guid?)null : row.GetGuid(0), ct);
+        Guid? replay = await session.RunEfStepAsync(false, (data, token) => (from m in data.Data.Set<SupportMessage>() join t in data.Data.Set<SupportTicket>() on m.TicketId equals t.Id where t.UserId == member.Id && m.SenderKind == "customer" && m.TelegramMessageId == update.MessageId select (Guid?)t.Id).SingleOrDefaultAsync(token), ct);
         if (replay is Guid prior)
         { await session.CommitAsync(ct); return new(prior, false, false, member.Flow.Revision); }
         if (!fresh) return new(Guid.Empty, false, false, member.Flow.Revision);
@@ -58,11 +52,7 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
             await SupportStore.RecordCustomerMessageAsync(session, update.Context, update.ActorId, ticketId, update.AssetRef, encrypted, keyId, ct, messageId, update.MessageId);
         }
         finally { CryptographicOperations.ZeroMemory(plain); }
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,support_ticket_id,flow_revision,telegram_update_id,outcome_code,idempotency_key)
-            VALUES (gen_random_uuid(),$1,'support',$2,$3,$4,$5,$6,'accepted',$7) ON CONFLICT (user_id,idempotency_key) DO NOTHING
-            """, DbValue.Uuid(member.Id), DbValue.Text(command ? "command" : "flow"), DbValue.Text(command ? "support_open" : "support_reply"),
-            DbValue.Uuid(ticketId), DbValue.Bigint(member.Flow.Revision), DbValue.Bigint(update.UpdateId), DbValue.Text("telegram:" + update.UpdateId.ToString(CultureInfo.InvariantCulture))), ct);
+        await session.RunEfStepAsync(true, async (data, token) => { await data.RequireMembershipAsync(update.Context, update.ActorId, false, false, token); string key = "telegram:" + update.UpdateId.ToString(System.Globalization.CultureInfo.InvariantCulture); if (!await data.Data.Set<BotActivityEvent>().AnyAsync(row => row.UserId == member.Id && row.IdempotencyKey == key, token)) data.Data.Add(new BotActivityEvent { Id = Guid.NewGuid(), UserId = member.Id, EventType = "support", SourceKind = command ? "command" : "flow", ActionCode = command ? "support_open" : "support_reply", SupportTicketId = ticketId, FlowRevision = member.Flow.Revision, TelegramUpdateId = update.UpdateId, OutcomeCode = "accepted", IdempotencyKey = key }); return true; }, ct);
         await session.CommitAsync(ct);
         return new(ticketId, created, false, member.Flow.Revision);
     }

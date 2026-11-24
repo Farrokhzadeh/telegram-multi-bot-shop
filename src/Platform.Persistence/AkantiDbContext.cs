@@ -32,6 +32,7 @@ public abstract class AkantiDbContext(DbContextOptions options) : DbContext(opti
         bool sqlite = Database.IsSqlite();
         if ((this is SqliteAkantiDbContext && !sqlite) || (this is PostgresAkantiDbContext && !Database.IsNpgsql()))
             throw new InvalidOperationException("The context provider is incompatible.");
+        modelBuilder.HasDbFunction(() => EfValues.TransactionTime()).HasName(sqlite ? "akanti_utc_now" : "transaction_timestamp").IsBuiltIn();
         modelBuilder.HasDbFunction(() => EfValues.UtcNow()).HasName(sqlite ? "akanti_utc_now" : "clock_timestamp").IsBuiltIn();
         modelBuilder.ApplyConfiguration(new Configurations.BrandConfiguration(sqlite));
         modelBuilder.ApplyConfiguration(new Configurations.BrandChannelConfiguration(sqlite));

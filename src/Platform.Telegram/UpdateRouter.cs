@@ -1,5 +1,6 @@
 using System.Globalization;
-using NpgsqlTypes;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
@@ -78,19 +79,18 @@ public sealed class UpdateRouter
         BrandUser member = update.IsCallback
             ? await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct)
             : await BrandUserStore.ObservePrivateAsync(session, update.Context, update.ActorId, ct, admit: false);
-        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(member.Id)), r => r.GetGuid(0), ct);
+        await session.RunEfStepAsync(false, (data, token) => data.LockUserAsync(member.Id, update.Context.BrandId, token), ct);
         member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, member.Id, ct);
         if (writerRevision is not null)
         {
             Guid? product = callback?.Action is 'p' or 's' or 'u' ? callback.Target : callback?.Action == 'o'
-                ? await session.QuerySingleAsync(new DbStatement("SELECT product_id FROM (SELECT 1) seed LEFT JOIN shop.orders ON id=$1 AND user_id=$2", DbValue.Uuid(callback.Target), DbValue.Uuid(member.Id)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct) : null;
+                ? await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Order>().Where(row => row.Id == callback.Target && row.UserId == member.Id).Select(row => row.ProductId).SingleOrDefaultAsync(token), ct) : null;
             await AdmitAsync(session, update, product, writerRevision, ct);
         }
         if (member.Banned || (member.Blocked && update.Value != "/start")) throw new TelegramIngressRejectedException();
         if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct)) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
         if (member.Blocked && update.Value == "/start")
-            await session.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=NULL WHERE id=$1 AND brand_id=$2 AND telegram_id=$3",
-                DbValue.Uuid(member.Id), DbValue.Uuid(update.Context.BrandId), DbValue.Bigint(update.ActorId)), ct);
+            await session.RunEfStepAsync(true, async (data, token) => { await data.RequireMembershipAsync(update.Context, update.ActorId, false, true, token); var row = await data.Data.Set<User>().SingleAsync(row => row.Id == member.Id && row.BrandId == update.Context.BrandId && row.TelegramId == update.ActorId, token); row.BlockedAt = null; return true; }, ct);
         if (callback is not null)
         {
             if (member.Flow.Revision != callback.Revision || member.Flow.AnchorMessageId != update.MessageId) throw new TelegramIngressRejectedException();
@@ -103,17 +103,12 @@ public sealed class UpdateRouter
         Guid? activityProduct = callback?.Action is 'p' or 's' or 'u' ? callback.Target : null;
         if (callback?.Action == 'o')
         {
-            activityProduct = await session.QuerySingleAsync(new DbStatement("SELECT product_id FROM (SELECT 1) seed LEFT JOIN shop.orders ON id=$1 AND user_id=$2", DbValue.Uuid(callback.Target), DbValue.Uuid(member.Id)), r => r.IsDBNull(0) ? (Guid?)null : r.GetGuid(0), ct);
+            activityProduct = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Order>().Where(row => row.Id == callback.Target && row.UserId == member.Id).Select(row => row.ProductId).SingleOrDefaultAsync(token), ct);
             if (activityProduct is null) throw new TelegramIngressRejectedException();
         }
         BotActivityRegistry.Validate(definition.Action, update.IsCallback ? BotActivitySource.Callback : BotActivitySource.Command, BotActivityOutcome.Accepted,
             new(activityProduct, callback?.Action == 'o' ? callback.Target : null, FlowRevision: member.Flow.Revision, TelegramUpdate: update.UpdateId));
-        int recorded = await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,order_id,flow_revision,telegram_update_id,outcome_code,idempotency_key)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'accepted',$10) ON CONFLICT (user_id,idempotency_key) DO NOTHING
-            """, DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(member.Id), DbValue.Text(definition.EventType), DbValue.Text(BotActivityRegistry.Source(update.IsCallback ? BotActivitySource.Callback : BotActivitySource.Command)),
-            DbValue.Text(action.Action), activityProduct is Guid observedProduct ? DbValue.Uuid(observedProduct) : DbValue.Null(NpgsqlDbType.Uuid),
-            callback?.Action == 'o' ? DbValue.Uuid(callback.Target) : DbValue.Null(NpgsqlDbType.Uuid), DbValue.Bigint(member.Flow.Revision), DbValue.Bigint(update.UpdateId), DbValue.Text(key)), ct);
+        int recorded = await session.RunEfStepAsync(true, async (data, token) => { await data.RequireMembershipAsync(update.Context, update.ActorId, false, false, token); if (await data.Data.Set<BotActivityEvent>().AnyAsync(row => row.UserId == member.Id && row.IdempotencyKey == key, token)) return 0; data.Data.Add(new BotActivityEvent { Id = Guid.NewGuid(), UserId = member.Id, EventType = definition.EventType, SourceKind = BotActivityRegistry.Source(update.IsCallback ? BotActivitySource.Callback : BotActivitySource.Command), ActionCode = action.Action, ProductId = activityProduct, OrderId = callback?.Action == 'o' ? callback.Target : null, FlowRevision = member.Flow.Revision, TelegramUpdateId = update.UpdateId, OutcomeCode = "accepted", IdempotencyKey = key }); return 1; }, ct);
         if (recorded == 0)
         { await session.CommitAsync(ct); return new(UpdateRouteCode.Duplicate, member.Flow.Revision); }
         BrandUser previous = member;
@@ -150,20 +145,16 @@ public sealed class UpdateRouter
     {
         await using var session = await sessions.BeginAsync(ct);
         if (!await BotConsumerOwnership.TryAcquireAsync(session, update.Context, ct)) return new(UpdateRouteCode.Busy, expected.Flow.Revision);
-        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(expected.Id)), r => r.GetGuid(0), ct);
+        await session.RunEfStepAsync(false, (data, token) => data.LockUserAsync(expected.Id, update.Context.BrandId, token), ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, expected.Id, ct);
         if (member.Blocked || member.Banned) throw new TelegramIngressRejectedException();
         await AdmitAsync(session, update, expected.Flow.ProductId, writerRevision, ct);
         if (!await TelegramReplayStore.TryClaimAsync(session, update.Context, update.UpdateId, ct)) return new(UpdateRouteCode.Duplicate, member.Flow.Revision);
-        long highwater = await session.QuerySingleAsync(new DbStatement("SELECT telegram_update_highwater FROM shop.brands WHERE id=$1", DbValue.Uuid(update.Context.BrandId)), r => r.GetInt64(0), ct);
+        long highwater = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Brand>().Where(row => row.Id == update.Context.BrandId).Select(row => row.TelegramUpdateHighwater).SingleAsync(token), ct);
         if (update.UpdateId != highwater) throw new TelegramIngressRejectedException();
         if (member.Flow.Revision != expected.Flow.Revision || member.Flow.State != CustomerFlowState.Quantity || member.Flow.ProductId is not Guid product ||
             member.Flow.AnchorMessageId is not long anchor || update.MessageId <= anchor) throw new TelegramIngressRejectedException();
-        var listing = await session.QuerySingleAsync(new DbStatement("""
-            SELECT l.min_quantity,l.max_quantity,clock_timestamp() FROM (SELECT 1) seed LEFT JOIN
-                (SELECT l.min_quantity,l.max_quantity FROM shop.brand_products l JOIN shop.products p ON p.id=l.product_id
-                WHERE l.brand_id=$1 AND l.product_id=$2 AND l.visible AND p.active FOR SHARE OF l,p) l ON true
-            """, DbValue.Uuid(update.Context.BrandId), DbValue.Uuid(product)), r => (Min: r.IsDBNull(0) ? 0 : r.GetInt32(0), Max: r.IsDBNull(1) ? 0 : r.GetInt32(1), Now: r.GetUtc(2)), ct);
+        var listing = await session.RunEfStepAsync(false, async (data, token) => { await data.LockListingAsync(update.Context.BrandId, product, token, true); await data.LockPublishedProductAsync(product, token); var row = await (from l in data.Data.Set<BrandProduct>() join p in data.Data.Set<Product>() on l.ProductId equals p.Id where l.BrandId == update.Context.BrandId && l.ProductId == product && l.Visible && p.Active select new { Min = l.MinQuantity, Max = l.MaxQuantity }).SingleOrDefaultAsync(token); return (Min: row?.Min ?? 0, Max: row?.Max ?? 0, Now: await data.BrandClockAsync(update.Context.BrandId, token)); }, ct);
         if (listing.Min == 0) throw new TelegramIngressRejectedException();
         if (member.Flow.ExpiresAt is DateTime expiry && expiry <= listing.Now) throw new TelegramIngressRejectedException();
         int? quantity = ParseQuantity(update.Value);
@@ -203,9 +194,7 @@ public sealed class UpdateRouter
             !Guid.TryParseExact(parts[3], "N", out Guid target) || target == Guid.Empty || target.ToString("N") != parts[3]) throw new TelegramIngressRejectedException();
         return new(revision, parts[2][0], target);
     }
-    private static Task<bool> Published(DbSession session, BrandContext context, Guid productId, CancellationToken ct) =>
-        session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brand_products b JOIN shop.products p ON p.id=b.product_id WHERE b.brand_id=$1 AND p.id=$2 AND b.visible AND p.active)",
-            DbValue.Uuid(context.BrandId), DbValue.Uuid(productId)), row => row.GetBoolean(0), ct);
+    private static Task<bool> Published(DbSession session, BrandContext context, Guid productId, CancellationToken ct) => session.RunEfStepAsync(false, (data, token) => (from b in data.Data.Set<BrandProduct>() join p in data.Data.Set<Product>() on b.ProductId equals p.Id where b.BrandId == context.BrandId && p.Id == productId && b.Visible && p.Active select p.Id).AnyAsync(token), ct);
     private static (string Event, string Action, UpdateRouteCode Code) Action(VerifiedTelegramUpdate update, Callback? callback) => callback?.Action switch
     {
         'p' => ("navigation", "product_open", UpdateRouteCode.Product),

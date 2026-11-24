@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -56,13 +57,7 @@ public sealed class SqliteStagingConfiguration
         var state = new SqliteStagingConfiguration(context, botId, recipient, secretRoot);
         bool valid = await state.Sessions.RunAsync(false, async (_, tx, token) =>
         {
-            using var command = SqliteWallet.Command(tx, """
-                SELECT EXISTS(SELECT 1 FROM brands WHERE id=$brand AND bot_id=1001
-                        AND policy_version>=0 AND active=1)
-                    AND EXISTS(SELECT 1 FROM users WHERE brand_id=$brand AND telegram_id=7001
-                        AND blocked_at IS NULL AND banned_at IS NULL)
-                """, ("$brand", StageBrand));
-            return (long)(await command.ExecuteScalarAsync(token))! == 1;
+            return await SqliteSessionFactory.StepEfAsync(tx, false, async (data, cancel) => await data.Data.Set<Entities.Brand>().AnyAsync(row => row.Id == StageBrand && row.BotId == 1001 && row.PolicyVersion >= 0 && row.Active, cancel) && await data.Data.Set<Entities.User>().AnyAsync(row => row.BrandId == StageBrand && row.TelegramId == 7001 && row.BlockedAt == null && row.BannedAt == null, cancel), token);
         }, ct);
         if (!valid) throw new UnauthorizedAccessException("SQLite staging brand fixture is unavailable.");
         return state;
