@@ -56,7 +56,9 @@ public sealed class SqlitePrepaidSourceTests
                 return 0;
             }, ct);
             var store = new SqlitePrepaidSourceStore(sessions, secrets);
-            Guid issued = await store.IssueAsync(brand, source, ct);
+            Guid[] issuedTogether = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => store.IssueAsync(brand, source, ct)));
+            Guid issued = issuedTogether[0];
+            Assert.All(issuedTogether, value => Assert.Equal(issued, value));
             Assert.Equal(issued, await new SqlitePrepaidSourceStore(new SqliteSessionFactory(path), secrets)
                 .IssueAsync(brand, source, ct));
             await Assert.ThrowsAsync<PricingRejectedException>(() =>

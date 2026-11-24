@@ -31,13 +31,14 @@ internal sealed partial class EfSession
     }
     internal async Task RequireOrderCommandAsync(BrandContext context, Guid order, CancellationToken ct)
     {
-        if (!await (from value in Data.Set<Order>()
-                    join member in Data.Set<User>() on value.UserId equals member.Id
-                    join brand in Data.Set<Entities.Brand>() on member.BrandId equals brand.Id
-                    where value.Id == order && brand.Id == context.BrandId && brand.BotId == context.BotId
-                    select value.Id).AnyAsync(ct))
-            throw Denied("Order scope is unavailable.");
-        await RequireNativeBrandAsync(context.BrandId, ct);
+        Guid? member = await (from value in Data.Set<Order>()
+                              join user in Data.Set<User>() on value.UserId equals user.Id
+                              join brand in Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
+                              where value.Id == order && brand.Id == context.BrandId && brand.BotId == context.BotId && (nativeWriterBoundary || brand.Active)
+                              select (Guid?)user.Id).SingleOrDefaultAsync(ct);
+        if (member is null) throw Denied("Order scope is unavailable.");
+        if (nativeWriterBoundary) await RequireNativeBrandAsync(context.BrandId, ct);
+        else await RequireWalletCommandAsync(member.Value, ct);
     }
     internal async Task RequireSourceCommandAsync(Guid source, CancellationToken ct)
     {

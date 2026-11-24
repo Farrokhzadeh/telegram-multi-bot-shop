@@ -1,7 +1,9 @@
+using Microsoft.EntityFrameworkCore;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Core;
+using Platform.Persistence.Configurations;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -49,65 +51,56 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
         ArgumentNullException.ThrowIfNull(request);
         if (request.OrderId == Guid.Empty || request.ProductId == Guid.Empty || request.Quantity is < 1 or > 10000 || request.UnitPrice <= 0 ||
             request.ListingRevision < 0 || request.ProductRevision < 0 || request.PolicyRevision < 0) throw new ArgumentException("Invalid checkout request.");
-        await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM (SELECT id FROM shop.users WHERE brand_id=$1 AND telegram_id=$2 FOR UPDATE) u", DbValue.Uuid(context.BrandId), DbValue.Bigint(verifiedActorId)), row => row.GetInt64(0), ct);
+        await session.RunEfStepAsync(false, (data, token) => data.LockMemberAsync(context.BrandId, verifiedActorId, token), ct);
         BrandUser member = await BrandUserStore.RequireAsync(session, context, verifiedActorId, null, ct);
         if (member.Blocked || member.Banned) Reject(session);
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(BinaryPrimitives.ReadInt64BigEndian(request.OrderId.ToByteArray(bigEndian: true)))), ct);
         if (writerRevision is long revision) await BrandWriterStore.RequireCustomerAsync(session, context, verifiedActorId, revision, request.ProductId, ct);
         else await session.AdmitCustomerWriterAsync(context, verifiedActorId, request.ProductId, ct);
         byte[] fingerprint = Fingerprint(context, member.Id, request);
-        var prior = await session.QuerySingleAsync(new DbStatement("""
-            SELECT o.id,a.id,a.actor_user_id,a.brand_id,a.command_sha256 FROM (SELECT 1) seed
-            LEFT JOIN shop.orders o ON o.id=$1 LEFT JOIN shop.audit_events a ON a.id=$1
-            """, DbValue.Uuid(request.OrderId)), row => new Prior(row.IsDBNull(0), row.IsDBNull(1), row.IsDBNull(2) ? null : row.GetGuid(2), row.IsDBNull(3) ? null : row.GetGuid(3), row.IsDBNull(4) ? null : row.GetBinary(4)), ct);
+        var prior = await session.RunEfStepAsync(false, (data, token) => CheckoutQueries.ReplayAsync(data, request.OrderId, token), ct);
         if (!prior.NoOrder || !prior.NoAudit)
         {
             if (prior.NoOrder || prior.NoAudit || prior.Member != member.Id || prior.Brand != context.BrandId || prior.Hash is null || !CryptographicOperations.FixedTimeEquals(prior.Hash, fingerprint)) Reject(session);
             return new(CheckoutOutcome.Replayed, request.OrderId);
         }
-        var product = await session.QuerySingleAsync<Product?>(new DbStatement("""
-            SELECT p.id,p.active,p.fulfillment_kind,p.availability_policy,p.local_first,p.revision,p.title,p.description,p.icon_ref,p.guidance
-            FROM (SELECT 1) seed LEFT JOIN (SELECT * FROM shop.products WHERE id=$1 FOR UPDATE) p ON true
-            """, DbValue.Uuid(request.ProductId)), row => row.IsDBNull(0) ? null : new Product(row.GetBoolean(1), row.GetString(2), row.GetString(3), row.GetBoolean(4), row.GetInt64(5), row.GetString(6), Text(row, 7), Text(row, 8), Text(row, 9)), ct);
+        var product = await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            await data.LockProductAsync(request.ProductId, token);
+            return await data.Data.Set<Entities.Product>().Where(value => value.Id == request.ProductId).Select(value => new Product(value.Active, value.FulfillmentKind, value.AvailabilityPolicy, value.LocalFirst, value.Revision, value.Title, value.Description, value.IconRef, value.Guidance)).SingleOrDefaultAsync(token);
+        }, ct);
         if (product is null || !product.Active || product.Kind != "local" || product.Availability != "immediate") return new(CheckoutOutcome.Unavailable);
-        var brand = await session.QuerySingleAsync(new DbStatement("SELECT public_name,policy_version,allow_wallet,require_channel_join FROM shop.brands WHERE id=$1 AND bot_id=$2 AND active FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)),
-            row => (Name: row.GetString(0), Revision: row.GetInt64(1), Wallet: row.GetBoolean(2), Channels: row.GetBoolean(3)), ct);
+        var brand = await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            await data.LockBrandUpdateAsync(context.BrandId, token);
+            return await data.Data.Set<Entities.Brand>().Where(value => value.Id == context.BrandId && value.BotId == context.BotId && value.Active).Select(value => new { Name = value.PublicName, Revision = value.PolicyVersion, Wallet = value.AllowWallet, Channels = value.RequireChannelJoin }).SingleAsync(token);
+        }, ct);
         if (!brand.Wallet || brand.Channels) return new(CheckoutOutcome.Unavailable);
-        var listing = await session.QuerySingleAsync<Listing?>(new DbStatement("""
-            SELECT b.product_id,b.visible,b.allow_wallet,b.price_usdt::text,b.min_quantity,b.max_quantity,b.revision,
-                CASE WHEN b.title_mode='override' THEN b.title_override ELSE $3 END,
-                CASE b.description_mode WHEN 'override' THEN b.description_override WHEN 'clear' THEN NULL ELSE $4 END,
-                CASE b.icon_mode WHEN 'override' THEN b.icon_override WHEN 'clear' THEN NULL ELSE $5 END,
-                CASE b.guidance_mode WHEN 'override' THEN b.guidance_override WHEN 'clear' THEN NULL ELSE $6 END
-            FROM (SELECT 1) seed LEFT JOIN (SELECT * FROM shop.brand_products WHERE brand_id=$1 AND product_id=$2 FOR UPDATE) b ON true
-            """, DbValue.Uuid(context.BrandId), DbValue.Uuid(request.ProductId), DbValue.Text(product.Title), NullableText(product.Description), NullableText(product.Icon), NullableText(product.Guidance)),
-            row => row.IsDBNull(0) ? null : new Listing(row.GetBoolean(1), row.GetBoolean(2), ExactDecimal.Parse(row.GetString(3)), row.GetInt32(4), row.GetInt32(5), row.GetInt64(6), row.GetString(7), Text(row, 8), Text(row, 9), Text(row, 10)), ct);
+        var listing = await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            await data.LockListingAsync(context.BrandId, request.ProductId, token);
+            return await data.Data.Set<Entities.BrandProduct>().Where(value => value.BrandId == context.BrandId && value.ProductId == request.ProductId).Select(value => new Listing(value.Visible, value.AllowWallet, value.PriceUsdt, value.MinQuantity, value.MaxQuantity, value.Revision,
+                value.TitleMode == "override" ? value.TitleOverride! : product.Title, value.DescriptionMode == "override" ? value.DescriptionOverride : value.DescriptionMode == "clear" ? null : product.Description,
+                value.IconMode == "override" ? value.IconOverride : value.IconMode == "clear" ? null : product.Icon, value.GuidanceMode == "override" ? value.GuidanceOverride : value.GuidanceMode == "clear" ? null : product.Guidance)).SingleOrDefaultAsync(token);
+        }, ct);
         if (listing is null || !listing.Visible || !listing.Wallet || request.Quantity < listing.Min || request.Quantity > listing.Max) return new(CheckoutOutcome.Unavailable);
         if (listing.Price != request.UnitPrice || listing.Revision != request.ListingRevision || product.Revision != request.ProductRevision || brand.Revision != request.PolicyRevision) return new(CheckoutOutcome.QuoteChanged);
-        bool guarded = await session.QuerySingleAsync(new DbStatement("""
-            SELECT EXISTS(SELECT 1 FROM shop.orders WHERE user_id=$1 AND payment_status IN ('awaiting_payment','under_review','confirmation_pending'))
-                OR EXISTS(SELECT 1 FROM shop.orders WHERE product_id=$2 AND is_preorder AND payment_status IN ('paid','not_required') AND fulfillment_status IN ('waiting_stock','requires_admin'))
-                OR EXISTS(SELECT 1 FROM shop.discounts WHERE brand_id=$3 AND active AND (product_id IS NULL OR product_id=$2) AND (eligible_user_id IS NULL OR eligible_user_id=$1)
-                    AND (starts_at IS NULL OR starts_at<=clock_timestamp()) AND (ends_at IS NULL OR ends_at>clock_timestamp()))
-            """, DbValue.Uuid(member.Id), DbValue.Uuid(request.ProductId), DbValue.Uuid(context.BrandId)), row => row.GetBoolean(0), ct);
+        bool guarded = await session.RunEfStepAsync(false, async (data, token) =>
+            await data.Data.Set<Entities.Order>().AnyAsync(value => value.UserId == member.Id && (value.PaymentStatus == "awaiting_payment" || value.PaymentStatus == "under_review" || value.PaymentStatus == "confirmation_pending"), token) ||
+            await data.Data.Set<Entities.Order>().AnyAsync(value => value.ProductId == request.ProductId && value.IsPreorder && (value.PaymentStatus == "paid" || value.PaymentStatus == "not_required") && (value.FulfillmentStatus == "waiting_stock" || value.FulfillmentStatus == "requires_admin"), token) ||
+            await data.Data.Set<Entities.Discount>().AnyAsync(value => value.BrandId == context.BrandId && value.Active && (value.ProductId == null || value.ProductId == request.ProductId) && (value.EligibleUserId == null || value.EligibleUserId == member.Id) && (value.StartsAt == null || value.StartsAt <= EfValues.UtcNow()) && (value.EndsAt == null || value.EndsAt > EfValues.UtcNow()), token), ct);
         if (guarded) return new(CheckoutOutcome.Unavailable);
         Money total = new Money(listing.Price, Currency.Usd).MultiplyQuantity(request.Quantity);
         var wallet = await WalletOperations.ReadAsync(session, member.Id, ct);
         if (wallet.Balance.Amount < total.Amount) return new(CheckoutOutcome.InsufficientBalance);
-        var stock = await session.QueryManyAsync(new DbStatement("SELECT id,credential_ciphertext,credential_key_id FROM shop.inventory_items WHERE product_id=$1 AND state='available' ORDER BY id LIMIT $2 FOR UPDATE", DbValue.Uuid(request.ProductId), DbValue.Integer(request.Quantity)),
-            row => new Stock(row.GetGuid(0), row.GetBinary(1), row.GetString(2)), request.Quantity, ct);
+        var stock = await ReadStockAsync(session, request.ProductId, request.Quantity, ct);
         if (stock.Count != request.Quantity) return new(CheckoutOutcome.OutOfStock);
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.audit_events(id,actor_kind,actor_user_id,brand_id,action,entity_kind,entity_id,reason,command_sha256,correlation_id)
-            VALUES ($1,'customer',$2,$3,'create','order',$1,'customer_request',$4,gen_random_uuid())
-            """, DbValue.Uuid(request.OrderId), DbValue.Uuid(member.Id), DbValue.Uuid(context.BrandId), DbValue.Binary(fingerprint)), ct);
-        await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.orders(id,user_id,product_id,quantity,order_kind,payment_status,currency,payment_method,unit_price_usdt,auto_price_toman_snapshot,
-                pricing_rounding_step_snapshot,price_calculation_version,brand_public_name_snapshot,product_title_snapshot,product_description_snapshot,
-                product_icon_snapshot,product_guidance_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,payment_confirmed_at)
-            VALUES ($1,$2,$3,$4,'product_purchase','paid','USDT','wallet',$5,false,5000,'local-wallet-v1',$6,$7,$8,$9,$10,'USD store credit; complete-order delivery','local',$11,false,CURRENT_TIMESTAMP)
-            """, DbValue.Uuid(request.OrderId), DbValue.Uuid(member.Id), DbValue.Uuid(request.ProductId), DbValue.Integer(request.Quantity), DbValue.Numeric(listing.Price),
-            DbValue.Text(brand.Name), DbValue.Text(listing.Title), NullableText(listing.Description), NullableText(listing.Icon), NullableText(listing.Guidance), DbValue.Boolean(product.LocalFirst)), ct);
+        await session.RunEfStepAsync(true, async (data, token) =>
+        {
+            DateTime now = await data.BrandClockAsync(context.BrandId, token);
+            await CheckoutQueries.InsertAsync(data, context, verifiedActorId, new Entities.Order { Id = request.OrderId, UserId = member.Id, ProductId = request.ProductId, Quantity = request.Quantity, OrderKind = "product_purchase", PaymentStatus = "paid", Currency = "USDT", PaymentMethod = "wallet", UnitPriceUsdt = listing.Price, AutoPriceTomanSnapshot = false, PricingRoundingStepSnapshot = 5000m, PriceCalculationVersion = "local-wallet-v1", BrandPublicNameSnapshot = brand.Name, ProductTitleSnapshot = listing.Title, ProductDescriptionSnapshot = listing.Description, ProductIconSnapshot = listing.Icon, ProductGuidanceSnapshot = listing.Guidance, PaymentTermsSnapshot = "USD store credit; complete-order delivery", FulfillmentKindSnapshot = "local", LocalFirstSnapshot = product.LocalFirst, IsPreorder = false, PaymentConfirmedAt = now }, fingerprint, token);
+            return true;
+        }, ct);
         await BotActivityWriter.CheckoutAsync(session, context, verifiedActorId, request.OrderId, ct);
         await WalletOperations.PostAsync(session, member.Id, new Money(-total.Amount, Currency.Usd), wallet.Version,
             new Entities.WalletEntry { Id = Guid.CreateVersion7(), MovementKind = "purchase_debit", IdempotencyKey = "checkout:" + request.OrderId.ToString("D"), OrderId = request.OrderId, Reason = "customer_request" }, ct);
@@ -126,11 +119,8 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
         }
         return SHA256.HashData(bytes.GetBuffer().AsSpan(0, checked((int)bytes.Length)));
     }
-    private static string? Text(DbRow row, int column) => row.IsDBNull(column) ? null : row.GetString(column);
-    private static DbValue NullableText(string? value) => value is null ? DbValue.Null(NpgsqlTypes.NpgsqlDbType.Text) : DbValue.Text(value);
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void Reject(DbSession session) { session.RejectApplication(); throw new UnauthorizedAccessException("Checkout request is unavailable."); }
-    private sealed record Prior(bool NoOrder, bool NoAudit, Guid? Member, Guid? Brand, byte[]? Hash);
     private sealed record Product(bool Active, string Kind, string Availability, bool LocalFirst, long Revision, string Title, string? Description, string? Icon, string? Guidance);
     private sealed record Listing(bool Visible, bool Wallet, decimal Price, int Min, int Max, long Revision, string Title, string? Description, string? Icon, string? Guidance);
     internal sealed record Stock(Guid Id, byte[] Content, string Key);
