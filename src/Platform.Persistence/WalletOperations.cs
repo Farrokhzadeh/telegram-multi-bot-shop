@@ -45,7 +45,12 @@ internal static class WalletOperations
         Money balance = wallet.Balance.Add(change);
         if (balance.Amount < 0) data.RejectConflict("Wallet funds are insufficient.");
         var row = await data.Data.Set<Wallet>().SingleOrDefaultAsync(value => value.UserId == member, ct);
-        if (row is null) { row = new Wallet { UserId = member }; data.Data.Add(row); }
+        if (row is null)
+        {
+            row = new Wallet { UserId = member };
+            data.Data.Add(row);
+            await data.FlushAsync(ct, false);
+        }
         row.Balance = balance.Amount; row.Version = checked(wallet.Version + 1);
         row.UpdatedAt = now ?? await data.ClockAsync(data.Data.Set<User>().Where(value => value.Id == member), ct);
         entry.UserId = member; entry.SignedAmount = change.Amount; entry.BalanceAfter = balance.Amount; entry.PostingVersion = row.Version; entry.IsPosting = true;

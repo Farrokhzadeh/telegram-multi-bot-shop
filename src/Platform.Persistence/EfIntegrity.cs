@@ -99,7 +99,7 @@ internal sealed partial class EfIntegrity(AkantiDbContext data, Func<bool> canWr
                 (!data.Set<Wallet>().Any(wallet => wallet.UserId == entry.UserId && wallet.Version >= entry.PostingVersion) ||
                     (entry.PostingVersion == 1 && entry.BalanceAfter != entry.SignedAmount) ||
                     (entry.PostingVersion > 1 && !ledger.Any(previous => previous.UserId == entry.UserId && previous.IsPosting &&
-                        previous.PostingVersion == entry.PostingVersion - 1 && previous.BalanceAfter + entry.SignedAmount == entry.BalanceAfter))), ct), "wallet_posting_chain");
+                        previous.PostingVersion == entry.PostingVersion - 1 && previous.BalanceAfter + entry.SignedAmount >= entry.BalanceAfter && previous.BalanceAfter + entry.SignedAmount <= entry.BalanceAfter))), ct), "wallet_posting_chain");
         }
         if (postings.Count != 0 || orders.Count != 0 || payments.Count != 0)
         {
