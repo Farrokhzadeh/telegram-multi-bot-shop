@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Platform.Persistence;
 
-internal enum EfRowLock { None, Share, Update, NoKeyUpdate }
+internal enum EfRowLock { None, Share, Update, NoKeyUpdate, UpdateSkipLocked }
 
 internal sealed class EfMutationInterceptor : DbCommandInterceptor
 {
@@ -47,7 +47,7 @@ internal sealed class EfMutationInterceptor : DbCommandInterceptor
                 integrity.Reject();
                 throw new InvalidOperationException("Row locks require a generated PostgreSQL query.");
             }
-            command.CommandText += integrity.RowLock switch { EfRowLock.Share => " FOR SHARE", EfRowLock.Update => " FOR UPDATE", EfRowLock.NoKeyUpdate => " FOR NO KEY UPDATE", _ => throw new InvalidOperationException() };
+            command.CommandText += integrity.RowLock switch { EfRowLock.Share => " FOR SHARE", EfRowLock.Update => " FOR UPDATE", EfRowLock.UpdateSkipLocked => " FOR UPDATE SKIP LOCKED", EfRowLock.NoKeyUpdate => " FOR NO KEY UPDATE", _ => throw new InvalidOperationException() };
         }
         return ValueTask.FromResult(result);
     }

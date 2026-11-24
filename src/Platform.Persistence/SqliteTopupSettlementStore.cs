@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Security;
 
@@ -33,46 +34,40 @@ public sealed class SqliteTopupSettlementStore(SqliteSessionFactory sessions)
                     remote.Status is ("waiting" or "confirming" or "confirmed" or "sending"))
                     return new PaymentSettlement(PaymentSettlementOutcome.Pending, ExternalSettlementRoute.Review);
 
-                using var review = SqliteWallet.Command(tx, "UPDATE payments SET status='review' WHERE id=$id AND status='confirming'", ("$id", payment));
-                if (await review.ExecuteNonQueryAsync(token) != 1) throw new PaymentNoticeRejectedException();
+                await ChangeAsync(tx, context, payment, "review", null, token);
                 return new(PaymentSettlementOutcome.Review, ExternalSettlementRoute.Review);
             }
 
             var wallet = await SqliteWallet.ReadAsync(tx, current.Member, token);
             Guid credit = await SqliteWallet.PostAsync(tx, current.Member, wallet, ExternalPaymentPolicy.FrozenCredit(current.Invoice.UsdDue),
                 payment, true, SqliteSchema.UtcText(DateTime.UtcNow), token);
-            using var settle = SqliteWallet.Command(tx, """
-                UPDATE payments SET status='settled',compensating_wallet_entry_id=$credit WHERE id=$id AND status='confirming'
-                """, ("$credit", credit), ("$id", payment));
-            if (await settle.ExecuteNonQueryAsync(token) != 1) throw new PaymentNoticeRejectedException();
+            await ChangeAsync(tx, context, payment, "settled", credit, token);
             return new(PaymentSettlementOutcome.Settled, ExternalSettlementRoute.Topup, credit);
         }, ct);
     }
 
     private static async Task<State> ReadAsync(SqliteTransaction tx, BrandContext context, long revision, Guid payment, CancellationToken ct)
     {
-        using var command = SqliteWallet.Command(tx, """
-            SELECT p.topup_user_id,p.status,p.compensating_wallet_entry_id,p.payment_method,p.provider_code,p.provider_status_code,
-                p.provider_payment_ref,p.idempotency_ref,p.network_asset,p.amount_due,p.expected_network_amount,p.network_amount,p.amount_received,
-                p.ipn_payload_sha256,p.evidence_asset_ref,p.confirmed_at,p.first_payment_observed_at
-            FROM payments p JOIN users u ON u.id=p.topup_user_id JOIN brands b ON b.id=u.brand_id
-            WHERE p.id=$id AND b.id=$brand AND b.bot_id=$bot AND b.active AND b.policy_version=$revision AND p.quote_currency='USD'
-            """, ("$id", payment), ("$brand", context.BrandId), ("$bot", context.BotId), ("$revision", revision));
-        await using var row = await command.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct)) throw new UnauthorizedAccessException("Payment is unavailable.");
-        Guid member = row.GetGuid(0);
-        string status = row.GetString(1);
-        Guid? credit = row.IsDBNull(2) ? null : row.GetGuid(2);
-        if (status != "confirming" || row.GetString(3) != "crypto" || Text(row, 4) != "nowpayments" ||
-            Text(row, 5) != "finished" || Text(row, 6) is not string provider || Number(row, 10) is not > 0 ||
-            Number(row, 10) != Number(row, 11) || Number(row, 9) != Number(row, 12) ||
-            row.IsDBNull(13) || row.IsDBNull(14) || row.IsDBNull(15) || row.IsDBNull(16))
-            return new(member, status, credit, null, null);
-
-        string network = Text(row, 8) switch { "USDTBSC" => "usdtbsc", "USDTTRC20" => "usdttrc20", _ => throw new PaymentNoticeRejectedException() };
-        return new(member, status, credit, new InvoiceExpectation(provider, row.GetString(7), Number(row, 9)!.Value, network, Number(row, 10)!.Value),
-            row.GetFieldValue<byte[]>(13));
+        var row = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) =>
+            (from value in data.Data.Set<Entities.Payment>()
+             join user in data.Data.Set<Entities.User>() on value.TopupUserId equals user.Id
+             join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
+             where value.Id == payment && brand.Id == context.BrandId && brand.BotId == context.BotId && brand.Active && brand.PolicyVersion == revision && value.QuoteCurrency == "USD"
+             select new { Member = user.Id, value.Status, value.CompensatingWalletEntryId, value.PaymentMethod, value.ProviderCode, value.ProviderStatusCode, value.ProviderPaymentRef, value.ExpectedNetworkAmount, value.NetworkAmount, value.AmountDue, value.AmountReceived, value.IpnPayloadSha256, value.EvidenceAssetRef, value.ConfirmedAt, value.FirstPaymentObservedAt, value.NetworkAsset, value.IdempotencyRef }).SingleOrDefaultAsync(token), ct);
+        if (row is null) throw new UnauthorizedAccessException("Payment is unavailable.");
+        if (row.Status != "confirming" || row.PaymentMethod != "crypto" || row.ProviderCode != "nowpayments" || row.ProviderStatusCode != "finished" || row.ProviderPaymentRef is not string provider || row.ExpectedNetworkAmount is not > 0 || row.ExpectedNetworkAmount != row.NetworkAmount || row.AmountDue != row.AmountReceived || row.IpnPayloadSha256 == null || row.EvidenceAssetRef == null || row.ConfirmedAt == null || row.FirstPaymentObservedAt == null) return new(row.Member, row.Status, row.CompensatingWalletEntryId, null, null);
+        string network = row.NetworkAsset switch { "USDTBSC" => "usdtbsc", "USDTTRC20" => "usdttrc20", _ => throw new PaymentNoticeRejectedException() };
+        return new(row.Member, row.Status, row.CompensatingWalletEntryId, new InvoiceExpectation(provider, row.IdempotencyRef, row.AmountDue, network, row.ExpectedNetworkAmount.Value), row.IpnPayloadSha256);
     }
+    private static Task<bool> ChangeAsync(SqliteTransaction tx, BrandContext context, Guid payment, string status, Guid? credit, CancellationToken ct) => SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
+    {
+        await data.RequirePaymentCommandAsync(context, payment, token);
+        var row = await data.Data.Set<Entities.Payment>().SingleOrDefaultAsync(value => value.Id == payment && value.Status == "confirming", token);
+        if (row is null) throw new PaymentNoticeRejectedException();
+        row.Status = status;
+        if (credit is Guid entry) row.CompensatingWalletEntryId = entry;
+        return true;
+    }, ct);
 
     private static PaymentSettlement Pending(State state) => state.Status switch
     {
@@ -82,7 +77,5 @@ public sealed class SqliteTopupSettlementStore(SqliteSessionFactory sessions)
         _ => new(PaymentSettlementOutcome.Pending, ExternalSettlementRoute.Review)
     };
 
-    private static string? Text(SqliteDataReader row, int i) => row.IsDBNull(i) ? null : row.GetString(i);
-    private static decimal? Number(SqliteDataReader row, int i) => row.IsDBNull(i) ? null : ExactDecimal.Parse(row.GetString(i));
     private sealed record State(Guid Member, string Status, Guid? Credit, InvoiceExpectation? Invoice, byte[]? Proof);
 }

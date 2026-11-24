@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Entities = Platform.Persistence.Entities;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Persistence;
@@ -31,14 +33,22 @@ public sealed class BankDestinationService : IDisposable
             {
                 if (!await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Update, AuditEntity.Brand, context.BrandId, context.BrandId, AuditReason.ConfigurationChange, command, hash), ct)) return;
                 await session.AdmitWriterAsync(context, ct);
-                var state = await session.QuerySingleAsync(new DbStatement("SELECT policy_version,market FROM shop.brands WHERE id=$1 AND bot_id=$2 FOR UPDATE", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => (Revision: r.GetInt64(0), Market: r.GetString(1)), ct);
+                var state = await session.RunEfStepAsync(false, async (data, token) =>
+                {
+                    await data.LockBrandUpdateAsync(context.BrandId, token);
+                    return await data.Data.Set<Entities.Brand>().Where(value => value.Id == context.BrandId && value.BotId == context.BotId).Select(value => new { Revision = value.PolicyVersion, value.Market }).SingleAsync(token);
+                }, ct);
                 if (state.Revision != expectedPolicyRevision || state.Market != "iran") throw new InvalidOperationException("Receiving destination revision conflict.");
                 var cipher = new BrandCipher(secrets);
-                await session.ExecuteAsync(new DbStatement("""
-                    UPDATE shop.brands SET bank_number_ciphertext=$1,bank_holder_ciphertext=$2,bank_key_id=$3,bank_card_fingerprint=$4,bank_changed_at=clock_timestamp(),
-                        allow_bank=true,policy_version=policy_version+1,updated_at=clock_timestamp() WHERE id=$5
-                    """, DbValue.Binary(cipher.Encrypt(context, "brands", context.BrandId, "bank_number_ciphertext", plain)),
-                    DbValue.Binary(cipher.Encrypt(context, "brands", context.BrandId, "bank_holder_ciphertext", name)), DbValue.Text(secrets.CurrentBrandKeyId(context)), DbValue.Binary(fingerprint), DbValue.Uuid(context.BrandId)), ct);
+                byte[] encryptedNumber = cipher.Encrypt(context, "brands", context.BrandId, "bank_number_ciphertext", plain), encryptedHolder = cipher.Encrypt(context, "brands", context.BrandId, "bank_holder_ciphertext", name);
+                await session.RunEfStepAsync(true, async (data, token) =>
+                {
+                    await data.RequireAdminAsync(actor, null, token); await data.RequireBrandCommandAsync(context.BrandId, token);
+                    var row = await data.Data.Set<Entities.Brand>().SingleAsync(value => value.Id == context.BrandId, token);
+                    DateTime now = await data.BrandClockAsync(context.BrandId, token);
+                    row.BankNumberCiphertext = encryptedNumber; row.BankHolderCiphertext = encryptedHolder; row.BankKeyId = secrets.CurrentBrandKeyId(context); row.BankCardFingerprint = fingerprint; row.BankChangedAt = now;
+                    row.AllowBank = true; row.PolicyVersion++; row.UpdatedAt = now; return true;
+                }, ct);
                 await session.CommitAsync(ct);
             }
             catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }

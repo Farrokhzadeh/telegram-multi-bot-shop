@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
 namespace Platform.Persistence;
@@ -21,61 +22,38 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
             $"receipt-decision-v1:{payment:D}:{approve}:{expectedOrderRevision}:{reason}"));
         var audit = new AuditCommand(command, AuditAction.Update, AuditEntity.Payment, payment,
             context.BrandId, AuditReason.OperatorReview, command, hash);
-        byte[] commitment = audit.Fingerprint(actor.AdminId);
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
-            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            using (var previous = SqliteWallet.Command(tx,
-                "SELECT command_sha256 FROM audit_events WHERE id=$command", ("$command", command)))
-            {
-                object? value = await previous.ExecuteScalarAsync(token);
-                if (value is byte[] prior)
-                {
-                    if (!CryptographicOperations.FixedTimeEquals(prior, commitment))
-                        throw new UnauthorizedAccessException("Administrator command identity conflict.");
-                    return SqliteBankDecisionOutcome.Replayed;
-                }
-            }
+            if (!await AdminAuditStore.AppendSqliteAsync(tx, actor, audit, token)) return SqliteBankDecisionOutcome.Replayed;
             State state = await ReadAsync(tx, context, payment, token);
             if (state.Method != "bank" || state.Status != "observed" ||
                 state.OrderStatus != "under_review" || state.Revision != expectedOrderRevision ||
                 state.Receipt is null || state.First is null || state.Due is null ||
-                string.CompareOrdinal(state.First, state.Due) > 0 ||
+                state.First > state.Due ||
                 state.Held || state.Review || state.OrderKind is not ("product_purchase" or "prepaid_units") ||
                 state.OrderKind == "product_purchase" && state.Kind is not ("local" or "manual") ||
                 state.Preorder)
                 throw new InvalidOperationException("Bank receipt is not eligible for approval.");
-            string now = SqliteSchema.UtcText(DateTime.UtcNow);
-            await Change(tx, """
-                INSERT INTO audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,
-                    reason,correlation_id,command_sha256)
-                VALUES ($command,'admin',$admin,$brand,'update','payment',$payment,'operator_review',$command,$hash)
-                """, token, ("$command", command), ("$admin", actor.AdminId),
-                ("$brand", context.BrandId), ("$payment", payment), ("$hash", commitment));
-            await Change(tx, """
-                UPDATE payments SET status=$status,review_admin_id=$admin,reviewed_at=$now,
-                    review_reason=$reason,amount_received=CASE WHEN $approve THEN amount_due ELSE amount_received END,
-                    confirmed_at=CASE WHEN $approve THEN $now ELSE confirmed_at END
-                WHERE id=$payment AND status='observed' AND receipt_asset_ref IS NOT NULL
-                """, token, ("$status", approve ? "settled" : "rejected"), ("$admin", actor.AdminId),
-                ("$now", now), ("$reason", reason), ("$approve", approve), ("$payment", payment));
+            DateTime instant = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.BrandClockAsync(context.BrandId, cancel), token);
+            string now = SqliteSchema.UtcText(instant);
+            await SqlitePaymentOperations.PaymentAsync(tx, context, payment, row =>
+            {
+                if (row.Status != "observed" || row.ReceiptAssetRef == null) throw new InvalidOperationException("Bank decision lost its authorized target.");
+                row.Status = approve ? "settled" : "rejected"; row.ReviewAdminId = actor.AdminId; row.ReviewedAt = instant; row.ReviewReason = reason;
+                if (approve) { row.AmountReceived = row.AmountDue; row.ConfirmedAt = instant; }
+            }, token);
             if (!approve) return SqliteBankDecisionOutcome.DeniedUnverified;
-            await Change(tx, """
-                UPDATE orders SET payment_status='paid',payment_confirmed_at=$now,revision=revision+1,
-                    updated_at=$now WHERE id=$order AND payment_status='under_review' AND revision=$revision
-                """, token, ("$now", now), ("$order", state.Order), ("$revision", expectedOrderRevision));
+            await SqlitePaymentOperations.OrderAsync(tx, state.Order, row =>
+            {
+                if (row.PaymentStatus != "under_review" || row.Revision != expectedOrderRevision) throw new InvalidOperationException("Bank decision lost its authorized target.");
+                row.PaymentStatus = "paid"; row.PaymentConfirmedAt = instant;
+            }, instant, token);
             if (state.OrderKind == "prepaid_units")
                 await new SqlitePrepaidSourceStore(sessions, secrets)
                     .IssueAsync(tx, context, state.Order, token);
             else if (state.Kind == "local")
             {
-                bool queued;
-                using (var backlog = SqliteWallet.Command(tx, """
-                    SELECT EXISTS(SELECT 1 FROM orders WHERE product_id=$product AND id<>$order
-                        AND is_preorder=1 AND payment_status IN ('paid','not_required')
-                        AND fulfillment_status IN ('waiting_stock','requires_admin'))
-                    """, ("$product", state.Product), ("$order", state.Order)))
-                    queued = (long)(await backlog.ExecuteScalarAsync(token))! != 0;
+                bool queued = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Order>().AnyAsync(value => value.ProductId == state.Product && value.Id != state.Order && value.IsPreorder && (value.PaymentStatus == "paid" || value.PaymentStatus == "not_required") && (value.FulfillmentStatus == "waiting_stock" || value.FulfillmentStatus == "requires_admin"), cancel), token);
                 List<SqliteOrderPaymentSettlementStore.Stock> stock = queued ? [] :
                     await SqliteOrderPaymentSettlementStore.ReadStockAsync(
                     tx, state.Product, state.Quantity, token);
@@ -88,11 +66,7 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
                 else await FulfillmentAsync(tx, state.Order, "requires_admin", "stock_shortage", now, token);
             }
             else await FulfillmentAsync(tx, state.Order, "requires_admin", null, now, token);
-            using (var expire = SqliteWallet.Command(tx, """
-                UPDATE jobs SET status='cancelled',completed_at=$now
-                WHERE order_id=$order AND job_kind='expire_order_payment' AND status IN ('pending','retry')
-                """, ("$now", now), ("$order", state.Order)))
-                await expire.ExecuteNonQueryAsync(token);
+            await SqlitePaymentOperations.CancelExpiryAsync(tx, context, state.Order, instant, token);
             await StatusAsync(tx, context, state, token);
             return SqliteBankDecisionOutcome.ConfirmedPaid;
         }, ct);
@@ -101,61 +75,23 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
     private static async Task<State> ReadAsync(SqliteTransaction tx, BrandContext context, Guid payment,
         CancellationToken ct)
     {
-        using var command = SqliteWallet.Command(tx, """
-            SELECT p.payment_method,p.status,p.receipt_asset_ref,p.first_payment_observed_at,
-                o.payment_due_at,o.payment_status,o.revision,o.product_id,o.quantity,o.fulfillment_kind_snapshot,
-                o.is_preorder,o.user_id,o.id,o.review_code IS NOT NULL,o.hold_at IS NOT NULL,
-                o.order_kind
-            FROM payments p JOIN orders o ON o.id=p.order_id JOIN users u ON u.id=o.user_id
-                JOIN brands b ON b.id=u.brand_id
-            WHERE p.id=$payment AND b.id=$brand AND b.bot_id=$bot AND b.active=1
-            """, ("$payment", payment), ("$brand", context.BrandId), ("$bot", context.BotId));
-        await using var row = await command.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct)) throw new UnauthorizedAccessException("Bank payment is unavailable.");
-        return new(row.GetString(0), row.GetString(1), row.IsDBNull(2) ? null : row.GetString(2),
-            row.IsDBNull(3) ? null : row.GetString(3), row.IsDBNull(4) ? null : row.GetString(4),
-            row.GetString(5), row.GetInt64(6), row.GetGuid(7), row.GetInt32(8), row.GetString(9),
-            row.GetBoolean(10), row.GetGuid(11), row.GetGuid(12), row.GetBoolean(13), row.GetBoolean(14),
-            row.GetString(15));
+        var state = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) =>
+            (from value in data.Data.Set<Entities.Payment>()
+             join order in data.Data.Set<Entities.Order>() on value.OrderId equals order.Id
+             join user in data.Data.Set<Entities.User>() on order.UserId equals user.Id
+             join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
+             where value.Id == payment && brand.Id == context.BrandId && brand.BotId == context.BotId && brand.Active
+             select new State(value.PaymentMethod, value.Status, value.ReceiptAssetRef, value.FirstPaymentObservedAt, order.PaymentDueAt, order.PaymentStatus, order.Revision, order.ProductId!.Value, order.Quantity, order.FulfillmentKindSnapshot, order.IsPreorder, user.Id, order.Id, order.ReviewCode != null, order.HoldAt != null, order.OrderKind)).SingleOrDefaultAsync(token), ct);
+        return state ?? throw new UnauthorizedAccessException("Bank payment is unavailable.");
     }
-
-    private static Task FulfillmentAsync(SqliteTransaction tx, Guid order, string status, string? review,
-        string now, CancellationToken ct) => Change(tx, """
-            UPDATE orders SET fulfillment_status=$status,review_code=$review,
-                revision=revision+1,updated_at=$now WHERE id=$order
-            """, ct, ("$status", status), ("$review", review), ("$now", now), ("$order", order));
-
+    private static Task<bool> FulfillmentAsync(SqliteTransaction tx, Guid order, string status, string? review, string now, CancellationToken ct) => SqlitePaymentOperations.OrderAsync(tx, order, row => { row.FulfillmentStatus = status; row.ReviewCode = review; }, DateTime.ParseExact(now, "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal), ct);
     private static async Task StatusAsync(SqliteTransaction tx, BrandContext context, State state, CancellationToken ct)
     {
-        long? anchor;
-        using (var lookup = SqliteWallet.Command(tx, """
-            SELECT telegram_message_id FROM telegram_deliveries WHERE order_id=$order
-                AND purpose='order_status' AND status='succeeded' AND telegram_message_id IS NOT NULL
-            ORDER BY created_at,id LIMIT 1
-            """, ("$order", state.Order)))
-            anchor = await lookup.ExecuteScalarAsync(ct) as long?;
-        Guid delivery = Guid.CreateVersion7();
-        await Change(tx, """
-            INSERT INTO telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,
-                target_message_id,dedupe_key,order_id)
-            VALUES ($id,$brand,'customer_dm',$member,'order_status',
-                CASE WHEN $anchor IS NULL THEN 'send' ELSE 'edit' END,$anchor,$dedupe,$order)
-            """, ct, ("$id", delivery), ("$brand", context.BrandId), ("$member", state.Member),
-            ("$anchor", anchor), ("$dedupe", "receipt-status:" + state.Order.ToString("D")),
-            ("$order", state.Order));
-        await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(context.BrandId, delivery),
-            delivery, DateTime.UtcNow, ct);
+        Guid delivery = await SqlitePaymentOperations.StatusAsync(tx, context, state.Order, state.Member, "receipt-status:" + state.Order.ToString("D"), ct);
+        await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Telegram(context.BrandId, delivery), delivery, DateTime.UtcNow, ct);
     }
 
-    private static async Task Change(SqliteTransaction tx, string sql, CancellationToken ct,
-        params (string Name, object? Value)[] values)
-    {
-        using var command = SqliteWallet.Command(tx, sql, values);
-        if (await command.ExecuteNonQueryAsync(ct) != 1)
-            throw new InvalidOperationException("Bank decision lost its authorized target.");
-    }
-
-    private sealed record State(string Method, string Status, string? Receipt, string? First,
-        string? Due, string OrderStatus, long Revision, Guid Product, int Quantity, string Kind,
+    private sealed record State(string Method, string Status, string? Receipt, DateTime? First,
+        DateTime? Due, string OrderStatus, long Revision, Guid Product, int Quantity, string Kind,
         bool Preorder, Guid Member, Guid Order, bool Review, bool Held, string OrderKind);
 }

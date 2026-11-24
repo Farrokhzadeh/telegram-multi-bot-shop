@@ -1,147 +1,69 @@
+using System.Numerics;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
+using Platform.Persistence.Configurations;
 using Platform.Security;
 
 namespace Platform.Persistence;
 
 public static class SqliteDiscountClaimStore
 {
-    internal static async Task HoldAsync(SqliteTransaction tx, BrandContext context, Guid member,
-        Guid order, Guid product, CheckoutQuote quote, CancellationToken ct)
+    internal static async Task HoldAsync(SqliteTransaction tx, BrandContext context, Guid member, Guid order, Guid product, CheckoutQuote quote, CancellationToken ct)
     {
         QuoteTerms terms = quote.Terms;
-        if (terms.DiscountId is not Guid coupon || terms.DiscountRevisionId is not Guid revision ||
-            terms.DiscountPercent is not decimal percent || terms.DiscountUnits != terms.Quantity ||
-            percent is <= 0 or >= 100 || terms.Quantity <= 0)
-            throw new PricingRejectedException();
-        using var lookup = SqliteWallet.Command(tx, """
-            SELECT r.id,d.percent_off,d.active,d.starts_at,d.ends_at,d.product_id,d.eligible_user_id,
-                d.kind,d.source_order_id,o.quantity,o.discount_pct_snapshot,o.discount_units_snapshot,
-                o.price_calculation_version,o.pricing_rounding_step_snapshot,o.product_id,o.user_id
-            FROM discounts d JOIN discount_revisions r ON r.discount_id=d.id AND r.revision_no=d.revision
-            JOIN orders o ON o.id=$order
-            JOIN users u ON u.id=o.user_id
-            WHERE d.id=$coupon AND d.brand_id=$brand AND u.brand_id=$brand AND u.id=$member
-            """, ("$coupon", coupon), ("$order", order), ("$brand", context.BrandId), ("$member", member));
-        await using var row = await lookup.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct) || row.GetGuid(0) != revision ||
-            ExactDecimal.Parse(row.GetString(1)) != percent || !row.GetBoolean(2) ||
-            row.GetInt32(9) != terms.Quantity || row.IsDBNull(10) ||
-            ExactDecimal.Parse(row.GetString(10)) != percent || row.IsDBNull(11) ||
-            row.GetInt32(11) != terms.Quantity || row.GetString(12) != terms.Version ||
-            ExactDecimal.Parse(row.GetString(13)) != terms.RoundingStep ||
-            row.GetGuid(14) != product || row.GetGuid(15) != member ||
-            !row.IsDBNull(5) && row.GetGuid(5) != product ||
-            !row.IsDBNull(6) && row.GetGuid(6) != member)
-            throw new PricingRejectedException();
-        string now = SqliteSchema.UtcText(DateTime.UtcNow);
-        if (!row.IsDBNull(3) && string.CompareOrdinal(row.GetString(3), now) > 0 ||
-            !row.IsDBNull(4) && string.CompareOrdinal(row.GetString(4), now) <= 0)
-            throw new PricingRejectedException();
-        if (row.GetString(7) == "prepaid_entitlement")
+        if (terms.DiscountId is not Guid coupon || terms.DiscountRevisionId is not Guid revision || terms.DiscountPercent is not decimal percent || terms.DiscountUnits != terms.Quantity || percent is <= 0 or >= 100 || terms.Quantity <= 0) throw new PricingRejectedException();
+        await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
         {
-            if (row.IsDBNull(8)) throw new PricingRejectedException();
-            Guid source = row.GetGuid(8);
-            await row.CloseAsync();
-            using var payment = SqliteWallet.Command(tx, """
-                SELECT 1 FROM orders WHERE id=$source AND user_id=$member AND product_id=$product
-                    AND order_kind='prepaid_units' AND payment_status='paid' LIMIT 1
-                """, ("$source", source), ("$member", member), ("$product", product));
-            if (await payment.ExecuteScalarAsync(ct) is null) throw new PricingRejectedException();
-        }
-        else await row.CloseAsync();
-        using var quota = SqliteWallet.Command(tx, """
-            SELECT d.max_total_uses,d.max_uses_per_user,d.redeemed_count,d.usage_adjustment_units,
-                (SELECT coalesce(sum(x.units_covered),0) FROM discount_uses x
-                    WHERE x.discount_id=$coupon AND x.status='held'),
-                (SELECT coalesce(sum(x.units_covered),0) FROM discount_uses x JOIN orders o ON o.id=x.order_id
-                    WHERE x.discount_id=$coupon AND o.user_id=$member AND x.status IN ('held','redeemed'))
-            FROM discounts d WHERE d.id=$coupon
-            """, ("$coupon", coupon), ("$member", member));
-        await using var cap = await quota.ExecuteReaderAsync(ct);
-        if (!await cap.ReadAsync(ct)) throw new PricingRejectedException();
-        long redeemed = cap.GetInt64(2), adjustment = cap.GetInt64(3), held = cap.GetInt64(4),
-            used = cap.GetInt64(5);
-        if (!cap.IsDBNull(0) &&
-            (System.Numerics.BigInteger)cap.GetInt64(0) + adjustment - redeemed - held < terms.Quantity ||
-            !cap.IsDBNull(1) && (System.Numerics.BigInteger)cap.GetInt64(1) - used < terms.Quantity)
-            throw new PricingRejectedException();
-        await cap.CloseAsync();
-        Money before = terms.Currency == Currency.Toman
-            ? PricingPolicy.TomanTotal(terms.UnitUsdt, terms.UnitToman, terms.Quantity, 0,
-                terms.AutoToman, terms.Rate)
-            : PricingPolicy.DiscountTotal(terms.UnitUsdt, terms.Quantity, 0, Currency.Usd);
-        Money after = terms.Currency == Currency.Toman
-            ? PricingPolicy.TomanTotal(terms.UnitUsdt, terms.UnitToman, terms.Quantity, percent,
-                terms.AutoToman, terms.Rate)
-            : PricingPolicy.DiscountTotal(terms.UnitUsdt, terms.Quantity, percent, Currency.Usd);
-        Money saved = before.Subtract(after);
-        using var insert = SqliteWallet.Command(tx, """
-            INSERT INTO discount_uses(discount_id,order_id,discount_revision_id,units_covered,
-                saved_amount,saved_currency,status)
-            VALUES ($coupon,$order,$revision,$units,$saved,$currency,'held')
-            """, ("$coupon", coupon), ("$order", order), ("$revision", revision),
-            ("$units", terms.Quantity), ("$saved", ExactDecimal.Format(saved.Amount)),
-            ("$currency", saved.Currency.ToCode()));
-        if (await insert.ExecuteNonQueryAsync(ct) != 1)
-            throw new InvalidOperationException("Discount hold was not persisted.");
+            await data.RequireOrderCommandAsync(context, order, token);
+            var grant = await (from value in data.Data.Set<Entities.Discount>()
+                               join snapshot in data.Data.Set<Entities.DiscountRevision>() on new { Id = value.Id, Revision = value.Revision } equals new { Id = snapshot.DiscountId, Revision = snapshot.RevisionNo }
+                               join source in data.Data.Set<Entities.Order>() on order equals source.Id
+                               join user in data.Data.Set<Entities.User>() on source.UserId equals user.Id
+                               where value.Id == coupon && value.BrandId == context.BrandId && user.BrandId == context.BrandId && user.Id == member
+                               select new { Discount = value, Revision = snapshot.Id, Order = source }).SingleOrDefaultAsync(token);
+            if (grant is null || grant.Revision != revision || grant.Discount.PercentOff != percent || !grant.Discount.Active || grant.Order.Quantity != terms.Quantity || grant.Order.DiscountPctSnapshot != percent || grant.Order.DiscountUnitsSnapshot != terms.Quantity || grant.Order.PriceCalculationVersion != terms.Version || grant.Order.PricingRoundingStepSnapshot != terms.RoundingStep || grant.Order.ProductId != product || grant.Order.UserId != member || grant.Discount.ProductId != null && grant.Discount.ProductId != product || grant.Discount.EligibleUserId != null && grant.Discount.EligibleUserId != member) throw new PricingRejectedException();
+            DateTime now = await data.BrandClockAsync(context.BrandId, token);
+            if (grant.Discount.StartsAt > now || grant.Discount.EndsAt <= now) throw new PricingRejectedException();
+            if (grant.Discount.Kind == "prepaid_entitlement" && !await data.Data.Set<Entities.Order>().AnyAsync(value => value.Id == grant.Discount.SourceOrderId && value.UserId == member && value.ProductId == product && value.OrderKind == "prepaid_units" && value.PaymentStatus == "paid", token)) throw new PricingRejectedException();
+            decimal held = await data.Data.Set<Entities.DiscountUse>().Where(value => value.DiscountId == coupon && value.Status == "held").SumAsync(value => (decimal?)value.UnitsCovered, token) ?? 0m;
+            decimal used = await (from value in data.Data.Set<Entities.DiscountUse>() join source in data.Data.Set<Entities.Order>() on value.OrderId equals source.Id where value.DiscountId == coupon && source.UserId == member && (value.Status == "held" || value.Status == "redeemed") select (decimal?)value.UnitsCovered).SumAsync(token) ?? 0m;
+            if (grant.Discount.MaxTotalUses is long maximum && (BigInteger)maximum + grant.Discount.UsageAdjustmentUnits - grant.Discount.RedeemedCount - (BigInteger)held < terms.Quantity || grant.Discount.MaxUsesPerUser is long per && (BigInteger)per - (BigInteger)used < terms.Quantity) throw new PricingRejectedException();
+            Money before = terms.Currency == Currency.Toman ? PricingPolicy.TomanTotal(terms.UnitUsdt, terms.UnitToman, terms.Quantity, 0, terms.AutoToman, terms.Rate) : PricingPolicy.DiscountTotal(terms.UnitUsdt, terms.Quantity, 0, Currency.Usd);
+            Money after = terms.Currency == Currency.Toman ? PricingPolicy.TomanTotal(terms.UnitUsdt, terms.UnitToman, terms.Quantity, percent, terms.AutoToman, terms.Rate) : PricingPolicy.DiscountTotal(terms.UnitUsdt, terms.Quantity, percent, Currency.Usd);
+            Money saved = before.Subtract(after);
+            data.Data.Add(new Entities.DiscountUse { DiscountId = coupon, OrderId = order, DiscountRevisionId = revision, UnitsCovered = terms.Quantity, SavedAmount = saved.Amount, SavedCurrency = saved.Currency.ToCode(), Status = "held" }); return true;
+        }, ct);
     }
-
-    internal static async Task<bool> TransitionAsync(SqliteTransaction tx, BrandContext context, Guid order,
-        bool redeem, CancellationToken ct)
+    internal static Task<bool> TransitionAsync(SqliteTransaction tx, BrandContext context, Guid order, bool redeem, CancellationToken ct) => SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
     {
-        using var lookup = SqliteWallet.Command(tx, """
-            SELECT c.discount_id,c.units_covered,c.status,o.payment_status,o.order_kind,
-                o.fulfillment_status,o.resolution_kind,o.release_authorized_at IS NOT NULL,
-                o.is_preorder,o.payment_method,o.quantity,
-                (SELECT count(*) FROM fulfillments f JOIN inventory_items i ON i.assigned_fulfillment_id=f.id
-                    WHERE f.order_id=o.id AND f.kind='local' AND f.status IN ('acquired','ready','released')
-                        AND i.state='allocated'),
-                (SELECT count(*) FROM fulfillments WHERE order_id=o.id),
-                EXISTS(SELECT 1 FROM supplier_requests WHERE order_id=o.id)
-            FROM discount_uses c JOIN orders o ON o.id=c.order_id
-                JOIN users u ON u.id=o.user_id JOIN brands b ON b.id=u.brand_id
-            WHERE c.order_id=$order AND b.id=$brand AND b.bot_id=$bot AND b.active=1
-            """, ("$order", order), ("$brand", context.BrandId), ("$bot", context.BotId));
-        await using var row = await lookup.ExecuteReaderAsync(ct);
-        if (!await row.ReadAsync(ct)) return false;
-        Guid coupon = row.GetGuid(0);
-        long units = row.GetInt64(1);
-        string status = row.GetString(2), payment = row.GetString(3), kind = row.GetString(4),
-            fulfillment = row.GetString(5);
-        string? resolution = row.IsDBNull(6) ? null : row.GetString(6);
-        bool released = row.GetBoolean(7), preorder = row.GetBoolean(8);
-        string method = row.GetString(9);
-        long quantity = row.GetInt64(10), allocated = row.GetInt64(11), total = row.GetInt64(12);
-        bool remote = row.GetBoolean(13);
-        await row.CloseAsync();
+        var state = await (from value in data.Data.Set<Entities.DiscountUse>()
+                           join source in data.Data.Set<Entities.Order>() on value.OrderId equals source.Id
+                           join user in data.Data.Set<Entities.User>() on source.UserId equals user.Id
+                           join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
+                           where value.OrderId == order && brand.Id == context.BrandId && brand.BotId == context.BotId && brand.Active
+                           select new
+                           {
+                               Claim = value,
+                               Order = source,
+                               Allocated = (from fulfillment in data.Data.Set<Entities.Fulfillment>() join item in data.Data.Set<Entities.InventoryItem>() on fulfillment.Id equals item.AssignedFulfillmentId where fulfillment.OrderId == source.Id && fulfillment.Kind == "local" && (fulfillment.Status == "acquired" || fulfillment.Status == "ready" || fulfillment.Status == "released") && item.State == "allocated" select fulfillment.Id).LongCount(),
+                               Total = data.Data.Set<Entities.Fulfillment>().LongCount(fulfillment => fulfillment.OrderId == source.Id),
+                               Remote = data.Data.Set<Entities.SupplierRequest>().Any(request => request.OrderId == source.Id)
+                           }).SingleOrDefaultAsync(token);
+        if (state is null) return false;
         string target = redeem ? "redeemed" : "released";
-        if (status == target) return false;
-        bool immediate = kind == "product_purchase" && !preorder &&
-            method is ("wallet" or "no_payment_required") && allocated == quantity &&
-            total == quantity && !remote;
-        bool permitted = redeem
-            ? payment is ("paid" or "not_required") && (released || immediate ||
-                kind == "prepaid_units" && fulfillment == "completed")
-            : payment is ("expired" or "cancelled") ||
-                resolution is ("local_preorder_cancellation" or "immediate_crypto_shortage_credit" or "supplier_wallet_credit");
-        if (status != "held" || !permitted)
-            throw new UnauthorizedAccessException("Discount claim transition is unavailable.");
-        using (var update = SqliteWallet.Command(tx, """
-            UPDATE discount_uses SET status=$status,transitioned_at=$now
-            WHERE order_id=$order AND discount_id=$coupon AND status='held'
-            """, ("$status", target), ("$now", SqliteSchema.UtcText(DateTime.UtcNow)),
-            ("$order", order), ("$coupon", coupon)))
-            if (await update.ExecuteNonQueryAsync(ct) != 1)
-                throw new InvalidOperationException("Discount claim was superseded.");
+        if (state.Claim.Status == target) return false;
+        bool immediate = state.Order.OrderKind == "product_purchase" && !state.Order.IsPreorder && state.Order.PaymentMethod is ("wallet" or "no_payment_required") && state.Allocated == state.Order.Quantity && state.Total == state.Order.Quantity && !state.Remote;
+        bool permitted = redeem ? state.Order.PaymentStatus is ("paid" or "not_required") && (state.Order.ReleaseAuthorizedAt != null || immediate || state.Order.OrderKind == "prepaid_units" && state.Order.FulfillmentStatus == "completed") : state.Order.PaymentStatus is ("expired" or "cancelled") || state.Order.ResolutionKind is ("local_preorder_cancellation" or "immediate_crypto_shortage_credit" or "supplier_wallet_credit");
+        if (state.Claim.Status != "held" || !permitted) data.RejectScope("Discount claim transition is unavailable.");
+        await data.RequireOrderCommandAsync(context, order, token);
+        state.Claim.Status = target; state.Claim.TransitionedAt = await data.BrandClockAsync(context.BrandId, token);
         if (redeem)
         {
-            using var count = SqliteWallet.Command(tx, """
-                UPDATE discounts SET redeemed_count=redeemed_count+$units WHERE id=$coupon AND brand_id=$brand
-                """, ("$units", units), ("$coupon", coupon), ("$brand", context.BrandId));
-            if (await count.ExecuteNonQueryAsync(ct) != 1)
-                throw new InvalidOperationException("Discount redemption was superseded.");
+            var discount = await data.Data.Set<Entities.Discount>().SingleOrDefaultAsync(value => value.Id == state.Claim.DiscountId && value.BrandId == context.BrandId, token);
+            if (discount is null) data.RejectConflict("Discount redemption was superseded.");
+            discount.RedeemedCount = checked(discount.RedeemedCount + state.Claim.UnitsCovered);
         }
         return true;
-    }
+    }, ct);
 }

@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Data.Sqlite;
 using Platform.Core;
 using Platform.Security;
 
@@ -44,73 +43,10 @@ public sealed class SqliteCouponAdministrationStore(SqliteSessionFactory session
         }
         var audit = new AuditCommand(command, AuditAction.CouponEdit, AuditEntity.Discount, coupon,
             context.BrandId, reason, command, hash, revision, checked(revision + 1));
-        return sessions.RunAsync(true, async (_, tx, token) =>
+        return sessions.RunEfAsync(true, null, async (data, token) =>
         {
-            await SqliteAdminSessionStore.RequireActiveAsync(tx, actor, token);
-            if (await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => AdminAuditStore.ReplayEfAsync(data, actor, audit, cancel), token)) return checked(revision + 1);
-            if (edit.MemberId is Guid member)
-            {
-                using var scope = SqliteWallet.Command(tx, """
-                    SELECT 1 FROM users WHERE id=$member AND brand_id=$brand
-                    """, ("$member", member), ("$brand", context.BrandId));
-                if (await scope.ExecuteScalarAsync(token) is null)
-                    throw new UnauthorizedAccessException("Coupon member is outside this brand.");
-            }
-            if (edit.ProductId is Guid product)
-            {
-                using var lookup = SqliteWallet.Command(tx, "SELECT 1 FROM products WHERE id=$product",
-                    ("$product", product));
-                if (await lookup.ExecuteScalarAsync(token) is null)
-                    throw new UnauthorizedAccessException("Coupon product is unavailable.");
-            }
-            long redeemed;
-            using (var current = SqliteWallet.Command(tx, """
-                SELECT d.revision,d.redeemed_count FROM discounts d JOIN brands b ON b.id=d.brand_id
-                WHERE d.id=$coupon AND b.id=$brand AND b.bot_id=$bot AND b.active=1
-                """, ("$coupon", coupon), ("$brand", context.BrandId), ("$bot", context.BotId)))
-            await using (var row = await current.ExecuteReaderAsync(token))
-            {
-                if (!await row.ReadAsync(token) || row.GetInt64(0) != revision)
-                    throw new InvalidOperationException("Coupon revision conflict.");
-                redeemed = row.GetInt64(1);
-            }
-            long adjustment = checked(edit.EffectiveUsed - redeemed);
-            string? starts = edit.StartsAt is DateTime startAt ? SqliteSchema.UtcText(startAt) : null;
-            string? ends = edit.EndsAt is DateTime endAt ? SqliteSchema.UtcText(endAt) : null;
-            string percent = ExactDecimal.Format(edit.Percent);
-            if (!await AdminAuditStore.AppendSqliteAsync(tx, actor, audit, token)) throw new InvalidOperationException("Coupon audit write was not persisted.");
-            using (var change = SqliteWallet.Command(tx, """
-                UPDATE discounts SET percent_off=$percent,max_total_uses=$maximum,
-                    max_uses_per_user=$per_user,usage_adjustment_units=$adjustment,starts_at=$starts,
-                    ends_at=$ends,active=$active,product_id=$product,eligible_user_id=$member,
-                    revision=revision+1
-                WHERE id=$coupon AND brand_id=$brand AND revision=$revision
-                    AND (percent_off IS NOT $percent OR max_total_uses IS NOT $maximum
-                        OR max_uses_per_user IS NOT $per_user OR usage_adjustment_units IS NOT $adjustment
-                        OR starts_at IS NOT $starts OR ends_at IS NOT $ends OR active IS NOT $active
-                        OR product_id IS NOT $product OR eligible_user_id IS NOT $member)
-                """, ("$percent", percent), ("$maximum", edit.MaximumUses),
-                ("$per_user", edit.MaximumPerMember), ("$adjustment", adjustment),
-                ("$starts", starts), ("$ends", ends), ("$active", edit.Active),
-                ("$product", edit.ProductId), ("$member", edit.MemberId),
-                ("$coupon", coupon), ("$brand", context.BrandId), ("$revision", revision)))
-                if (await change.ExecuteNonQueryAsync(token) != 1)
-                    throw new InvalidOperationException("Coupon edit has no changes.");
-            using var snapshot = SqliteWallet.Command(tx, """
-                INSERT INTO discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,
-                    max_total_uses,max_uses_per_user,usage_adjustment_units,redeemed_count_at_revision,
-                    held_units_at_revision,starts_at,ends_at,active,product_id,eligible_user_id)
-                SELECT $id,id,revision,$audit,percent_off,max_total_uses,max_uses_per_user,
-                    usage_adjustment_units,redeemed_count,
-                    (SELECT coalesce(sum(units_covered),0) FROM discount_uses
-                        WHERE discount_id=$coupon AND status='held'),
-                    starts_at,ends_at,active,product_id,eligible_user_id
-                FROM discounts WHERE id=$coupon AND brand_id=$brand
-                """, ("$id", Guid.CreateVersion7()), ("$audit", command),
-                ("$coupon", coupon), ("$brand", context.BrandId));
-            if (await snapshot.ExecuteNonQueryAsync(token) != 1)
-                throw new InvalidOperationException("Coupon edit revision was not persisted.");
-            return checked(revision + 1);
+            if (!await AdminAuditStore.AppendEfAsync(data, actor, audit, token)) return checked(revision + 1);
+            return await CouponEdits.WriteAsync(data, context, actor, coupon, revision, edit, command, token);
         }, ct);
     }
 }

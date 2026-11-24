@@ -166,7 +166,7 @@ public sealed class ManualDepositTests
         DateTime limit = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < limit)
         {
-            await using var command = f.Database.Data.CreateCommand("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT count(*) FROM (SELECT id FROM shop.users%'");
+            await using var command = f.Database.Data.CreateCommand("SELECT count(*) FROM pg_stat_activity a WHERE a.datname=current_database() AND a.wait_event_type='Lock' AND EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=a.pid AND l.relation='shop.users'::regclass AND l.mode='RowShareLock')");
             if ((long)(await command.ExecuteScalarAsync(Ct) ?? 0L) >= minimum) return;
             await Task.Delay(50, Ct);
         }
