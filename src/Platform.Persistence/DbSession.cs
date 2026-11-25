@@ -122,7 +122,7 @@ public sealed partial class DbSession : IAsyncDisposable
 
     // The repository statement MUST compare the durable lease owner, generation and expiry.
     // This enforces the affected-row fence; it neither acquires a lease nor permits remote resubmission.
-    public Task<int> ExecuteLeaseFencedAsync(DbStatement statement, CancellationToken cancellationToken = default) =>
+    internal Task<int> ExecuteLeaseFencedAsync(DbStatement statement, CancellationToken cancellationToken = default) =>
         ExecuteCoreAsync(statement, true, cancellationToken);
 
     private async Task<int> ExecuteCoreAsync(DbStatement statement, bool leaseFenced, CancellationToken cancellationToken)
