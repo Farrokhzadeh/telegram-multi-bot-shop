@@ -98,10 +98,12 @@ public sealed class SqliteIntegrityTests
             }, ct));
             await Assert.ThrowsAsync<InvalidOperationException>(() => sessions.RunAsync(true, async (_, tx, token) =>
             {
+                for (int i = 1; i <= 128; i++)
+                    await ExecuteAsync(tx, "INSERT INTO audit_events(id,actor_kind,actor_user_id,brand_id,action,entity_kind,entity_id,reason,correlation_id) VALUES ($event,'customer',$member,$first,'create','brand',$first,'fixture',$event)", token, ("$event", Guid.Parse("00000000-0000-0000-0000-" + i.ToString("D12", System.Globalization.CultureInfo.InvariantCulture))), ("$member", member), ("$first", first));
                 await ExecuteAsync(tx, """
                     INSERT INTO audit_events(id,actor_kind,actor_user_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
                     VALUES ($event,'customer',$member,$second,'create','brand',$second,'fixture',$event);
-                    """, token, ("$event", Guid.NewGuid()), ("$member", member), ("$second", second));
+                    """, token, ("$event", Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff")), ("$member", member), ("$second", second));
                 return true;
             }, ct));
             var unchanged = await sessions.RunAsync(false, async (_, tx, token) =>

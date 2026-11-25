@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -68,23 +70,22 @@ internal static class WalletOrderCopyQualification
         await using (var scope = await sessions.BeginReadOnlyAsync(ct))
         {
             var tables = await scope.QueryManyAsync(new DbStatement("SELECT tablename FROM pg_tables WHERE schemaname='shop' ORDER BY tablename"), r => r.GetString(0), 1000, ct);
-            foreach (string table in tables.Where(t => t is not ("brands" or "users" or "wallets" or "wallet_entries" or "legacy_id_map" or "audit_events" or "bot_activity_events" or "orders" or "payments" or "products" or "brand_products"))) if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
+            foreach (string table in tables.Where(t => t is not ("brands" or "users" or "wallets" or "wallet_entries" or "legacy_id_map" or "audit_events" or "bot_activity_events" or "orders" or "payments" or "products" or "brand_products"))) if (await scope.RunEfStepAsync(false, (ef, token) => SnapshotCopyQueries.CountAsync(ef.Data, table, token), ct) != 0) throw new MigrationRejectedException();
             if (shared)
             {
-                var brand = DbValue.Uuid(context.BrandId);
-                var sourceBrand = DbValue.Text(archive.SourceBrand);
-                Task<long> Count(string sql) => scope.QuerySingleAsync(new DbStatement(sql, brand), r => r.GetInt64(0), ct);
-                if (await Count("SELECT count(*) FROM shop.users WHERE brand_id=$1") != wallets.Count ||
-                    await Count("SELECT count(*) FROM shop.wallets w JOIN shop.users u ON u.id=w.user_id WHERE u.brand_id=$1") != wallets.Count ||
-                    await Count("SELECT count(*) FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1") != plan.Set.Orders.Count ||
-                    await Count("SELECT count(*) FROM shop.payments p WHERE EXISTS(SELECT 1 FROM shop.users u WHERE u.brand_id=$1 AND (u.id=p.topup_user_id OR EXISTS(SELECT 1 FROM shop.orders o WHERE o.id=p.order_id AND o.user_id=u.id)))") != plan.Set.Payments.Count ||
-                    await Count("SELECT count(*) FROM shop.wallet_entries e JOIN shop.users u ON u.id=e.user_id WHERE u.brand_id=$1 AND e.is_posting") != plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) ||
-                    await Count("SELECT count(*) FROM shop.brand_products WHERE brand_id=$1") != plan.Set.Catalog.Count ||
-                    await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE source_brand=$1", sourceBrand), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count ||
-                    await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products WHERE active OR id NOT IN (SELECT product_id FROM shop.brand_products)"), r => r.GetInt64(0), ct) != 0 ||
-                    await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brand_products WHERE visible"), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
+                bool valid = await scope.RunEfStepAsync(false, async (ef, token) =>
+                {
+                    var users = ef.Data.Set<User>().Where(u => u.BrandId == context.BrandId);
+                    var orders = ef.Data.Set<Order>().Where(o => users.Any(u => u.Id == o.UserId));
+                    return await users.LongCountAsync(token) == wallets.Count && await ef.Data.Set<Wallet>().LongCountAsync(w => users.Any(u => u.Id == w.UserId), token) == wallets.Count && await orders.LongCountAsync(token) == plan.Set.Orders.Count && await ef.Data.Set<Payment>().LongCountAsync(p => users.Any(u => u.Id == p.TopupUserId || orders.Any(o => o.Id == p.OrderId && o.UserId == u.Id)), token) == plan.Set.Payments.Count && await ef.Data.Set<WalletEntry>().LongCountAsync(e => e.IsPosting && users.Any(u => u.Id == e.UserId), token) == plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) && await ef.Data.Set<BrandProduct>().LongCountAsync(b => b.BrandId == context.BrandId, token) == plan.Set.Catalog.Count && await ef.Data.Set<LegacyIdMap>().LongCountAsync(m => m.SourceBrand == archive.SourceBrand, token) == plan.Manifest.Proofs.Count && !await ef.Data.Set<Product>().AnyAsync(p => p.Active || !ef.Data.Set<BrandProduct>().Any(b => b.ProductId == p.Id), token) && !await ef.Data.Set<BrandProduct>().AnyAsync(b => b.Visible, token);
+                }, ct);
+                if (!valid) throw new MigrationRejectedException();
             }
-            else if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.orders"), r => r.GetInt64(0), ct) != plan.Set.Orders.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries WHERE is_posting"), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products WHERE active"), r => r.GetInt64(0), ct) != 0 || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brand_products WHERE visible"), r => r.GetInt64(0), ct) != 0 || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products"), r => r.GetInt64(0), ct) != plan.Set.Catalog.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brand_products"), r => r.GetInt64(0), ct) != plan.Set.Catalog.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.payments"), r => r.GetInt64(0), ct) != plan.Set.Payments.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map"), r => r.GetInt64(0), ct) != plan.Manifest.Proofs.Count) throw new MigrationRejectedException();
+            else
+            {
+                bool valid = await scope.RunEfStepAsync(false, async (ef, token) => await ef.Data.Set<Order>().LongCountAsync(token) == plan.Set.Orders.Count && await ef.Data.Set<WalletEntry>().LongCountAsync(e => e.IsPosting, token) == plan.Manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) && !await ef.Data.Set<Product>().AnyAsync(p => p.Active, token) && !await ef.Data.Set<BrandProduct>().AnyAsync(b => b.Visible, token) && await ef.Data.Set<Product>().LongCountAsync(token) == plan.Set.Catalog.Count && await ef.Data.Set<BrandProduct>().LongCountAsync(token) == plan.Set.Catalog.Count && await ef.Data.Set<Payment>().LongCountAsync(token) == plan.Set.Payments.Count && await ef.Data.Set<LegacyIdMap>().LongCountAsync(token) == plan.Manifest.Proofs.Count, ct);
+                if (!valid) throw new MigrationRejectedException();
+            }
         }
         int direct = plan.Set.Payments.Count(p => p.Order is not null);
         if (direct != plan.Set.Orders.Count(o => o.NativePaymentSettledAt is not null)) throw new MigrationRejectedException();

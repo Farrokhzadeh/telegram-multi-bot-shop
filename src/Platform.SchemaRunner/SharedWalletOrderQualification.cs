@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -53,28 +55,9 @@ internal static class SharedWalletOrderQualification
             using var plan = JsonDocument.Parse(read(Path.Combine(part.Directory, "wallet-shared-direct-catalog-review.json")));
             zero += plan.RootElement.GetProperty("native_zero_proofs").GetInt64();
         }
-        async Task<long> Count(string query)
-        {
-            await using var command = target.CreateCommand(query); return Convert.ToInt64(await command.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture);
-        }
-        if (await Count("SELECT count(*) FROM shop.brands WHERE NOT active AND bot_id IN (1101,1102,1103) AND bot_token_key_id='qualification-unusable'") != 3 ||
-            await Count("SELECT count(*) FROM shop.brands") != 3 ||
-            await Count("SELECT count(*) FROM shop.users") != users ||
-            await Count("SELECT count(*) FROM shop.wallets") != users ||
-            await Count("SELECT count(*) FROM shop.orders") != orders ||
-            await Count("SELECT count(*) FROM shop.payments") != payments ||
-            await Count("SELECT count(*) FROM shop.products") != catalog ||
-            await Count("SELECT count(*) FROM shop.brand_products") != catalog ||
-            await Count("SELECT count(*) FROM shop.products WHERE active") != 0 ||
-            await Count("SELECT count(*) FROM shop.brand_products WHERE visible") != 0 ||
-            await Count("SELECT count(*) FROM shop.inventory_items WHERE state='available'") != 0 ||
-            await Count("SELECT count(*) FROM shop.fulfillments") != 0 ||
-            await Count("SELECT count(*) FROM shop.jobs") != 0 ||
-            await Count("SELECT count(*) FROM shop.discounts WHERE active") != 0 ||
-            await Count("SELECT count(*) FROM shop.orders WHERE payment_status IN ('paid','not_required') AND (fulfillment_status!='requires_admin' OR release_authorized_at IS NOT NULL)") != 0 ||
-            await Count("SELECT count(*) FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id JOIN shop.users u ON u.id=o.user_id WHERE p.topup_user_id IS NOT NULL AND p.topup_user_id!=u.id") != 0 ||
-            await Count("SELECT count(*) FROM shop.legacy_id_map WHERE source_brand NOT IN ('acc-abad','kuala','zikotech')") != 0 ||
-            await Count("SELECT count(*) FROM pg_tables WHERE schemaname='shop'") != 28) throw new MigrationRejectedException();
+        await using var model = new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql(target).Options);
+        if (await model.Set<Brand>().LongCountAsync(b => !b.Active && (b.BotId == 1101 || b.BotId == 1102 || b.BotId == 1103) && b.BotTokenKeyId == "qualification-unusable", ct) != 3 || await model.Set<Brand>().LongCountAsync(ct) != 3 || await model.Set<User>().LongCountAsync(ct) != users || await model.Set<Wallet>().LongCountAsync(ct) != users || await model.Set<Order>().LongCountAsync(ct) != orders || await model.Set<Payment>().LongCountAsync(ct) != payments || await model.Set<Product>().LongCountAsync(ct) != catalog || await model.Set<BrandProduct>().LongCountAsync(ct) != catalog || await model.Set<Product>().AnyAsync(p => p.Active, ct) || await model.Set<BrandProduct>().AnyAsync(b => b.Visible, ct) || await model.Set<InventoryItem>().AnyAsync(i => i.State == "available", ct) || await model.Set<Fulfillment>().AnyAsync(ct) || await model.Set<Job>().AnyAsync(ct) || await model.Set<Discount>().AnyAsync(d => d.Active, ct) || await model.Set<Order>().AnyAsync(o => (o.PaymentStatus == "paid" || o.PaymentStatus == "not_required") && (o.FulfillmentStatus != "requires_admin" || o.ReleaseAuthorizedAt != null), ct) || await (from p in model.Set<Payment>() join o in model.Set<Order>() on p.OrderId equals o.Id join u in model.Set<User>() on o.UserId equals u.Id where p.TopupUserId != null && p.TopupUserId != u.Id select p.Id).AnyAsync(ct) || await model.Set<LegacyIdMap>().AnyAsync(m => m.SourceBrand != "acc-abad" && m.SourceBrand != "kuala" && m.SourceBrand != "zikotech", ct)) throw new MigrationRejectedException();
+        await using (var check = target.CreateCommand("SELECT count(*) FROM pg_tables WHERE schemaname='shop'")) if (Convert.ToInt64(await check.ExecuteScalarAsync(ct), System.Globalization.CultureInfo.InvariantCulture) != 28) throw new MigrationRejectedException();
         await WalletCopyQualification.WriteAsync(receipt, WalletCopyQualification.JsonBody(writer =>
         {
             writer.WriteString("scope", "canonical_three_brand_same_disposable_target");

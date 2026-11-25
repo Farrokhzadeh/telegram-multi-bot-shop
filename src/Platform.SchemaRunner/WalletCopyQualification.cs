@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -84,9 +86,9 @@ internal static class WalletCopyQualification
             await using (var scope = await sessions.BeginReadOnlyAsync(ct))
             {
                 var tables = await scope.QueryManyAsync(new DbStatement("SELECT tablename FROM pg_tables WHERE schemaname='shop' ORDER BY tablename"), r => r.GetString(0), 1000, ct);
-                foreach (string table in tables.Where(t => t is not ("brands" or "users" or "wallets" or "wallet_entries" or "legacy_id_map" or "audit_events"))) if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
-                if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.audit_events"), r => r.GetInt64(0), ct) != rows.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries"), r => r.GetInt64(0), ct) != aggregate.OpeningPostings + aggregate.NonPostingHistory) throw new MigrationRejectedException();
-                if (await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.users"), r => r.GetInt64(0), ct) != rows.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallets"), r => r.GetInt64(0), ct) != rows.Count || await scope.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map"), r => r.GetInt64(0), ct) != manifest.Proofs.Count) throw new MigrationRejectedException();
+                foreach (string table in tables.Where(t => t is not ("brands" or "users" or "wallets" or "wallet_entries" or "legacy_id_map" or "audit_events"))) if (await scope.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, table, token), ct) != 0) throw new MigrationRejectedException();
+                if (await scope.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, "audit_events", token), ct) != rows.Count || await scope.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, "wallet_entries", token), ct) != aggregate.OpeningPostings + aggregate.NonPostingHistory) throw new MigrationRejectedException();
+                if (await scope.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, "users", token), ct) != rows.Count || await scope.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, "wallets", token), ct) != rows.Count || await scope.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, "legacy_id_map", token), ct) != manifest.Proofs.Count) throw new MigrationRejectedException();
             }
             await SourceCopyInspection.RunAsync(sourceConnection, sourcePlan, Path.Combine(directory, "source-end-" + Guid.NewGuid().ToString("N") + ".json"), ct);
             if (!retained.First().Value.Matches((await ReadRetention(retentionReference, ct)).Span)) throw new MigrationRejectedException();
@@ -98,13 +100,13 @@ internal static class WalletCopyQualification
     {
         await using (var seed = await sessions.BeginAsync(ct))
         {
-            long existing = await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brands"), r => r.GetInt64(0), ct);
+            long existing = await seed.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, "brands", token), ct);
             if (existing == 0)
             {
-                foreach (string table in new[] { "users", "wallets", "wallet_entries", "legacy_id_map", "audit_events" }) if (await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
-                await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active) VALUES($1,$2,$2,$2,'international','en',$2,101,$3,'qualification-unusable',false)", DbValue.Uuid(brand), DbValue.Text("qual-" + brandName), DbValue.Binary([1])), ct);
+                foreach (string table in new[] { "users", "wallets", "wallet_entries", "legacy_id_map", "audit_events" }) if (await seed.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, table, token), ct) != 0) throw new MigrationRejectedException();
+                await SeedBrandAsync(seed, brand, brandName, 101, ct);
             }
-            else if (existing != 1 || !await seed.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND code=$2 AND bot_id=101 AND NOT active AND bot_token_key_id='qualification-unusable' AND bot_token_ciphertext=$3)", DbValue.Uuid(brand), DbValue.Text("qual-" + brandName), DbValue.Binary([1])), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
+            else if (existing != 1 || !await MatchesBrandAsync(seed, brand, brandName, 101, ct)) throw new MigrationRejectedException();
             await seed.CommitAsync(ct);
         }
     }
@@ -113,22 +115,28 @@ internal static class WalletCopyQualification
         string[] names = ["acc-abad", "kuala", "zikotech"]; int position = Array.IndexOf(names, brandName);
         if (position < 0 || brand != new Guid(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + brandName)).AsSpan(0, 16))) throw new MigrationRejectedException();
         await using var seed = await sessions.BeginAsync(ct);
-        long existing = await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.brands"), r => r.GetInt64(0), ct);
+        long existing = await seed.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, "brands", token), ct);
         if (existing != position && existing != names.Length) throw new MigrationRejectedException();
         foreach (string name in existing == names.Length ? names : names.Take(position))
         {
             Guid known = new(SHA256.HashData(Encoding.UTF8.GetBytes("protected-wallet-copy-brand-v1:" + name)).AsSpan(0, 16));
             long bot = 1101 + Array.IndexOf(names, name);
-            if (!await seed.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND code=$2 AND bot_id=$3 AND NOT active AND bot_token_key_id='qualification-unusable' AND bot_token_ciphertext=$4)", DbValue.Uuid(known), DbValue.Text("qual-" + name), DbValue.Bigint(bot), DbValue.Binary([1])), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
+            if (!await MatchesBrandAsync(seed, known, name, bot, ct)) throw new MigrationRejectedException();
         }
         if (existing == position)
         {
             if (existing == 0) foreach (string table in new[] { "users", "wallets", "wallet_entries", "legacy_id_map", "audit_events", "orders", "payments", "products", "brand_products" })
-                if (await seed.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop." + table), r => r.GetInt64(0), ct) != 0) throw new MigrationRejectedException();
-            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active) VALUES($1,$2,$2,$2,'international','en',$2,$3,$4,'qualification-unusable',false)", DbValue.Uuid(brand), DbValue.Text("qual-" + brandName), DbValue.Bigint(1101 + position), DbValue.Binary([1])), ct);
+                if (await seed.RunEfStepAsync(false, (data, token) => SnapshotCopyQueries.CountAsync(data.Data, table, token), ct) != 0) throw new MigrationRejectedException();
+            await SeedBrandAsync(seed, brand, brandName, 1101 + position, ct);
         }
         await seed.CommitAsync(ct);
     }
+    private static Task<bool> MatchesBrandAsync(DbSession session, Guid brand, string name, long bot, CancellationToken ct)
+    {
+        byte[] tokenBytes = [1]; string code = "qual-" + name;
+        return session.RunEfStepAsync(false, (data, token) => data.Data.Set<Brand>().AnyAsync(row => row.Id == brand && row.Code == code && row.BotId == bot && !row.Active && row.BotTokenKeyId == "qualification-unusable" && row.BotTokenCiphertext == tokenBytes, token), ct);
+    }
+    private static Task<bool> SeedBrandAsync(DbSession session, Guid brand, string name, long bot, CancellationToken ct) => session.RunEfStepAsync(true, (data, token) => { data.RequireImportCommand(); data.Data.Add(new Brand { Id = brand, Code = "qual-" + name, InternalName = "qual-" + name, PublicName = "qual-" + name, Market = "international", DefaultLanguage = "en", BotUsername = "qual-" + name, BotId = bot, BotTokenCiphertext = [1], BotTokenKeyId = "qualification-unusable", Active = false }); return Task.FromResult(true); }, ct);
     internal static byte[] JsonBody(Action<Utf8JsonWriter> body)
     { using var stream = new MemoryStream(); using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); body(writer); writer.WriteEndObject(); } return stream.ToArray(); }
     internal static async Task WriteAsync(string path, byte[] bytes, CancellationToken ct)

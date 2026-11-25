@@ -52,23 +52,13 @@ public sealed class AkundingSourceInspection : IDisposable
     {
         if (product == Guid.Empty || revision <= 0 || revision == long.MaxValue) throw new ArgumentException("Invalid supplier product.");
         credentials.UseCredential("akunding", account, key => key.Length);
-        await using var session = await sessions.BeginAsync(ct);
-        await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        long count = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.products WHERE id=$1 AND revision=$2 AND fulfillment_kind='supplier'", DbValue.Uuid(product), DbValue.Bigint(revision)), r => r.GetInt64(0), ct);
-        if (count != 1) throw new InvalidOperationException("Supplier product revision conflict.");
+        if (!await new SupplierInspectionStore(sessions).IsCurrentProductAsync(actor, product, revision, ct)) throw new InvalidOperationException("Supplier product revision conflict.");
     }
     private async Task<(long External, long ProductRevision)> ReadAsync(AuthenticatedAdmin actor, Guid product, Guid source, long revision, CancellationToken ct)
     {
-        await using var session = await sessions.BeginAsync(ct);
-        await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.QueryManyAsync(new DbStatement("""
-            SELECT s.external_product_id,p.revision FROM shop.product_supplier_sources s JOIN shop.products p ON p.id=s.product_id
-            WHERE s.id=$1 AND s.product_id=$2 AND s.revision=$3 AND s.provider_code='akunding'
-                AND s.external_variant_id IS NULL AND p.fulfillment_kind='supplier'
-            """, DbValue.Uuid(source), DbValue.Uuid(product), DbValue.Bigint(revision)), r => (External: r.GetString(0), ProductRevision: r.GetInt64(1)), 1, ct);
-        if (rows.Count != 1 || !long.TryParse(rows[0].External, NumberStyles.None, CultureInfo.InvariantCulture, out long external) || external <= 0 || rows[0].External != external.ToString(CultureInfo.InvariantCulture))
-            throw new InvalidOperationException("Supplier mapping is unavailable.");
-        return (external, rows[0].ProductRevision);
+        var row = await new SupplierInspectionStore(sessions).ReadAsync(actor, product, source, revision, ct);
+        if (row is null || !long.TryParse(row.External, NumberStyles.None, CultureInfo.InvariantCulture, out long external) || external <= 0 || row.External != external.ToString(CultureInfo.InvariantCulture)) throw new InvalidOperationException("Supplier mapping is unavailable.");
+        return (external, row.ProductRevision);
     }
     public void Dispose() => http.Dispose();
     private sealed class Authorization(SupplierCredentialSnapshot credentials, string account, HttpMessageHandler transport) : DelegatingHandler(transport)

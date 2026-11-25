@@ -15,7 +15,7 @@ internal static class SqliteIntegrity
         await using var data = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
         await data.Database.UseTransactionAsync(transaction, ct);
         var ledger = data.Set<WalletEntry>();
-        if (await ledger.AnyAsync(e => e.IsPosting && e.PostingVersion != ledger.LongCount(previous => previous.UserId == e.UserId && previous.IsPosting && previous.PostingVersion <= e.PostingVersion), ct)) throw new InvalidOperationException("SQLite commit rejected: wallet_posting_chain.");
+        await ValidateChainAsync(ledger, ct);
         if (await data.Set<Wallet>().AnyAsync(w => w.Version != ledger.LongCount(e => e.UserId == w.UserId && e.IsPosting), ct)) throw new InvalidOperationException("SQLite commit rejected: wallet_posting_balance.");
         await ValidateRowsAsync(data, data.Set<Wallet>().OrderBy(row => row.UserId), row => row.UserId, ct);
         await ValidateRowsAsync(data, ledger.OrderBy(row => row.Id), row => row.Id, ct);
@@ -27,6 +27,23 @@ internal static class SqliteIntegrity
         await ValidateRowsAsync(data, data.Set<Discount>().OrderBy(row => row.Id), row => row.Id, ct);
         await ValidateRowsAsync(data, data.Set<DiscountUse>().OrderBy(row => row.OrderId), row => row.OrderId, ct);
         await ValidateRowsAsync(data, data.Set<AuditEvent>().OrderBy(row => row.Id), row => row.Id, ct);
+    }
+    private static async Task ValidateChainAsync(IQueryable<WalletEntry> ledger, CancellationToken ct)
+    {
+        Guid? member = null; long version = 0; decimal balance = 0m;
+        while (true)
+        {
+            var rows = await ledger.Where(row => row.IsPosting && (member == null || row.UserId.CompareTo(member.Value) > 0 || row.UserId == member && row.PostingVersion > version)).OrderBy(row => row.UserId).ThenBy(row => row.PostingVersion).Select(row => new { row.UserId, row.PostingVersion, row.SignedAmount, row.BalanceAfter }).Take(128).ToListAsync(ct);
+            foreach (var row in rows)
+            {
+                if (row.UserId != member) { version = 0; balance = 0m; }
+                try { balance = checked(balance + row.SignedAmount); version = checked(version + 1); }
+                catch (OverflowException) { throw new InvalidOperationException("SQLite commit rejected: wallet_posting_chain."); }
+                if (row.PostingVersion != version || row.BalanceAfter != balance) throw new InvalidOperationException("SQLite commit rejected: wallet_posting_chain.");
+                member = row.UserId;
+            }
+            if (rows.Count < 128) return;
+        }
     }
     private static async Task ValidateRowsAsync<T>(AkantiDbContext data, IQueryable<T> query, System.Linq.Expressions.Expression<Func<T, Guid>> key, CancellationToken ct) where T : class
     {

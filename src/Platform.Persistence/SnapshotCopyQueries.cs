@@ -16,6 +16,12 @@ internal sealed class SqliteSnapshotDbContext(DbContextOptions<SqliteSnapshotDbC
 }
 internal static class SnapshotCopyQueries
 {
+    internal static Task<long> CountAsync(AkantiDbContext data, string table, CancellationToken ct)
+    {
+        var entity = data.Model.GetEntityTypes().SingleOrDefault(value => value.GetTableName() == table) ?? throw new InvalidOperationException("Snapshot entity is unavailable.");
+        return (Task<long>)typeof(SnapshotCopyQueries).GetMethod(nameof(CountRowsAsync), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(entity.ClrType).Invoke(null, [data, ct])!;
+    }
+    private static Task<long> CountRowsAsync<T>(AkantiDbContext data, CancellationToken ct) where T : class => data.Set<T>().LongCountAsync(ct);
     internal static Task<long> CopyAsync(AkantiDbContext source, AkantiDbContext target, string table, string[] columns, string[] key, Action<IncrementalHash, object?> hash, Func<object?, object?> convert, CancellationToken ct)
     {
         var entity = source.Model.GetEntityTypes().SingleOrDefault(value => value.GetTableName() == table) ?? throw new InvalidOperationException("Snapshot entity is unavailable.");
