@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Platform.Core;
 
@@ -59,6 +60,10 @@ public static class SqliteStagingCopy
                 await using var write = sqlite.BeginTransaction(deferred: false);
                 await using (var defer = SqliteCommand(write, "PRAGMA defer_foreign_keys=ON"))
                     await defer.ExecuteNonQueryAsync(ct);
+                await using var sourceModel = new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql(postgres).Options);
+                await sourceModel.Database.UseTransactionAsync(snapshot, ct);
+                await using var targetModel = new SqliteSnapshotDbContext(new DbContextOptionsBuilder<SqliteSnapshotDbContext>().UseSqlite(sqlite).Options);
+                await targetModel.Database.UseTransactionAsync(write, ct);
                 long rows = 0;
                 foreach (string table in tables)
                 {
@@ -68,42 +73,7 @@ public static class SqliteStagingCopy
                     string[] key = await PrimaryKeyAsync(postgres, snapshot, table, ct);
                     if (key.Length == 0 || key.Any(k => !columns.Contains(k, StringComparer.Ordinal)))
                         throw new InvalidOperationException("The source table has no qualified primary key.");
-                    string projection = string.Join(",", columns.Select(Identifier));
-                    string order = string.Join(",", key.Select(Identifier));
-                    using var select = new NpgsqlCommand("SELECT " + projection + " FROM shop." + Identifier(table) + " ORDER BY " + order, postgres, snapshot);
-                    await using var sourceReader = await select.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct);
-                    using var insert = SqliteCommand(write, "INSERT INTO " + Identifier(table) + "(" + projection + ") VALUES (" +
-                        string.Join(",", columns.Select((_, i) => "$p" + i.ToString(CultureInfo.InvariantCulture))) + ")");
-                    for (int i = 0; i < columns.Length; i++) insert.Parameters.Add(new SqliteParameter("$p" + i.ToString(CultureInfo.InvariantCulture), DBNull.Value));
-                    using var sourceHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    long count = 0;
-                    while (await sourceReader.ReadAsync(ct))
-                    {
-                        for (int i = 0; i < columns.Length; i++)
-                        {
-                            object? value = ConvertValue(sourceReader.GetValue(i));
-                            insert.Parameters[i].Value = value ?? DBNull.Value;
-                            HashValue(sourceHash, value);
-                        }
-                        if (await insert.ExecuteNonQueryAsync(ct) != 1) throw new InvalidOperationException("SQLite source row was not copied.");
-                        count = checked(count + 1);
-                    }
-                    await sourceReader.DisposeAsync();
-                    using var targetHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                    using (var verify = SqliteCommand(write, "SELECT " + projection + " FROM " + Identifier(table) + " ORDER BY rowid"))
-                    await using (var copied = await verify.ExecuteReaderAsync(ct))
-                    {
-                        long checkedRows = 0;
-                        while (await copied.ReadAsync(ct))
-                        {
-                            for (int i = 0; i < columns.Length; i++) HashValue(targetHash, copied.GetValue(i));
-                            checkedRows = checked(checkedRows + 1);
-                        }
-                        if (checkedRows != count) throw new InvalidOperationException("SQLite row count differs from the staging snapshot.");
-                    }
-                    if (!CryptographicOperations.FixedTimeEquals(sourceHash.GetHashAndReset(), targetHash.GetHashAndReset()))
-                        throw new InvalidOperationException("SQLite row content differs from the staging snapshot.");
-                    rows = checked(rows + count);
+                    rows = checked(rows + await SnapshotCopyQueries.CopyAsync(sourceModel, targetModel, table, columns, key, HashValue, ConvertValue, ct));
                 }
                 await SqliteIntegrity.ValidateAsync(sqlite, write, ct);
                 using (var check = SqliteCommand(write, "PRAGMA integrity_check"))
@@ -199,9 +169,9 @@ public static class SqliteStagingCopy
             throw new InvalidOperationException("Staging table columns do not match SQLite schema.");
     }
 
-    private static object? ConvertValue(object value) => value switch
+    private static object? ConvertValue(object? value) => value switch
     {
-        DBNull => null,
+        null or DBNull => null,
         bool boolean => boolean ? 1L : 0L,
         Guid id => id.ToString("D"),
         decimal amount => ExactDecimal.Format(amount),

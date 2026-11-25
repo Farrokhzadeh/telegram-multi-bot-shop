@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using Platform.Persistence;
 
 namespace Platform.Migration;
@@ -26,13 +28,8 @@ public static class LegacyMapStore
         long committed = 0, mismatched = 0, inBatch = 0;
         while (true)
         {
-            var rows = await session.QueryManyAsync(new DbStatement("""
-                SELECT source_table,source_key_kind,legacy_id,target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref
-                FROM shop.legacy_id_map WHERE source_brand=$1 AND ($2='' OR (source_table,source_key_kind,legacy_id)>($2,$3,$4))
-                ORDER BY source_table,source_key_kind,legacy_id LIMIT 1000
-                """, DbValue.Text(manifest.SourceBrand), DbValue.Text(cursor?.Table ?? ""), DbValue.Text(cursor?.Kind ?? ""), DbValue.Text(cursor?.Id ?? "")),
-                r => (Table: r.GetString(0), Kind: r.GetString(1), Id: r.GetString(2), TargetKind: r.GetString(3), Target: r.GetGuid(4),
-                    Brand: r.IsDBNull(5) ? Guid.Empty : r.GetGuid(5), Digest: r.GetBinary(6), Batch: r.GetGuid(7), Reference: r.GetString(8)), 1000, ct);
+            string table = cursor?.Table ?? "", kind = cursor?.Kind ?? "", legacy = cursor?.Id ?? "";
+            var rows = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().Where(row => row.SourceBrand == manifest.SourceBrand && (table == "" || row.SourceTable.CompareTo(table) > 0 || row.SourceTable == table && (row.SourceKeyKind.CompareTo(kind) > 0 || row.SourceKeyKind == kind && row.LegacyId.CompareTo(legacy) > 0))).OrderBy(row => row.SourceTable).ThenBy(row => row.SourceKeyKind).ThenBy(row => row.LegacyId).Select(row => new { Table = row.SourceTable, Kind = row.SourceKeyKind, Id = row.LegacyId, row.TargetKind, Target = row.TargetId, Brand = row.TargetBrandId ?? Guid.Empty, Digest = row.SourceFingerprint, Batch = row.ImportBatch, Reference = row.ImportManifestRef }).Take(1000).ToListAsync(token), ct);
             foreach (var row in rows)
             {
                 var key = (row.Table, row.Kind, row.Id); cursor = key;
@@ -45,8 +42,7 @@ public static class LegacyMapStore
             }
             if (rows.Count < 1000) break;
         }
-        long batchCount = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2",
-            DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        long batchCount = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().LongCountAsync(row => row.ImportBatch == manifest.Batch && row.ImportManifestRef == manifest.Reference, token), ct);
         if (batchCount < inBatch) throw new MigrationRejectedException();
         return new(committed, expected.Count - committed, mismatched, batchCount - (committed - mismatched), batchCount);
     }
@@ -56,16 +52,15 @@ public static class LegacyMapStore
         await RequireDestinationAsync(session, manifest, ct);
         byte[] identity = System.Text.Encoding.UTF8.GetBytes("legacy-map-v1:" + manifest.SourceBrand + ":" + proof.Key);
         await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock($1)", DbValue.Bigint(System.Buffers.Binary.BinaryPrimitives.ReadInt64BigEndian(SHA256.HashData(identity)))), ct);
-        var old = await session.QueryManyAsync(new DbStatement("SELECT target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind=$3 AND legacy_id=$4",
-            DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId)), r => (Kind: r.GetString(0), Id: r.GetGuid(1), Brand: r.IsDBNull(2) ? Guid.Empty : r.GetGuid(2), Digest: r.GetBinary(3), Batch: r.GetGuid(4), Reference: r.GetString(5)), 1, ct);
+        var old = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().Where(row => row.SourceBrand == manifest.SourceBrand && row.SourceTable == proof.SourceTable && row.SourceKeyKind == proof.KeyKind && row.LegacyId == proof.LegacyId).Select(row => new { Kind = row.TargetKind, Id = row.TargetId, Brand = row.TargetBrandId ?? Guid.Empty, Digest = row.SourceFingerprint, Batch = row.ImportBatch, Reference = row.ImportManifestRef }).Take(1).ToListAsync(token), ct);
         if (old.Count != 0)
         {
             var value = old[0];
             if (value.Kind != proof.TargetKind || value.Id != proof.Target || value.Brand != proof.Brand || value.Batch != manifest.Batch || value.Reference != manifest.Reference || !CryptographicOperations.FixedTimeEquals(value.Digest, proof.Fingerprint.Span)) throw new MigrationRejectedException();
             return false;
         }
-        await session.ExecuteAsync(new DbStatement("INSERT INTO shop.legacy_id_map(source_brand,source_table,source_key_kind,legacy_id,target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
-            DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId), DbValue.Text(proof.TargetKind), DbValue.Uuid(proof.Target), DbValue.Uuid(proof.Brand), DbValue.Binary(proof.Fingerprint.Span), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), ct);
+        byte[] fingerprint = proof.Fingerprint.ToArray();
+        await session.RunEfStepAsync(true, (data, token) => { data.RequireImportCommand(); data.Data.Add(new LegacyIdMap { SourceBrand = manifest.SourceBrand, SourceTable = proof.SourceTable, SourceKeyKind = proof.KeyKind, LegacyId = proof.LegacyId, TargetKind = proof.TargetKind, TargetId = proof.Target, TargetBrandId = proof.Brand, SourceFingerprint = fingerprint, ImportBatch = manifest.Batch, ImportManifestRef = manifest.Reference }); return Task.FromResult(true); }, ct);
         return true;
     }
 }

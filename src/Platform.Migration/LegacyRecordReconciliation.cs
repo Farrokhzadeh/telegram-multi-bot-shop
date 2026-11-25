@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Data;
 using Npgsql;
 using Platform.Persistence;
@@ -66,25 +68,30 @@ public sealed class LegacyRecordReconciliationReport(NpgsqlDataSource destinatio
             if (!await OpeningBalanceImportWorkflow.MatchesWalletAsync(session, manifest, wallet, ct)) walletMatched = false;
             foreach (var history in wallet.History) if (!await OpeningBalanceImportWorkflow.MatchesHistoryAsync(session, manifest.Batch, wallet.TargetUser, history, ct)) walletMatched = false;
         }
-        long unexpectedActivity = await session.QuerySingleAsync(new DbStatement("""
-            SELECT count(*) FROM shop.bot_activity_events e JOIN shop.users u ON u.id=e.user_id
-            WHERE u.brand_id=$1 AND NOT COALESCE(
-                e.source_kind='system' AND e.outcome_code='accepted' AND e.support_ticket_id IS NULL AND e.flow_revision IS NULL AND e.telegram_update_id IS NULL
-                AND (
-                    (e.event_type='payment' AND e.action_code='topup_created' AND e.product_id IS NULL AND e.order_id IS NULL AND e.quantity_selected IS NULL
-                        AND EXISTS(SELECT 1 FROM shop.payments p JOIN shop.legacy_id_map m ON m.target_id=p.id AND m.target_kind='payment'
-                            WHERE m.source_brand=$2 AND m.source_table='payment_attempts' AND m.import_batch=$3 AND m.import_manifest_ref=$4
-                                AND p.topup_user_id=e.user_id AND p.order_id IS NULL AND p.payment_method='crypto' AND p.legacy_kind='payment_attempt'
-                                AND e.idempotency_key='workflow:topup_created:'||replace(p.id::text,'-','') AND e.occurred_at=p.created_at))
-                    OR (e.event_type='checkout' AND e.action_code='checkout_funded'
-                        AND EXISTS(SELECT 1 FROM shop.orders o JOIN shop.legacy_id_map m ON m.target_id=o.id AND m.target_kind='order'
-                            WHERE m.source_brand=$2 AND m.source_table='orders.record' AND m.import_batch=$3 AND m.import_manifest_ref=$4
-                                AND o.id=e.order_id AND o.user_id=e.user_id AND o.product_id=e.product_id AND o.quantity=e.quantity_selected
-                                AND o.payment_status IN ('paid','not_required') AND o.fulfillment_status='requires_admin' AND o.release_authorized_at IS NULL
-                                AND e.idempotency_key='workflow:checkout_funded:'||replace(o.id::text,'-','') AND e.occurred_at=o.payment_confirmed_at))
-                ),false)
-            """, DbValue.Uuid(context.BrandId), DbValue.Text(manifest.SourceBrand), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        long unexpectedActivity = await session.RunEfStepAsync(false, (data, token) => UnexpectedActivityAsync(data, manifest, context.BrandId, token), ct);
         long expected = manifest.Proofs.LongCount(p => p.Projection is LegacyProjection.WalletSnapshot or LegacyProjection.OrderRecord or LegacyProjection.PaymentAttempt or LegacyProjection.ManualDeposit or LegacyProjection.InventoryUnit or LegacyProjection.Delivery or LegacyProjection.DeliveryPart or LegacyProjection.PreorderBatch or LegacyProjection.PreorderPart or LegacyProjection.PreorderItem or LegacyProjection.DiscountRecord or LegacyProjection.ProductRecord or LegacyProjection.SupplierFulfillment or LegacyProjection.SupplierItem or LegacyProjection.SupplierAttempt or LegacyProjection.SupplierRefundArchive or LegacyProjection.PreorderState or LegacyProjection.PreorderRefundArchive or LegacyProjection.ServiceJob or LegacyProjection.ZeroTransaction or LegacyProjection.DeliveryAttempt);
         return new(manifest.Batch, expected, records.LongLength + wallets.LongLength, mismatched, invalidArchives, mapping.MissingMappings, mapping.MismatchedMappings, mapping.UnexpectedMappings, walletMatched, mapping.SaleableInventory, records.Sum(r => (long)LegacyRecordArchive.EncryptedFields(r.Source).Count), reencrypted, invalidRetentions, wallets.LongCount(w => w.Retention?.ManualIrrBalance == true), wallets.Sum(w => w.Retention?.HistoryRows ?? 0), wallets.Sum(w => w.Retention?.IrrHistoryRows ?? 0), wallets.Sum(w => w.Retention?.ZeroHistoryRows ?? 0), unexpectedActivity);
     }
+    private static async Task<long> UnexpectedActivityAsync(EfSession data, VerifiedImportManifest manifest, Guid brand, CancellationToken ct)
+    {
+        Guid? after = null; long unexpected = 0;
+        while (true)
+        {
+            var rows = await (from e in data.Data.Set<BotActivityEvent>().AsNoTracking() join u in data.Data.Set<User>() on e.UserId equals u.Id where u.BrandId == brand && (after == null || e.Id.CompareTo(after.Value) > 0) orderby e.Id select e).Take(128).ToListAsync(ct);
+            foreach (var row in rows)
+            {
+                bool valid = row.SourceKind == "system" && row.OutcomeCode == "accepted" && row.SupportTicketId == null && row.FlowRevision == null && row.TelegramUpdateId == null;
+                string prefix = "workflow:" + row.ActionCode + ":";
+                if (!valid || !row.IdempotencyKey.StartsWith(prefix, StringComparison.Ordinal) || !Guid.TryParseExact(row.IdempotencyKey[prefix.Length..], "N", out Guid id) || row.IdempotencyKey != prefix + id.ToString("N")) { unexpected++; continue; }
+                if (row.EventType == "payment" && row.ActionCode == "topup_created" && row.ProductId == null && row.OrderId == null && row.QuantitySelected == null)
+                    valid = await (from p in data.Data.Set<Payment>() join m in data.Data.Set<LegacyIdMap>() on p.Id equals m.TargetId where m.TargetKind == "payment" && m.SourceBrand == manifest.SourceBrand && m.SourceTable == "payment_attempts" && m.ImportBatch == manifest.Batch && m.ImportManifestRef == manifest.Reference && p.Id == id && p.TopupUserId == row.UserId && p.OrderId == null && p.PaymentMethod == "crypto" && p.LegacyKind == "payment_attempt" && p.CreatedAt == row.OccurredAt select p.Id).AnyAsync(ct);
+                else if (row.EventType == "checkout" && row.ActionCode == "checkout_funded" && row.ProductId != null)
+                    valid = await (from o in data.Data.Set<Order>() join m in data.Data.Set<LegacyIdMap>() on o.Id equals m.TargetId where m.TargetKind == "order" && m.SourceBrand == manifest.SourceBrand && m.SourceTable == "orders.record" && m.ImportBatch == manifest.Batch && m.ImportManifestRef == manifest.Reference && o.Id == id && o.Id == row.OrderId && o.UserId == row.UserId && o.ProductId == row.ProductId && o.Quantity == row.QuantitySelected && (o.PaymentStatus == "paid" || o.PaymentStatus == "not_required") && o.FulfillmentStatus == "requires_admin" && o.ReleaseAuthorizedAt == null && o.PaymentConfirmedAt == row.OccurredAt select o.Id).AnyAsync(ct);
+                else valid = false;
+                if (!valid) unexpected++;
+            }
+            if (rows.Count < 128) return unexpected; after = rows[^1].Id;
+        }
+    }
+
 }

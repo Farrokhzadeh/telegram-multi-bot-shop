@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
-using NpgsqlTypes;
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
+using Platform.Persistence.Configurations;
 using Platform.Core;
 using Platform.Persistence;
 
@@ -86,51 +88,36 @@ public sealed class TargetActivityImportWorkflow(DbSessionFactory sessions)
                 AND coalesce(obj_description('shop'::regnamespace,'pg_namespace'),'') LIKE $4
             """, DbValue.Text(destination.Database), DbValue.Text(destination.Username), DbValue.Integer(destination.ServerVersion), DbValue.Text("shop-schema|0001|" + destination.SqlSha256 + "|%")), r => r.GetBoolean(0), ct);
         if (!permitted) throw new MigrationRejectedException();
-        DateTime now = await session.QuerySingleAsync(new DbStatement("SELECT CURRENT_TIMESTAMP"), r => r.GetUtc(0), ct);
+        DateTime now = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Brand>().Where(row => row.Id == batch.Brand).Select(row => EfValues.TransactionTime()).SingleAsync(token), ct);
         if (batch.Snapshot > now) throw new MigrationRejectedException();
         foreach (Guid member in batch.Rows.Select(r => r.Member).Distinct().Order())
-            await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 FOR UPDATE", DbValue.Uuid(member), DbValue.Uuid(batch.Brand)), r => r.GetGuid(0), ct);
+            if (await session.RunEfStepAsync(false, (data, token) => data.LockUserAsync(member, batch.Brand, token), ct) != 1) throw new MigrationRejectedException();
         int inserted = 0, replayed = 0, expired = 0;
         foreach (var row in batch.Rows)
         {
             var definition = BotActivityRegistry.Get(row.Action); var links = row.Context;
-            var values = new[] { DbValue.Uuid(row.Id), DbValue.Uuid(row.Member), DbValue.Text(definition.EventType), DbValue.Text(BotActivityRegistry.Source(row.Source)), DbValue.Text(definition.Code),
-                Id(links.Product), Id(links.Order), Id(links.Ticket), links.Quantity is int quantity ? DbValue.Integer(quantity) : DbValue.Null(NpgsqlDbType.Integer),
-                links.FlowRevision is long revision ? DbValue.Bigint(revision) : DbValue.Null(NpgsqlDbType.Bigint), links.TelegramUpdate is long update ? DbValue.Bigint(update) : DbValue.Null(NpgsqlDbType.Bigint),
-                DbValue.Text(BotActivityRegistry.Outcome(row.Outcome)), DbValue.Text(row.Key), DbValue.Utc(row.OccurredAt) };
-            bool origin = await session.QuerySingleAsync(new DbStatement("""
-                SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=$2
-                    AND ($6 IS NULL OR EXISTS(SELECT 1 FROM shop.brand_products l WHERE l.brand_id=u.brand_id AND l.product_id=$6))
-                    AND ($7 IS NULL OR EXISTS(SELECT 1 FROM shop.orders o WHERE o.id=$7 AND o.user_id=u.id AND ($6 IS NULL OR o.product_id=$6)))
-                    AND ($8 IS NULL OR EXISTS(SELECT 1 FROM shop.support_tickets t WHERE t.id=$8 AND t.user_id=u.id))
-                    AND ($11 IS NULL OR shop.telegram_update_seen(b.telegram_update_highwater,b.telegram_update_window,$11))
-                    AND ($5 NOT IN ('flow_expired','flow_abandoned') OR u.flow_revision>$10)
-                    AND ($5<>'checkout_created' OR EXISTS(SELECT 1 FROM shop.orders o WHERE o.id=$7 AND o.user_id=u.id AND o.product_id=$6 AND o.quantity=$9 AND o.created_at=$14))
-                    AND ($5 NOT IN ('checkout_funded','checkout_expired','checkout_replaced') OR EXISTS(SELECT 1 FROM shop.orders o WHERE o.id=$7 AND o.user_id=u.id AND o.product_id=$6 AND o.quantity=$9
-                        AND CASE $5 WHEN 'checkout_funded' THEN o.payment_status IN ('paid','not_required') AND o.payment_confirmed_at=$14
-                            WHEN 'checkout_expired' THEN o.resolution_kind='unpaid_expiry' AND o.resolution_at=$14
-                            WHEN 'checkout_replaced' THEN o.resolution_kind='replaced' AND o.resolution_at=$14 ELSE false END))
-                    AND ($3<>'payment' OR shop.activity_payment_origin(ROW($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)::shop.bot_activity_events)))
-                """, values), r => r.GetBoolean(0), ct);
+            var value = new BotActivityEvent { Id = row.Id, UserId = row.Member, EventType = definition.EventType, SourceKind = BotActivityRegistry.Source(row.Source), ActionCode = definition.Code, ProductId = links.Product, OrderId = links.Order, SupportTicketId = links.Ticket, QuantitySelected = links.Quantity, FlowRevision = links.FlowRevision, TelegramUpdateId = links.TelegramUpdate, OutcomeCode = BotActivityRegistry.Outcome(row.Outcome), IdempotencyKey = row.Key, OccurredAt = new DateTime(row.OccurredAt.Ticks - row.OccurredAt.Ticks % 10, DateTimeKind.Utc) };
+            bool origin = await session.RunEfStepAsync(false, async (data, token) =>
+            {
+                var owner = await (from u in data.Data.Set<User>() join b in data.Data.Set<Brand>() on u.BrandId equals b.Id where u.Id == row.Member && (links.Product == null || data.Data.Set<BrandProduct>().Any(l => l.BrandId == u.BrandId && l.ProductId == links.Product)) && (links.Order == null || data.Data.Set<Order>().Any(o => o.Id == links.Order && o.UserId == u.Id && (links.Product == null || o.ProductId == links.Product))) && (links.Ticket == null || data.Data.Set<SupportTicket>().Any(t => t.Id == links.Ticket && t.UserId == u.Id)) select new { u.BrandId, u.FlowRevision, b.TelegramUpdateHighwater, b.TelegramUpdateWindow }).SingleOrDefaultAsync(token);
+                if (owner is null || links.TelegramUpdate is long update && !ActivityRetentionQueries.Seen(owner.TelegramUpdateHighwater, owner.TelegramUpdateWindow, update)) return false;
+                if (definition.Code is "flow_expired" or "flow_abandoned" && !(links.FlowRevision is long revision && owner.FlowRevision > revision)) return false;
+                if (definition.Code is "checkout_created" or "checkout_funded" or "checkout_expired" or "checkout_replaced")
+                {
+                    if (links.Product == null || links.Quantity == null || !await data.Data.Set<Order>().AnyAsync(o => o.Id == links.Order && o.UserId == row.Member && o.ProductId == links.Product && o.Quantity == links.Quantity && (definition.Code == "checkout_created" && o.CreatedAt == value.OccurredAt || definition.Code == "checkout_funded" && (o.PaymentStatus == "paid" || o.PaymentStatus == "not_required") && o.PaymentConfirmedAt == value.OccurredAt || definition.Code == "checkout_expired" && o.ResolutionKind == "unpaid_expiry" && o.ResolutionAt == value.OccurredAt || definition.Code == "checkout_replaced" && o.ResolutionKind == "replaced" && o.ResolutionAt == value.OccurredAt), token)) return false;
+                }
+                return definition.EventType != "payment" || await ActivityRetentionQueries.PaymentAsync(data, value, owner.BrandId, token);
+            }, ct);
             if (!origin) throw new MigrationRejectedException();
             if (row.OccurredAt < now.AddHours(-4320)) { expired++; continue; }
-            int count = await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.bot_activity_events(id,user_id,event_type,source_kind,action_code,product_id,order_id,support_ticket_id,quantity_selected,flow_revision,telegram_update_id,outcome_code,idempotency_key,occurred_at)
-                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(user_id,idempotency_key) DO NOTHING
-                """, values), ct);
-            if (count == 0)
+            bool added = await session.RunEfStepAsync(true, async (data, token) =>
             {
-                bool same = await session.QuerySingleAsync(new DbStatement("""
-                    SELECT EXISTS(SELECT 1 FROM shop.bot_activity_events e WHERE e.user_id=$2 AND e.idempotency_key=$13
-                        AND ROW(e.id,e.user_id,e.event_type,e.source_kind,e.action_code,e.product_id,e.order_id,e.support_ticket_id,e.quantity_selected,e.flow_revision,e.telegram_update_id,e.outcome_code,e.idempotency_key,e.occurred_at)
-                        IS NOT DISTINCT FROM ROW($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14))
-                    """, values), r => r.GetBoolean(0), ct);
-                if (!same) throw new MigrationRejectedException();
-                replayed++;
-            }
-            else inserted++;
+                data.RequireImportCommand(); var prior = await data.Data.Set<BotActivityEvent>().SingleOrDefaultAsync(e => e.UserId == row.Member && e.IdempotencyKey == row.Key, token);
+                if (prior is null) { data.Data.Add(value); return true; }
+                if (prior.Id != value.Id || prior.UserId != value.UserId || prior.EventType != value.EventType || prior.SourceKind != value.SourceKind || prior.ActionCode != value.ActionCode || prior.ProductId != value.ProductId || prior.OrderId != value.OrderId || prior.SupportTicketId != value.SupportTicketId || prior.QuantitySelected != value.QuantitySelected || prior.FlowRevision != value.FlowRevision || prior.TelegramUpdateId != value.TelegramUpdateId || prior.OutcomeCode != value.OutcomeCode || prior.IdempotencyKey != value.IdempotencyKey || prior.OccurredAt != value.OccurredAt) throw new MigrationRejectedException(); return false;
+            }, ct);
+            if (added) inserted++; else replayed++;
         }
         await session.CommitAsync(ct); return new(inserted, replayed, expired);
     }
-    private static DbValue Id(Guid? value) => value is Guid id ? DbValue.Uuid(id) : DbValue.Null(NpgsqlDbType.Uuid);
 }

@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -50,7 +52,7 @@ public sealed class HistoricalOrderImportWorkflow(DbSessionFactory sessions)
         foreach (var proof in proofs) manifest.Require(proof);
         await using var session = await sessions.BeginAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
-        bool member = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.brands b ON b.id=u.brand_id WHERE u.id=$1 AND b.id=$2 AND b.bot_id=$3 AND u.telegram_id=$4)", DbValue.Uuid(row.User), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId), DbValue.Bigint(row.Source.UserId)), r => r.GetBoolean(0), ct);
+        bool member = await session.RunEfStepAsync(false, (data, token) => (from u in data.Data.Set<User>() join b in data.Data.Set<Brand>() on u.BrandId equals b.Id where u.Id == row.User && b.Id == context.BrandId && b.BotId == context.BotId && u.TelegramId == row.Source.UserId select u.Id).AnyAsync(token), ct);
         if (!member || !await LegacyValues.HasHistoricalDebitAsync(session, manifest, row.Source.Id, row.User, row.Source.Total, ct)) throw new MigrationRejectedException();
         bool first = await LegacyMapStore.EnsureAsync(session, manifest, proofs[0], ct);
         bool projection = await LegacyMapStore.EnsureAsync(session, manifest, proofs[1], ct);
@@ -58,13 +60,7 @@ public sealed class HistoricalOrderImportWorkflow(DbSessionFactory sessions)
         if (first != projection || first != alias) throw new MigrationRejectedException();
         if (first)
         {
-            await session.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.orders(id,user_id,quantity,order_kind,payment_status,fulfillment_status,currency,payment_method,unit_price_usdt,
-                auto_price_toman_snapshot,pricing_rounding_step_snapshot,price_calculation_version,payment_confirmed_at,brand_public_name_snapshot,
-                product_title_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder,review_code,created_at,updated_at)
-            VALUES($1,$2,$3,'product_purchase','paid','requires_admin','USDT','wallet',$4,false,5000,'legacy-wallet-v1',$5,$6,$7,$8,'local',false,false,'credential_recovery',$5,$5)
-            """, DbValue.Uuid(row.Target), DbValue.Uuid(row.User), DbValue.Integer(row.Source.Quantity), DbValue.Numeric(terms.UnitPrice), DbValue.Utc(row.Source.CreatedAt), DbValue.Text(row.HistoricalBrandName), DbValue.Text(terms.Title), DbValue.Text(row.Source.CheckoutSnapshot)), ct);
-            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,correlation_id) VALUES ($1,'system',$2,'legacy_import','order',$3,'Manifest-bound historical wallet order retained for review',$4)", DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(context.BrandId), DbValue.Uuid(row.Target), DbValue.Uuid(manifest.Batch)), ct);
+            await session.RunEfStepAsync(true, (data, token) => { data.RequireImportCommand(); data.Data.Add(new Order { Id = row.Target, UserId = row.User, Quantity = row.Source.Quantity, OrderKind = "product_purchase", PaymentStatus = "paid", FulfillmentStatus = "requires_admin", Currency = "USDT", PaymentMethod = "wallet", UnitPriceUsdt = terms.UnitPrice, AutoPriceTomanSnapshot = false, PricingRoundingStepSnapshot = 5000m, PriceCalculationVersion = "legacy-wallet-v1", PaymentConfirmedAt = row.Source.CreatedAt, BrandPublicNameSnapshot = row.HistoricalBrandName, ProductTitleSnapshot = terms.Title, PaymentTermsSnapshot = row.Source.CheckoutSnapshot, FulfillmentKindSnapshot = "local", LocalFirstSnapshot = false, IsPreorder = false, ReviewCode = "credential_recovery", CreatedAt = row.Source.CreatedAt, UpdatedAt = row.Source.CreatedAt }); data.Data.Add(new AuditEvent { Id = Guid.NewGuid(), ActorKind = "system", BrandId = context.BrandId, Action = "legacy_import", EntityKind = "order", EntityId = row.Target, Reason = "Manifest-bound historical wallet order retained for review", CorrelationId = manifest.Batch }); return Task.FromResult(true); }, ct);
         }
         if (!await MatchesAsync(session, row, ct)) throw new MigrationRejectedException();
         await session.CommitAsync(ct);
@@ -72,19 +68,6 @@ public sealed class HistoricalOrderImportWorkflow(DbSessionFactory sessions)
     internal static Task<bool> MatchesAsync(DbSession session, LegacyHistoricalOrder row, CancellationToken ct)
     {
         var terms = row.Terms();
-        return session.QuerySingleAsync(new DbStatement("""
-            SELECT EXISTS(SELECT 1 FROM shop.orders WHERE id=$1 AND user_id=$2 AND quantity=$3 AND product_id IS NULL
-                AND order_kind='product_purchase' AND payment_status='paid' AND fulfillment_status='requires_admin' AND currency='USDT'
-                AND payment_method='wallet' AND unit_price_usdt=$4 AND payment_confirmed_at=$5 AND created_at=$5 AND updated_at=$5
-                AND brand_public_name_snapshot=$6 AND product_title_snapshot=$7 AND payment_terms_snapshot=$8
-                AND fulfillment_kind_snapshot='local' AND NOT local_first_snapshot AND NOT is_preorder AND review_code='credential_recovery'
-                AND NOT auto_price_toman_snapshot AND pricing_rounding_step_snapshot=5000 AND price_calculation_version='legacy-wallet-v1'
-                AND unit_price_toman IS NULL AND fx_rate_snapshot IS NULL AND discount_pct_snapshot IS NULL AND discount_units_snapshot IS NULL
-                AND delivery_generation IS NULL AND release_authorized_at IS NULL AND resolution_kind IS NULL
-                AND NOT EXISTS(SELECT 1 FROM shop.fulfillments WHERE order_id=$1)
-                AND NOT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE order_id=$1)
-                AND NOT EXISTS(SELECT 1 FROM shop.payments WHERE order_id=$1)
-                AND NOT EXISTS(SELECT 1 FROM shop.supplier_requests WHERE order_id=$1))
-            """, DbValue.Uuid(row.Target), DbValue.Uuid(row.User), DbValue.Integer(row.Source.Quantity), DbValue.Numeric(terms.UnitPrice), DbValue.Utc(row.Source.CreatedAt), DbValue.Text(row.HistoricalBrandName), DbValue.Text(terms.Title), DbValue.Text(row.Source.CheckoutSnapshot)), r => r.GetBoolean(0), ct);
+        return session.RunEfStepAsync(false, (data, token) => data.Data.Set<Order>().AnyAsync(o => o.Id == row.Target && o.UserId == row.User && o.Quantity == row.Source.Quantity && o.ProductId == null && o.OrderKind == "product_purchase" && o.PaymentStatus == "paid" && o.FulfillmentStatus == "requires_admin" && o.Currency == "USDT" && o.PaymentMethod == "wallet" && o.UnitPriceUsdt == terms.UnitPrice && o.PaymentConfirmedAt == row.Source.CreatedAt && o.CreatedAt == row.Source.CreatedAt && o.UpdatedAt == row.Source.CreatedAt && o.BrandPublicNameSnapshot == row.HistoricalBrandName && o.ProductTitleSnapshot == terms.Title && o.PaymentTermsSnapshot == row.Source.CheckoutSnapshot && o.FulfillmentKindSnapshot == "local" && !o.LocalFirstSnapshot && !o.IsPreorder && o.ReviewCode == "credential_recovery" && !o.AutoPriceTomanSnapshot && o.PricingRoundingStepSnapshot == 5000m && o.PriceCalculationVersion == "legacy-wallet-v1" && o.UnitPriceToman == null && o.FxRateSnapshot == null && o.DiscountPctSnapshot == null && o.DiscountUnitsSnapshot == null && o.DeliveryGeneration == null && o.ReleaseAuthorizedAt == null && o.ResolutionKind == null && !data.Data.Set<Fulfillment>().Any(f => f.OrderId == o.Id) && !data.Data.Set<WalletEntry>().Any(w => w.OrderId == o.Id) && !data.Data.Set<Payment>().Any(p => p.OrderId == o.Id) && !data.Data.Set<SupplierRequest>().Any(r => r.OrderId == o.Id), token), ct);
     }
 }

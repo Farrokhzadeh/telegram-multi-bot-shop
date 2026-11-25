@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using System.Text;
-using NpgsqlTypes;
+using Platform.Persistence.Entities;
 using Platform.Core;
 using Platform.Persistence;
 using Platform.Security;
@@ -65,11 +65,11 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
         var proofs = row.Proofs(context.BrandId); foreach (var proof in proofs) manifest.Require(proof);
         await using var session = await sessions.BeginAsync(ct);
         await LegacyMapStore.RequireDestinationAsync(session, manifest, ct);
-        bool brand = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.brands WHERE id=$1 AND bot_id=$2)", DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct);
+        bool brand = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Brand>().AnyAsync(row => row.Id == context.BrandId && row.BotId == context.BotId, token), ct);
         if (!brand) throw new MigrationRejectedException();
         bool newUser = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.User), ct);
-        if (newUser) await session.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language,first_seen_at,last_seen_at,username,first_name,last_name,blocked_at,banned_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId), DbValue.Text(row.Language), DbValue.Utc(row.FirstSeen), DbValue.Utc(row.LastSeen), LegacyValues.String(row.State?.Username), LegacyValues.String(row.State?.FirstName), LegacyValues.String(row.State?.LastName), LegacyValues.Date(row.State is { Active: false } ? row.State.ObservedAt : null), LegacyValues.Date(row.State is { Banned: true } ? row.State.BannedAt ?? row.State.ObservedAt : null)), ct);
-        await session.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 AND brand_id=$2 AND telegram_id=$3 FOR UPDATE", DbValue.Uuid(row.TargetUser), DbValue.Uuid(context.BrandId), DbValue.Bigint(row.TelegramId)), r => r.GetGuid(0), ct);
+        if (newUser) await session.RunEfStepAsync(true, (data, token) => { data.RequireImportCommand(); data.Data.Add(new User { Id = row.TargetUser, BrandId = context.BrandId, TelegramId = row.TelegramId, Language = row.Language, FirstSeenAt = row.FirstSeen, LastSeenAt = row.LastSeen, Username = row.State?.Username, FirstName = row.State?.FirstName, LastName = row.State?.LastName, BlockedAt = row.State is { Active: false } ? row.State.ObservedAt : null, BannedAt = row.State is { Banned: true } ? row.State.BannedAt ?? row.State.ObservedAt : null }); return Task.FromResult(true); }, ct);
+        await session.RunEfStepAsync(false, async (data, token) => { await data.LockUserAsync(row.TargetUser, context.BrandId, token); return await data.Data.Set<User>().Where(value => value.Id == row.TargetUser && value.BrandId == context.BrandId && value.TelegramId == row.TelegramId).Select(value => value.Id).SingleAsync(token); }, ct);
         bool first = await LegacyMapStore.EnsureAsync(session, manifest, proofs.Single(p => p.Projection == LegacyProjection.WalletSnapshot), ct);
         if (first != newUser) throw new MigrationRejectedException();
         if (row.BalanceUsd > 0)
@@ -89,7 +89,8 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
                     new Platform.Persistence.Entities.WalletEntry { Id = row.TargetOpening, MovementKind = "opening_balance", IdempotencyKey = "opening:" + row.TargetOpening.ToString("D"), LegacyImportBatch = manifest.Batch, Reason = "Frozen authoritative USD opening; history is non-posting" }, token);
                 return true;
             }, ct);
-            await session.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,correlation_id,command_sha256) VALUES ($1,'system',$2,'legacy_import','wallet',$3,$4,$5,$6)", DbValue.Uuid(Guid.NewGuid()), DbValue.Uuid(context.BrandId), DbValue.Uuid(row.TargetUser), DbValue.Text(row.Retention?.Reference ?? "Frozen manifest-bound USD opening; no financial history replay"), DbValue.Uuid(manifest.Batch), row.Retention is null ? DbValue.Null(NpgsqlDbType.Bytea) : DbValue.Binary(row.Retention.Digest.Span)), ct);
+            byte[]? retentionDigest = row.Retention?.Digest.ToArray();
+            await session.RunEfStepAsync(true, (data, token) => { data.RequireImportCommand(); data.Data.Add(new AuditEvent { Id = Guid.NewGuid(), ActorKind = "system", BrandId = context.BrandId, Action = "legacy_import", EntityKind = "wallet", EntityId = row.TargetUser, Reason = row.Retention?.Reference ?? "Frozen manifest-bound USD opening; no financial history replay", CorrelationId = manifest.Batch, CommandSha256 = retentionDigest }); return Task.FromResult(true); }, ct);
         }
         foreach (var history in row.History)
         {
@@ -109,12 +110,21 @@ public sealed class OpeningBalanceImportWorkflow(DbSessionFactory sessions)
     }
     internal static async Task<bool> MatchesWalletAsync(DbSession session, VerifiedImportManifest manifest, LegacyWalletSnapshot row, CancellationToken ct)
     {
-        if (row.Retention is not null && !await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.audit_events WHERE actor_kind='system' AND brand_id=$1 AND action='legacy_import' AND entity_kind='wallet' AND entity_id=$2 AND correlation_id=$3 AND command_sha256=$4 AND reason=$5)", DbValue.Uuid(manifest.TargetBrand), DbValue.Uuid(row.TargetUser), DbValue.Uuid(manifest.Batch), DbValue.Binary(row.Retention.Digest.Span), DbValue.Text(row.Retention.Reference)), r => r.GetBoolean(0), ct)) return false;
-        bool member = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.users u JOIN shop.wallets w ON w.user_id=u.id WHERE u.id=$1 AND u.brand_id=$2 AND u.telegram_id=$3 AND u.language=$4 AND u.first_seen_at=$5 AND u.last_seen_at=$6 AND w.balance=$7 AND w.version=$8)", DbValue.Uuid(row.TargetUser), DbValue.Uuid(manifest.TargetBrand), DbValue.Bigint(row.TelegramId), DbValue.Text(row.Language), DbValue.Utc(row.FirstSeen), DbValue.Utc(row.LastSeen), DbValue.Numeric(row.BalanceUsd), DbValue.Bigint(row.BalanceUsd > 0 ? 1 : 0)), r => r.GetBoolean(0), ct);
-        if (member) member = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.users WHERE id=$1 AND username IS NOT DISTINCT FROM $2 AND first_name IS NOT DISTINCT FROM $3 AND last_name IS NOT DISTINCT FROM $4 AND blocked_at IS NOT DISTINCT FROM $5 AND banned_at IS NOT DISTINCT FROM $6)", DbValue.Uuid(row.TargetUser), LegacyValues.String(row.State?.Username), LegacyValues.String(row.State?.FirstName), LegacyValues.String(row.State?.LastName), LegacyValues.Date(row.State is { Active: false } ? row.State.ObservedAt : null), LegacyValues.Date(row.State is { Banned: true } ? row.State.BannedAt ?? row.State.ObservedAt : null)), r => r.GetBoolean(0), ct);
+        if (row.Retention is not null)
+        {
+            byte[] digest = row.Retention.Digest.ToArray();
+            if (!await session.RunEfStepAsync(false, (data, token) => data.Data.Set<AuditEvent>().AnyAsync(a => a.ActorKind == "system" && a.BrandId == manifest.TargetBrand && a.Action == "legacy_import" && a.EntityKind == "wallet" && a.EntityId == row.TargetUser && a.CorrelationId == manifest.Batch && a.CommandSha256 == digest && a.Reason == row.Retention.Reference, token), ct)) return false;
+        }
+        bool member = await session.RunEfStepAsync(false, (data, token) => (from u in data.Data.Set<User>() join w in data.Data.Set<Wallet>() on u.Id equals w.UserId where u.Id == row.TargetUser && u.BrandId == manifest.TargetBrand && u.TelegramId == row.TelegramId && u.Language == row.Language && u.FirstSeenAt == row.FirstSeen && u.LastSeenAt == row.LastSeen && w.Balance == row.BalanceUsd && w.Version == (row.BalanceUsd > 0 ? 1 : 0) select u.Id).AnyAsync(token), ct);
+        string? username = row.State?.Username, first = row.State?.FirstName, last = row.State?.LastName; DateTime? blocked = row.State is { Active: false } ? row.State.ObservedAt : null, banned = row.State is { Banned: true } ? row.State.BannedAt ?? row.State.ObservedAt : null;
+        if (member) member = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<User>().AnyAsync(u => u.Id == row.TargetUser && u.Username == username && u.FirstName == first && u.LastName == last && u.BlockedAt == blocked && u.BannedAt == banned, token), ct);
         if (!member || row.BalanceUsd == 0) return member;
-        return await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE id=$1 AND user_id=$2 AND signed_amount=$3 AND balance_after=$3 AND posting_version=1 AND movement_kind='opening_balance' AND is_posting AND legacy_import_batch=$4 AND idempotency_key=$5)", DbValue.Uuid(row.TargetOpening), DbValue.Uuid(row.TargetUser), DbValue.Numeric(row.BalanceUsd), DbValue.Uuid(manifest.Batch), DbValue.Text("opening:" + row.TargetOpening.ToString("D"))), r => r.GetBoolean(0), ct);
+        string opening = "opening:" + row.TargetOpening.ToString("D");
+        return await session.RunEfStepAsync(false, (data, token) => data.Data.Set<WalletEntry>().AnyAsync(w => w.Id == row.TargetOpening && w.UserId == row.TargetUser && w.SignedAmount == row.BalanceUsd && w.BalanceAfter == row.BalanceUsd && w.PostingVersion == 1 && w.MovementKind == "opening_balance" && w.IsPosting && w.LegacyImportBatch == manifest.Batch && w.IdempotencyKey == opening, token), ct);
     }
-    internal static Task<bool> MatchesHistoryAsync(DbSession session, Guid batch, Guid user, LegacyHistoryRow history, CancellationToken ct) =>
-        session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.wallet_entries WHERE id=$1 AND user_id=$2 AND signed_amount=$3 AND balance_after IS NOT DISTINCT FROM $4 AND movement_kind='legacy_history' AND NOT is_posting AND posting_version IS NULL AND legacy_import_batch=$5 AND created_at=$6 AND idempotency_key=$7)", DbValue.Uuid(history.TargetEntry), DbValue.Uuid(user), DbValue.Numeric(history.SignedAmount), history.BalanceAfter is decimal amount ? DbValue.Numeric(amount) : DbValue.Null(NpgsqlDbType.Numeric), DbValue.Uuid(batch), DbValue.Utc(history.OccurredAt), DbValue.Text("history:" + history.TargetEntry.ToString("D"))), r => r.GetBoolean(0), ct);
+    internal static Task<bool> MatchesHistoryAsync(DbSession session, Guid batch, Guid user, LegacyHistoryRow history, CancellationToken ct)
+    {
+        string key = "history:" + history.TargetEntry.ToString("D");
+        return session.RunEfStepAsync(false, (data, token) => data.Data.Set<WalletEntry>().AnyAsync(w => w.Id == history.TargetEntry && w.UserId == user && w.SignedAmount == history.SignedAmount && w.BalanceAfter == history.BalanceAfter && w.MovementKind == "legacy_history" && !w.IsPosting && w.PostingVersion == null && w.LegacyImportBatch == batch && w.CreatedAt == history.OccurredAt && w.IdempotencyKey == key, token), ct);
+    }
 }

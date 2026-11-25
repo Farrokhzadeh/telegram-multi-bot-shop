@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Text.Json;
 using Platform.Persistence;
 using Platform.Security;
@@ -30,9 +32,13 @@ public sealed class LegacyDeliveryImportWorkflow(DbSessionFactory sessions, Secr
         };
         string id = source.GetProperty(field).ValueKind == JsonValueKind.String ? LegacyValues.Text(source, field) : source.GetProperty(field).GetRawText();
         var expected = manifest.Proofs.SingleOrDefault(p => p.Projection == parent && p.LegacyId == id && p.Target == row.Target) ?? throw new MigrationRejectedException();
-        bool linked = await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind='primary' AND legacy_id=$3 AND target_id=$4 AND import_batch=$5 AND import_manifest_ref=$6)", DbValue.Text(manifest.SourceBrand), DbValue.Text(expected.SourceTable), DbValue.Text(id), DbValue.Uuid(row.Target), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetBoolean(0), ct);
-        if (!linked || !await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.orders o JOIN shop.users u ON u.id=o.user_id JOIN shop.brands b ON b.id=u.brand_id WHERE o.id=$1 AND b.id=$2 AND b.bot_id=$3 AND o.fulfillment_status='requires_admin' AND o.review_code='credential_recovery' AND o.release_authorized_at IS NULL AND o.delivery_generation IS NULL)", DbValue.Uuid(row.Target), DbValue.Uuid(context.BrandId), DbValue.Bigint(context.BotId)), r => r.GetBoolean(0), ct)) throw new MigrationRejectedException();
-        if (row.Source.Projection == LegacyProjection.ZeroTransaction && (LegacyValues.Text(source, "currency") != "USD" || !await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE o.id=$1 AND u.telegram_id=$2 AND o.payment_status='not_required')", DbValue.Uuid(row.Target), DbValue.Bigint(source.GetProperty("user_id").GetInt64())), r => r.GetBoolean(0), ct))) throw new MigrationRejectedException();
+        bool linked = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().AnyAsync(m => m.SourceBrand == manifest.SourceBrand && m.SourceTable == expected.SourceTable && m.SourceKeyKind == "primary" && m.LegacyId == id && m.TargetId == row.Target && m.ImportBatch == manifest.Batch && m.ImportManifestRef == manifest.Reference, token), ct);
+        if (!linked || !await session.RunEfStepAsync(false, (data, token) => (from o in data.Data.Set<Order>() join u in data.Data.Set<User>() on o.UserId equals u.Id join b in data.Data.Set<Brand>() on u.BrandId equals b.Id where o.Id == row.Target && b.Id == context.BrandId && b.BotId == context.BotId && o.FulfillmentStatus == "requires_admin" && o.ReviewCode == "credential_recovery" && o.ReleaseAuthorizedAt == null && o.DeliveryGeneration == null select o.Id).AnyAsync(token), ct)) throw new MigrationRejectedException();
+        if (row.Source.Projection == LegacyProjection.ZeroTransaction)
+        {
+            long telegram = source.GetProperty("user_id").GetInt64();
+            if (LegacyValues.Text(source, "currency") != "USD" || !await session.RunEfStepAsync(false, (data, token) => (from o in data.Data.Set<Order>() join u in data.Data.Set<User>() on o.UserId equals u.Id where o.Id == row.Target && u.TelegramId == telegram && o.PaymentStatus == "not_required" select o.Id).AnyAsync(token), ct)) throw new MigrationRejectedException();
+        }
         if (row.Source.Projection == LegacyProjection.PreorderItem)
         {
             string inventory = source.GetProperty("inventoryitem_id").GetRawText();

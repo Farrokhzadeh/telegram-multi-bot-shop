@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using Platform.Persistence.Entities;
 using System.Text.Json.Serialization;
 using Platform.Core;
 using Platform.Persistence;
@@ -92,7 +94,7 @@ public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReco
             }
             foreach (var proof in row.Proofs(manifest.TargetBrand))
             {
-                var maps = await session.QueryManyAsync(new DbStatement("SELECT target_kind,target_id,target_brand_id,source_fingerprint,import_batch,import_manifest_ref FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind=$3 AND legacy_id=$4", DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId)), r => (Kind: r.GetString(0), Id: r.GetGuid(1), Brand: r.IsDBNull(2) ? Guid.Empty : r.GetGuid(2), Digest: r.GetBinary(3), Batch: r.GetGuid(4), Reference: r.GetString(5)), 1, ct);
+                var maps = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().Where(m => m.SourceBrand == manifest.SourceBrand && m.SourceTable == proof.SourceTable && m.SourceKeyKind == proof.KeyKind && m.LegacyId == proof.LegacyId).Select(m => new { Kind = m.TargetKind, Id = m.TargetId, Brand = m.TargetBrandId ?? Guid.Empty, Digest = m.SourceFingerprint, Batch = m.ImportBatch, Reference = m.ImportManifestRef }).Take(1).ToListAsync(token), ct);
                 if (maps.Count == 0) missingMaps++;
                 else { var value = maps[0]; if (value.Batch == manifest.Batch && value.Reference == manifest.Reference) foundMaps++; if (value.Kind != proof.TargetKind || value.Id != proof.Target || value.Brand != proof.Brand || value.Batch != manifest.Batch || value.Reference != manifest.Reference || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(value.Digest, proof.Fingerprint.Span)) mismatchedMaps++; }
             }
@@ -100,10 +102,10 @@ public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReco
         long expected = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.WalletSnapshot);
         long expectedHistory = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.Transaction);
         long expectedOpenings = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.WalletOpening);
-        long actualEntries = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.wallet_entries WHERE legacy_import_batch=$1 AND movement_kind IN ('opening_balance','legacy_history')", DbValue.Uuid(manifest.Batch)), r => r.GetInt64(0), ct);
+        long actualEntries = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<WalletEntry>().LongCountAsync(w => w.LegacyImportBatch == manifest.Batch && (w.MovementKind == "opening_balance" || w.MovementKind == "legacy_history"), token), ct);
         long expectedEntries = expectedHistory + expectedOpenings;
         long uncovered = Math.Abs(expectedHistory - rows.Sum(r => (long)r.History.Count)) + Math.Abs(expectedOpenings - rows.LongCount(r => r.BalanceUsd > 0)) + Math.Abs(expectedEntries - actualEntries);
-        long walletMaps = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2 AND source_table IN ('users','users.balance.snapshot','users.balance.opening','transactions')", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        long walletMaps = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().LongCountAsync(m => m.ImportBatch == manifest.Batch && m.ImportManifestRef == manifest.Reference && (m.SourceTable == "users" || m.SourceTable == "users.balance.snapshot" || m.SourceTable == "users.balance.opening" || m.SourceTable == "transactions"), token), ct);
         return new(manifest.Batch, expected, rows.LongLength, mismatch, missingMaps, mismatchedMaps, uncovered, Math.Max(0, walletMaps - foundMaps), invalidRetentions, rows.LongCount(r => r.Retention?.ManualIrrBalance == true), rows.Sum(r => r.Retention?.HistoryRows ?? 0), rows.Sum(r => r.Retention?.IrrHistoryRows ?? 0), rows.Sum(r => r.Retention?.ZeroHistoryRows ?? 0));
     }
     public async Task<HistoricalOrderReconciliation> CompareOrdersAsync(VerifiedImportManifest manifest, IReadOnlyList<LegacyHistoricalOrder> source, CancellationToken ct = default)
@@ -118,10 +120,10 @@ public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReco
         long expected = manifest.Proofs.LongCount(p => p.Projection == LegacyProjection.HistoricalOrder);
         long unmatched = expected - rows.LongLength;
         var mappings = await ReadAsync(session, manifest, ct, target);
-        long batchMappings = await session.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.legacy_id_map WHERE import_batch=$1 AND import_manifest_ref=$2", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetInt64(0), ct);
+        long batchMappings = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().LongCountAsync(m => m.ImportBatch == manifest.Batch && m.ImportManifestRef == manifest.Reference, token), ct);
         long expectedKeysInBatch = 0;
         foreach (var proof in manifest.Proofs)
-            if (await session.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.legacy_id_map WHERE source_brand=$1 AND source_table=$2 AND source_key_kind=$3 AND legacy_id=$4 AND import_batch=$5 AND import_manifest_ref=$6)", DbValue.Text(manifest.SourceBrand), DbValue.Text(proof.SourceTable), DbValue.Text(proof.KeyKind), DbValue.Text(proof.LegacyId), DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => r.GetBoolean(0), ct)) expectedKeysInBatch++;
+            if (await session.RunEfStepAsync(false, (data, token) => data.Data.Set<LegacyIdMap>().AnyAsync(m => m.SourceBrand == manifest.SourceBrand && m.SourceTable == proof.SourceTable && m.SourceKeyKind == proof.KeyKind && m.LegacyId == proof.LegacyId && m.ImportBatch == manifest.Batch && m.ImportManifestRef == manifest.Reference, token), ct)) expectedKeysInBatch++;
         long unexpected = Math.Max(0, batchMappings - expectedKeysInBatch);
         return new(manifest.Batch, expected, rows.LongLength, mismatched, unmatched, mappings.MissingMappings, mappings.MismatchedMappings, unexpected);
     }
@@ -136,18 +138,20 @@ public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReco
     {
         if (target is null) await LegacyMapStore.RequireDestinationAsync(session, manifest, ct); else await target.RequireAsync(session, manifest, ct);
         var coverage = await LegacyMapStore.ReadCoverageAsync(session, manifest, ct, target);
-        var money = await session.QuerySingleAsync(new DbStatement("SELECT COALESCE(sum(signed_amount) FILTER(WHERE movement_kind='opening_balance' AND is_posting),0)::text,count(*) FILTER(WHERE movement_kind='opening_balance' AND is_posting),count(*) FILTER(WHERE movement_kind='legacy_history' AND NOT is_posting) FROM shop.wallet_entries WHERE legacy_import_batch=$1", DbValue.Uuid(manifest.Batch)), r => (Opening: ExactDecimal.Parse(r.GetString(0)), Postings: r.GetInt64(1), History: r.GetInt64(2)), ct);
-        var liabilities = await session.QuerySingleAsync(new DbStatement("""
-            SELECT (SELECT count(*) FROM shop.orders o JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND o.payment_status IN ('paid','not_required') AND o.fulfillment_status NOT IN ('completed','cancelled','compensated')),
-                (SELECT COALESCE(sum(d.units_covered),0)::bigint FROM shop.discount_uses d JOIN shop.orders o ON o.id=d.order_id JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND d.status='held'),
-                (SELECT count(*) FROM shop.fulfillments f JOIN shop.orders o ON o.id=f.order_id JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND f.delivered_content IS NOT NULL)
-                    +(SELECT count(*) FROM shop.discounts WHERE brand_id=$1 AND code_ciphertext IS NOT NULL)
-                    +(SELECT count(*) FROM shop.support_messages m JOIN shop.support_tickets t ON t.id=m.ticket_id JOIN shop.users u ON u.id=t.user_id WHERE u.brand_id=$1 AND m.body_ciphertext IS NOT NULL)
-                    +(SELECT count(*) FROM shop.payments p JOIN shop.orders o ON o.id=p.order_id JOIN shop.users u ON u.id=o.user_id WHERE u.brand_id=$1 AND p.bank_destination_ciphertext IS NOT NULL),
-                (SELECT count(*) FROM shop.inventory_items WHERE state='available')
-            """, DbValue.Uuid(manifest.TargetBrand)), r => (Paid: r.GetInt64(0), Held: r.GetInt64(1), Ciphers: r.GetInt64(2), Stock: r.GetInt64(3)), ct);
+        var money = await session.RunEfStepAsync(false, async (data, token) => { var query = data.Data.Set<WalletEntry>().Where(w => w.LegacyImportBatch == manifest.Batch); return (Opening: await query.Where(w => w.MovementKind == "opening_balance" && w.IsPosting).SumAsync(w => (decimal?)w.SignedAmount, token) ?? 0m, Postings: await query.LongCountAsync(w => w.MovementKind == "opening_balance" && w.IsPosting, token), History: await query.LongCountAsync(w => w.MovementKind == "legacy_history" && !w.IsPosting, token)); }, ct);
+        var liabilities = await session.RunEfStepAsync(false, async (data, token) =>
+        {
+            var orders = from o in data.Data.Set<Order>() join u in data.Data.Set<User>() on o.UserId equals u.Id where u.BrandId == manifest.TargetBrand select o;
+            long paid = await orders.LongCountAsync(o => (o.PaymentStatus == "paid" || o.PaymentStatus == "not_required") && o.FulfillmentStatus != "completed" && o.FulfillmentStatus != "cancelled" && o.FulfillmentStatus != "compensated", token);
+            long held = await (from d in data.Data.Set<DiscountUse>() join o in orders on d.OrderId equals o.Id where d.Status == "held" select (long?)d.UnitsCovered).SumAsync(token) ?? 0L;
+            long ciphers = await (from f in data.Data.Set<Fulfillment>() join o in orders on f.OrderId equals o.Id where f.DeliveredContent != null select f.Id).LongCountAsync(token);
+            ciphers += await data.Data.Set<Discount>().LongCountAsync(d => d.BrandId == manifest.TargetBrand && d.CodeCiphertext != null, token);
+            ciphers += await (from m in data.Data.Set<SupportMessage>() join t in data.Data.Set<SupportTicket>() on m.TicketId equals t.Id join u in data.Data.Set<User>() on t.UserId equals u.Id where u.BrandId == manifest.TargetBrand && m.BodyCiphertext != null select m.Id).LongCountAsync(token);
+            ciphers += await (from p in data.Data.Set<Payment>() join o in orders on p.OrderId equals o.Id where p.BankDestinationCiphertext != null select p.Id).LongCountAsync(token);
+            return (Paid: paid, Held: held, Ciphers: ciphers, Stock: await data.Data.Set<InventoryItem>().LongCountAsync(i => i.State == "available", token));
+        }, ct);
         long mapped = coverage.BatchCount;
-        var balances = await session.QuerySingleAsync(new DbStatement("SELECT COALESCE(sum(w.balance),0)::text,count(*) FROM shop.wallets w JOIN shop.legacy_id_map m ON m.target_kind='wallet' AND m.target_id=w.user_id WHERE m.import_batch=$1 AND m.import_manifest_ref=$2", DbValue.Uuid(manifest.Batch), DbValue.Text(manifest.Reference)), r => (Total: ExactDecimal.Parse(r.GetString(0)), Count: r.GetInt64(1)), ct);
+        var balances = await session.RunEfStepAsync(false, async (data, token) => { var query = from w in data.Data.Set<Wallet>() join m in data.Data.Set<LegacyIdMap>() on w.UserId equals m.TargetId where m.TargetKind == "wallet" && m.ImportBatch == manifest.Batch && m.ImportManifestRef == manifest.Reference select w; return (Total: await query.SumAsync(w => (decimal?)w.Balance, token) ?? 0m, Count: await query.LongCountAsync(token)); }, ct);
         bool complete = money.Opening == manifest.ExpectedOpeningUsd && balances.Total == manifest.ExpectedOpeningUsd && balances.Count == manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletSnapshot) && coverage.Missing == 0 && coverage.Mismatched == 0 && coverage.Unexpected == 0 && mapped == manifest.Proofs.Count &&
             money.Postings == manifest.Proofs.Count(p => p.Projection == LegacyProjection.WalletOpening) && money.History == manifest.Proofs.Count(p => p.Projection == LegacyProjection.Transaction);
         return new(manifest.Batch, manifest.Proofs.Count, coverage.Committed, coverage.Missing, coverage.Mismatched, money.Opening, manifest.ExpectedOpeningUsd, balances.Total, balances.Total - manifest.ExpectedOpeningUsd, money.Postings, money.History, liabilities.Paid, liabilities.Held, liabilities.Ciphers, liabilities.Stock, complete, coverage.Unexpected);
