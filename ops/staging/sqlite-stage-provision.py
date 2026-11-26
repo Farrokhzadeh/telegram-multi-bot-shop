@@ -55,8 +55,26 @@ def inside(path, root):
     require(value == root or root in value.parents, "Stage source escaped its qualified root")
     return value
 
+def provision_tester(preview):
+    require(re.fullmatch(r"/var/lib/teleg-cli/akanti-cold-staging-[A-Za-z0-9_-]+/telegram-preview-[A-Za-z0-9_-]+/config", str(preview)),
+            "Unrecognized synthetic preview path")
+    safe_directory(ROOT, 0)
+    safe_directory(ROOT / "tester", OWNER)
+    for name in ("bot-id", "bot-token", "tester-id"):
+        private_file(ROOT / "tester" / name, read_private(preview / name, 200), OWNER)
+    key = ROOT / "tester" / "api-key"
+    if not key.exists():
+        private_file(key, secrets.token_hex(32).encode("ascii"), OWNER)
+    require(re.fullmatch(rb"[a-f0-9]{64}", read_private(key, 64)) is not None, "Invalid stage API key")
+
+
 def main():
-    require(os.geteuid() == 0 and len(sys.argv) == 4, "Staging provisioning requires root and exact source paths")
+    require(os.geteuid() == 0, "Staging provisioning requires root")
+    if len(sys.argv) == 3 and sys.argv[1] == "--plaintext":
+        provision_tester(Path(sys.argv[2]).resolve(strict=True))
+        print("Synthetic SQLite API and Telegram identity files are provisioned.")
+        return
+    require(len(sys.argv) == 4, "Staging provisioning requires exact source paths")
     target = Path(sys.argv[1]).resolve(strict=True)
     preview = Path(sys.argv[2]).resolve(strict=True)
     runtime = Path(sys.argv[3]).resolve(strict=True)
@@ -84,14 +102,7 @@ def main():
             "Unqualified synthetic keys")
     entries = [value for value in manifest["brands"] if value.get("brandId") == BRAND]
     require(len(entries) == 1 and manifest.get("inventory") is not None, "Synthetic staging key is unavailable")
-    safe_directory(ROOT, 0)
-    safe_directory(ROOT / "tester", OWNER)
-    for name in ("bot-id", "bot-token", "tester-id"):
-        private_file(ROOT / "tester" / name, read_private(preview / name, 200), OWNER)
-    key = ROOT / "tester" / "api-key"
-    if not key.exists():
-        private_file(key, secrets.token_hex(32).encode("ascii"), OWNER)
-    require(re.fullmatch(rb"[a-f0-9]{64}", read_private(key, 64)) is not None, "Invalid stage IPC key")
+    provision_tester(preview)
     private_file(ROOT / "staging-copy.env", ("SHOP_STAGING_POSTGRES_READONLY=" + dsn + "\n").encode("utf-8"), 0)
     for service, root_name in (("Api", "qualified-api-v1"), ("JobHost", "qualified-job-v1")):
         qualified = ROOT / root_name

@@ -28,6 +28,7 @@ public sealed class Payment
     public string Status { get; set; } = null!;
     public string? ProviderStatusCode { get; set; }
     public byte[]? BankDestinationCiphertext { get; set; }
+    public byte[]? BankDestination { get; set; }
     public string? BankDestinationKeyId { get; set; }
     public string? ReceiptAssetRef { get; set; }
     public Guid? ReviewAdminId { get; set; }
@@ -36,6 +37,7 @@ public sealed class Payment
     public Guid? CompensatingWalletEntryId { get; set; }
     public string? EvidenceAssetRef { get; set; }
     public byte[]? PendingEvidenceCiphertext { get; set; }
+    public byte[]? PendingEvidence { get; set; }
     public string? PendingEvidenceKeyId { get; set; }
     public byte[]? EvidenceDigest { get; set; }
     public string? LegacyKind { get; set; }

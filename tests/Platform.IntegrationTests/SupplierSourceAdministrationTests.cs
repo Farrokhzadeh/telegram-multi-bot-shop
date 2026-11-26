@@ -30,12 +30,12 @@ public sealed class SupplierSourceAdministrationTests
         }
         if (service != f.Secrets.Service || deployment != f.Secrets.DeploymentId)
         {
-            Assert.Equal(SecretConfigurationFailure.IdentityMismatch, Assert.Throws<SecretConfigurationException>(() => new CatalogStore(f.Sessions, f.Secrets, credentials, Inspect)).Failure);
+            Assert.Equal(SecretConfigurationFailure.IdentityMismatch, Assert.Throws<SecretConfigurationException>(() => new CatalogStore(f.Sessions, SupplierCredentialQualification.Grant(service: f.Secrets.Service, deployment: f.Secrets.DeploymentId), credentials, Inspect)).Failure);
             Assert.Equal(0, calls);
         }
         else
         {
-            var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, Inspect);
+            var catalog = new CatalogStore(f.Sessions, SupplierCredentialQualification.Grant(service: f.Secrets.Service, deployment: f.Secrets.DeploymentId), credentials, Inspect);
             Assert.Equal(CatalogAvailability.Available, (await catalog.GetAsync(f.Context(0), CheckoutFixture.Actor(0), f.Product, Ct))!.Availability);
             Assert.Equal(1, calls);
         }
@@ -80,7 +80,7 @@ public sealed class SupplierSourceAdministrationTests
         var store = new SupplierSourceSelectionStore(f.Sessions);
         Guid source = Guid.NewGuid();
         await store.CreateAsync(actor, f.Product, source, "synthetic", "Public mapping", null, Guid.NewGuid(), Ct);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, failure == "account" ? [] : [new("synthetic", "public account")], (_, _) => failure switch
+        var catalog = new CatalogStore(f.Sessions, failure == "account" ? [] : [new("synthetic", "public account")], (_, _) => failure switch
         {
             "transport" => throw new IOException("Public synthetic transport failure"),
             "ineligible" => Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Ineligible, 0)),
@@ -107,7 +107,7 @@ public sealed class SupplierSourceAdministrationTests
         Guid source = Guid.NewGuid(), command = Guid.NewGuid();
         await store.CreateAsync(actor, f.Product, source, "synthetic", "Public mapping", "Public variant", Guid.NewGuid(), Ct);
         int calls = 0;
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [new("synthetic", "public account")], (request, _) =>
+        var catalog = new CatalogStore(f.Sessions, [new("synthetic", "public account")], (request, _) =>
         {
             calls++; Assert.Equal("Public mapping", request.ProductRef); Assert.Equal("Public variant", request.VariantRef); Assert.Equal("public account", request.AccountRef); Assert.Equal(1, request.Quantity);
             return Task.FromResult(new SupplierCatalogResult(outOfStock ? SupplierCatalogStatus.OutOfStock : SupplierCatalogStatus.Available, outOfStock ? 0 : 10, 1, "USD", "public quote"));
@@ -139,7 +139,7 @@ public sealed class SupplierSourceAdministrationTests
         var store = new SupplierSourceSelectionStore(f.Sessions);
         Guid source = Guid.NewGuid();
         await store.CreateAsync(actor, f.Product, source, "synthetic", "Public mapping", null, Guid.NewGuid(), Ct);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [new("synthetic", "public account")], async (_, ct) =>
+        var catalog = new CatalogStore(f.Sessions, [new("synthetic", "public account")], async (_, ct) =>
         {
             await using var logout = await f.Sessions.BeginAsync(ct);
             await AdminSessionStore.LogoutAsync(logout, actor, ct); await logout.CommitAsync(ct);
@@ -159,9 +159,9 @@ public sealed class SupplierSourceAdministrationTests
         var store = new SupplierSourceSelectionStore(f.Sessions);
         Guid source = Guid.NewGuid();
         await store.CreateAsync(actor, f.Product, source, "synthetic", "Public mapping", null, Guid.NewGuid(), Ct);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [new("synthetic", "public account")], async (_, ct) =>
+        var catalog = new CatalogStore(f.Sessions, [new("synthetic", "public account")], async (_, ct) =>
         {
-            await new AdminCatalogStore(f.Sessions, f.Secrets).ProductAsync(actor, f.Product, new("Public changed product", null, null, null, "supplier", "immediate", true, true), 1, Guid.NewGuid(), ct);
+            await new AdminCatalogStore(f.Sessions).ProductAsync(actor, f.Product, new("Public changed product", null, null, null, "supplier", "immediate", true, true), 1, Guid.NewGuid(), ct);
             return new(SupplierCatalogStatus.Available, 10, 1, "USD", "public quote");
         });
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.SetEnabledAsync(actor, f.Product, source, true, 1, Guid.NewGuid(), catalog, Ct));
@@ -196,7 +196,7 @@ public sealed class SupplierSourceAdministrationTests
         var store = new SupplierSourceSelectionStore(f.Sessions);
         await store.SetEnabledAsync(actor, f.Product, source, false, 1, Guid.NewGuid(), ct: Ct);
         var port = new SyntheticSupplier();
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         await store.SetEnabledAsync(actor, f.Product, source, true, 2, Guid.NewGuid(), new PaymentSettlementFixture(f).Catalog, Ct);
         Assert.Equal(0, port.Submits);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='blocked' AND source_revision=1 AND review_code='source_disabled' AND cost_baseline_amount=1", Ct));

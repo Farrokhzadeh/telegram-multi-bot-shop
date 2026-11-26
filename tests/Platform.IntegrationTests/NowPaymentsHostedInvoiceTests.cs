@@ -86,7 +86,7 @@ public sealed class NowPaymentsHostedInvoiceTests
                 {"id":{{invoice}},"order_id":{{payload.GetProperty("order_id").GetRawText()}},"price_amount":{{payload.GetProperty("price_amount").GetRawText()}},"price_currency":"usd","pay_currency":{{payload.GetProperty("pay_currency").GetRawText()}},"invoice_url":"https://nowpayments.io/payment/?iid={{invoice}}"}
                 """, Encoding.UTF8, "application/json") };
         }));
-        var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        var evidence = new PaymentEvidenceStore(f.Sessions);
         var hosted = new HostedPaymentService(evidence, client, Callback);
         var a = await hosted.IssueForOrderAsync(f.Context(0), CheckoutFixture.Actor(0), first, ct: Ct);
         var b = await hosted.IssueForOrderAsync(f.Context(1), CheckoutFixture.Actor(1), second, ct: Ct);
@@ -116,7 +116,7 @@ public sealed class NowPaymentsHostedInvoiceTests
             string body = PaymentNoticeFixture.Body(origin, quote: 10m).Replace("\"order_id\":", "\"invoice_id\":" + invoice + ",\"order_id\":", StringComparison.Ordinal);
             return read.Verify([PaymentNoticeFixture.Sign(body)], Encoding.UTF8.GetBytes(body));
         }
-        Task<string> Archive(ProtectedPaymentEvidence item, CancellationToken _) => Task.FromResult("protected:synthetic/" + item.Digest);
+        Task<string> Archive(PaymentEvidenceContent item, CancellationToken _) => Task.FromResult("protected:synthetic/" + item.Digest);
         using (var forged = MakeNotice(b.ProviderInvoice))
             await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => evidence.CaptureAsync(f.Context(0), forged, Archive, Ct));
         using var notice = MakeNotice(a.ProviderInvoice);
@@ -136,7 +136,7 @@ public sealed class NowPaymentsHostedInvoiceTests
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
         var fixture = new PaymentSettlementFixture(f);
         await fixture.EnableAsync(Ct);
-        var store = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        var store = new PaymentEvidenceStore(f.Sessions);
         Guid payment = await store.CreateTopupAsync(f.Context(0), CheckoutFixture.Actor(0), Guid.NewGuid(), new(10m, Currency.Usd), CryptoAsset.UsdtTrc20, Ct);
         int requests = 0;
         using var client = new NowPaymentsClient("synthetic-api-key-only", new Handler((_, _) =>
@@ -146,7 +146,7 @@ public sealed class NowPaymentsHostedInvoiceTests
         }));
         var service = new HostedPaymentService(store, client, Callback);
         await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => service.IssueForTopupAsync(f.Context(0), CheckoutFixture.Actor(0), payment, ct: Ct));
-        var restarted = new HostedPaymentService(new PaymentEvidenceStore(new(f.Database.Data), f.Secrets), client, Callback);
+        var restarted = new HostedPaymentService(new PaymentEvidenceStore(new(f.Database.Data)), client, Callback);
         await Assert.ThrowsAsync<InvalidOperationException>(() => restarted.IssueForTopupAsync(f.Context(0), CheckoutFixture.Actor(0), payment, ct: Ct));
         Assert.Equal(1, requests);
     }

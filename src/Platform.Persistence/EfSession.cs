@@ -144,8 +144,8 @@ internal sealed partial class EfSession(AkantiDbContext data, bool write, Writer
             if (Data.ChangeTracker.HasChanges()) throw new InvalidOperationException("Read-only EF sessions cannot write.");
             return;
         }
-        if (!admitted) throw Denied("A verified command scope is required.");
-        await Data.SaveChangesAsync(ct);
+        if (admitted) await Data.SaveChangesAsync(ct);
+        else if (Data.ChangeTracker.HasChanges()) throw Denied("A verified command scope is required.");
         if (validate) await Integrity.ValidateAsync(ct);
         ct.ThrowIfCancellationRequested();
     }
@@ -177,7 +177,7 @@ public sealed partial class DbSession
         RunEfCoreAsync(write, false, operation, ct);
     internal Task<T> RunEfStepAsync<T>(bool write, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct) =>
         RunEfCoreAsync(write, true, operation, ct);
-    private PostgresAkantiDbContext EfContext() => new(new DbContextOptionsBuilder<PostgresAkantiDbContext>()
+    private AkantiDbContext EfContext() => new PostgresPlainTargetDbContext(new DbContextOptionsBuilder<PostgresPlainTargetDbContext>()
         .UseNpgsql(connection, provider => provider.CommandTimeout(options.ClientTimeoutSeconds)
             .ExecutionStrategy(dependencies => new NonRetryingExecutionStrategy(dependencies))).Options);
     private async Task<T> RunEfCoreAsync<T>(bool write, bool defer, Func<EfSession, CancellationToken, Task<T>> operation, CancellationToken ct)

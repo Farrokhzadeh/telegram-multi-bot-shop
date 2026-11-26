@@ -25,7 +25,7 @@ public sealed class RuntimeWriterTests
     public async Task ExistingCheckoutApiUsesBoundRevisionAndRejectsOtherBrand()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 3, ct: Ct);
-        var registry = Registry(f); var factory = registry.ForBrand(f.Context(0)); var store = new CheckoutStore(factory, f.Secrets);
+        var registry = Registry(f); var factory = registry.ForBrand(f.Context(0)); var store = new CheckoutStore(factory);
         Assert.Equal(CheckoutOutcome.Purchased, (await store.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request(), Ct)).Outcome);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.PurchaseLocalAsync(f.Context(1), CheckoutFixture.Actor(1), f.Request(), Ct));
         var actor = await f.AdminAsync(Ct);
@@ -33,7 +33,7 @@ public sealed class RuntimeWriterTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request(), Ct));
         await registry.Controls.SetActiveAsync(actor, f.Context(0), 1, true, Guid.NewGuid(), Ct);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request(), Ct));
-        var fresh = new CheckoutStore(f.Sessions.ForBrandWriter(f.Context(0), 2), f.Secrets);
+        var fresh = new CheckoutStore(f.Sessions.ForBrandWriter(f.Context(0)), f.Secrets);
         Assert.Equal(CheckoutOutcome.Purchased, (await fresh.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request() with { PolicyRevision = 2 }, Ct)).Outcome);
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
     }
@@ -105,10 +105,10 @@ public sealed class RuntimeWriterTests
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct); var registry = Registry(f); var actor = await f.AdminAsync(Ct);
         static InventoryImportItem[] Items() => [new(Guid.NewGuid(), "public synthetic runtime stock")];
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new AdminCatalogStore(registry.ForBrand(f.Context(0)), f.Secrets).ImportAsync(actor, f.Product, Items(), Guid.NewGuid(), Ct));
-        await new AdminCatalogStore(registry.Shared, f.Secrets).ImportAsync(actor, f.Product, Items(), Guid.NewGuid(), Ct);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new AdminCatalogStore(registry.ForBrand(f.Context(0))).ImportAsync(actor, f.Product, Items(), Guid.NewGuid(), Ct));
+        await new AdminCatalogStore(registry.Shared).ImportAsync(actor, f.Product, Items(), Guid.NewGuid(), Ct);
         await registry.Controls.SetActiveAsync(actor, f.Context(0), 0, false, Guid.NewGuid(), Ct);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new AdminCatalogStore(registry.Shared, f.Secrets).ImportAsync(actor, f.Product, Items(), Guid.NewGuid(), Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new AdminCatalogStore(registry.Shared).ImportAsync(actor, f.Product, Items(), Guid.NewGuid(), Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items", Ct));
     }
     [Fact]

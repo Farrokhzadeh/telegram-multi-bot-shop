@@ -11,7 +11,7 @@ public sealed class RegionalPricingTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static WalletCheckoutService Service(CheckoutFixture f) => new(f.Sessions, f.Store,
-        new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Unexpected source.")));
+        new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException("Unexpected source.")));
     private static Task<ChannelMembership> Member(long chat, long actor, CancellationToken ct) => Task.FromResult(ChannelMembership.Member);
 
     [Theory]
@@ -31,7 +31,7 @@ public sealed class RegionalPricingTests
         var admin = await f.AdminAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin,
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin,
                 new(Guid.NewGuid(), "PUBLIC-CAPPED", CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: 10), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
@@ -79,7 +79,7 @@ public sealed class RegionalPricingTests
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin,
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin,
                 new(coupon, "PUBLIC-PROTECTED", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: 3), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
@@ -104,7 +104,7 @@ public sealed class RegionalPricingTests
             prepare = (await OutboxStore.ClaimAsync(claim, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromSeconds(30), Ct))!;
             await claim.CommitAsync(Ct);
         }
-        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), prepare, Ct);
+        await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), prepare, Ct);
         Assert.Equal(3L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=3", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE discount_pct_snapshot=100 AND release_authorized_at IS NOT NULL", Ct));

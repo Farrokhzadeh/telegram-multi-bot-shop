@@ -23,9 +23,9 @@ public static class BrandEndpoints
         Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken,
         Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
         => MapCore(endpoints, _ => store, resolve, verifyToken, verifyChannels);
-    public static void MapScopedBrandAdministration(this IEndpointRouteBuilder endpoints, WriterRegistry writers, SecretSnapshot secrets,
+    public static void MapScopedBrandAdministration(this IEndpointRouteBuilder endpoints, WriterRegistry writers,
         Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken, Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
-        => MapCore(endpoints, context => new BrandAdministrationStore(writers.ForBrand(context), secrets), writers.Resolve, verifyToken, verifyChannels);
+        => MapCore(endpoints, context => new BrandAdministrationStore(writers.ForBrand(context)), writers.Resolve, verifyToken, verifyChannels);
     private static void MapCore(IEndpointRouteBuilder endpoints, Func<BrandContext, BrandAdministrationStore> store, Func<Guid, BrandContext?> resolve,
         Func<BotToken, CancellationToken, Task<VerifiedBotProfile>> verifyToken, Func<BrandContext, IReadOnlyList<RequiredChannel>, CancellationToken, Task<bool>> verifyChannels)
     {

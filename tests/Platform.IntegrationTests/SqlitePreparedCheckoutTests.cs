@@ -17,38 +17,35 @@ public sealed class SqlitePreparedCheckoutTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), stock = Guid.NewGuid(), order = Guid.NewGuid();
-            byte[] encrypted = new InventoryCipher(secrets).Encrypt(stock, Encoding.UTF8.GetBytes("synthetic-stock"));
+            byte[] content = Encoding.UTF8.GetBytes("synthetic-stock");
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active,allow_crypto)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1,1);
+                        bot_token,active,allow_crypto)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1,1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title)
                     VALUES ($product,'local','immediate','Synthetic goods');
                     INSERT INTO brand_products(brand_id,product_id,visible,price_usdt,allow_crypto)
                     VALUES ($brand,$product,1,'10.25',1);
-                    INSERT INTO inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind)
-                    VALUES ($stock,$product,$content,'current',$fingerprint,'local_import');
+                    INSERT INTO inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind)
+                    VALUES ($stock,$product,$content,$fingerprint,'local_import');
                     """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$member", member),
-                    ("$product", product), ("$stock", stock), ("$content", encrypted),
+                    ("$product", product), ("$stock", stock), ("$content", content),
                     ("$fingerprint", SHA256.HashData(stock.ToByteArray())));
                 await setup.ExecuteNonQueryAsync(token);
                 return 0;
             }, ct);
 
-            var catalog = new SqliteCatalogStore(sessions, secrets);
+            var catalog = new SqliteCatalogStore(sessions);
             var query = new CatalogQuery(product, 1, CheckoutPayment.Crypto);
             PreparedCheckout prepared = await catalog.PrepareAsync(brand, 7001, query, ct);
-            var checkout = new SqlitePreparedCheckoutStore(sessions, secrets);
+            var checkout = new SqlitePreparedCheckoutStore(sessions);
             var request = new CheckoutRequest(order, product, 1, CheckoutPayment.Crypto,
                 CheckoutKind.ProductPurchase, CryptoAsset.UsdtTrc20);
             Assert.Equal(CheckoutOutcome.AwaitingPayment,
@@ -82,11 +79,11 @@ public sealed class SqlitePreparedCheckoutTests
 
             await new SqlitePaymentEvidenceStore(sessions).BindInvoiceAsync(brand, 0, 7001, payment, "123456789", 10.4m, ct);
             using var notice = PaymentNoticeFixture.Notice(origin: "order:" + order.ToString("D"));
-            var evidence = new SqlitePaymentCaptureStore(sessions, secrets);
+            var evidence = new SqlitePaymentCaptureStore(sessions);
             Assert.Equal(PaymentCaptureOutcome.Ready, (await evidence.CaptureAsync(brand, 0, notice,
                 (proof, _) => Task.FromResult("protected:synthetic/" + proof.Digest), ct)).Outcome);
             Assert.Equal(PaymentSettlementOutcome.Settled,
-                (await new SqliteOrderPaymentSettlementStore(sessions, secrets)
+                (await new SqliteOrderPaymentSettlementStore(sessions)
                     .SettleAsync(brand, 0, payment, PaymentSettlementFixture.Lookup, ct)).Outcome);
             await sessions.RunAsync(false, async (_, tx, token) =>
             {

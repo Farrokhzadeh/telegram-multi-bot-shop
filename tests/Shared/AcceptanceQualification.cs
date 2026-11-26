@@ -36,13 +36,13 @@ public static class AcceptanceQualification
         await Expire(f, oldPrepare, ct);
         var prepare = await Claim(f, JobKind.PrepareManifest, ct);
         Require(prepare.Id == oldPrepare.Id && prepare.Attempt == oldPrepare.Attempt + 1, "durable prepare restart");
-        var delivery = await new DeliveryStore(new(f.Database.Data), f.Secrets).PrepareAsync(f.Context(winner), prepare, ct);
+        var delivery = await new DeliveryStore(new(f.Database.Data)).PrepareAsync(f.Context(winner), prepare, ct);
         Require(delivery.HasValue, "persisted delivery");
         var oldSend = await Claim(f, JobKind.SendTelegram, ct); Guid generation;
-        using (var dispatch = await new DeliveryStore(f.Sessions, f.Secrets).BeginAsync(f.Context(winner), oldSend, ct))
+        using (var dispatch = await new DeliveryStore(f.Sessions).BeginAsync(f.Context(winner), oldSend, ct))
         { Require(dispatch is not null && dispatch.TargetMessageId == 901, "original edit target"); generation = dispatch!.Generation; }
         await Expire(f, oldSend, ct);
-        var restarted = new DeliveryStore(new(f.Database.Data), f.Secrets);
+        var restarted = new DeliveryStore(new(f.Database.Data));
         await restarted.RecoverExpiredAsync(f.Context(winner), delivery!.Value, ct);
         var recovered = await Claim(f, JobKind.SendTelegram, ct);
         Require(recovered.Id == oldSend.Id && recovered.Attempt == oldSend.Attempt + 1, "durable edit recovery");
@@ -56,7 +56,7 @@ public static class AcceptanceQualification
         Require(sends == 1 && (await f.Store.PurchaseLocalAsync(f.Context(winner), CheckoutFixture.Actor(winner), requests[winner], ct)).Outcome == CheckoutOutcome.Replayed, "delivery and checkout replay");
         Require(await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct) == 1, "no restart debit");
         var payments = new PaymentSettlementFixture(f); await payments.EnableAsync(ct);
-        Guid payment = Guid.NewGuid(); var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        Guid payment = Guid.NewGuid(); var evidence = new PaymentEvidenceStore(f.Sessions);
         await evidence.CreateTopupAsync(f.Context(0), CheckoutFixture.Actor(0), payment, new(10.25m, Currency.Usd), CryptoAsset.UsdtBsc, ct);
         await using (var bind = await f.Sessions.BeginAsync(ct))
         { await evidence.BindInvoiceAsync(bind, f.Context(0), CheckoutFixture.Actor(0), payment, PaymentSettlementFixture.Provider(payment), 10.4m, ct); await bind.CommitAsync(ct); }
@@ -65,7 +65,7 @@ public static class AcceptanceQualification
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is missing."))
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, MaxPoolSize = 16, IncludeErrorDetail = false };
         await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
-        var settled = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => new PaymentSettlementStore(new(bounded), f.Secrets, payments.Catalog).SettleAsync(f.Context(0), payment, PaymentSettlementFixture.Lookup, ct)));
+        var settled = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => new PaymentSettlementStore(new(bounded), payments.Catalog).SettleAsync(f.Context(0), payment, PaymentSettlementFixture.Lookup, ct)));
         Require(settled.Count(r => r.Outcome == PaymentSettlementOutcome.Settled) == 1 && settled.Count(r => r.Outcome == PaymentSettlementOutcome.Replayed) == 99, "hundred settlement replays");
         int postings = checked((int)await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='wallet_topup' AND signed_amount=10.25", ct));
         Require(postings == 1 && await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='wallet_topup' AND user_id<>'" + f.Users[0].ToString("D") + "'", ct) == 0, "original topup member");
@@ -73,17 +73,17 @@ public static class AcceptanceQualification
         Guid mixed = await SupplierFixture.AcceptAsync(f, 5, ct);
         await Anchor(f, 0, mixed, 902, ct);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var submit = await Claim(f, JobKind.SubmitSupplier, ct);
         var original = await store.ReadAsync(f.Context(0), submit, ct);
         await new SupplierFulfillmentWorker(store, port, port).RunAsync(f.Context(0), submit, ct);
         Require(await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE order_id='" + mixed.ToString("D") + "' AND status='released'", ct) == 0, "no partial supplier release");
         await using (var due = await f.Sessions.BeginAsync(ct))
         { await due.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET available_at=clock_timestamp() WHERE job_kind='reconcile_supplier' AND status='pending'"), ct); await due.CommitAsync(ct); }
-        await new SupplierFulfillmentWorker(new(new(f.Database.Data), f.Secrets), port, port).RunAsync(f.Context(0), await Claim(f, JobKind.ReconcileSupplier, ct), ct);
+        await new SupplierFulfillmentWorker(new(new(f.Database.Data)), port, port).RunAsync(f.Context(0), await Claim(f, JobKind.ReconcileSupplier, ct), ct);
         Require(port.Submits == 1 && port.Lookups == 1 && port.Intents.All(i => i == original.Intent), "original supplier intent reconciliation");
         Require(await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=2 AND status='succeeded'", ct) == 1, "mixed remainder");
-        var finalStore = new DeliveryStore(new(f.Database.Data), f.Secrets);
+        var finalStore = new DeliveryStore(new(f.Database.Data));
         Require(await finalStore.PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest, ct), ct) is not null, "complete mixed manifest");
         await new LocalDeliveryWorker(finalStore).RunAsync(f.Context(0), await Claim(f, JobKind.SendTelegram, ct), (dispatch, _) =>
         { Require(dispatch.ChatId == CheckoutFixture.Actor(0) && dispatch.BotId == f.Context(0).BotId && dispatch.TargetMessageId == 902, "mixed private route"); return Task.FromResult(new DeliveryOutcome(DeliveryOutcomeKind.Succeeded, 902)); }, ct);

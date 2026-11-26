@@ -4,7 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Platform.Core;
 using Platform.Persistence.Configurations;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -12,7 +11,7 @@ public enum CheckoutOutcome { Purchased, Replayed, Unavailable, QuoteChanged, In
 public sealed record LocalCheckoutRequest(Guid OrderId, Guid ProductId, int Quantity, decimal UnitPrice, long ListingRevision = 0, long ProductRevision = 0, long PolicyRevision = 0);
 public sealed record CheckoutResult(CheckoutOutcome Outcome, Guid? OrderId = null);
 
-public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed partial class CheckoutStore(DbSessionFactory sessions)
 {
     public async Task<CheckoutResult> PurchaseLocalAsync(BrandContext context, long verifiedActorId, LocalCheckoutRequest request, CancellationToken ct = default)
     {
@@ -123,5 +122,8 @@ public sealed partial class CheckoutStore(DbSessionFactory sessions, SecretSnaps
     private static void Reject(DbSession session) { session.RejectApplication(); throw new UnauthorizedAccessException("Checkout request is unavailable."); }
     private sealed record Product(bool Active, string Kind, string Availability, bool LocalFirst, long Revision, string Title, string? Description, string? Icon, string? Guidance);
     private sealed record Listing(bool Visible, bool Wallet, decimal Price, int Min, int Max, long Revision, string Title, string? Description, string? Icon, string? Guidance);
-    internal sealed record Stock(Guid Id, byte[] Content, string Key);
+    internal sealed record Stock(Guid Id)
+    {
+        public override string ToString() => "Stock [redacted]";
+    }
 }

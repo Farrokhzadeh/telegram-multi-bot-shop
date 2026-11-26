@@ -12,6 +12,7 @@ public sealed class Brand
     public string BotUsername { get; set; } = null!;
     public long BotId { get; set; }
     public byte[] BotTokenCiphertext { get; set; } = null!;
+    public byte[] BotToken { get; set; } = null!;
     public string BotTokenKeyId { get; set; } = null!;
     public bool Active { get; set; }
     public bool AllowWallet { get; set; } = true;
@@ -24,7 +25,9 @@ public sealed class Brand
     public bool FxEnabled { get; set; }
     public Guid? CustomerSupportAdminId { get; set; }
     public byte[]? BankNumberCiphertext { get; set; }
+    public byte[]? BankNumber { get; set; }
     public byte[]? BankHolderCiphertext { get; set; }
+    public byte[]? BankHolder { get; set; }
     public string? BankKeyId { get; set; }
     public byte[]? BankCardFingerprint { get; set; }
     public DateTime? BankChangedAt { get; set; }

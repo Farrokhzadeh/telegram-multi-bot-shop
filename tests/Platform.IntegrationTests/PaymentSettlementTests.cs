@@ -20,7 +20,7 @@ public sealed class PaymentSettlementTests
         var fixture = new PaymentSettlementFixture(f);
         await fixture.EnableAsync(Ct);
         Guid payment = Guid.NewGuid();
-        var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        var evidence = new PaymentEvidenceStore(f.Sessions);
         await evidence.CreateTopupAsync(f.Context(0), CheckoutFixture.Actor(0), payment, new(10.25m, Currency.Usd), CryptoAsset.UsdtBsc, Ct);
         await using (var bind = await f.Sessions.BeginAsync(Ct))
         { await evidence.BindInvoiceAsync(bind, f.Context(0), CheckoutFixture.Actor(0), payment, PaymentSettlementFixture.Provider(payment), 10.4m, Ct); await bind.CommitAsync(Ct); }
@@ -36,7 +36,7 @@ public sealed class PaymentSettlementTests
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, MaxPoolSize = 16, IncludeErrorDetail = false };
         await using var bounded = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         var sessions = new DbSessionFactory(bounded);
-        var results = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => new PaymentSettlementStore(sessions, f.Secrets, fixture.Catalog).SettleAsync(f.Context(0), payment, PaymentSettlementFixture.Lookup, Ct)));
+        var results = await Task.WhenAll(Enumerable.Range(0, 100).Select(_ => new PaymentSettlementStore(sessions, fixture.Catalog).SettleAsync(f.Context(0), payment, PaymentSettlementFixture.Lookup, Ct)));
         Assert.Single(results, r => r.Outcome == PaymentSettlementOutcome.Settled);
         Assert.Equal(99, results.Count(r => r.Outcome == PaymentSettlementOutcome.Replayed));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='wallet_topup' AND signed_amount=10.25 AND posting_version=1", Ct));
@@ -212,7 +212,7 @@ public sealed class PaymentSettlementTests
         Guid id = Guid.NewGuid();
         var admin = await f.AdminAsync(Ct);
         await using var issue = await f.Sessions.BeginAsync(Ct);
-        await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(id, "PUBLIC-" + id.ToString("N"), CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: quantity), Guid.NewGuid(), Ct);
+        await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(id, "PUBLIC-" + id.ToString("N"), CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: quantity), Guid.NewGuid(), Ct);
         await issue.CommitAsync(Ct);
         return id;
     }

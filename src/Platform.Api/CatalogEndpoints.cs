@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Platform.Persistence;
-using Platform.Security;
 
 namespace Platform.Api;
 
@@ -17,8 +16,8 @@ public static class CatalogEndpoints
 {
     public static void MapCatalogAdministration(this IEndpointRouteBuilder endpoints, DbSessionFactory sessions, AdminCatalogStore store, Func<Guid, BrandContext?> resolve)
         => MapCore(endpoints, sessions, store, resolve, _ => store, _ => sessions);
-    public static void MapScopedCatalogAdministration(this IEndpointRouteBuilder endpoints, WriterRegistry writers, SecretSnapshot secrets)
-        => MapCore(endpoints, writers.Shared, new AdminCatalogStore(writers.Shared, secrets), writers.Resolve, context => new AdminCatalogStore(writers.ForBrand(context), secrets), writers.ForBrand);
+    public static void MapScopedCatalogAdministration(this IEndpointRouteBuilder endpoints, WriterRegistry writers)
+        => MapCore(endpoints, writers.Shared, new AdminCatalogStore(writers.Shared), writers.Resolve, context => new AdminCatalogStore(writers.ForBrand(context)), writers.ForBrand);
     private static void MapCore(IEndpointRouteBuilder endpoints, DbSessionFactory sessions, AdminCatalogStore store, Func<Guid, BrandContext?> resolve, Func<BrandContext, AdminCatalogStore> brandStore, Func<BrandContext, DbSessionFactory> brandSessions)
     {
         endpoints.MapGet("/v1/admin/brands", (HttpContext http, Guid? after, int? limit) => AdminHttp.HandleAsync(http, async () =>

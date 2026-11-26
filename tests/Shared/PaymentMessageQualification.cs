@@ -34,7 +34,7 @@ public static class PaymentMessageQualification
         { expiry = await OutboxStore.ClaimAsync(claim, JobKind.ExpireOrderPayment, Guid.NewGuid(), TimeSpan.FromMinutes(1), ct) ?? throw new InvalidOperationException(); await claim.CommitAsync(ct); }
         await payments.CaptureAsync(next.Payment, next.Origin, next.Due, ct: ct);
         await payments.Store.SettleAsync(f.Context(0), next.Payment, PaymentSettlementFixture.Lookup, ct);
-        Require(await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(0), expiry, ct) == PaymentExpiryOutcome.Terminal, "stale expiry cannot expire paid money");
+        Require(await new PaymentExpiryService(f.Sessions).RunAsync(f.Context(0), expiry, ct) == PaymentExpiryOutcome.Terminal, "stale expiry cannot expire paid money");
         var fresh = await store.ReadForSendAsync(f.Context(0), pending, ct);
         Require(fresh is not null && fresh.Order == next.Order && fresh.Text.Contains("Payment accepted", StringComparison.Ordinal) && !fresh.Text.Contains("Expired", StringComparison.Ordinal), "authoritative reread before dispatch");
         await store.RecordAsync(f.Context(0), pending, new(PaymentMessageOutcomeKind.Sent, 502), ct);
@@ -140,7 +140,7 @@ public static class PaymentMessageQualification
         await DueAsync(f, ct); var metadata = await Claim(messages, ct);
         Require(await messages.BeginAsync(f.Context(0), metadata, TimeSpan.FromMilliseconds(100), ct), "metadata started before manifest");
         Require((await messages.ReadForSendAsync(f.Context(0), metadata, ct))?.TargetMessageId == 901, "metadata owns original saved target");
-        var deliveryStore = new DeliveryStore(f.Sessions, f.Secrets);
+        var deliveryStore = new DeliveryStore(f.Sessions);
         Require(await deliveryStore.PrepareAsync(f.Context(0), await CredentialClaim(f, JobKind.PrepareManifest, ct), ct) is not null, "complete manifest prepared");
         if (uncertain)
         {

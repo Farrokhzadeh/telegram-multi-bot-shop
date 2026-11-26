@@ -5,6 +5,7 @@ public sealed class InventoryItem
     public Guid Id { get; set; }
     public Guid ProductId { get; set; }
     public byte[] CredentialCiphertext { get; set; } = null!;
+    public byte[] CredentialContent { get; set; } = null!;
     public string CredentialKeyId { get; set; } = null!;
     public byte[] SourceFingerprint { get; set; } = null!;
     public string OriginKind { get; set; } = null!;

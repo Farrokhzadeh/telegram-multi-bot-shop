@@ -13,7 +13,7 @@ public sealed class CheckoutFixture : IAsyncDisposable
     public DbSessionFactory Sessions { get; }
     public SecretSnapshot Secrets { get; }
     public string SecretRoot => files.Root;
-    public CheckoutStore Store => new(Sessions, Secrets);
+    public CheckoutStore Store => new(Sessions);
     public Guid Product { get; } = Guid.NewGuid();
     public static Guid[] BrandIds => [SyntheticSecretFiles.BrandA, SyntheticSecretFiles.BrandB, Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc")];
     public Guid[] Brands { get; } = BrandIds;

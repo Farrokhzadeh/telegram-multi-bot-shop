@@ -7,8 +7,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteCheckoutStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteCheckoutStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<CheckoutResult> PurchaseLocalAsync(BrandContext context, long expectedRevision, long actor, LocalCheckoutRequest request, CancellationToken ct) => sessions.RunAsync(true, (_, tx, token) => AcceptLocalAsync(tx, context, expectedRevision, actor, request, token), ct);
     internal async Task<CheckoutResult> AcceptLocalAsync(SqliteTransaction tx, BrandContext context, long expectedRevision, long actor, LocalCheckoutRequest request, CancellationToken ct)
     {
@@ -34,8 +36,8 @@ public sealed class SqliteCheckoutStore(SqliteSessionFactory sessions, SecretSna
             Money total = new Money(state.UnitUsdt, Currency.Usd).MultiplyQuantity(request.Quantity);
             var wallet = await WalletOperations.ReadAsync(data, member.Id, token);
             if (wallet.Balance.Amount < total.Amount) return new(CheckoutOutcome.InsufficientBalance);
-            var stock = await data.Data.Set<Entities.InventoryItem>().Where(value => value.ProductId == request.ProductId && value.State == "available").OrderBy(value => value.Id).Take(request.Quantity).Select(value => new CheckoutStore.Stock(value.Id, value.CredentialCiphertext, value.CredentialKeyId)).ToArrayAsync(token);
-            if (stock.Length != request.Quantity) return new(CheckoutOutcome.OutOfStock);
+            var stock = await SqliteOrderPaymentSettlementStore.ReadStockAsync(data, request.ProductId, request.Quantity, token);
+            if (stock.Count != request.Quantity) return new CheckoutResult(CheckoutOutcome.OutOfStock);
             DateTime now = await data.BrandClockAsync(context.BrandId, token);
             var product = state.Presentation;
             await CheckoutQueries.InsertAsync(data, context, actor, new Entities.Order { Id = request.OrderId, UserId = member.Id, ProductId = request.ProductId, Quantity = request.Quantity, OrderKind = "product_purchase", PaymentStatus = "paid", Currency = "USDT", PaymentMethod = "wallet", UnitPriceUsdt = state.UnitUsdt, AutoPriceTomanSnapshot = false, PricingRoundingStepSnapshot = 5000m, PriceCalculationVersion = "local-wallet-v1", BrandPublicNameSnapshot = product.Brand, ProductTitleSnapshot = product.Title, ProductDescriptionSnapshot = product.Description, ProductIconSnapshot = product.Icon, ProductGuidanceSnapshot = product.Guidance, PaymentTermsSnapshot = "USD store credit; complete-order delivery", FulfillmentKindSnapshot = "local", LocalFirstSnapshot = state.LocalFirst, PaymentConfirmedAt = now, CreatedAt = now, UpdatedAt = now }, proof, token);
@@ -43,19 +45,12 @@ public sealed class SqliteCheckoutStore(SqliteSessionFactory sessions, SecretSna
             await data.FlushAsync(token, false);
             await WalletOperations.PostAsync(data, member.Id, new Money(-total.Amount, Currency.Usd), wallet.Version, new Entities.WalletEntry { Id = Guid.CreateVersion7(), MovementKind = "purchase_debit", IdempotencyKey = $"checkout:{request.OrderId:D}", OrderId = request.OrderId, Reason = "customer_request" }, token, now);
             await data.FlushAsync(token, false);
-            var inventory = new InventoryCipher(secrets); var cipher = new BrandCipher(secrets); int unit = 0;
+            int unit = 0;
             foreach (var item in stock)
             {
-                Guid fulfillment = Guid.CreateVersion7(); byte[] plain = inventory.Decrypt(item.Id, item.Key, item.Content), encrypted;
-                try { encrypted = cipher.Encrypt(context, "fulfillments", fulfillment, "delivered_content", plain); }
-                finally { CryptographicOperations.ZeroMemory(plain); }
-                var content = new Entities.Fulfillment { Id = fulfillment, OrderId = request.OrderId, UnitNo = ++unit, Kind = "local" };
-                data.Data.Add(content); await data.FlushAsync(token, false);
-                var row = await data.Data.Set<Entities.InventoryItem>().SingleAsync(value => value.Id == item.Id && value.State == "available", token);
-                row.State = "allocated"; row.AssignedFulfillmentId = fulfillment; row.AllocatedAt = now;
-                await data.FlushAsync(token, false);
-                content.Status = "acquired"; content.DeliveredContent = encrypted; content.DeliveredContentKeyId = secrets.CurrentBrandKeyId(context); content.ContentKind = "text";
-                await data.FlushAsync(token, false); data.Data.ChangeTracker.Clear();
+                await CheckoutQueries.AcquireStockAsync(data, request.OrderId, item,
+                    Guid.CreateVersion7(), ++unit, now, token);
+                data.Data.ChangeTracker.Clear();
             }
             return new CheckoutResult(CheckoutOutcome.Purchased, request.OrderId);
         }, ct);

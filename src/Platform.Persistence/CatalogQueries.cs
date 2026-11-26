@@ -6,7 +6,6 @@ using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Persistence.Configurations;
 using Platform.Persistence.Entities;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -68,17 +67,17 @@ internal static class CatalogQueries
         return new(product, state.Member, state.PolicyVersion, state.ProductRevision, state.ListingRevision, new(state.PublicName, state.Title, state.Description, state.Icon, state.Guidance), state.FulfillmentKind, state.AvailabilityPolicy, state.LocalFirst, local, state.PriceUsdt, state.PriceToman, state.AutoPriceToman, state.FxEnabled, rate, TimeSpan.FromSeconds(state.MaxExchangeRateAgeSeconds), state.Market, state.Wallet, state.Crypto, state.Bank, state.MinQuantity, state.MaxQuantity, source, now);
     }
     internal static IQueryable<Discount> Eligible(EfSession data, BrandContext context, Guid product, Guid member) => data.Data.Set<Discount>().Where(value => value.BrandId == context.BrandId && value.Active && (value.ProductId == null || value.ProductId == product) && (value.EligibleUserId == null || value.EligibleUserId == member) && (value.StartsAt == null || value.StartsAt <= EfValues.UtcNow()) && (value.EndsAt == null || value.EndsAt > EfValues.UtcNow()) && (value.Kind != "prepaid_entitlement" || data.Data.Set<Order>().Any(order => order.Id == value.SourceOrderId && order.UserId == member && order.ProductId == product && order.OrderKind == "prepaid_units" && order.PaymentStatus == "paid")));
-    internal static async Task<IReadOnlyList<QuoteCoupon>> CouponsAsync(EfSession data, SecretSnapshot secrets, BrandContext context, Guid product, Guid member, CancellationToken ct, bool locked = false)
+    internal static async Task<IReadOnlyList<QuoteCoupon>> CouponsAsync(EfSession data, BrandContext context, Guid product, Guid member, CancellationToken ct, bool locked = false)
     {
         var eligible = Eligible(data, context, product, member);
-        var candidates = from discount in eligible join revision in data.Data.Set<DiscountRevision>() on new { Id = discount.Id, Revision = discount.Revision } equals new { Id = revision.DiscountId, Revision = revision.RevisionNo } select new { Discount = discount, Revision = revision.Id };
+        var candidates = from discount in eligible join revision in data.Data.Set<DiscountRevision>() on new { Id = discount.Id, Revision = discount.Revision } equals new { Id = revision.DiscountId, Revision = revision.RevisionNo } select new { Discount = discount, Revision = revision.Id, Bytes = discount.CodeContent };
         if (locked) await data.LockDiscountsAsync(eligible.Where(value => data.Data.Set<DiscountRevision>().Any(revision => revision.DiscountId == value.Id && revision.RevisionNo == value.Revision)).OrderBy(value => value.Id).Select(value => value.Id), ct);
         var rows = await candidates.OrderBy(value => value.Discount.Id).Select(value => new
         {
             value.Discount.Id,
             value.Revision,
-            value.Discount.CodeCiphertext,
-            value.Discount.CodeKeyId,
+            value.Bytes,
+            value.Key,
             value.Discount.PercentOff,
             value.Discount.MaxTotalUses,
             value.Discount.RedeemedCount,
@@ -90,15 +89,13 @@ internal static class CatalogQueries
         }).Take(1001).ToArrayAsync(ct);
         if (rows.Length > 1000) throw new PricingRejectedException();
         var result = new List<QuoteCoupon>(rows.Length);
-        var cipher = new BrandCipher(secrets);
         foreach (var row in rows)
         {
             BigInteger held = BigInteger.Parse(row.Held, NumberStyles.Number, CultureInfo.InvariantCulture), memberUsed = BigInteger.Parse(row.MemberUsed, NumberStyles.Number, CultureInfo.InvariantCulture), reusable = BigInteger.Parse(row.Reusable, NumberStyles.Number, CultureInfo.InvariantCulture);
             BigInteger? capacity = PricingPolicy.Remaining(row.MaxTotalUses, row.RedeemedCount, row.UsageAdjustmentUnits, held - reusable);
             if (row.MaxUsesPerUser is long limit) { BigInteger own = BigInteger.Max(0, (BigInteger)limit - memberUsed + reusable); capacity = capacity is BigInteger global ? BigInteger.Min(global, own) : own; }
-            byte[] plain = cipher.Decrypt(context, "discounts", row.Id, "code_ciphertext", row.CodeKeyId, row.CodeCiphertext);
-            try { result.Add(new(row.Id, row.Revision, Encoding.UTF8.GetString(plain), row.PercentOff, capacity)); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            try { result.Add(new(row.Id, row.Revision, Encoding.UTF8.GetString(row.Bytes), row.PercentOff, capacity)); }
+            finally { CryptographicOperations.ZeroMemory(row.Bytes); }
         }
         return result;
     }

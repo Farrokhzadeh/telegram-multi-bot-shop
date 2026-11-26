@@ -15,7 +15,7 @@ public sealed class CutoverPaymentCaptureTests
     {
         await using (var policy = await f.Sessions.BeginAsync(Ct))
         { await policy.ExecuteAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,allow_wallet_topup=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(f.Brands[0])), Ct); await policy.CommitAsync(Ct); }
-        Guid id = Guid.NewGuid(); var store = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        Guid id = Guid.NewGuid(); var store = new PaymentEvidenceStore(f.Sessions);
         _ = await store.CreateTopupAsync(f.Context(0), CheckoutFixture.Actor(0), id, new(10.25m, Currency.Usd), CryptoAsset.UsdtBsc, Ct);
         string provider = PaymentSettlementFixture.Provider(id);
         await using var bind = await f.Sessions.BeginAsync(Ct);
@@ -36,14 +36,14 @@ public sealed class CutoverPaymentCaptureTests
         await using var f = await CheckoutFixture.CreateAsync(users: 1, ct: Ct); var key = await Setup(f); long postings = await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct); string root = Path.Combine(Path.GetTempPath(), "cutover-payment-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
-            var first = Input(key); var files = new CutoverPaymentFiles(root, f.Secrets, f.Context(0), key, first);
-            Assert.Equal("Ready", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, first, files.SaveAsync, Ct));
+            var first = Input(key); var files = new CutoverPaymentFiles(root, f.Context(0), key, first);
+            Assert.Equal("Ready", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, first, files.SaveAsync, Ct));
             string path = Directory.GetFiles(root, "*.json").Single(); byte[] original = await File.ReadAllBytesAsync(path, Ct); byte[] plain = files.Read(path);
             try { Assert.Equal(first.Body, Encoding.UTF8.GetString(plain)); } finally { CryptographicOperations.ZeroMemory(plain); }
-            Assert.Equal("Replayed", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, first, files.SaveAsync, Ct));
+            Assert.Equal("Replayed", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, first, files.SaveAsync, Ct));
             Assert.Equal(original, await File.ReadAllBytesAsync(path, Ct));
-            var variant = Input(key, formatted: true); Assert.Equal(first.Event, variant.Event); var variantFiles = new CutoverPaymentFiles(root, f.Secrets, f.Context(0), key, variant);
-            Assert.Equal("Replayed", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, variant, variantFiles.SaveAsync, Ct));
+            var variant = Input(key, formatted: true); Assert.Equal(first.Event, variant.Event); var variantFiles = new CutoverPaymentFiles(root, f.Context(0), key, variant);
+            Assert.Equal("Replayed", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, variant, variantFiles.SaveAsync, Ct));
             Assert.Equal(2, Directory.GetFiles(root, "*.json").Length); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment' AND status='pending'", Ct)); Assert.Equal(postings, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct)); Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
             await using var read = await f.Sessions.BeginReadOnlyAsync(Ct); Assert.Equal(0L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.payments WHERE status='settled'"), r => r.GetInt64(0), Ct));
         }
@@ -52,12 +52,12 @@ public sealed class CutoverPaymentCaptureTests
     [Fact]
     public async Task InvalidProofIsRejectedAndAuthenticUnboundOrMismatchedEvidenceDoesNotCreditOrReprice()
     {
-        await using var f = await CheckoutFixture.CreateAsync(users: 3, ct: Ct); var key = await Setup(f); long postings = await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct); int archived = 0; Task<string> Archive(ProtectedPaymentEvidence e, CancellationToken _) { archived++; return Task.FromResult("protected:synthetic/" + e.Digest); }
+        await using var f = await CheckoutFixture.CreateAsync(users: 3, ct: Ct); var key = await Setup(f); long postings = await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct); int archived = 0; Task<string> Archive(PaymentEvidenceContent e, CancellationToken _) { archived++; return Task.FromResult("protected:synthetic/" + e.Digest); }
         var valid = Input(key);
-        await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, valid with { Signature = new string('0', 128) }, Archive, Ct));
-        await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(1), f.Users[1], key.Run, key, valid, Archive, Ct));
-        Assert.Equal("Held", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, Input(key, origin: "unbound-source"), Archive, Ct)); Assert.Equal(0, archived);
-        Assert.Equal("Review", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, Input(key, quote: 99), Archive, Ct));
+        await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, valid with { Signature = new string('0', 128) }, Archive, Ct));
+        await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(1), f.Users[1], key.Run, key, valid, Archive, Ct));
+        Assert.Equal("Held", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, Input(key, origin: "unbound-source"), Archive, Ct)); Assert.Equal(0, archived);
+        Assert.Equal("Review", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, Input(key, quote: 99), Archive, Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE amount_due=10.25 AND quote_currency='USD' AND status='review'", Ct)); Assert.Equal(postings, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
     }
     [Fact]
@@ -67,8 +67,8 @@ public sealed class CutoverPaymentCaptureTests
         await using var f = await CheckoutFixture.CreateAsync(users: 1, ct: Ct); var key = await Setup(f); long postings = await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct); string root = Path.Combine(Path.GetTempPath(), "cutover-payment-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
-            var input = Input(key); var files = new CutoverPaymentFiles(root, f.Secrets, f.Context(0), key, input); Assert.Equal("Ready", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, input, files.SaveAsync, Ct)); string path = Directory.GetFiles(root, "*.json").Single(); var row = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(path, Ct), CutoverPaymentJson.Default.CutoverPaymentArchive)!; row.Ciphertext[^1] ^= 1; await File.WriteAllTextAsync(path, JsonSerializer.Serialize(row, CutoverPaymentJson.Default.CutoverPaymentArchive), Ct);
-            await Assert.ThrowsAsync<CipherRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Secrets, f.Context(0), f.Users[0], key.Run, key, input, files.SaveAsync, Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment'", Ct)); Assert.Equal(postings, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+            var input = Input(key); var files = new CutoverPaymentFiles(root, f.Context(0), key, input); Assert.Equal("Ready", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, input, files.SaveAsync, Ct)); string path = Directory.GetFiles(root, "*.json").Single(); var row = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(path, Ct), CutoverPaymentJson.Default.CutoverPaymentArchive)!; row.Content[^1] ^= 1; await File.WriteAllTextAsync(path, JsonSerializer.Serialize(row, CutoverPaymentJson.Default.CutoverPaymentArchive), Ct);
+            await Assert.ThrowsAsync<CipherRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, input, files.SaveAsync, Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment'", Ct)); Assert.Equal(postings, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
         }
         finally { Directory.Delete(root, true); }
     }

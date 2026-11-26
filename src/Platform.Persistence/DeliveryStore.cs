@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -25,7 +24,7 @@ public sealed class DeliveryDispatch : IDisposable
     public override string ToString() => "DeliveryDispatch [redacted]";
 }
 
-public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed class DeliveryStore(DbSessionFactory sessions)
 {
     internal async Task<bool> HasCompleteAcquisitionAsync(DbSession session, BrandContext context, Guid order, int quantity, CancellationToken ct)
     {
@@ -55,7 +54,7 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
                 await PaymentSettlementStore.ChangeOrderAsync(session, order, (row, now) => { row.DeliveryGeneration = generation; row.ManifestAssetRef = Asset(order, generation); row.ManifestDigest = SHA256.HashData(manifest.Bytes); row.ManifestPreparedAt = now; row.ReleaseAuthorizedAt = now; row.FulfillmentStatus = "ready"; }, ct);
                 await PartsAsync(session, context, order, row => row.Status == "acquired", (row, now) => { row.Status = "ready"; row.ManifestGeneration = generation; }, ct);
                 Guid? coupon = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.DiscountUse>().Where(row => row.OrderId == order && row.Status == "held").Select(row => (Guid?)row.DiscountId).SingleOrDefaultAsync(token), ct);
-                if (coupon is Guid id) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, id, order, true, ct);
+                if (coupon is Guid id) await new PricingStore(sessions).TransitionClaimAsync(session, context, id, order, true, ct);
                 state = await LockAsync(session, context, order, ct);
             }
             using Manifest frozen = await BuildAsync(session, context, order, state.Quantity, true, ct);
@@ -207,7 +206,7 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
     }
 
     private static Guid Origin(BrandContext context, JobLease lease) => lease.Intent.Kind == JobKind.SendTelegram && lease.Intent.BrandId == context.BrandId && lease.Intent.OriginId is Guid id ? id : throw new UnauthorizedAccessException();
-    private static string Asset(Guid order, Guid generation) => "manifest:" + order.ToString("D") + ":" + generation.ToString("D");
+    private static string Asset(Guid order, Guid generation) => DeliveryManifestEncoding.Reference(order, generation);
     private static void Verify(State state, Guid order, Manifest manifest)
     {
         if (state.Status is not ("ready" or "delivering" or "completed") || !state.Released || state.Generation is not Guid generation || !manifest.Complete || state.Asset != Asset(order, generation) || state.Digest is null ||
@@ -247,35 +246,47 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
         using var bytes = new MemoryStream();
         var text = new StringBuilder();
         bool file = false;
-        var cipher = new BrandCipher(secrets);
         int count = 0;
         try
         {
             using var writer = new BinaryWriter(bytes, Encoding.UTF8, leaveOpen: true);
-            writer.Write(1); writer.Write(quantity);
+            DeliveryManifestEncoding.WriteHeader(writer, quantity);
             while (count < quantity)
             {
-                var rows = await session.RunEfStepAsync(false, async (data, token) => { await data.LockOrderPartsAsync(order, count, token); return await data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order).OrderBy(row => row.UnitNo).Skip(count).Take(1000).Select(row => new Part(row.Id, row.UnitNo, row.ContentKind, row.DeliveredContent, row.DeliveredContentKeyId, row.Status, row.ManifestGeneration)).ToListAsync(token); }, ct);
-                if (rows.Count == 0) break;
-                foreach (Part part in rows)
+                var rows = await session.RunEfStepAsync(false, async (data, token) =>
                 {
-                    if (part.Number != count + 1 || part.Content is null || part.Key is null || part.Kind is null || (frozen ? part.Status is not ("ready" or "released") || part.Generation is null : part.Status != "acquired"))
-                        return new([], [], false, true);
-                    byte[] plain = cipher.Decrypt(context, "fulfillments", part.Id, "delivered_content", part.Key, part.Content);
-                    try
+                    await data.LockOrderPartsAsync(order, count, token);
+                    var parts = data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order).OrderBy(row => row.UnitNo).Skip(count).Take(1000);
+                    return await parts.Select(row => new Part(row.Id, row.UnitNo, row.ContentKind, row.DeliveredContent, row.Status, row.ManifestGeneration)).ToListAsync(token);
+                }, ct);
+                if (rows.Count == 0) break;
+                try
+                {
+                    foreach (Part part in rows)
                     {
-                        writer.Write(part.Number); writer.Write(part.Kind); writer.Write(plain.Length); writer.Write(plain);
-                        if (bytes.Length > 16777216) throw new ManifestNeedsRecoveryException();
-                        if (part.Kind == "file") file = true;
-                        if (!file)
+                        if (part.Number != count + 1 || part.Content is null || part.Kind is null || (frozen ? part.Status is not ("ready" or "released") || part.Generation is null : part.Status != "acquired"))
+                            return new([], [], false, true);
+                        byte[] plain = part.Content;
+                        try
                         {
-                            try { text.Append(part.Number).Append(". ").Append(new UTF8Encoding(false, true).GetString(plain)).Append('\n'); }
-                            catch (DecoderFallbackException) { file = true; }
-                            if (text.Length > 4096) file = true;
+                            DeliveryManifestEncoding.WritePart(writer, part.Number, part.Kind, plain);
+                            if (bytes.Length > DeliveryManifestEncoding.MaximumBytes) throw new ManifestNeedsRecoveryException();
+                            if (part.Kind == "file") file = true;
+                            if (!file)
+                            {
+                                try { text.Append(part.Number).Append(". ").Append(new UTF8Encoding(false, true).GetString(plain)).Append('\n'); }
+                                catch (DecoderFallbackException) { file = true; }
+                                if (text.Length > 4096) file = true;
+                            }
                         }
+                        finally { CryptographicOperations.ZeroMemory(plain); }
+                        count++;
                     }
-                    finally { CryptographicOperations.ZeroMemory(plain); }
-                    count++;
+                }
+                finally
+                {
+                    foreach (Part part in rows)
+                        if (part.Content is not null) CryptographicOperations.ZeroMemory(part.Content);
                 }
             }
             byte[] content = bytes.ToArray();
@@ -306,7 +317,7 @@ public sealed class DeliveryStore(DbSessionFactory sessions, SecretSnapshot secr
     private sealed record Identity(Guid User, Guid Product);
     private sealed record State(Guid Member, int Quantity, string Kind, string Payment, string Status, Guid? Generation, string? Asset, byte[]? Digest, bool Released, bool Held, bool Review, long Telegram, bool Blocked);
     private sealed record Intent(Guid Order, Guid Generation, long? Target, string Status, long Attempt);
-    private sealed record Part(Guid Id, int Number, string? Kind, byte[]? Content, string? Key, string Status, Guid? Generation);
+    private sealed record Part(Guid Id, int Number, string? Kind, byte[]? Content, string Status, Guid? Generation);
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void Reject(DbSession session) { session.RejectApplication(); throw new UnauthorizedAccessException("Credential delivery requires current complete-order authority."); }
 }

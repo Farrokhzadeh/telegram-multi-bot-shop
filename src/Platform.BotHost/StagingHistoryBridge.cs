@@ -20,9 +20,7 @@ internal partial class StagingHistoryBridgeJson : JsonSerializerContext
 internal static class StagingHistoryBridge
 {
     private const string BindingName = "stage-binding.json";
-    private const string ManifestName = "service-config.json";
-    private const string KeyName = "stage-key";
-    private const string HistoryName = "teleg-customer-history-synthetic";
+    private const string HistoryName = "teleg-customer-history-synthetic-v2";
     private const int FixtureCount = 55;
 
     private static void RequireRoot(string root, bool mustExist)
@@ -81,31 +79,12 @@ internal static class StagingHistoryBridge
             throw new UnauthorizedAccessException("Staging history bridge rejected.");
         Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var brand = Guid.NewGuid(); var deployment = Guid.NewGuid(); var member = Guid.NewGuid();
-        byte[] key = RandomNumberGenerator.GetBytes(32);
-        try { WritePrivate(Path.Combine(root, KeyName), key); }
-        finally { CryptographicOperations.ZeroMemory(key); }
-        using (var memory = new MemoryStream())
-        {
-            using (var writer = new Utf8JsonWriter(memory))
-            {
-                writer.WriteStartObject(); writer.WriteNumber("schemaVersion", 1);
-                writer.WriteNumber("revision", 1); writer.WriteString("deploymentId", deployment);
-                writer.WriteString("service", "BotHost"); writer.WriteStartArray("brands");
-                writer.WriteStartObject(); writer.WriteString("brandId", brand);
-                writer.WriteString("currentKeyId", "stage");
-                writer.WriteStartArray("keys"); writer.WriteStartObject();
-                writer.WriteString("id", "stage"); writer.WriteString("file", KeyName);
-                writer.WriteEndObject(); writer.WriteEndArray(); writer.WriteEndObject(); writer.WriteEndArray();
-                writer.WriteNull("inventory"); writer.WriteEndObject();
-            }
-            WritePrivate(Path.Combine(root, ManifestName), memory.ToArray());
-        }
         using (var memory = new MemoryStream())
         {
             using (var writer = new Utf8JsonWriter(memory))
             {
                 writer.WriteStartObject();
-                writer.WriteNumber("schemaVersion", 1);
+                writer.WriteNumber("schemaVersion", 2);
                 writer.WriteString("instanceId", "staging"); writer.WriteString("botUsername", "testadbadbot");
                 writer.WriteString("brandId", brand); writer.WriteString("deploymentId", deployment);
                 writer.WriteString("membershipId", member); writer.WriteNumber("actorId", actor);
@@ -117,14 +96,14 @@ internal static class StagingHistoryBridge
         string dir = Path.Combine(root, HistoryName);
         Directory.CreateDirectory(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var ctx = Context(brand, deployment, bot);
-        using var secrets = SecretFiles.Load(root, ManifestName, new SecretLoadGrant(SecretService.BotHost, deployment, 1, [brand], false));
         var original = Enumerable.Range(0, FixtureCount).Select(Synthetic).ToArray();
-        byte[] sealedBytes = new CustomerHistoryArchive(secrets).Seal(ctx, member, original);
-        await new CustomerHistoryFiles(dir, secrets).PublishAsync(ctx, member, sealedBytes, ct);
-        var reread = await new CustomerHistoryFiles(dir, secrets).ReadAsync(ctx, member, ct);
-        if (new CustomerHistoryArchive(secrets).Open(ctx, member, reread.Span).Count != FixtureCount)
+        var files = new CustomerHistoryFiles(dir);
+        byte[] content = CustomerHistoryContent.Encode(member, original);
+        try { await files.PublishAsync(ctx, member, content, ct); }
+        finally { CryptographicOperations.ZeroMemory(content); }
+        if ((await files.ReadOrdersAsync(ctx, member, ct)).Count != FixtureCount)
             throw new UnauthorizedAccessException("Staging history bridge rejected.");
-        Console.WriteLine("PASS: staging-only encrypted synthetic 55-order history initialized; no network or live purchase.");
+        Console.WriteLine("PASS: isolated synthetic 55-order history initialized.");
         return 0;
     }
 
@@ -137,7 +116,7 @@ internal static class StagingHistoryBridge
             throw new UnauthorizedAccessException("Staging history bridge rejected.");
         using var binding = JsonDocument.Parse(ReadPrivate(Path.Combine(root, BindingName), 4096));
         var info = binding.RootElement;
-        if (info.EnumerateObject().Count() != 10 || info.GetProperty("schemaVersion").GetInt32() != 1 ||
+        if (info.EnumerateObject().Count() != 10 || info.GetProperty("schemaVersion").GetInt32() != 2 ||
             info.GetProperty("instanceId").GetString() != "staging" || info.GetProperty("botUsername").GetString() != "testadbadbot" ||
             !info.GetProperty("syntheticOnly").GetBoolean() || info.GetProperty("originalOrders").GetInt32() != FixtureCount ||
             info.GetProperty("actorId").GetInt64() != actor || info.GetProperty("botId").GetInt64() != bot)
@@ -148,9 +127,7 @@ internal static class StagingHistoryBridge
         if (brand == Guid.Empty || deployment == Guid.Empty || member == Guid.Empty)
             throw new UnauthorizedAccessException("Staging history bridge rejected.");
         var ctx = Context(brand, deployment, bot);
-        using var secrets = SecretFiles.Load(root, ManifestName, new SecretLoadGrant(SecretService.BotHost, deployment, 1, [brand], false));
-        var sealedBytes = await new CustomerHistoryFiles(Path.Combine(root, HistoryName), secrets).ReadAsync(ctx, member, ct);
-        var originals = new CustomerHistoryArchive(secrets).Open(ctx, member, sealedBytes.Span);
+        var originals = await new CustomerHistoryFiles(Path.Combine(root, HistoryName)).ReadOrdersAsync(ctx, member, ct);
         if (originals.Count != FixtureCount || originals.Any(o => !o.OriginalReference.StartsWith("STAGE-SYNTH-", StringComparison.Ordinal)))
             throw new UnauthorizedAccessException("Staging history bridge rejected.");
         var imported = originals.Take(10).Select(o => o with { SavedTitle = "Verified synthetic product" }).ToArray();

@@ -13,7 +13,7 @@ public static class CouponRevisionQualification
         var actor = await f.AdminAsync(ct); Guid coupon = await Issue(f, actor, 100, ct);
         Guid spent = await Buy(f, 30, ct); await Prepare(f, ct); await Preorder(f, ct);
         Guid held = await Buy(f, 10, ct); string frozen = await Quotes(f, ct);
-        var store = new PricingStore(f.Sessions, f.Secrets);
+        var store = new PricingStore(f.Sessions);
         var edit = new CouponOwnerEdit(12.5m, 0, 0, 2, null, DateTime.UtcNow.AddMinutes(-1), false, f.Product, f.Users[3]);
         Guid command = Guid.NewGuid();
         Require(await store.EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, ct) == 1, "owner override");
@@ -50,7 +50,7 @@ public static class CouponRevisionQualification
         var actor = await f.AdminAsync(ct); Guid coupon = await Issue(f, actor, 10, ct); await Preorder(f, ct); await Buy(f, 3, ct);
         string quote = await Quotes(f, ct); var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var redeem = Task.Run(async () => { await gate.Task; await Prepare(f, ct); }, ct);
-        var edit = Task.Run(async () => { await gate.Task; await new PricingStore(f.Sessions, f.Secrets).EditAsync(f.Context(0), actor, coupon, 0, new(50, 0, 0, 0, null, null, false, f.Product, f.Users[0]), AuditReason.OperatorReview, Guid.NewGuid(), ct); }, ct);
+        var edit = Task.Run(async () => { await gate.Task; await new PricingStore(f.Sessions).EditAsync(f.Context(0), actor, coupon, 0, new(50, 0, 0, 0, null, null, false, f.Product, f.Users[0]), AuditReason.OperatorReview, Guid.NewGuid(), ct); }, ct);
         gate.SetResult(); await Task.WhenAll(redeem, edit);
         await using var read = await f.Sessions.BeginAsync(ct);
         var context = await read.QuerySingleAsync(new DbStatement("SELECT redeemed_count_at_revision,held_units_at_revision,usage_adjustment_units FROM shop.discount_revisions WHERE discount_id=$1 AND revision_no=1", DbValue.Uuid(coupon)), r => (Redeemed: r.GetInt64(0), Held: r.GetInt64(1), Adjustment: r.GetInt64(2)), ct);
@@ -64,11 +64,11 @@ public static class CouponRevisionQualification
         await using (var fail = f.Database.Data.CreateCommand("CREATE FUNCTION shop.public_test_revision_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'public synthetic revision failure' USING ERRCODE='23514'; END $$; CREATE CONSTRAINT TRIGGER public_test_revision_failure AFTER INSERT ON shop.discount_revisions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.revision_no>0) EXECUTE FUNCTION shop.public_test_revision_failure()")) await fail.ExecuteNonQueryAsync(ct);
         bool rejected = false;
         var edit = new CouponOwnerEdit(50, 1, 1, 0, null, null, true, f.Product, f.Users[0]);
-        try { await new PricingStore(f.Sessions, f.Secrets).EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, ct); }
+        try { await new PricingStore(f.Sessions).EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, ct); }
         catch (DbOperationException e) when (e.Failure.Kind == DbFailureKind.Constraint) { rejected = true; }
         Require(rejected && await f.CountAsync("SELECT revision FROM shop.discounts", ct) == 0 && await f.CountAsync("SELECT count(*) FROM shop.discount_revisions", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='coupon_edit'", ct) == 0, "deferred failure rolls back settings revision and audit together");
         await using (var recover = f.Database.Data.CreateCommand("DROP TRIGGER public_test_revision_failure ON shop.discount_revisions")) await recover.ExecuteNonQueryAsync(ct);
-        Require(await new PricingStore(f.Sessions, f.Secrets).EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, ct) == 1, "same command resumes without a history gap");
+        Require(await new PricingStore(f.Sessions).EditAsync(f.Context(0), actor, coupon, 0, edit, AuditReason.OperatorReview, command, ct) == 1, "same command resumes without a history gap");
         Require(await f.CountAsync("SELECT count(*) FROM shop.discount_revisions", ct) == 2, "one exact successful edit revision");
         bool missing = false;
         await using (var write = await f.Sessions.BeginAsync(ct))
@@ -80,17 +80,17 @@ public static class CouponRevisionQualification
     private static async Task<Guid> Issue(CheckoutFixture f, AuthenticatedAdmin actor, long cap, CancellationToken ct)
     {
         Guid coupon = Guid.NewGuid(); await using var session = await f.Sessions.BeginAsync(ct);
-        await new PricingStore(f.Sessions, f.Secrets).IssueAsync(session, f.Context(0), actor, new(coupon, "PUBLIC-REVISION", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: cap), Guid.NewGuid(), ct);
+        await new PricingStore(f.Sessions).IssueAsync(session, f.Context(0), actor, new(coupon, "PUBLIC-REVISION", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: cap), Guid.NewGuid(), ct);
         await session.CommitAsync(ct); return coupon;
     }
     private static async Task<Guid> Buy(CheckoutFixture f, int quantity, CancellationToken ct)
     {
-        var service = new WalletCheckoutService(f.Sessions, f.Store, new(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Unexpected synthetic supplier call.")));
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new(f.Sessions, [], (_, _) => throw new InvalidOperationException("Unexpected synthetic supplier call.")));
         var request = new CheckoutRequest(OrderIds.New(), f.Product, quantity);
         Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, (_, _, _) => Task.FromResult(ChannelMembership.Member), ct)).Outcome == CheckoutOutcome.Purchased, "whole synthetic free purchase"); return request.OrderId;
     }
     private static async Task Prepare(CheckoutFixture f, CancellationToken ct)
-    { await using var session = await f.Sessions.BeginAsync(ct); var lease = await OutboxStore.ClaimAsync(session, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromMinutes(1), ct) ?? throw new InvalidOperationException(); await session.CommitAsync(ct); await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), lease, ct); }
+    { await using var session = await f.Sessions.BeginAsync(ct); var lease = await OutboxStore.ClaimAsync(session, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromMinutes(1), ct) ?? throw new InvalidOperationException(); await session.CommitAsync(ct); await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), lease, ct); }
     private static async Task<string> Quotes(CheckoutFixture f, CancellationToken ct)
     { await using var read = await f.Sessions.BeginAsync(ct); return await read.QuerySingleAsync(new DbStatement("SELECT md5(COALESCE(string_agg(ROW(id,user_id,product_id,quantity,payment_method,currency,unit_price_usdt,discount_pct_snapshot,discount_units_snapshot,pricing_rounding_step_snapshot,price_calculation_version,created_at)::text,'|' ORDER BY id),'')) FROM shop.orders"), r => r.GetString(0), ct); }
     private static void Require(bool condition, string stage) { if (!condition) throw new InvalidOperationException("Coupon history qualification failed: " + stage + "."); }

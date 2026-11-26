@@ -24,7 +24,7 @@ public static class PreorderProcessQualification
         await FoundationQualification.VerifySchemaAsync(data);
         using var secrets = SecretFiles.Load(root, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
         var sessions = new DbSessionFactory(data);
-        var worker = new LocalPreorderWorker(new(sessions, secrets), CheckoutFixture.ResolveContexts());
+        var worker = new LocalPreorderWorker(new(sessions), CheckoutFixture.ResolveContexts());
         for (int i = 0; i < 30; i++)
         {
             JobLease? lease;
@@ -50,7 +50,7 @@ public static class PreorderProcessQualification
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: ct);
         await using (var policy = await f.Sessions.BeginAsync(ct))
         { await policy.ExecuteAsync(new DbStatement("UPDATE shop.products SET availability_policy='local_preorder',revision=revision+1"), ct); await policy.CommitAsync(ct); }
-        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
         for (int user = 0; user < 2; user++)
             if ((await service.PurchaseAsync(f.Context(user), CheckoutFixture.Actor(user), new(Guid.CreateVersion7(), f.Product, user == 0 ? 5 : 2), (_, _, _) => Task.FromResult(ChannelMembership.Member), ct)).Outcome != CheckoutOutcome.Purchased) throw new InvalidOperationException("Qualification acceptance failed.");
         await f.AddStockAsync(7, ct);
@@ -110,7 +110,7 @@ public static class PreorderProcessQualification
                 JobLease manifest;
                 await using (var claim = await f.Sessions.BeginAsync(ct))
                 { manifest = await OutboxStore.ClaimAsync(claim, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromMinutes(1), ct) ?? throw new InvalidOperationException("Recovered manifest work is missing."); await claim.CommitAsync(ct); }
-                var store = new DeliveryStore(f.Sessions, f.Secrets);
+                var store = new DeliveryStore(f.Sessions);
                 await store.PrepareAsync(f.Context(user), manifest, ct);
                 byte[] content = await store.ReadManifestAsync(f.Context(user), CheckoutFixture.Actor(user), manifest.Intent.OriginId!.Value, ct);
                 CryptographicOperations.ZeroMemory(content);

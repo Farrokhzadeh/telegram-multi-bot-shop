@@ -33,10 +33,14 @@ public sealed class AkundingSupplierAdapter : ISupplierAdapter, IDisposable
     public string Account { get; }
     public bool ProvenIntentLookup => false;
     public bool UsesPurchaseKey => true;
-    public AkundingSupplierAdapter(SecretSnapshot commerce, SupplierCredentialSnapshot credentials, string account, IEnumerable<AkundingProductApproval> approvals,
+    public AkundingSupplierAdapter(SupplierCredentialGrant grant, SupplierCredentialSnapshot credentials, string account, IEnumerable<AkundingProductApproval> approvals,
         Func<SupplierBinding, AkundingOrderReceipt, SupplierItem[]> verifyItems, HttpMessageHandler? transport = null)
+        : this(credentials.ForGrant(grant), account, approvals, verifyItems, transport, grant.DeploymentId, grant.Service) { }
+
+    private AkundingSupplierAdapter(SupplierCredentialSnapshot credentials, string account, IEnumerable<AkundingProductApproval> approvals,
+        Func<SupplierBinding, AkundingOrderReceipt, SupplierItem[]> verifyItems, HttpMessageHandler? transport, Guid deployment, SecretService service)
     {
-        if (credentials.DeploymentId != commerce.DeploymentId || credentials.Service != commerce.Service) throw new UnauthorizedAccessException("Supplier credential scope is unavailable.");
+        if (credentials.DeploymentId != deployment || credentials.Service != service) throw new UnauthorizedAccessException("Supplier credential scope is unavailable.");
         credentials.UseCredential("akunding", account, key => key.Length);
         ArgumentNullException.ThrowIfNull(verifyItems);
         approved = [];

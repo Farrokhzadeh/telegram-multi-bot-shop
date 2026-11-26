@@ -26,7 +26,7 @@ public static class PaymentActivityQualification
         string before = await WorkflowActivityQualification.DomainAsync(f.Sessions, true, ct);
         var result = await new BotActivityRetentionStore(f.Sessions).CleanAsync(ct: ct);
         Require(foreign && result.Deleted == 1 && result.Backlog.Expired == 0, "only exact payment membership provenance authorizes history retirement");
-        var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        var evidence = new PaymentEvidenceStore(f.Sessions);
         for (int i = 0; i < 100; i++) await evidence.CreateTopupAsync(f.Context(0), CheckoutFixture.Actor(0), payment, new(1, Currency.Usd), CryptoAsset.UsdtTrc20, ct);
         Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events", ct) == 0 && before == await WorkflowActivityQualification.DomainAsync(f.Sessions, true, ct), "payment replay after expiry cannot retimestamp history or mutate domain records");
     }
@@ -34,7 +34,7 @@ public static class PaymentActivityQualification
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: ct);
         var fixture = new PaymentSettlementFixture(f); await fixture.EnableAsync(ct);
-        var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        var evidence = new PaymentEvidenceStore(f.Sessions);
         for (int user = 0; user < 3; user++)
         {
             Guid payment = Guid.NewGuid();
@@ -61,7 +61,7 @@ public static class PaymentActivityQualification
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 3, ct: ct);
         var fixture = new PaymentSettlementFixture(f); await fixture.EnableAsync(ct);
         var crypto = await fixture.OrderAsync(user: 1, ct: ct);
-        var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        var evidence = new PaymentEvidenceStore(f.Sessions);
         using (var notice = PaymentNoticeFixture.Notice(crypto.Origin, asset: "usdtbsc", quote: crypto.Due, provider: PaymentSettlementFixture.Provider(crypto.Payment)))
             for (int i = 0; i < 100; i++) await evidence.CaptureAsync(f.Context(1), notice, (e, _) => Task.FromResult("protected:synthetic/" + e.Digest), ct);
         Require(await f.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE action_code='payment_review' AND outcome_code='blocked'", ct) == 1 && await f.CountAsync("SELECT count(*) FROM shop.payments WHERE status='settled'", ct) == 0, "review is one real unresolved transition without acceptance");
@@ -81,7 +81,7 @@ public static class PaymentActivityQualification
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: ct);
         var fixture = new PaymentSettlementFixture(f); await fixture.EnableAsync(ct);
-        Guid payment = Guid.NewGuid(); var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        Guid payment = Guid.NewGuid(); var evidence = new PaymentEvidenceStore(f.Sessions);
         await evidence.CreateTopupAsync(f.Context(0), CheckoutFixture.Actor(0), payment, new(10, Currency.Usd), CryptoAsset.UsdtTrc20, ct);
         await using (var bind = await f.Sessions.BeginAsync(ct))
         { await evidence.BindInvoiceAsync(bind, f.Context(0), CheckoutFixture.Actor(0), payment, PaymentSettlementFixture.Provider(payment), 10.4m, ct); await bind.CommitAsync(ct); }

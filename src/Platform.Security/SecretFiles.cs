@@ -100,6 +100,48 @@ public sealed class SecretSnapshot : IDisposable
 
     public override string ToString() => "Secret configuration (redacted)";
 
+    internal byte[] RecoveryCommitment()
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            hash.AppendData("akanti-recovery-keyring-v1"u8);
+            hash.AppendData(DeploymentId.ToByteArray());
+            hash.AppendData(BitConverter.GetBytes(Revision));
+            hash.AppendData(BitConverter.GetBytes((int)Service));
+            foreach (var entry in brands.OrderBy(entry => entry.Key))
+            {
+                hash.AppendData([1]);
+                hash.AppendData(entry.Key.ToByteArray());
+                AddRing(entry.Value);
+            }
+            if (inventory is not null)
+            {
+                hash.AppendData([2]);
+                AddRing(inventory);
+            }
+            return hash.GetHashAndReset();
+
+            void AddRing(LoadedKeyRing ring)
+            {
+                AddId(ring.CurrentKeyId);
+                hash.AppendData(BitConverter.GetBytes(ring.Keys.Count));
+                foreach (var entry in ring.Keys.OrderBy(entry => entry.Key, StringComparer.Ordinal))
+                {
+                    AddId(entry.Key);
+                    hash.AppendData(entry.Value);
+                }
+            }
+            void AddId(string id)
+            {
+                byte[] bytes = System.Text.Encoding.ASCII.GetBytes(id);
+                hash.AppendData(BitConverter.GetBytes(bytes.Length));
+                hash.AppendData(bytes);
+            }
+        }
+    }
+
     private LoadedKeyRing BrandRing(BrandContext context)
     {
         ObjectDisposedException.ThrowIf(disposed, this);

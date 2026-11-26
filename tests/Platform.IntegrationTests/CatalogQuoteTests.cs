@@ -8,7 +8,7 @@ public sealed class CatalogQuoteTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static CatalogStore Store(CheckoutFixture f, Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>>? fetch = null) =>
-        new(f.Sessions, f.Secrets, [new("synthetic", "public-synthetic-account")], fetch ?? ((_, _) => throw new InvalidOperationException("Unexpected supplier call.")));
+        new(f.Sessions, [new("synthetic", "public-synthetic-account")], fetch ?? ((_, _) => throw new InvalidOperationException("Unexpected supplier call.")));
 
     [Theory]
     [InlineData(10)]
@@ -70,7 +70,7 @@ public sealed class CatalogQuoteTests
         var actor = await f.AdminAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), actor,
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), actor,
                 new(Guid.NewGuid(), "PUBLIC-PER-MEMBER", CouponKind.Promotion, 50, f.Product, MaximumUses: 5, MaximumPerMember: 1), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
@@ -84,7 +84,7 @@ public sealed class CatalogQuoteTests
     {
         await using var f = await CheckoutFixture.CreateAsync(users: 6, stock: 5, ct: Ct);
         var actor = await f.AdminAsync(Ct);
-        var pricing = new PricingStore(f.Sessions, f.Secrets);
+        var pricing = new PricingStore(f.Sessions);
         Guid source = Guid.NewGuid(), coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
@@ -246,7 +246,7 @@ public sealed class CatalogQuoteTests
                     product_title_snapshot,payment_terms_snapshot,fulfillment_kind_snapshot,local_first_snapshot,is_preorder)
                 VALUES ($1,$2,$3,1,'product_purchase','awaiting_payment','USDT','crypto',11,false,5000,$4,10,1,CURRENT_TIMESTAMP+INTERVAL '30 minutes','public brand','public product','public terms','local',true,false)
                 """, DbValue.Uuid(order), DbValue.Uuid(f.Users[3]), DbValue.Uuid(f.Product), DbValue.Text(PricingPolicy.Version)), Ct);
-            await new PricingStore(f.Sessions, f.Secrets).HoldAsync(competitor, f.Context(3), CheckoutFixture.Actor(3), coupon, order, Ct);
+            await new PricingStore(f.Sessions).HoldAsync(competitor, f.Context(3), CheckoutFixture.Actor(3), coupon, order, Ct);
             await competitor.CommitAsync(Ct);
         }
         await using var consumed = await f.Sessions.BeginAsync(Ct);
@@ -326,7 +326,7 @@ public sealed class CatalogQuoteTests
         var actor = await f.AdminAsync(Ct);
         Guid id = Guid.NewGuid();
         await using var session = await f.Sessions.BeginAsync(Ct);
-        await new PricingStore(f.Sessions, f.Secrets).IssueAsync(session, f.Context(0), actor, new(id, "PUBLIC-" + id.ToString("N"), CouponKind.Promotion, percent, f.Product, member, MaximumUses: cap), Guid.NewGuid(), Ct);
+        await new PricingStore(f.Sessions).IssueAsync(session, f.Context(0), actor, new(id, "PUBLIC-" + id.ToString("N"), CouponKind.Promotion, percent, f.Product, member, MaximumUses: cap), Guid.NewGuid(), Ct);
         await session.CommitAsync(Ct);
         return id;
     }

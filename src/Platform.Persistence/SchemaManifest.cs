@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.Data.Sqlite;
 using Npgsql;
 
 namespace Platform.Persistence;
@@ -6,6 +7,28 @@ namespace Platform.Persistence;
 public sealed record SchemaManifest(string Environment, string Revision, string SqlSha256,
     string Host, int Port, string Database, string Username, int ServerVersion)
 {
+    internal const string PlaintextPostgresRequired = "pg_catalog.obj_description(pg_catalog.to_regnamespace('shop'),'pg_namespace') IS NOT DISTINCT FROM '" + Migrations.PlainTargetSchema.PostgresFormat + "'";
+
+    internal static async Task RequirePlaintextSqliteAsync(SqliteCommand metadata, CancellationToken ct)
+    {
+        metadata.CommandText = """
+            SELECT (SELECT user_version FROM pragma_user_version) = $format
+                AND (SELECT application_id FROM pragma_application_id) = 0
+                AND NOT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name=$checkpoint)
+                AND EXISTS(SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name='__EFMigrationsHistory')
+            """;
+        metadata.Parameters.Add("$format", SqliteType.Integer).Value = Migrations.PlainTargetSchema.SqliteVersion;
+        metadata.Parameters.Add("$checkpoint", SqliteType.Text).Value = Migrations.PlainTargetSchema.RowCopyTable;
+        if (Convert.ToInt64(await metadata.ExecuteScalarAsync(ct)) != 1)
+            throw new InvalidOperationException("A runtime plaintext SQLite target is required.");
+        metadata.Parameters.Clear();
+        metadata.CommandText = """SELECT count(*)=1 AND min(MigrationId)=$migration FROM "__EFMigrationsHistory" """;
+        metadata.Parameters.Add("$migration", SqliteType.Text).Value = Migrations.PlainContentBaseline.MigrationId;
+        if (Convert.ToInt64(await metadata.ExecuteScalarAsync(ct)) != 1)
+            throw new InvalidOperationException("The SQLite plaintext migration history differs from the runtime.");
+        metadata.Parameters.Clear();
+    }
+
     public static SchemaManifest Parse(string text)
     {
         var fields = new Dictionary<string, string>(StringComparer.Ordinal);

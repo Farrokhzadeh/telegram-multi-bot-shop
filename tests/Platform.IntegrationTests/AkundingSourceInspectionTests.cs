@@ -21,7 +21,7 @@ public sealed class AkundingSourceInspectionTests
         using var files = new SyntheticSecretFiles();
         using var credentials = Credentials(files);
         int lists = 0, details = 0;
-        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(request =>
+        using var inspection = new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new Handler(request =>
         {
             Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
             if (request.RequestUri!.AbsolutePath == "/api/v1/products")
@@ -63,7 +63,7 @@ public sealed class AkundingSourceInspectionTests
         long revision = await f.CountAsync("SELECT revision FROM shop.products", Ct);
         using var files = new SyntheticSecretFiles();
         using var credentials = Credentials(files);
-        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new AsyncHandler(async (_, ct) =>
+        using var inspection = new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new AsyncHandler(async (_, ct) =>
         {
             await using var edit = await f.Sessions.BeginAsync(ct);
             if (revoke) await AdminSessionStore.LogoutAsync(edit, actor, ct);
@@ -108,7 +108,7 @@ public sealed class AkundingSourceInspectionTests
         using var files = new SyntheticSecretFiles();
         using var credentials = Credentials(files);
         int calls = 0;
-        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(_ => { calls++; return Reply(); }));
+        using var inspection = new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new Handler(_ => { calls++; return Reply(); }));
         await Assert.ThrowsAsync<InvalidOperationException>(() => inspection.BrowseAsync(actor, f.Product, revision + 1, "", null, 10, Ct));
         await Assert.ThrowsAsync<InvalidOperationException>(() => inspection.AddCandidateAsync(actor, f.Product, revision + 1, 7, Guid.NewGuid(), Guid.NewGuid(), Ct));
         await using (var logout = await f.Sessions.BeginAsync(Ct))
@@ -127,7 +127,7 @@ public sealed class AkundingSourceInspectionTests
         await Mapping(f, actor);
         using var files = new SyntheticSecretFiles();
         using var credentials = Credentials(files);
-        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(_ => Reply()));
+        using var inspection = new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new Handler(_ => Reply()));
         long revision = await f.CountAsync("SELECT revision FROM shop.products", Ct);
         await Assert.ThrowsAsync<InvalidOperationException>(() => inspection.AddCandidateAsync(actor, f.Product, revision, 9, Guid.NewGuid(), Guid.NewGuid(), Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.product_supplier_sources", Ct));
@@ -143,7 +143,7 @@ public sealed class AkundingSourceInspectionTests
         using var credentials = Credentials(files);
         int calls = 0;
         HttpRequestMessage? sent = null;
-        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(request =>
+        using var inspection = new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new Handler(request =>
         {
             calls++; sent = request;
             Assert.Equal(HttpMethod.Get, request.Method);
@@ -176,9 +176,9 @@ public sealed class AkundingSourceInspectionTests
         int calls = 0;
         using var handler = new Handler(_ => { calls++; return Reply(); });
         if (mismatch == "account")
-            Assert.Throws<SecretConfigurationException>(() => new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "another account", handler));
+            Assert.Throws<SecretConfigurationException>(() => new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "another account", handler));
         else
-            Assert.Throws<UnauthorizedAccessException>(() => new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", handler));
+            Assert.Throws<UnauthorizedAccessException>(() => new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", handler));
         Assert.Equal(0, calls);
     }
     [Theory]
@@ -194,7 +194,7 @@ public sealed class AkundingSourceInspectionTests
         using var files = new SyntheticSecretFiles();
         using var credentials = Credentials(files);
         int calls = 0;
-        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new Handler(_ => { calls++; return Reply(); }));
+        using var inspection = new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new Handler(_ => { calls++; return Reply(); }));
         if (invalid == "revoked")
         {
             await using var logout = await f.Sessions.BeginAsync(Ct);
@@ -215,7 +215,7 @@ public sealed class AkundingSourceInspectionTests
         Guid source = await Mapping(f, actor);
         using var files = new SyntheticSecretFiles();
         using var credentials = Credentials(files);
-        using var inspection = new AkundingSourceInspection(f.Sessions, f.Secrets, credentials, "public account", new AsyncHandler(async (_, ct) =>
+        using var inspection = new AkundingSourceInspection(f.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new AsyncHandler(async (_, ct) =>
         {
             await using var edit = await f.Sessions.BeginAsync(ct);
             if (revoke) await AdminSessionStore.LogoutAsync(edit, actor, ct);

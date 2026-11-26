@@ -14,7 +14,7 @@ public sealed class BrandAdministrationTests
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
         var admin = await f.AdminAsync(Ct);
-        var store = new BrandAdministrationStore(f.Sessions, f.Secrets);
+        var store = new BrandAdministrationStore(f.Sessions);
         var channels = new[] { new RequiredChannel(-10001, "Public channel", "https://t.me/public_channel") };
         BrandPolicySnapshot original;
         await using (var read = await f.Sessions.BeginAsync(Ct)) original = await BrandPolicyStore.ReadAsync(read, f.Context(0), CheckoutFixture.Actor(0), Ct);
@@ -38,7 +38,7 @@ public sealed class BrandAdministrationTests
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
         var admin = await f.AdminAsync(Ct);
-        var store = new BrandAdministrationStore(f.Sessions, f.Secrets);
+        var store = new BrandAdministrationStore(f.Sessions);
         using var token = BotToken.Parse("1001:" + new string('s', 35));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.RotateTokenAsync(admin, f.Context(0), token, 0, Guid.NewGuid(), (_, _) => Task.FromResult(new VerifiedBotProfile(1002, "public_wrong_bot")), Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.RotateTokenAsync(admin, f.Context(1), token, 0, Guid.NewGuid(), (_, _) => throw new InvalidOperationException(), Ct));

@@ -12,6 +12,10 @@ The versioned admin contract is an OpenAPI 3.0.3 JSON file with 29 operations. I
 
 Run `ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/Platform.Api -- --serve-qualification` and open [Swagger UI](http://127.0.0.1:18080/swagger). It reads the same 29-operation contract from `/openapi/admin-api.json`. The loopback qualification host shows the contract without enabling the admin endpoints. On an admin API host, calls still need a valid bearer session. The documentation routes are off outside Development.
 
+## Plaintext runtime candidate
+
+The isolated SQLite v2 API keeps the existing local service key and administrator bearer sessions. Synthetic stock imports use the same request and command identity through `POST /v1/admin/inventory/import`. The route checks the administrator session and accepts synthetic credentials only. PostgreSQL v2 keeps scoped writer registration, independent supplier credentials and the keyed bank-card fingerprint. The HTTP request and response contract is unchanged.
+
 ## Integrate the admin panel
 
 | Screen | Start with | Follow-up operations |

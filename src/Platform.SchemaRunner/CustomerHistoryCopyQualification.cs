@@ -31,6 +31,7 @@ internal static class CustomerHistoryCopyQualification
         if (!info.Exists || info.LinkTarget is not null || info.Length is < 128 or > 16777216 ||
             (File.GetUnixFileMode(originalPlan) & (UnixFileMode)63) != 0) throw new MigrationRejectedException();
         byte[] body = await File.ReadAllBytesAsync(originalPlan, ct);
+        IReadOnlyDictionary<Guid, byte[]>? memberSnapshots = null;
         try
         {
             var manifest = VerifiedImportManifest.Open("protected:customer-history/source-archive", SHA256.HashData(body), body);
@@ -63,24 +64,24 @@ internal static class CustomerHistoryCopyQualification
                 if (row.Source.Projection != LegacyProjection.OrderRecord || row.Source.Id != proof.LegacyId) throw new MigrationRejectedException();
                 records.Add(row);
             }
-            var memberSnapshots = new LegacyCustomerHistoryProjection(secrets).SealAll(context!, manifest, records);
+            memberSnapshots = new LegacyCustomerHistoryProjection(secrets).EncodeAll(context!, manifest, records);
             int members = manifest.Proofs.Count(p => p.Projection == LegacyProjection.User);
             if (memberSnapshots.Count != members) throw new MigrationRejectedException();
-            var sealedReader = new CustomerHistoryArchive(secrets);
-            string output = Path.Combine(directory, "teleg-customer-history-reviewed");
+            string output = Path.Combine(directory, "teleg-customer-history-reviewed-v2");
             Directory.CreateDirectory(output, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            var storage = new CustomerHistoryFiles(output, secrets);
+            var storage = new CustomerHistoryFiles(output);
             int count = 0;
             foreach (var member in memberSnapshots)
             {
-                var original = sealedReader.Open(context!, member.Key, member.Value);
                 await storage.PublishAsync(context!, member.Key, member.Value, ct);
-                var reread = await storage.ReadAsync(context!, member.Key, ct);
-                if (!sealedReader.Open(context!, member.Key, reread.Span).SequenceEqual(original)) throw new MigrationRejectedException();
+                var original = CustomerHistoryContent.Decode(member.Key, member.Value);
+                var stored = await storage.ReadCommitmentAsync(context!, member.Key, ct);
+                if (stored.Sha256 != Convert.ToHexStringLower(SHA256.HashData(member.Value)) || stored.Orders != original.Count)
+                    throw new MigrationRejectedException();
                 int offset = 0;
                 while (true)
                 {
-                    var page = sealedReader.Page(context!, member.Key, reread.Span, offset);
+                    var page = CustomerHistoryContent.Page(original, offset);
                     if (page.Orders.Count > 20 || !page.Orders.SequenceEqual(original.Skip(offset).Take(20))) throw new MigrationRejectedException();
                     offset = checked(offset + page.Orders.Count);
                     if (page.NextOffset is null) break;
@@ -92,7 +93,7 @@ internal static class CustomerHistoryCopyQualification
             if (count != expectedOrders || memberSnapshots.Count < 2) throw new MigrationRejectedException();
             var first = memberSnapshots.First();
             Guid foreign = memberSnapshots.Keys.First(id => id != first.Key);
-            try { _ = sealedReader.Open(context!, foreign, first.Value); throw new MigrationRejectedException(); }
+            try { _ = CustomerHistoryContent.Decode(foreign, first.Value); throw new MigrationRejectedException(); }
             catch (UnauthorizedAccessException) { }
             await WalletCopyQualification.WriteAsync(receipt, WalletCopyQualification.JsonBody(w =>
             {
@@ -100,19 +101,25 @@ internal static class CustomerHistoryCopyQualification
                 w.WriteString("source_brand", sourceBrand); w.WriteString("archive_sha256", archiveHash);
                 w.WriteNumber("original_orders", count); w.WriteNumber("memberships", members);
                 w.WriteBoolean("all_original_orders_accounted", true);
-                w.WriteBoolean("per_member_brand_key_encrypted", true);
+                w.WriteNumber("history_format", 2);
                 w.WriteNumber("typed_historical_orders", review.TypedOrders);
                 w.WriteNumber("retained_unresolved_original_orders", review.ReviewedOrders);
                 w.WriteNumber("verified_original_review_rows", review.ReviewedRecords);
                 w.WriteBoolean("all_original_review_cases_bound_to_frozen_source_proofs", true);
                 w.WriteBoolean("actual_source_history_pagination_verified", true);
-                w.WriteBoolean("foreign_member_decryption_rejected", true);
+                w.WriteBoolean("foreign_member_content_rejected", true);
                 w.WriteBoolean("unchanged_private_archive", true);
                 w.WriteBoolean("source_copy_database_accessed", false);
                 w.WriteBoolean("runtime_customer_route_deployed", false);
                 w.WriteBoolean("paid_obligations_adjudicated", false); w.WriteBoolean("release_ready", false);
             }), ct);
         }
-        finally { CryptographicOperations.ZeroMemory(body); }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(body);
+            if (memberSnapshots is not null)
+                foreach (byte[] snapshot in memberSnapshots.Values)
+                    CryptographicOperations.ZeroMemory(snapshot);
+        }
     }
 }

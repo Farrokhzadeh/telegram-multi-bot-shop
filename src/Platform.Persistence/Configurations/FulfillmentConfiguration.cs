@@ -4,7 +4,7 @@ using Platform.Persistence.Entities;
 
 namespace Platform.Persistence.Configurations;
 
-internal sealed class FulfillmentConfiguration(bool sqlite) : IEntityTypeConfiguration<Fulfillment>
+internal sealed class FulfillmentConfiguration(bool sqlite, bool plaintext = false) : IEntityTypeConfiguration<Fulfillment>
 {
     public void Configure(EntityTypeBuilder<Fulfillment> row)
     {
@@ -20,14 +20,15 @@ internal sealed class FulfillmentConfiguration(bool sqlite) : IEntityTypeConfigu
                 table.HasCheckConstraint("ck_fulfillments_6", "supplier_request_id IS NULL OR akanti_uuid(supplier_request_id)");
                 table.HasCheckConstraint("ck_fulfillments_7", "remote_item_ref IS NULL OR (length(remote_item_ref) BETWEEN 1 AND 160 AND trim(remote_item_ref)<>'')");
                 table.HasCheckConstraint("ck_fulfillments_8", "length(supplier_item_key)=32");
-                table.HasCheckConstraint("ck_fulfillments_9", "delivered_content_key_id IS NULL OR (length(delivered_content_key_id) BETWEEN 1 AND 160 AND trim(delivered_content_key_id)<>'')");
+                if (!plaintext) table.HasCheckConstraint("ck_fulfillments_9", "delivered_content_key_id IS NULL OR (length(delivered_content_key_id) BETWEEN 1 AND 160 AND trim(delivered_content_key_id)<>'')");
                 table.HasCheckConstraint("ck_fulfillments_10", "content_kind IN ('account','key','code','text','file')");
                 table.HasCheckConstraint("ck_fulfillments_11", "resolution_admin_id IS NULL OR akanti_uuid(resolution_admin_id)");
                 table.HasCheckConstraint("ck_fulfillments_12", "resolution_note IS NULL OR (length(resolution_note)<=16384)");
                 table.HasCheckConstraint("ck_fulfillments_13", "manifest_generation IS NULL OR akanti_uuid(manifest_generation)");
                 table.HasCheckConstraint("ck_fulfillments_14", "kind IS NOT NULL OR status='unfilled'");
                 table.HasCheckConstraint("ck_fulfillments_15", "(kind IS NOT DISTINCT FROM 'supplier')=(supplier_request_id IS NOT NULL)");
-                table.HasCheckConstraint("ck_fulfillments_16", "((delivered_content IS NOT NULL) + (delivered_content_key_id IS NOT NULL) + (content_kind IS NOT NULL)) IN (0,3)");
+                if (!plaintext) table.HasCheckConstraint("ck_fulfillments_16", "((delivered_content IS NOT NULL) + (delivered_content_key_id IS NOT NULL) + (content_kind IS NOT NULL)) IN (0,3)");
+                else table.HasCheckConstraint("ck_fulfillments_16", "((delivered_content IS NOT NULL) + (content_kind IS NOT NULL)) IN (0,2)");
                 table.HasCheckConstraint("ck_fulfillments_17", "status NOT IN ('acquired','ready','released','retained_admin') OR delivered_content IS NOT NULL");
                 table.HasCheckConstraint("ck_fulfillments_18", "status <> 'released' OR (manifest_generation IS NOT NULL AND completed_at IS NOT NULL)");
                 table.HasCheckConstraint("ck_fulfillments_19", "status <> 'retained_admin' OR resolution_admin_id IS NOT NULL");
@@ -43,14 +44,15 @@ internal sealed class FulfillmentConfiguration(bool sqlite) : IEntityTypeConfigu
                 table.HasCheckConstraint("ck_fulfillments_5", "content_kind IN ('account','key','code','text','file')");
                 table.HasCheckConstraint("ck_fulfillments_6", "kind IS NOT NULL OR status='unfilled'");
                 table.HasCheckConstraint("ck_fulfillments_7", "(kind IS NOT DISTINCT FROM 'supplier')=(supplier_request_id IS NOT NULL)");
-                table.HasCheckConstraint("ck_fulfillments_8", "num_nonnulls(delivered_content,delivered_content_key_id,content_kind) IN (0,3)");
+                if (!plaintext) table.HasCheckConstraint("ck_fulfillments_8", "num_nonnulls(delivered_content,delivered_content_key_id,content_kind) IN (0,3)");
+                else table.HasCheckConstraint("ck_fulfillments_8", "num_nonnulls(delivered_content,content_kind) IN (0,2)");
                 table.HasCheckConstraint("ck_fulfillments_9", "status NOT IN ('acquired','ready','released','retained_admin') OR delivered_content IS NOT NULL");
                 table.HasCheckConstraint("ck_fulfillments_10", "status <> 'released' OR (manifest_generation IS NOT NULL AND completed_at IS NOT NULL)");
                 table.HasCheckConstraint("ck_fulfillments_11", "status <> 'retained_admin' OR resolution_admin_id IS NOT NULL");
                 table.HasCheckConstraint("ck_fulfillments_12", "isfinite(created_at)");
                 table.HasCheckConstraint("ck_fulfillments_13", "isfinite(completed_at)");
                 table.HasCheckConstraint("ck_fulfillments_14", "length(remote_item_ref) BETWEEN 1 AND 160 AND btrim(remote_item_ref)<>''");
-                table.HasCheckConstraint("ck_fulfillments_15", "length(delivered_content_key_id) BETWEEN 1 AND 160 AND btrim(delivered_content_key_id)<>''");
+                if (!plaintext) table.HasCheckConstraint("ck_fulfillments_15", "length(delivered_content_key_id) BETWEEN 1 AND 160 AND btrim(delivered_content_key_id)<>''");
                 table.HasCheckConstraint("ck_fulfillments_16", "length(resolution_note)<=16384");
             }
         });
@@ -76,8 +78,12 @@ internal sealed class FulfillmentConfiguration(bool sqlite) : IEntityTypeConfigu
         remote_item_ref.HasMaxLength(160);
         var supplier_item_key = row.Property(v => v.SupplierItemKey).HasColumnName("supplier_item_key").HasColumnType(sqlite ? "BLOB" : "bytea");
         var delivered_content = row.Property(v => v.DeliveredContent).HasColumnName("delivered_content").HasColumnType(sqlite ? "BLOB" : "bytea");
-        var delivered_content_key_id = row.Property(v => v.DeliveredContentKeyId).HasColumnName("delivered_content_key_id").HasColumnType(sqlite ? "TEXT" : "text");
-        delivered_content_key_id.HasMaxLength(160);
+        if (plaintext) row.Ignore(v => v.DeliveredContentKeyId);
+        else
+        {
+            var delivered_content_key_id = row.Property(v => v.DeliveredContentKeyId).HasColumnName("delivered_content_key_id").HasColumnType(sqlite ? "TEXT" : "text");
+            delivered_content_key_id.HasMaxLength(160);
+        }
         var content_kind = row.Property(v => v.ContentKind).HasColumnName("content_kind").HasColumnType(sqlite ? "TEXT" : "text");
         var resolution_admin_id = row.Property(v => v.ResolutionAdminId).HasColumnName("resolution_admin_id").HasColumnType(sqlite ? "TEXT" : "uuid");
         resolution_admin_id.ValueGeneratedNever();

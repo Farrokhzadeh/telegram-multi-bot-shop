@@ -19,21 +19,18 @@ public sealed class SqliteSupplierRequestTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
-            var sessions = new SqliteSessionFactory(path);
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), source = Guid.NewGuid();
             Guid order = Guid.NewGuid(), request = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var command = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,title,fulfillment_kind,availability_policy)
                     VALUES ($product,'Fixture','supplier','immediate');
@@ -60,7 +57,7 @@ public sealed class SqliteSupplierRequestTests
                     request, DateTime.UtcNow, token);
                 return 0;
             }, ct);
-            var supplier = new SqliteSupplierRequestStore(sessions, secrets);
+            var supplier = new SqliteSupplierRequestStore(sessions);
             Assert.Null(await supplier.ClaimAsync(other, JobKind.SubmitSupplier, Guid.NewGuid(), ct));
             JobLease? lease = await supplier.ClaimAsync(brand, JobKind.SubmitSupplier, Guid.NewGuid(), ct);
             Assert.NotNull(lease);

@@ -4,7 +4,7 @@ using Platform.Persistence.Entities;
 
 namespace Platform.Persistence.Configurations;
 
-internal sealed class SupportMessageConfiguration(bool sqlite) : IEntityTypeConfiguration<SupportMessage>
+internal sealed class SupportMessageConfiguration(bool sqlite, bool plaintext = false) : IEntityTypeConfiguration<SupportMessage>
 {
     public void Configure(EntityTypeBuilder<SupportMessage> row)
     {
@@ -17,12 +17,13 @@ internal sealed class SupportMessageConfiguration(bool sqlite) : IEntityTypeConf
                 table.HasCheckConstraint("ck_support_messages_3", "sender_kind IN ('customer','admin','system')");
                 table.HasCheckConstraint("ck_support_messages_4", "sender_admin_id IS NULL OR akanti_uuid(sender_admin_id)");
                 table.HasCheckConstraint("ck_support_messages_5", "sender_telegram_id > 0");
-                table.HasCheckConstraint("ck_support_messages_6", "body_key_id IS NULL OR (length(body_key_id) BETWEEN 1 AND 160 AND trim(body_key_id)<>'')");
+                if (!plaintext) table.HasCheckConstraint("ck_support_messages_6", "body_key_id IS NULL OR (length(body_key_id) BETWEEN 1 AND 160 AND trim(body_key_id)<>'')");
                 table.HasCheckConstraint("ck_support_messages_7", "asset_ref IS NULL OR (length(asset_ref) BETWEEN 1 AND 1024)");
                 table.HasCheckConstraint("ck_support_messages_8", "telegram_message_id > 0");
                 table.HasCheckConstraint("ck_support_messages_9", "(sender_kind='admin')=(sender_admin_id IS NOT NULL)");
-                table.HasCheckConstraint("ck_support_messages_10", "((body_ciphertext IS NOT NULL) + (body_key_id IS NOT NULL)) IN (0,2)");
-                table.HasCheckConstraint("ck_support_messages_11", "((body_ciphertext IS NOT NULL) + (asset_ref IS NOT NULL))>0");
+                if (!plaintext) table.HasCheckConstraint("ck_support_messages_10", "((body_ciphertext IS NOT NULL) + (body_key_id IS NOT NULL)) IN (0,2)");
+                if (!plaintext) table.HasCheckConstraint("ck_support_messages_11", "((body_ciphertext IS NOT NULL) + (asset_ref IS NOT NULL))>0");
+                else table.HasCheckConstraint("ck_support_messages_11", "((body_content IS NOT NULL) + (asset_ref IS NOT NULL))>0");
                 table.HasCheckConstraint("ck_support_messages_12", "created_at IS NULL OR akanti_utc_time(created_at)");
             }
             else
@@ -31,10 +32,11 @@ internal sealed class SupportMessageConfiguration(bool sqlite) : IEntityTypeConf
                 table.HasCheckConstraint("ck_support_messages_2", "sender_telegram_id > 0");
                 table.HasCheckConstraint("ck_support_messages_3", "telegram_message_id > 0");
                 table.HasCheckConstraint("ck_support_messages_4", "(sender_kind='admin')=(sender_admin_id IS NOT NULL)");
-                table.HasCheckConstraint("ck_support_messages_5", "num_nonnulls(body_ciphertext,body_key_id) IN (0,2)");
-                table.HasCheckConstraint("ck_support_messages_6", "num_nonnulls(body_ciphertext,asset_ref)>0");
+                if (!plaintext) table.HasCheckConstraint("ck_support_messages_5", "num_nonnulls(body_ciphertext,body_key_id) IN (0,2)");
+                if (!plaintext) table.HasCheckConstraint("ck_support_messages_6", "num_nonnulls(body_ciphertext,asset_ref)>0");
+                else table.HasCheckConstraint("ck_support_messages_6", "num_nonnulls(body_content,asset_ref)>0");
                 table.HasCheckConstraint("ck_support_messages_7", "isfinite(created_at)");
-                table.HasCheckConstraint("ck_support_messages_8", "length(body_key_id) BETWEEN 1 AND 160 AND btrim(body_key_id)<>''");
+                if (!plaintext) table.HasCheckConstraint("ck_support_messages_8", "length(body_key_id) BETWEEN 1 AND 160 AND btrim(body_key_id)<>''");
                 table.HasCheckConstraint("ck_support_messages_9", "length(asset_ref) BETWEEN 1 AND 1024 AND btrim(asset_ref)<>''");
             }
         });
@@ -53,9 +55,14 @@ internal sealed class SupportMessageConfiguration(bool sqlite) : IEntityTypeConf
         sender_admin_id.ValueGeneratedNever();
         if (sqlite) sender_admin_id.UseCollation("NOCASE");
         var sender_telegram_id = row.Property(v => v.SenderTelegramId).HasColumnName("sender_telegram_id").HasColumnType(sqlite ? "INTEGER" : "bigint");
-        var body_ciphertext = row.Property(v => v.BodyCiphertext).HasColumnName("body_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
-        var body_key_id = row.Property(v => v.BodyKeyId).HasColumnName("body_key_id").HasColumnType(sqlite ? "TEXT" : "text");
-        body_key_id.HasMaxLength(160);
+        if (plaintext) row.Ignore(v => v.BodyCiphertext); else row.Ignore(v => v.BodyContent);
+        var body_ciphertext = (plaintext ? row.Property(v => v.BodyContent) : row.Property(v => v.BodyCiphertext)).HasColumnName(plaintext ? "body_content" : "body_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
+        if (plaintext) row.Ignore(v => v.BodyKeyId);
+        else
+        {
+            var body_key_id = row.Property(v => v.BodyKeyId).HasColumnName("body_key_id").HasColumnType(sqlite ? "TEXT" : "text");
+            body_key_id.HasMaxLength(160);
+        }
         var asset_ref = row.Property(v => v.AssetRef).HasColumnName("asset_ref").HasColumnType(sqlite ? "TEXT" : "text");
         asset_ref.HasMaxLength(1024);
         var telegram_message_id = row.Property(v => v.TelegramMessageId).HasColumnName("telegram_message_id").HasColumnType(sqlite ? "INTEGER" : "bigint");

@@ -17,25 +17,22 @@ public sealed class SqliteCatalogTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
             Guid member = Guid.NewGuid(), otherMember = Guid.NewGuid(), product = Guid.NewGuid();
             Guid stock = Guid.NewGuid(), admin = Guid.NewGuid(), audit = Guid.NewGuid();
-            byte[] encrypted = new InventoryCipher(secrets).Encrypt(stock, Encoding.UTF8.GetBytes("public fixture"));
+            byte[] content = Encoding.UTF8.GetBytes("public fixture");
             await sessions.RunAsync(true, async (_, tx, cancel) =>
             {
                 using var command = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'local','Local','Local','international','en','local_bot',1001,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($brand,'local','Local','Local','international','en','local_bot',1001,x'01',1);
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($other,'other','Other','Other','international','en','other_bot',1002,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($other,'other','Other','Other','international','en','other_bot',1002,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($otherMember,$other,7001,'en');
                     INSERT INTO admins(id,login,authentication_mode,external_subject)
@@ -49,16 +46,16 @@ public sealed class SqliteCatalogTests
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title) VALUES ($product,'local','immediate','Fixture');
                     INSERT INTO brand_products(brand_id,product_id,visible,price_usdt)
                     VALUES ($brand,$product,1,'10');
-                    INSERT INTO inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind)
-                    VALUES ($stock,$product,$encrypted,'current',$fingerprint,'local_import');
+                    INSERT INTO inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind)
+                    VALUES ($stock,$product,$content,$fingerprint,'local_import');
                     """, ("$brand", brand.BrandId), ("$other", other.BrandId), ("$member", member),
                     ("$otherMember", otherMember), ("$admin", admin), ("$audit", audit),
-                    ("$product", product), ("$stock", stock), ("$encrypted", encrypted),
+                    ("$product", product), ("$stock", stock), ("$content", content),
                     ("$fingerprint", SHA256.HashData(stock.ToByteArray())));
                 await command.ExecuteNonQueryAsync(cancel);
                 return true;
             }, ct);
-            var store = new SqliteCatalogStore(sessions, secrets);
+            var store = new SqliteCatalogStore(sessions);
             var item = await store.GetAsync(brand, 7001, product, ct);
             Assert.NotNull(item);
             Assert.Equal(CatalogAvailability.Available, item.Availability);
@@ -84,7 +81,7 @@ public sealed class SqliteCatalogTests
             Assert.Equal(11m, request.UnitPrice);
             await Assert.ThrowsAsync<PricingRejectedException>(() =>
                 store.RequireLocalAsync(brand, 7001, prepared, Guid.NewGuid(), ct));
-            var checkout = new SqliteCheckoutStore(new SqliteSessionFactory(path), secrets);
+            var checkout = new SqliteCheckoutStore(SqliteSessionFactory.ForPlaintext(path));
             Assert.Equal(CheckoutOutcome.Purchased,
                 (await checkout.PurchaseLocalAsync(brand, request.PolicyRevision, 7001, request, ct)).Outcome);
             var result = await store.GetAsync(brand, 7001, product, ct);

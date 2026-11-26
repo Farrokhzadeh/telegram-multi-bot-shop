@@ -24,7 +24,7 @@ public sealed class ProdSellerSupplierAdapterTests
         using var credentials = AkundingSourceInspectionTests.Credentials(files, provider: "prodseller");
         int posts = 0;
         HttpRequestMessage? posted = null;
-        using var adapter = new ProdSellerSupplierAdapter(f.Secrets, credentials, "public account", [new(ProductId, "key")], Verify, new Handler(async (request, ct) =>
+        using var adapter = new ProdSellerSupplierAdapter(SupplierCredentialQualification.Grant(), credentials, "public account", [new(ProductId, "key")], Verify, new Handler(async (request, ct) =>
         {
             Assert.Equal(32, Assert.Single(request.Headers.GetValues("X-API-Key")).Length);
             Assert.Null(request.Headers.Authorization);
@@ -45,17 +45,17 @@ public sealed class ProdSellerSupplierAdapterTests
             return Reply(Delivered);
         }));
         await Configure(f);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, adapter.InspectCatalogAsync);
+        var catalog = new CatalogStore(f.Sessions, SupplierCredentialQualification.Grant(), credentials, adapter.InspectCatalogAsync);
         var accepted = await new WalletCheckoutService(f.Sessions, f.Store, catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 2),
             (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
         Assert.Equal(CheckoutOutcome.Purchased, accepted.Outcome);
         var archive = new SyntheticSupplier();
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), adapter, archive).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), adapter, archive).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Assert.Equal(1, posts); Assert.Equal(1, archive.Archives);
         Assert.False(posted!.Headers.Contains("X-API-Key"));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE provider_code='prodseller' AND cost_currency='USDT' AND cost_baseline_amount=1 AND status='succeeded' AND remote_ref='publicOrderOne'", Ct));
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired' AND content_kind='key'", Ct));
-        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, Ct), Ct);
+        await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, Ct), Ct);
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='ready'", Ct));
     }
     [Theory]
@@ -76,7 +76,7 @@ public sealed class ProdSellerSupplierAdapterTests
             "missing flag" => Product.Replace(",\"requiresEmailActivation\":false", "", StringComparison.Ordinal),
             _ => Product.Replace("\"type\":\"instant\"", "\"type\":\"unknown\"", StringComparison.Ordinal)
         };
-        using var adapter = new ProdSellerSupplierAdapter(f.Secrets, credentials, "public account", [new(ProductId, "key")], Verify, new Handler((request, _) =>
+        using var adapter = new ProdSellerSupplierAdapter(SupplierCredentialQualification.Grant(), credentials, "public account", [new(ProductId, "key")], Verify, new Handler((request, _) =>
         { if (request.Method == HttpMethod.Post) posts++; return Task.FromResult(Reply(body)); }));
         var binding = Binding();
         var quote = await adapter.InspectAsync(binding, Ct);
@@ -84,7 +84,7 @@ public sealed class ProdSellerSupplierAdapterTests
         using var blocked = await adapter.SubmitAttemptAsync(binding, "purchase:" + Guid.NewGuid().ToString("D"), SupplierRules.UnitCeiling(binding), Ct);
         Assert.Equal(SupplierOutcomeKind.ConfirmedNoEffect, blocked.Kind);
         await Configure(f);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, adapter.InspectCatalogAsync);
+        var catalog = new CatalogStore(f.Sessions, SupplierCredentialQualification.Grant(), credentials, adapter.InspectCatalogAsync);
         await Assert.ThrowsAsync<PricingRejectedException>(() => new WalletCheckoutService(f.Sessions, f.Store, catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 2), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct));
         Assert.Equal(0, posts);
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
@@ -183,7 +183,7 @@ public sealed class ProdSellerSupplierAdapterTests
     }
     private static SupplierBinding Binding() => new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "prodseller", "public account", ProductId, null, "public-local-intent", 2, 1, "USDT", null);
     private static ProdSellerSupplierAdapter Adapter(CheckoutFixture f, Platform.Security.SupplierCredentialSnapshot credentials, HttpMessageHandler handler) =>
-        new(f.Secrets, credentials, "public account", [new(ProductId, "key")], Verify, handler);
+        new(SupplierCredentialQualification.Grant(), credentials, "public account", [new(ProductId, "key")], Verify, handler);
     private static SupplierItem[] Verify(SupplierBinding binding, ProdSellerOrderReceipt receipt) => receipt.Items.Select(raw => new SupplierItem(Encoding.UTF8.GetString(raw.Span) switch
     { "public key A" => "qualified synthetic ProdSeller unit A", "public key B" => "qualified synthetic ProdSeller unit B", _ => throw new InvalidOperationException("Unqualified synthetic identity.") }, SupplierItemDisposition.Customer, "key", raw.Span)).ToArray();
     private static async Task Configure(CheckoutFixture f)

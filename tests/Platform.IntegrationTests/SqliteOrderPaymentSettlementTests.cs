@@ -19,24 +19,21 @@ public sealed class SqliteOrderPaymentSettlementTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var alternate = CheckoutFixture.ResolveContexts()[1];
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), stock = Guid.NewGuid();
             Guid order = Guid.NewGuid(), payment = Guid.NewGuid();
             string created = SqliteSchema.UtcText(DateTime.UtcNow);
             string deadline = SqliteSchema.UtcText(DateTime.Parse(created, null, System.Globalization.DateTimeStyles.AdjustToUniversal).AddMinutes(30));
-            byte[] encrypted = new InventoryCipher(secrets).Encrypt(stock, Encoding.UTF8.GetBytes("public synthetic delivered item"));
+            byte[] content = Encoding.UTF8.GetBytes("public synthetic delivered item");
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active,allow_crypto)
-                    VALUES ($brand,'fixture','Fixture','Fixture','international','en','fixture_bot',1001,x'01','fixture',1,1);
+                        bot_token,active,allow_crypto)
+                    VALUES ($brand,'fixture','Fixture','Fixture','international','en','fixture_bot',1001,x'01',1,1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title) VALUES ($product,'local','immediate','Fixture');
                     INSERT INTO brand_products(brand_id,product_id,visible,price_usdt,allow_crypto) VALUES ($brand,$product,1,'10',1);
@@ -57,15 +54,15 @@ public sealed class SqliteOrderPaymentSettlementTests
                 if (stocked)
                 {
                     using var inventory = SqliteWallet.Command(tx, """
-                        INSERT INTO inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind)
-                        VALUES ($stock,$product,$cipher,'current',$fingerprint,'local_import')
-                        """, ("$stock", stock), ("$product", product), ("$cipher", encrypted), ("$fingerprint", SHA256.HashData(stock.ToByteArray())));
+                        INSERT INTO inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind)
+                        VALUES ($stock,$product,$content,$fingerprint,'local_import')
+                        """, ("$stock", stock), ("$product", product), ("$content", content), ("$fingerprint", SHA256.HashData(stock.ToByteArray())));
                     await inventory.ExecuteNonQueryAsync(token);
                 }
                 return 0;
             }, ct);
 
-            var settle = new SqliteOrderPaymentSettlementStore(new SqliteSessionFactory(path), secrets);
+            var settle = new SqliteOrderPaymentSettlementStore(SqliteSessionFactory.ForPlaintext(path));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 settle.SettleAsync(alternate, 0, payment, PaymentSettlementFixture.Lookup, ct));
             var accepted = await settle.SettleAsync(brand, 0, payment, PaymentSettlementFixture.Lookup, ct);

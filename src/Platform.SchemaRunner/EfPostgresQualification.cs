@@ -1,6 +1,8 @@
 using Npgsql;
 using Microsoft.EntityFrameworkCore;
 using Platform.Persistence;
+using Platform.Persistence.Migrations;
+using System.Security.Cryptography;
 
 namespace Platform.SchemaRunner;
 
@@ -16,9 +18,43 @@ public static partial class EfSchemaCommand
             !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(Convert.FromHexString(expectedScriptSha256), Convert.FromHexString(description.ScriptSha256)))
             throw new InvalidOperationException("The reviewed PostgreSQL EF script digest differs.");
         var identity = SchemaManifest.ForQualification(data.ConnectionString);
-        var options = new NpgsqlConnectionStringBuilder(data.ConnectionString);
-        if (options.IncludeErrorDetail || options.Multiplexing) throw new UnauthorizedAccessException("Qualification requires a dedicated redacted connection.");
+        RequireRedactedPostgres(data);
         await using var connection = await data.OpenConnectionAsync(ct);
+        await RequireEmptyPostgresAsync(connection, identity, ct);
+        await using var context = new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>()
+            .UseNpgsql(connection, provider => provider.CommandTimeout(30)).Options);
+        await context.Database.MigrateAsync(ct);
+        if ((await context.Database.GetPendingMigrationsAsync(ct)).Any()) throw new InvalidOperationException("The PostgreSQL schema is incomplete.");
+        return new(identity.Database, description.Migration, description.ScriptSha256);
+    }
+
+    internal static async Task<(string Database, string Ddl, string Model)> CreatePlainPostgresQualificationAsync(
+        NpgsqlDataSource data, string expectedDdl, CancellationToken ct = default)
+    {
+        RequireQualification();
+        var description = DescribePlain("postgres");
+        if (expectedDdl.Length != 64 || !expectedDdl.All(char.IsAsciiHexDigit) ||
+            !CryptographicOperations.FixedTimeEquals(Convert.FromHexString(expectedDdl), Convert.FromHexString(description.Ddl)))
+            throw new InvalidOperationException("The reviewed plaintext PostgreSQL DDL digest differs.");
+        var identity = SchemaManifest.ForQualification(data.ConnectionString);
+        RequireRedactedPostgres(data);
+        await using var connection = await data.OpenConnectionAsync(ct);
+        await RequireEmptyPostgresAsync(connection, identity, ct);
+        await using var context = new PlainTargetDbContext(new DbContextOptionsBuilder<PlainTargetDbContext>()
+            .UseNpgsql(connection, provider => provider.CommandTimeout(30)).Options);
+        await PlainTargetSchema.CreateAsync(context, ct);
+        return (identity.Database, description.Ddl, description.Model);
+    }
+
+    private static void RequireRedactedPostgres(NpgsqlDataSource data)
+    {
+        var options = new NpgsqlConnectionStringBuilder(data.ConnectionString);
+        if (options.IncludeErrorDetail || options.LogParameters || options.Multiplexing)
+            throw new UnauthorizedAccessException("Qualification requires a dedicated redacted connection.");
+    }
+
+    private static async Task RequireEmptyPostgresAsync(NpgsqlConnection connection, SchemaManifest identity, CancellationToken ct)
+    {
         await using (var check = connection.CreateCommand())
         {
             check.CommandTimeout = 5;
@@ -40,10 +76,5 @@ public static partial class EfSchemaCommand
                 reader.GetInt64(5) != 0 || reader.GetInt64(6) != 0)
                 throw new UnauthorizedAccessException("Only an owned empty synthetic qualification database is accepted.");
         }
-        await using var context = new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>()
-            .UseNpgsql(connection, provider => provider.CommandTimeout(30)).Options);
-        await context.Database.MigrateAsync(ct);
-        if ((await context.Database.GetPendingMigrationsAsync(ct)).Any()) throw new InvalidOperationException("The PostgreSQL schema is incomplete.");
-        return new(identity.Database, description.Migration, description.ScriptSha256);
     }
 }

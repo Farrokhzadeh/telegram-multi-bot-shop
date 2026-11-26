@@ -7,8 +7,10 @@ namespace Platform.Persistence;
 
 public sealed record SqliteCouponDispatch(long ChatId, string Text);
 
-public sealed class SqliteCouponDeliveryStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteCouponDeliveryStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<JobLease?> ClaimNoticeAsync(BrandContext context, Guid worker, CancellationToken ct = default) => sessions.RunAsync(true, (_, tx, token) => OutboxStore.ClaimSqliteAsync(tx, context.BrandId, JobKind.CouponNotice, worker, TimeSpan.FromSeconds(90), token), ct);
     public Task PrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
@@ -39,18 +41,21 @@ public sealed class SqliteCouponDeliveryStore(SqliteSessionFactory sessions, Sec
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             var state = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) =>
-                (from value in data.Data.Set<Entities.TelegramDelivery>()
-                 join coupon in Eligible(data, context) on value.DiscountId equals coupon.Id
-                 join user in data.Data.Set<Entities.User>() on value.UserId equals user.Id
-                 where value.Id == delivery && value.BrandId == context.BrandId && value.UserId == coupon.EligibleUserId && user.BrandId == context.BrandId && value.RecipientKind == "customer_dm" && value.Purpose == "discount_notice" && value.Action == "send" && value.TargetMessageId == null
-                 select new { value.Status, Member = user.Id, Actor = user.TelegramId, Coupon = coupon.Id, coupon.CodeCiphertext, coupon.CodeKeyId }).SingleOrDefaultAsync(cancel), token);
+            {
+                var target = from value in data.Data.Set<Entities.TelegramDelivery>()
+                             join coupon in Eligible(data, context) on value.DiscountId equals coupon.Id
+                             join user in data.Data.Set<Entities.User>() on value.UserId equals user.Id
+                             where value.Id == delivery && value.BrandId == context.BrandId && value.UserId == coupon.EligibleUserId && user.BrandId == context.BrandId && value.RecipientKind == "customer_dm" && value.Purpose == "discount_notice" && value.Action == "send" && value.TargetMessageId == null
+                             select new { value.Status, Member = user.Id, Actor = user.TelegramId, Coupon = coupon };
+                return target.Select(row => new CouponNotice(row.Status, row.Member, row.Actor, row.Coupon.CodeContent)).SingleOrDefaultAsync(cancel);
+            }, token);
             if (state is null) throw new UnauthorizedAccessException("Prepaid delivery is unavailable.");
             JobLease renewed = await OutboxStore.RenewSqliteAsync(tx, lease, TimeSpan.FromSeconds(90), token);
             if (state.Status == "succeeded") { await OutboxStore.CompleteSqliteAsync(tx, renewed, token); return (SqliteCouponDispatch?)null; }
             if (state.Status is not ("pending" or "retry")) throw new UnauthorizedAccessException("Prepaid delivery is held for review.");
-            byte[] plain = new BrandCipher(secrets).Decrypt(context, "discounts", state.Coupon, "code_ciphertext", state.CodeKeyId, state.CodeCiphertext); string code;
-            try { code = new UTF8Encoding(false, true).GetString(plain); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            string code;
+            try { code = new UTF8Encoding(false, true).GetString(state.Bytes); }
+            finally { CryptographicOperations.ZeroMemory(state.Bytes); }
             if (code.Length != 48 || !code.All(char.IsAsciiHexDigit)) throw new UnauthorizedAccessException("Prepaid entitlement code is invalid.");
             await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
             {
@@ -62,6 +67,11 @@ public sealed class SqliteCouponDeliveryStore(SqliteSessionFactory sessions, Sec
             return new SqliteCouponDispatch(state.Actor, "Akanti staging prepaid entitlement\nCode: " + code);
         }, ct);
     }
+    private sealed record CouponNotice(string Status, Guid Member, long Actor, byte[] Bytes)
+    {
+        public override string ToString() => "Coupon notice [redacted]";
+    }
+
     public Task RecordOutcomeAsync(BrandContext context, JobLease lease, DeliveryOutcome result, CancellationToken ct = default)
     {
         Guid delivery = Require(context, lease);

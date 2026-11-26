@@ -25,7 +25,7 @@ public sealed class PaidSourceAuthorityTests
         }
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new PricingStore(f.Sessions, f.Secrets).IssuePaidSourceAsync(issue, f.Context(0), source, Ct));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new PricingStore(f.Sessions).IssuePaidSourceAsync(issue, f.Context(0), source, Ct));
             Assert.Equal(DbSessionState.Aborted, issue.State);
         }
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.discounts", Ct));

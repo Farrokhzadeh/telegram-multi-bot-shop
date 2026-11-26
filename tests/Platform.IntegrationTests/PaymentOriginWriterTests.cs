@@ -10,7 +10,7 @@ namespace Platform.IntegrationTests;
 public sealed class PaymentOriginWriterTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private static PaymentEvidenceStore Store(CheckoutFixture f) => new(f.Sessions, f.Secrets);
+    private static PaymentEvidenceStore Store(CheckoutFixture f) => new(f.Sessions);
     private static Task<Guid> Create(CheckoutFixture f, Guid payment, long revision = 1, int user = 0)
         => Store(f).CreateTopupForBrandAsync(f.Context(user), revision, CheckoutFixture.Actor(user), payment, new(10.25m, Currency.Usd), CryptoAsset.UsdtBsc, Ct);
     private static async Task<Guid> Bound(CheckoutFixture f)
@@ -22,7 +22,7 @@ public sealed class PaymentOriginWriterTests
         return payment;
     }
     private static VerifiedPaymentNotice Notice(Guid payment) => PaymentNoticeFixture.Notice("topup:" + payment.ToString("D"), asset: "usdtbsc", provider: PaymentSettlementFixture.Provider(payment));
-    private static Task<string> Archive(ProtectedPaymentEvidence evidence, CancellationToken ct) => Task.FromResult("protected:synthetic/" + evidence.Digest);
+    private static Task<string> Archive(PaymentEvidenceContent evidence, CancellationToken ct) => Task.FromResult("protected:synthetic/" + evidence.Digest);
     private static async Task Uncaptured(CheckoutFixture f)
     {
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE ipn_verified_at IS NOT NULL OR first_payment_observed_at IS NOT NULL OR confirmed_at IS NOT NULL", Ct));
@@ -92,7 +92,7 @@ public sealed class PaymentOriginWriterTests
         var admin = await f.AdminAsync(Ct);
         await writer.SetActiveAsync(admin, f.Context(0), 1, false, Guid.NewGuid(), Ct);
         if (resume) await writer.SetActiveAsync(admin, f.Context(0), 2, true, Guid.NewGuid(), Ct);
-        Task<string> Reject(ProtectedPaymentEvidence _, CancellationToken token) => throw new InvalidOperationException("Rejected capture reached archive.");
+        Task<string> Reject(PaymentEvidenceContent _, CancellationToken token) => throw new InvalidOperationException("Rejected capture reached archive.");
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).CaptureForBrandAsync(f.Context(0), 1, notice, Reject, Ct));
         if (!resume) await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).CaptureForBrandAsync(f.Context(0), 2, notice, Reject, Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).CaptureForBrandAsync(f.Context(1), 1, notice, Reject, Ct));
@@ -111,17 +111,17 @@ public sealed class PaymentOriginWriterTests
         using var notice = Notice(payment);
         var writer = new BrandWriterStore(f.Sessions);
         var admin = await f.AdminAsync(Ct);
-        ProtectedPaymentEvidence? retained = null;
-        async Task<string> Pause(ProtectedPaymentEvidence evidence, CancellationToken ct)
+        PaymentEvidenceContent? retained = null;
+        async Task<string> Pause(PaymentEvidenceContent evidence, CancellationToken ct)
         {
-            retained = evidence with { Ciphertext = evidence.Ciphertext.ToArray() };
+            retained = evidence with { Content = evidence.Content.ToArray() };
             await writer.SetActiveAsync(admin, f.Context(0), 1, false, Guid.NewGuid(), ct);
             if (resume) await writer.SetActiveAsync(admin, f.Context(0), 2, true, Guid.NewGuid(), ct);
             return await Archive(evidence, ct);
         }
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).CaptureForBrandAsync(f.Context(0), 1, notice, Pause, Ct));
-        var saved = Assert.IsType<ProtectedPaymentEvidence>(retained);
-        byte[] plain = new BrandCipher(f.Secrets).Decrypt(f.Context(0), "payments", payment, "ipn_evidence", saved.EncryptionKeyId, saved.Ciphertext.Span);
+        var saved = Assert.IsType<PaymentEvidenceContent>(retained);
+        byte[] plain = saved.Content.ToArray();
         try { Assert.Equal(PaymentNoticeFixture.Body(notice.Origin, asset: notice.Asset, provider: notice.ProviderPayment), System.Text.Encoding.UTF8.GetString(plain)); }
         finally { CryptographicOperations.ZeroMemory(plain); }
         await Uncaptured(f);
@@ -142,7 +142,7 @@ public sealed class PaymentOriginWriterTests
         using var first = Notice(payment);
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        async Task<string> Hold(ProtectedPaymentEvidence evidence, CancellationToken ct)
+        async Task<string> Hold(PaymentEvidenceContent evidence, CancellationToken ct)
         { entered.SetResult(); await release.Task.WaitAsync(ct); return await Archive(evidence, ct); }
         var capture = Store(f).CaptureForBrandAsync(f.Context(0), 1, first, Hold, Ct);
         try

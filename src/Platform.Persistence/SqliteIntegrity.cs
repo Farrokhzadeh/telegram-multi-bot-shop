@@ -9,10 +9,13 @@ internal static class SqliteIntegrity
     internal static async Task ValidateAsync(SqliteConnection connection, SqliteTransaction transaction, CancellationToken ct)
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = "PRAGMA user_version";
-        if (Convert.ToInt64(await command.ExecuteScalarAsync(ct)) != 1) return;
+        long version = Convert.ToInt64(await command.ExecuteScalarAsync(ct));
+        if (version is not (1 or Migrations.PlainTargetSchema.SqliteVersion)) return;
         command.CommandText = "PRAGMA foreign_key_check";
         await using (var rows = await command.ExecuteReaderAsync(ct)) if (await rows.ReadAsync(ct)) throw new InvalidOperationException("SQLite commit rejected: foreign_key_check.");
-        await using var data = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+        await using AkantiDbContext data = version == Migrations.PlainTargetSchema.SqliteVersion
+            ? new SqlitePlainTargetDbContext(new DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options)
+            : new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
         await data.Database.UseTransactionAsync(transaction, ct);
         var ledger = data.Set<WalletEntry>();
         await ValidateChainAsync(ledger, ct);

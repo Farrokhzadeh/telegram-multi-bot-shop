@@ -10,9 +10,9 @@ namespace Platform.Testing;
 public sealed class PaymentSettlementFixture(CheckoutFixture fixture)
 {
     public CheckoutFixture Shop { get; } = fixture;
-    public CatalogStore Catalog => new(Shop.Sessions, Shop.Secrets, [new("synthetic", "public account")],
+    public CatalogStore Catalog => new(Shop.Sessions, [new("synthetic", "public account")],
         (_, _) => Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, 10000, 1, "USD", "public quote")));
-    public PaymentSettlementStore Store => new(Shop.Sessions, Shop.Secrets, Catalog);
+    public PaymentSettlementStore Store => new(Shop.Sessions, Catalog);
     public async Task EnableAsync(CancellationToken ct)
     {
         await using var edit = await Shop.Sessions.BeginAsync(ct);
@@ -29,7 +29,7 @@ public sealed class PaymentSettlementFixture(CheckoutFixture fixture)
         await using var bind = await Shop.Sessions.BeginAsync(ct);
         var payment = await bind.QuerySingleAsync(new DbStatement("SELECT id,idempotency_ref,amount_due::text FROM shop.payments WHERE order_id=$1", DbValue.Uuid(request.OrderId)),
             r => (Id: r.GetGuid(0), Origin: r.GetString(1), Due: ExactDecimal.Parse(r.GetString(2))), ct);
-        await new PaymentEvidenceStore(Shop.Sessions, Shop.Secrets).BindInvoiceAsync(bind, Shop.Context(user), CheckoutFixture.Actor(user), payment.Id, Provider(payment.Id), 10.4m, ct);
+        await new PaymentEvidenceStore(Shop.Sessions).BindInvoiceAsync(bind, Shop.Context(user), CheckoutFixture.Actor(user), payment.Id, Provider(payment.Id), 10.4m, ct);
         await bind.CommitAsync(ct);
         return (payment.Id, request.OrderId, payment.Origin, payment.Due);
     }
@@ -44,7 +44,7 @@ public sealed class PaymentSettlementFixture(CheckoutFixture fixture)
         }
         long revision;
         await using (var read = await Shop.Sessions.BeginAsync(ct)) revision = await read.QuerySingleAsync(new DbStatement("SELECT policy_version FROM shop.brands WHERE id=$1", DbValue.Uuid(Shop.Brands[0])), r => r.GetInt64(0), ct);
-        using var bank = new BankDestinationService(Shop.Sessions, Shop.Secrets, new byte[32]);
+        using var bank = new BankDestinationService(Shop.Sessions, new byte[32]);
         await bank.SaveAsync(Shop.Context(0), await Shop.AdminAsync(ct), "1111222233334444", "Public synthetic holder", revision, Guid.NewGuid(), ct);
     }
     public async Task<(Guid Payment, Guid Order)> BankOrderAsync(CancellationToken ct)
@@ -61,7 +61,7 @@ public sealed class PaymentSettlementFixture(CheckoutFixture fixture)
     public async Task CaptureAsync(Guid payment, string origin, decimal due, int user = 0, CancellationToken ct = default)
     {
         using var notice = PaymentNoticeFixture.Notice(origin, quote: due, provider: Provider(payment));
-        await new PaymentEvidenceStore(Shop.Sessions, Shop.Secrets).CaptureAsync(Shop.Context(user), notice,
+        await new PaymentEvidenceStore(Shop.Sessions).CaptureAsync(Shop.Context(user), notice,
             (e, _) => Task.FromResult("protected:synthetic/" + e.PaymentId.ToString("N") + "/" + e.Digest), ct);
     }
     public static NowPaymentsClient Client(Func<string, string>? change = null) => new("public-synthetic-api-key", new Transport(change));

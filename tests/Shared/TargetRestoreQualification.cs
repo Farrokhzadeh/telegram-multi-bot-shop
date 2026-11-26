@@ -59,7 +59,7 @@ public static class TargetRestoreQualification
             var cleanup = await new BotActivityRetentionStore(sessions).CleanAsync(500, ct);
             Require(cleanup.Deleted == 3 && cleanup.Backlog.Expired == 1 && cleanup.Backlog.Blocked == 1, "restore cleanup discards covered ingress and retired ephemeral quote/lookup observations while reporting unresolved provenance");
             var router = new UpdateRouter(sessions, (_, _, _) => throw new InvalidOperationException());
-            var checkout = new CheckoutStore(sessions, source.Secrets);
+            var checkout = new CheckoutStore(sessions);
             for (int i = 0; i < 100; i++)
             {
                 Require((await router.RouteAsync(update, ct)).Code == UpdateRouteCode.Duplicate, "restored checkpoint rejects deleted-event replay");
@@ -67,8 +67,8 @@ public static class TargetRestoreQualification
             }
             Require(before == await WorkflowActivityQualification.DomainAsync(sessions, true, ct), "cleanup and replay preserve every domain fact");
             Require((await timeline.ReadAsync(actor, new(Member: source.Users[0]), ct: ct)).Items.Length == 2, "restored expired activity never acquires recovery time");
-            await new CatalogStore(sessions, source.Secrets, [], (_, _) => throw new InvalidOperationException()).PrepareAsync(source.Context(0), CheckoutFixture.Actor(0), new(source.Product, 2, CheckoutPayment.Wallet), ct);
-            Require((await new PricingStore(sessions, source.Secrets).LookupAsync(source.Context(0), CheckoutFixture.Actor(0), "PUBLIC-RESTORE-LOOKUP", ct)).Outcome == CouponLookupOutcome.NotFound, "expired lookup history cannot affect a fresh one-minute rate window");
+            await new CatalogStore(sessions, [], (_, _) => throw new InvalidOperationException()).PrepareAsync(source.Context(0), CheckoutFixture.Actor(0), new(source.Product, 2, CheckoutPayment.Wallet), ct);
+            Require((await new PricingStore(sessions).LookupAsync(source.Context(0), CheckoutFixture.Actor(0), "PUBLIC-RESTORE-LOOKUP", ct)).Outcome == CouponLookupOutcome.NotFound, "expired lookup history cannot affect a fresh one-minute rate window");
             await using (var read = await sessions.BeginAsync(ct))
             {
                 Require(await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.bot_activity_events WHERE idempotency_key IN ($1,$2)", DbValue.Text(observationKey), DbValue.Text(lookupKey)), r => r.GetInt64(0), ct) == 0, "fresh preparation or lookup cannot replay an imported original observation identity");

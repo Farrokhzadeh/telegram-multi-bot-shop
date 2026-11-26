@@ -56,19 +56,16 @@ public sealed class PreparedCheckout
 public sealed class CatalogStore
 {
     private readonly DbSessionFactory sessions;
-    private readonly SecretSnapshot secrets;
     private readonly Dictionary<string, string> accounts = new(StringComparer.Ordinal);
     private readonly Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>> fetch;
-    public CatalogStore(DbSessionFactory sessions, SecretSnapshot secrets, SupplierCredentialSnapshot credentials,
+    public CatalogStore(DbSessionFactory sessions, SupplierCredentialGrant grant, SupplierCredentialSnapshot credentials,
         Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>> fetch)
-        : this(sessions, secrets, credentials.Accounts.Select(x => new SupplierAccount(x.Key, x.Value)), fetch)
-    {
-        if (credentials.DeploymentId != secrets.DeploymentId || credentials.Service != secrets.Service) throw new SecretConfigurationException(SecretConfigurationFailure.IdentityMismatch);
-    }
-    public CatalogStore(DbSessionFactory sessions, SecretSnapshot secrets, IEnumerable<SupplierAccount> accounts,
+        : this(sessions, credentials.ForGrant(grant).Accounts.Select(value => new SupplierAccount(value.Key, value.Value)), fetch) { }
+
+    public CatalogStore(DbSessionFactory sessions, IEnumerable<SupplierAccount> accounts,
         Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>> fetch)
     {
-        this.sessions = sessions; this.secrets = secrets; this.fetch = fetch;
+        this.sessions = sessions; this.fetch = fetch;
         foreach (SupplierAccount account in accounts)
             if (!Label(account.Provider) || !Label(account.AccountRef) || !this.accounts.TryAdd(account.Provider, account.AccountRef)) throw new ArgumentException("One trusted account per provider is required.");
     }
@@ -266,7 +263,7 @@ public sealed class CatalogStore
         if (query.Quantity < data.Minimum || query.Quantity > data.Maximum || !PaymentAllowed(data, query.Payment)) throw new PricingRejectedException();
         var snapshot = await session.RunEfStepAsync(false, async (ef, token) =>
         {
-            var coupons = await CatalogQueries.CouponsAsync(ef, secrets, context, data.ProductId, data.Member, token, true);
+            var coupons = await CatalogQueries.CouponsAsync(ef, context, data.ProductId, data.Member, token, true);
             DateTime now = await ef.BrandClockAsync(context.BrandId, token);
             return (Coupons: coupons, Now: now);
         }, ct);

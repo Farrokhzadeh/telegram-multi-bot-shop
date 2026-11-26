@@ -184,7 +184,7 @@ public sealed class SupplierCatalogHttpTests
             var files = new SyntheticSecretFiles();
             var credentials = AkundingSourceInspectionTests.Credentials(files);
             Fixture? fixture = null;
-            var inspection = new AkundingSourceInspection(data.Sessions, data.Secrets, credentials, "public account", new Handler(async (request, ct) =>
+            var inspection = new AkundingSourceInspection(data.Sessions, SupplierCredentialQualification.Grant(), credentials, "public account", new Handler(async (request, ct) =>
             {
                 var current = fixture ?? throw new InvalidOperationException("HTTP fixture is unavailable.");
                 current.Calls++;

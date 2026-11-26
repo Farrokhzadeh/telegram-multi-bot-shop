@@ -1,14 +1,13 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
 public sealed record AdminOrder(Guid Id, Guid BrandId, Guid MemberId, Guid? ProductId, int Quantity, string Payment, string Fulfillment, bool Preorder, bool Held, string? Review, long Revision, string Title, DateTime CreatedAt);
 public sealed record WalletAdjustment(Guid MemberId, string AmountUsd, long ExpectedVersion, string Reason, Guid CommandId);
 public sealed record OrderResolution(string Action, long ExpectedRevision, string Reason, Guid CommandId, Guid? SupplierRequestId = null, long? ExpectedRequestRevision = null, string? BankCreditUsd = null);
-public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed class OrderAdministrationStore(DbSessionFactory sessions)
 {
     public async Task<AdminPage<AdminOrder>> SearchAsync(AuthenticatedAdmin actor, Guid? brand, Guid? member, Guid? order, Guid? after, int limit, CancellationToken ct = default)
     {
@@ -146,7 +145,7 @@ public sealed class OrderAdministrationStore(DbSessionFactory sessions, SecretSn
     private async Task ReleaseAsync(DbSession session, BrandContext context, Guid order, CancellationToken ct)
     {
         Guid? coupon = await session.RunEfStepAsync(false, (ef, token) => ef.Data.Set<Entities.DiscountUse>().Where(row => row.OrderId == order && row.Status == "held").Select(row => (Guid?)row.DiscountId).SingleOrDefaultAsync(token), ct);
-        if (coupon is Guid id) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, id, order, false, ct);
+        if (coupon is Guid id) await new PricingStore(sessions).TransitionClaimAsync(session, context, id, order, false, ct);
     }
     private static async Task<Guid> MemberAsync(DbSession session, BrandContext context, Guid member, CancellationToken ct)
     {

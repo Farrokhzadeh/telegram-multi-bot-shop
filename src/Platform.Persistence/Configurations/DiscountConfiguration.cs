@@ -4,7 +4,7 @@ using Platform.Persistence.Entities;
 
 namespace Platform.Persistence.Configurations;
 
-internal sealed class DiscountConfiguration(bool sqlite) : IEntityTypeConfiguration<Discount>
+internal sealed class DiscountConfiguration(bool sqlite, bool plaintext = false) : IEntityTypeConfiguration<Discount>
 {
     public void Configure(EntityTypeBuilder<Discount> row)
     {
@@ -15,8 +15,9 @@ internal sealed class DiscountConfiguration(bool sqlite) : IEntityTypeConfigurat
                 table.HasCheckConstraint("ck_discounts_1", "id IS NULL OR akanti_uuid(id)");
                 table.HasCheckConstraint("ck_discounts_2", "brand_id IS NULL OR akanti_uuid(brand_id)");
                 table.HasCheckConstraint("ck_discounts_3", "length(code_digest)=32");
-                table.HasCheckConstraint("ck_discounts_4", "length(code_ciphertext)>0");
-                table.HasCheckConstraint("ck_discounts_5", "code_key_id IS NULL OR (length(code_key_id) BETWEEN 1 AND 160 AND trim(code_key_id)<>'')");
+                if (!plaintext) table.HasCheckConstraint("ck_discounts_4", "length(code_ciphertext)>0");
+                else table.HasCheckConstraint("ck_discounts_4", "length(code_content)>0");
+                if (!plaintext) table.HasCheckConstraint("ck_discounts_5", "code_key_id IS NULL OR (length(code_key_id) BETWEEN 1 AND 160 AND trim(code_key_id)<>'')");
                 table.HasCheckConstraint("ck_discounts_6", "display_prefix IS NULL OR (length(display_prefix) BETWEEN 1 AND 160 AND trim(display_prefix)<>'')");
                 table.HasCheckConstraint("ck_discounts_7", "issuance_batch_id IS NULL OR akanti_uuid(issuance_batch_id)");
                 table.HasCheckConstraint("ck_discounts_8", "kind IN ('prepaid_entitlement','goodwill','promotion')");
@@ -40,7 +41,8 @@ internal sealed class DiscountConfiguration(bool sqlite) : IEntityTypeConfigurat
             else
             {
                 table.HasCheckConstraint("ck_discounts_1", "octet_length(code_digest)=32");
-                table.HasCheckConstraint("ck_discounts_2", "octet_length(code_ciphertext)>0");
+                if (!plaintext) table.HasCheckConstraint("ck_discounts_2", "octet_length(code_ciphertext)>0");
+                else table.HasCheckConstraint("ck_discounts_2", "octet_length(code_content)>0");
                 table.HasCheckConstraint("ck_discounts_3", "kind IN ('prepaid_entitlement','goodwill','promotion')");
                 table.HasCheckConstraint("ck_discounts_4", "percent_off BETWEEN 0 AND 100");
                 table.HasCheckConstraint("ck_discounts_5", "max_total_uses >= 0");
@@ -52,7 +54,7 @@ internal sealed class DiscountConfiguration(bool sqlite) : IEntityTypeConfigurat
                 table.HasCheckConstraint("ck_discounts_11", "isfinite(starts_at)");
                 table.HasCheckConstraint("ck_discounts_12", "isfinite(ends_at)");
                 table.HasCheckConstraint("ck_discounts_13", "isfinite(created_at)");
-                table.HasCheckConstraint("ck_discounts_14", "length(code_key_id) BETWEEN 1 AND 160 AND btrim(code_key_id)<>''");
+                if (!plaintext) table.HasCheckConstraint("ck_discounts_14", "length(code_key_id) BETWEEN 1 AND 160 AND btrim(code_key_id)<>''");
                 table.HasCheckConstraint("ck_discounts_15", "length(display_prefix) BETWEEN 1 AND 160 AND btrim(display_prefix)<>''");
                 table.HasCheckConstraint("ck_discounts_16", "percent_off NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)");
             }
@@ -68,11 +70,16 @@ internal sealed class DiscountConfiguration(bool sqlite) : IEntityTypeConfigurat
         if (sqlite) brand_id.UseCollation("NOCASE");
         var code_digest = row.Property(v => v.CodeDigest).HasColumnName("code_digest").HasColumnType(sqlite ? "BLOB" : "bytea");
         code_digest.IsRequired();
-        var code_ciphertext = row.Property(v => v.CodeCiphertext).HasColumnName("code_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
+        if (plaintext) row.Ignore(v => v.CodeCiphertext); else row.Ignore(v => v.CodeContent);
+        var code_ciphertext = (plaintext ? row.Property(v => v.CodeContent) : row.Property(v => v.CodeCiphertext)).HasColumnName(plaintext ? "code_content" : "code_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
         code_ciphertext.IsRequired();
-        var code_key_id = row.Property(v => v.CodeKeyId).HasColumnName("code_key_id").HasColumnType(sqlite ? "TEXT" : "text");
-        code_key_id.IsRequired();
-        code_key_id.HasMaxLength(160);
+        if (plaintext) row.Ignore(v => v.CodeKeyId);
+        else
+        {
+            var code_key_id = row.Property(v => v.CodeKeyId).HasColumnName("code_key_id").HasColumnType(sqlite ? "TEXT" : "text");
+            code_key_id.IsRequired();
+            code_key_id.HasMaxLength(160);
+        }
         var display_prefix = row.Property(v => v.DisplayPrefix).HasColumnName("display_prefix").HasColumnType(sqlite ? "TEXT" : "text");
         display_prefix.IsRequired();
         display_prefix.HasMaxLength(160);

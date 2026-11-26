@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Platform.Persistence;
+using Platform.Persistence.Migrations;
 
 namespace Platform.SchemaRunner;
 
@@ -11,6 +12,21 @@ public sealed record EfSchemaDescription(string Provider, string Migration, stri
 
 public static partial class EfSchemaCommand
 {
+    internal static (string Ddl, string Model) DescribePlain(string provider)
+    {
+        using var data = PlainModel(provider);
+        if (data.Database.GetMigrations().Single() != PlainContentBaseline.MigrationId || data.Database.HasPendingModelChanges())
+            throw new InvalidOperationException("The provider plaintext baseline differs from the EF model.");
+        return (Convert.ToHexStringLower(PlainTargetSchema.ScriptDigest(data)), Convert.ToHexStringLower(PlainTargetSchema.ModelDigest(data)));
+    }
+
+    private static PlainTargetDbContext PlainModel(string provider) => provider switch
+    {
+        "sqlite" => new SqlitePlainDesignTimeFactory().CreateDbContext([]),
+        "postgres" => new PostgresPlainDesignTimeFactory().CreateDbContext([]),
+        _ => throw new ArgumentException("The EF provider is unsupported.", nameof(provider))
+    };
+
     public static EfSchemaDescription Describe(string provider)
     {
         using AkantiDbContext context = provider switch

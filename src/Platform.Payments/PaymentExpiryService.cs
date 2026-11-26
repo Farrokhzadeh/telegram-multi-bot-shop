@@ -3,12 +3,11 @@ using Platform.Persistence.Configurations;
 using Entities = Platform.Persistence.Entities;
 using Platform.Core;
 using Platform.Persistence;
-using Platform.Security;
 
 namespace Platform.Payments;
 
 public enum PaymentExpiryOutcome { Expired, Protected, NotDue, Terminal }
-public sealed class PaymentExpiryService(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed class PaymentExpiryService(DbSessionFactory sessions)
 {
     public async Task<PaymentExpiryOutcome> RunAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
@@ -36,7 +35,7 @@ public sealed class PaymentExpiryService(DbSessionFactory sessions, SecretSnapsh
             {
                 await session.RunEfStepAsync(true, (data, token) => PaymentStateQueries.ExpireAsync(data, context, order, proof.Now, token), ct);
                 Guid? held = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.DiscountUse>().Where(value => value.OrderId == order && value.Status == "held").Select(value => (Guid?)value.DiscountId).SingleOrDefaultAsync(token), ct);
-                if (held is Guid discount) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, discount, order, false, ct);
+                if (held is Guid discount) await new PricingStore(sessions).TransitionClaimAsync(session, context, discount, order, false, ct);
                 await PaymentInstructionStore.EnqueueAsync(session, context, order, "expired", ct);
                 outcome = PaymentExpiryOutcome.Expired;
             }

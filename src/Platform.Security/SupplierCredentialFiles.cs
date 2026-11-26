@@ -34,6 +34,20 @@ public sealed class SupplierCredentialSnapshot : IDisposable
     {
         get { lock (gate) { ObjectDisposedException.ThrowIf(disposed, this); return entries.Select(x => new KeyValuePair<string, string>(x.Key, x.Value.Account)).ToArray(); } }
     }
+    public SupplierCredentialSnapshot ForGrant(SupplierCredentialGrant grant)
+    {
+        ArgumentNullException.ThrowIfNull(grant);
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (DeploymentId != grant.DeploymentId || Revision != grant.Revision || Service != grant.Service ||
+                entries.Count != grant.Accounts.Count || entries.Any(entry =>
+                    !grant.Accounts.TryGetValue(entry.Key, out string? account) || entry.Value.Account != account))
+                throw new SecretConfigurationException(SecretConfigurationFailure.IdentityMismatch);
+            return this;
+        }
+    }
+
     public TResult UseCredential<TResult>(string provider, string expectedAccount, SecretKeyOperation<TResult> operation)
     {
         ArgumentNullException.ThrowIfNull(operation);

@@ -6,10 +6,11 @@ namespace Platform.Persistence;
 
 public sealed partial class SqliteSessionFactory
 {
-    private sealed class EfTransaction(bool write, int timeout)
+    private sealed class EfTransaction(bool write, int timeout, bool plaintext)
     {
         internal readonly bool Write = write;
         internal readonly int Timeout = timeout;
+        internal readonly bool Plaintext = plaintext;
         internal readonly EfIntegrityScope Changes = new();
         internal int Busy;
     }
@@ -22,8 +23,7 @@ public sealed partial class SqliteSessionFactory
         if (Interlocked.CompareExchange(ref state.Busy, 1, 0) != 0) { state.Changes.Rejected = true; throw new InvalidOperationException("SQLite EF steps cannot run concurrently."); }
         try
         {
-            await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>()
-                .UseSqlite(transaction.Connection!, provider => provider.CommandTimeout(state.Timeout)).Options);
+            await using var context = OpenEfContext(transaction, state);
             await context.Database.UseTransactionAsync(transaction, ct);
             var session = new EfSession(context, write, writer, changes: state.Changes);
             session.InitializeIntegrity();
@@ -35,13 +35,18 @@ public sealed partial class SqliteSessionFactory
         catch { state.Changes.Rejected = true; throw; }
         finally { Interlocked.Exchange(ref state.Busy, 0); }
     }
+    private static AkantiDbContext OpenEfContext(SqliteTransaction transaction, EfTransaction state) => state.Plaintext
+        ? new SqlitePlainTargetDbContext(new DbContextOptionsBuilder<SqlitePlainTargetDbContext>()
+            .UseSqlite(transaction.Connection!, provider => provider.CommandTimeout(state.Timeout)).Options)
+        : new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>()
+            .UseSqlite(transaction.Connection!, provider => provider.CommandTimeout(state.Timeout)).Options);
+
     private static async Task ValidateEfAsync(SqliteTransaction transaction, CancellationToken ct)
     {
         var state = efTransactions.GetValue(transaction, _ => throw new InvalidOperationException("An owned SQLite transaction is required."));
         if (state.Changes.Rejected) throw new InvalidOperationException("The SQLite EF command was rejected and cannot commit.");
         if (state.Changes.Empty) return;
-        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>()
-            .UseSqlite(transaction.Connection!, provider => provider.CommandTimeout(state.Timeout)).Options);
+        await using var context = OpenEfContext(transaction, state);
         await context.Database.UseTransactionAsync(transaction, ct);
         context.Integrity = new EfIntegrity(context, () => false, state.Changes);
         await context.Integrity.ValidateAsync(ct);

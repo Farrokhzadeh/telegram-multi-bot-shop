@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Data.Sqlite;
+using Platform.Persistence.Migrations;
 using Platform.Persistence;
 using Platform.Persistence.Entities;
 using System.Security.Cryptography;
@@ -12,9 +14,24 @@ public sealed class PlainTargetRuntimeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ProviderPlaintextMigrationHistoryMatchesTheFinalModel(bool postgres)
+    {
+        using PlainTargetDbContext data = postgres
+            ? new PostgresPlainDesignTimeFactory().CreateDbContext([])
+            : new SqlitePlainDesignTimeFactory().CreateDbContext([]);
+        Assert.Equal(PlainContentBaseline.MigrationId, Assert.Single(data.Database.GetMigrations()));
+        Assert.False(data.Database.HasPendingModelChanges());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void FinalModelPreservesAllTablesAndDirectContentWithoutEncryptionKeyColumns(bool postgres)
     {
-        using AkantiDbContext data = postgres ? new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql("Host=localhost;Database=plain_model_only;Username=plain_model_only").Options) : new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite("Data Source=:memory:").Options);
+        var options = new DbContextOptionsBuilder<PlainTargetDbContext>();
+        if (postgres) options.UseNpgsql("Host=localhost;Database=plain_model_only;Username=plain_model_only");
+        else options.UseSqlite("Data Source=:memory:");
+        using var data = new PlainTargetDbContext(options.Options);
         var entities = data.Model.GetEntityTypes().ToArray();
         Assert.Equal(28, entities.Length);
         Assert.Equal(493, entities.Sum(entity => entity.GetProperties().Count()));
@@ -50,23 +67,68 @@ public sealed class PlainTargetRuntimeTests
         var directory = Directory.CreateTempSubdirectory("akanti-plain-runtime-");
         try
         {
-            string path = Path.Combine(directory.FullName, "shop.db"); await SqliteSchema.InitializeAsync(path, ct);
+            string path = Path.Combine(directory.FullName, "shop.db");
             Guid product = Guid.NewGuid(), inventory = Guid.NewGuid(); byte[] bytes = [0, 255, 128, .. Encoding.UTF8.GetBytes("اعتبار\0exact")];
-            var options = new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite("Data Source=" + path).Options;
-            await using (var writer = new SqliteAkantiDbContext(options))
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, ForeignKeys = true, Pooling = false }.ToString());
+            await connection.OpenAsync(ct); SqliteSchema.Configure(connection);
+            await using (var journal = connection.CreateCommand())
             {
-                var entity = writer.Model.FindEntityType(typeof(InventoryItem))!; var table = StoreObjectIdentifier.Table("inventory_items", entity.GetSchema());
-                string content = Assert.Single(entity.GetProperties(), property => property.GetColumnName(table) == "credential_content").Name;
-                writer.Add(new Product { Id = product, FulfillmentKind = "local", AvailabilityPolicy = "immediate", Title = "Plain fixture", Description = description });
-                var row = new InventoryItem { Id = inventory, ProductId = product, SourceFingerprint = SHA256.HashData(bytes), OriginKind = "local_import", State = "available" };
-                writer.Add(row); writer.Entry(row).Property(content).CurrentValue = bytes; await writer.SaveChangesAsync(ct);
+                journal.CommandText = "PRAGMA journal_mode=WAL";
+                Assert.Equal("wal", await journal.ExecuteScalarAsync(ct));
             }
-            await using var reader = new SqliteAkantiDbContext(options);
-            var metadata = reader.Model.FindEntityType(typeof(InventoryItem))!; var storedTable = StoreObjectIdentifier.Table("inventory_items", metadata.GetSchema());
-            string name = Assert.Single(metadata.GetProperties(), property => property.GetColumnName(storedTable) == "credential_content").Name;
-            Assert.Equal(bytes, await reader.Set<InventoryItem>().Where(row => row.Id == inventory).Select(row => EF.Property<byte[]>(row, name)).SingleAsync(ct));
-            Assert.Equal(description, await reader.Set<Product>().Where(row => row.Id == product).Select(row => row.Description).SingleAsync(ct));
+            var options = new DbContextOptionsBuilder<PlainTargetDbContext>().UseSqlite(connection).Options;
+            await using (var writer = new PlainTargetDbContext(options))
+            {
+                await PlainTargetSchema.CreateAsync(writer, ct);
+                writer.Add(new Product { Id = product, FulfillmentKind = "local", AvailabilityPolicy = "immediate", Title = "Plain fixture", Description = description });
+                writer.Add(new InventoryItem { Id = inventory, ProductId = product, CredentialContent = bytes, SourceFingerprint = SHA256.HashData(bytes), OriginKind = "local_import", State = "available" });
+                await writer.SaveChangesAsync(ct);
+            }
+            await connection.CloseAsync();
+            var legacy = new SqliteSessionFactory(path);
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => legacy.RunAsync(false, (_, _, _) => Task.FromResult(true), ct));
+            Assert.Contains("cannot open a plaintext target", error.Message);
+            var runtime = SqliteSessionFactory.ForPlaintext(path);
+            await runtime.RunEfAsync(false, null, async (data, token) =>
+            {
+                Assert.Equal(bytes, await data.Data.Set<InventoryItem>().Where(row => row.Id == inventory).Select(row => row.CredentialContent).SingleAsync(token));
+                Assert.Equal(description, await data.Data.Set<Product>().Where(row => row.Id == product).Select(row => row.Description).SingleAsync(token));
+                return true;
+            }, ct);
+            var wrong = SqliteSessionFactory.ForPlaintext(Path.Combine(directory.FullName, "missing.db"));
+            await Assert.ThrowsAsync<SqliteException>(() => wrong.RunAsync(false, (_, _, _) => Task.FromResult(true), ct));
             Assert.Equal(["shop.db"], Directory.GetFiles(directory.FullName).Select(path => Path.GetFileName(path)!).Where(name => name is not "shop.db-wal" and not "shop.db-shm").Order().ToArray());
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+    internal static async Task InitializeSqliteAsync(string path, CancellationToken ct, bool staged = false)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, ForeignKeys = true, Pooling = false }.ToString());
+        await connection.OpenAsync(ct);
+        SqliteSchema.Configure(connection);
+        await using var journal = connection.CreateCommand();
+        journal.CommandText = "PRAGMA journal_mode=WAL";
+        Assert.Equal("wal", await journal.ExecuteScalarAsync(ct));
+        await using var data = new PlainTargetDbContext(new DbContextOptionsBuilder<PlainTargetDbContext>().UseSqlite(connection).Options);
+        await PlainTargetSchema.CreateAsync(data, ct, forConversion: staged);
+    }
+
+    [Fact]
+    public async Task PlaintextRuntimeRefusesStagedAndLegacyTargetsBeforeAnyOperation()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var directory = Directory.CreateTempSubdirectory("akanti-plain-runtime-");
+        try
+        {
+            string staged = Path.Combine(directory.FullName, "staged.db"), legacy = Path.Combine(directory.FullName, "legacy.db");
+            await InitializeSqliteAsync(staged, ct, staged: true);
+            await SqliteSchema.InitializeAsync(legacy, ct);
+            foreach (string path in new[] { staged, legacy })
+            {
+                var sessions = SqliteSessionFactory.ForPlaintext(path);
+                await Assert.ThrowsAsync<InvalidOperationException>(() => sessions.RunAsync<bool>(false, (_, _, _) =>
+                    throw new NotSupportedException("Incompatible target reached the runtime operation."), ct));
+            }
         }
         finally { directory.Delete(recursive: true); }
     }

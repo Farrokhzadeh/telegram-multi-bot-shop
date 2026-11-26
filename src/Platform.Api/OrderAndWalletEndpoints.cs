@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Platform.Payments;
 using Platform.Persistence;
-using Platform.Security;
 
 namespace Platform.Api;
 
@@ -19,12 +18,12 @@ public sealed record BankDestinationCommand(string Number, string Holder, long E
 public sealed record AdminIdentity(Guid Id);
 public sealed class BrandAdministrationServices : IDisposable
 {
-    public BrandAdministrationServices(WriterRegistry writers, BrandContext context, SecretSnapshot secrets, CatalogStore catalog, ReadOnlySpan<byte> fingerprintKey)
+    public BrandAdministrationServices(WriterRegistry writers, BrandContext context, CatalogStore catalog, ReadOnlySpan<byte> fingerprintKey)
     {
         var sessions = writers.ForBrand(context);
-        Orders = new(sessions, secrets); Pricing = new(sessions, secrets);
-        Deposits = new(sessions, new PaymentSettlementStore(sessions, secrets, catalog));
-        Bank = new(sessions, secrets, fingerprintKey);
+        Orders = new(sessions); Pricing = new(sessions);
+        Deposits = new(sessions, new PaymentSettlementStore(sessions, catalog));
+        Bank = new(sessions, fingerprintKey);
     }
     public OrderAdministrationStore Orders { get; }
     public PricingStore Pricing { get; }
@@ -38,8 +37,8 @@ public static class OrderAndWalletEndpoints
     public static void MapOrderAdministration(this IEndpointRouteBuilder endpoints, OrderAdministrationStore store, PricingStore pricing, ManualDepositService deposits,
         BankDestinationService bank, Func<Guid, BrandContext?> resolve)
         => MapCore(endpoints, store, _ => store, _ => pricing, _ => deposits, _ => bank, resolve);
-    public static void MapScopedOrderAdministration(this IEndpointRouteBuilder endpoints, WriterRegistry writers, SecretSnapshot secrets, Func<BrandContext, BrandAdministrationServices> services)
-        => MapCore(endpoints, new OrderAdministrationStore(writers.Shared, secrets), context => services(context).Orders, context => services(context).Pricing, context => services(context).Deposits, context => services(context).Bank, writers.Resolve);
+    public static void MapScopedOrderAdministration(this IEndpointRouteBuilder endpoints, WriterRegistry writers, Func<BrandContext, BrandAdministrationServices> services)
+        => MapCore(endpoints, new OrderAdministrationStore(writers.Shared), context => services(context).Orders, context => services(context).Pricing, context => services(context).Deposits, context => services(context).Bank, writers.Resolve);
     private static void MapCore(IEndpointRouteBuilder endpoints, OrderAdministrationStore search, Func<BrandContext, OrderAdministrationStore> orders,
         Func<BrandContext, PricingStore> pricing, Func<BrandContext, ManualDepositService> deposits, Func<BrandContext, BankDestinationService> bank, Func<Guid, BrandContext?> resolve)
     {

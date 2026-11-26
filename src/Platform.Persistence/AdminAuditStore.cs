@@ -101,7 +101,7 @@ public static class AdminAuditStore
         {
             if (previous.CommandSha256 is null || !CryptographicOperations.FixedTimeEquals(fingerprint, previous.CommandSha256))
             {
-                if (data.Data is SqliteAkantiDbContext) throw new UnauthorizedAccessException("Administrator command identity conflict.");
+                if (data.Data.Database.IsSqlite()) throw new UnauthorizedAccessException("Administrator command identity conflict.");
                 throw new FormatException("Audit command identity conflict.");
             }
             return false;

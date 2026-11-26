@@ -40,7 +40,7 @@ public sealed class OrderIdTests
                 """, DbValue.Uuid(historical), DbValue.Uuid(f.Users[0]), DbValue.Uuid(f.Product)), ct);
             await seed.CommitAsync(ct);
         }
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Collision must not refresh."));
+        var catalog = new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException("Collision must not refresh."));
         var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(historical, f.Product, 1),
             (_, _, _) => throw new InvalidOperationException("Collision must not fetch channels."), ct));

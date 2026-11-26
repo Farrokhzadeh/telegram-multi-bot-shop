@@ -23,7 +23,7 @@ public sealed class ScopedAdministrationTests
         var actor = await f.AdminAsync(Ct);
         var writers = new WriterRegistry(f.Sessions, f.Contexts.Select(c => new BrandWriterRegistration(c, 0)));
         var services = f.Contexts.ToDictionary(c => c.BrandId, c => new BrandAdministrationServices(writers, c, f.Secrets,
-            new CatalogStore(writers.ForBrand(c), f.Secrets, [], (_, _) => throw new InvalidOperationException()), new byte[32]));
+            new CatalogStore(writers.ForBrand(c), [], (_, _) => throw new InvalidOperationException()), new byte[32]));
         try
         {
             var builder = WebApplication.CreateSlimBuilder(); builder.WebHost.UseUrls("http://127.0.0.1:0");

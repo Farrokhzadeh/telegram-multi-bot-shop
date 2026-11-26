@@ -16,22 +16,18 @@ public sealed class SqliteCheckoutTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             Guid member = Guid.NewGuid(), admin = Guid.NewGuid(), audit = Guid.NewGuid(), product = Guid.NewGuid(), stock = Guid.NewGuid();
             const string credential = "public synthetic checkout credential";
-            var cipher = new InventoryCipher(secrets);
             await sessions.RunAsync(true, async (connection, tx, token) =>
             {
                 using var setup = connection.CreateCommand();
                 setup.Transaction = tx;
                 setup.CommandText = """
-                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'fixture','Fixture','Fixture','international','en','fixture_bot',$bot,x'01','current',true);
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token,active)
+                    VALUES ($brand,'fixture','Fixture','Fixture','international','en','fixture_bot',$bot,x'01',true);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,$actor,'en');
                     INSERT INTO admins(id,login,authentication_mode,external_subject) VALUES ($admin,'fixture','external','fixture');
                     INSERT INTO audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,correlation_id)
@@ -41,8 +37,8 @@ public sealed class SqliteCheckoutTests
                     VALUES ($audit,$member,'20.25','20.25',1,'admin_adjustment',true,'fixture-funding',$admin,$audit,'fixture');
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title) VALUES ($product,'local','immediate','Fixture');
                     INSERT INTO brand_products(brand_id,product_id,visible,price_usdt) VALUES ($brand,$product,true,'10.125');
-                    INSERT INTO inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind)
-                    VALUES ($stock,$product,$encrypted,'current',$hash,'local_import');
+                    INSERT INTO inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind)
+                    VALUES ($stock,$product,$content,$hash,'local_import');
                     """;
                 setup.Parameters.AddWithValue("$brand", brand.BrandId);
                 setup.Parameters.AddWithValue("$bot", brand.BotId);
@@ -52,12 +48,12 @@ public sealed class SqliteCheckoutTests
                 setup.Parameters.AddWithValue("$audit", audit);
                 setup.Parameters.AddWithValue("$product", product);
                 setup.Parameters.AddWithValue("$stock", stock);
-                setup.Parameters.AddWithValue("$encrypted", cipher.Encrypt(stock, Encoding.UTF8.GetBytes(credential)));
+                setup.Parameters.AddWithValue("$content", Encoding.UTF8.GetBytes(credential));
                 setup.Parameters.AddWithValue("$hash", SHA256.HashData(stock.ToByteArray()));
                 return await setup.ExecuteNonQueryAsync(token);
             }, ct);
 
-            var store = new SqliteCheckoutStore(sessions, secrets);
+            var store = new SqliteCheckoutStore(sessions);
             LocalCheckoutRequest[] requests = [new(Guid.NewGuid(), product, 1, 10.125m), new(Guid.NewGuid(), product, 1, 10.125m)];
             CheckoutResult[] results = await Task.WhenAll(requests.Select(request => Task.Run(() => Purchase(request), ct)));
             Guid winner = Assert.IsType<Guid>(Assert.Single(results, r => r.Outcome == CheckoutOutcome.Purchased).OrderId);
@@ -74,7 +70,7 @@ public sealed class SqliteCheckoutTests
                     SELECT w.balance,w.version,
                         (SELECT count(*) FROM wallet_entries WHERE movement_kind='purchase_debit'),
                         (SELECT count(*) FROM jobs WHERE job_kind='prepare_manifest'),
-                        f.id,f.delivered_content,f.delivered_content_key_id
+                        f.id,f.delivered_content
                     FROM wallets w JOIN orders o ON o.user_id=w.user_id JOIN fulfillments f ON f.order_id=o.id
                     JOIN inventory_items i ON i.assigned_fulfillment_id=f.id AND i.state='allocated'
                     """;
@@ -84,7 +80,7 @@ public sealed class SqliteCheckoutTests
                 Assert.Equal(2, row.GetInt64(1));
                 Assert.Equal(1, row.GetInt64(2));
                 Assert.Equal(1, row.GetInt64(3));
-                byte[] plain = new BrandCipher(secrets).Decrypt(brand, "fulfillments", row.GetGuid(4), "delivered_content", row.GetString(6), row.GetFieldValue<byte[]>(5));
+                byte[] plain = row.GetFieldValue<byte[]>(5);
                 try { Assert.Equal(credential, Encoding.UTF8.GetString(plain)); }
                 finally { CryptographicOperations.ZeroMemory(plain); }
                 Assert.False(await row.ReadAsync(token));

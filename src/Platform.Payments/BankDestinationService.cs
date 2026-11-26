@@ -10,13 +10,12 @@ namespace Platform.Payments;
 public sealed class BankDestinationService : IDisposable
 {
     private readonly DbSessionFactory sessions;
-    private readonly SecretSnapshot secrets;
     private readonly byte[] fingerprintKey;
     private bool disposed;
-    public BankDestinationService(DbSessionFactory sessions, SecretSnapshot secrets, ReadOnlySpan<byte> fingerprintKey)
+    public BankDestinationService(DbSessionFactory sessions, ReadOnlySpan<byte> fingerprintKey)
     {
         if (fingerprintKey.Length != 32) throw new ArgumentException("A protected shared card-fingerprint key is required.");
-        this.sessions = sessions; this.secrets = secrets; this.fingerprintKey = fingerprintKey.ToArray();
+        this.sessions = sessions; this.fingerprintKey = fingerprintKey.ToArray();
     }
     public async Task SaveAsync(BrandContext context, AuthenticatedAdmin actor, string number, string holder, long expectedPolicyRevision, Guid command, CancellationToken ct = default)
     {
@@ -39,14 +38,14 @@ public sealed class BankDestinationService : IDisposable
                     return await data.Data.Set<Entities.Brand>().Where(value => value.Id == context.BrandId && value.BotId == context.BotId).Select(value => new { Revision = value.PolicyVersion, value.Market }).SingleAsync(token);
                 }, ct);
                 if (state.Revision != expectedPolicyRevision || state.Market != "iran") throw new InvalidOperationException("Receiving destination revision conflict.");
-                var cipher = new BrandCipher(secrets);
-                byte[] encryptedNumber = cipher.Encrypt(context, "brands", context.BrandId, "bank_number_ciphertext", plain), encryptedHolder = cipher.Encrypt(context, "brands", context.BrandId, "bank_holder_ciphertext", name);
                 await session.RunEfStepAsync(true, async (data, token) =>
                 {
                     await data.RequireAdminAsync(actor, null, token); await data.RequireBrandCommandAsync(context.BrandId, token);
                     var row = await data.Data.Set<Entities.Brand>().SingleAsync(value => value.Id == context.BrandId, token);
                     DateTime now = await data.BrandClockAsync(context.BrandId, token);
-                    row.BankNumberCiphertext = encryptedNumber; row.BankHolderCiphertext = encryptedHolder; row.BankKeyId = secrets.CurrentBrandKeyId(context); row.BankCardFingerprint = fingerprint; row.BankChangedAt = now;
+                    row.BankNumber = plain;
+                    row.BankHolder = name;
+                    row.BankCardFingerprint = fingerprint; row.BankChangedAt = now;
                     row.AllowBank = true; row.PolicyVersion++; row.UpdatedAt = now; return true;
                 }, ct);
                 await session.CommitAsync(ct);

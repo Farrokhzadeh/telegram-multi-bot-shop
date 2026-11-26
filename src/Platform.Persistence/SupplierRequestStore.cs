@@ -1,12 +1,11 @@
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
 public sealed record SupplierAttempt(SupplierBinding Binding, Guid Id, Guid? ParentSubmit, string Operation, string? PurchaseReference, string? PurchaseKey = null);
-public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapshot secrets, long? trustedStaffChat = null, TimeSpan? remoteLeaseDuration = null)
+public sealed class SupplierRequestStore(DbSessionFactory sessions, long? trustedStaffChat = null, TimeSpan? remoteLeaseDuration = null)
 {
     private static IQueryable<SupplierBinding> Binding(EfSession data, Guid request) => from value in data.Data.Set<Entities.SupplierRequest>() join order in data.Data.Set<Entities.Order>() on value.OrderId equals order.Id where value.Id == request select new SupplierBinding(value.Id, order.Id, order.ProductId!.Value, value.ProductSupplierSourceId!.Value, value.SourceRevision!.Value, value.ProviderCode!, value.AccountRef!, value.ExternalProductId!, value.ExternalVariantId, value.LocalIntentKey, value.RequestedQuantity, value.CostBaselineAmount!.Value, value.CostCurrency!, value.ApprovedCostCeiling);
     public async Task ApproveCompleteAsync(AuthenticatedAdmin actor, BrandContext context, Guid order, Guid request, long revision, Guid command, string reason, CancellationToken ct = default)
@@ -21,7 +20,7 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
             if (!owned) throw new UnauthorizedAccessException("Supplier review is unavailable.");
             await LockAsync(session, context, request, ct);
             var state = await session.RunEfStepAsync(false, (data, token) => (from r in data.Data.Set<Entities.SupplierRequest>() join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id where r.Id == request select new { Quantity = o.Quantity, Valid = o.Revision == revision && o.FulfillmentStatus == "requires_admin" && o.ReviewCode == "partial_acquisition" && o.ReleaseAuthorizedAt == null && o.DeliveryGeneration == null && r.Status == "succeeded" && r.ReviewCode == null && r.RemoteRef != null && r.EvidenceRef != null && data.Data.Set<Entities.Fulfillment>().Count(f => f.OrderId == o.Id) == o.Quantity && data.Data.Set<Entities.Fulfillment>().Count(f => f.SupplierRequestId == r.Id && f.Kind == "supplier" && f.Status == "acquired") == r.RequestedQuantity && data.Data.Set<Entities.SupplierRequestAttempt>().Any(a => a.SupplierRequestId == r.Id && a.Outcome == "succeeded" && a.ErrorCode == null && a.EvidenceRef == r.EvidenceRef && a.RemoteRef != null && a.FinishedAt != null) }).SingleAsync(token), ct);
-            if (!state.Valid || !await new DeliveryStore(sessions, secrets).HasCompleteAcquisitionAsync(session, context, order, state.Quantity, ct)) throw new InvalidOperationException("Complete verified supplier acquisition requires current review.");
+            if (!state.Valid || !await new DeliveryStore(sessions).HasCompleteAcquisitionAsync(session, context, order, state.Quantity, ct)) throw new InvalidOperationException("Complete verified supplier acquisition requires current review.");
             await PaymentSettlementStore.ChangeOrderAsync(session, order, (row, now) => { row.FulfillmentStatus = "acquiring"; row.ReviewCode = null; }, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, order), order, DateTime.UtcNow, ct);
             await session.CommitAsync(ct);
@@ -148,14 +147,10 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
         foreach (var item in result.Items)
         {
             byte[] key = SupplierRules.ItemKey(binding, item.Reference);
-            var existing = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Fulfillment>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "customer", Bytes = row.DeliveredContent!, Key = row.DeliveredContentKeyId!, row.ContentKind }).Concat(data.Data.Set<Entities.InventoryItem>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "bonus", Bytes = row.CredentialCiphertext, Key = row.CredentialKeyId, ContentKind = (string?)null })).Take(3).ToListAsync(token), ct);
-            if (existing.Count == 0) { if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++; continue; }
-            if (existing.Count != 1 || existing[0].Request != binding.RequestId || existing[0].Kind != (item.Disposition == SupplierItemDisposition.Customer ? "customer" : "bonus")) return false;
-            var value = existing[0];
-            if (value.ContentKind is not null && value.ContentKind != item.ContentKind) return false;
-            byte[] plain = value.Kind == "customer" ? new BrandCipher(secrets).Decrypt(context, "fulfillments", value.Id, "delivered_content", value.Key, value.Bytes) : new InventoryCipher(secrets).Decrypt(value.Id, value.Key, value.Bytes);
-            try { if (!CryptographicOperations.FixedTimeEquals(plain, item.Content.Span)) return false; }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            var existing = await session.RunEfStepAsync(false,
+                (data, token) => SupplierQueries.MatchItemAsync(data, binding, item, key, token), ct);
+            if (!existing.Found) { if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++; continue; }
+            if (!existing.Matches) return false;
         }
         return newCustomers <= available;
     }
@@ -178,19 +173,25 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
                     int number = Enumerable.Range(1, quantity).First(value => !used.Contains(value));
                     Guid created = Guid.CreateVersion7(); data.Data.Add(new Entities.Fulfillment { Id = created, OrderId = binding.OrderId, UnitNo = number, Kind = "supplier", SupplierRequestId = binding.RequestId, Status = "unfilled" }); return created;
                 }, ct);
-                byte[] cipher = new BrandCipher(secrets).Encrypt(context, "fulfillments", id, "delivered_content", item.Content.Span);
-                await session.RunEfStepAsync(true, async (data, token) =>
+                byte[] content = item.Content.ToArray();
+                try
                 {
-                    await data.RequireOrderCommandAsync(context, binding.OrderId, token);
-                    var row = await data.Data.Set<Entities.Fulfillment>().SingleAsync(row => row.Id == id, token);
-                    row.Kind = "supplier"; row.Status = "acquired"; row.SupplierRequestId = binding.RequestId; row.RemoteItemRef = item.Reference; row.SupplierItemKey = key; row.DeliveredContent = cipher; row.DeliveredContentKeyId = secrets.CurrentBrandKeyId(context); row.ContentKind = item.ContentKind; return true;
-                }, ct);
+                    await session.RunEfStepAsync(true, async (data, token) =>
+                    {
+                        await data.RequireOrderCommandAsync(context, binding.OrderId, token);
+                        var row = await data.Data.Set<Entities.Fulfillment>().SingleAsync(row => row.Id == id, token);
+                        row.Kind = "supplier"; row.Status = "acquired"; row.SupplierRequestId = binding.RequestId; row.RemoteItemRef = item.Reference; row.SupplierItemKey = key; row.DeliveredContent = content; row.ContentKind = item.ContentKind; return true;
+                    }, ct);
+                }
+                finally { CryptographicOperations.ZeroMemory(content); }
             }
             else
             {
-                Guid id = Guid.NewGuid(); byte[] cipher = new InventoryCipher(secrets).Encrypt(id, item.Content.Span);
-                byte[] fingerprint = secrets.UseInventoryKey(secrets.CurrentInventoryKeyId, k => HMACSHA256.HashData(k, item.Content.Span));
-                await session.RunEfStepAsync(true, async (data, token) => { await data.RequireOrderCommandAsync(context, binding.OrderId, token); data.Data.Add(new Entities.InventoryItem { Id = id, ProductId = binding.ProductId, CredentialCiphertext = cipher, CredentialKeyId = secrets.CurrentInventoryKeyId, SourceFingerprint = fingerprint, OriginKind = "supplier_bonus", SupplierRequestId = binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, State = "admin_held" }); return true; }, ct);
+                Guid id = Guid.NewGuid();
+                byte[] fingerprint = SHA256.HashData(item.Content.Span);
+                byte[] content = item.Content.ToArray();
+                try { await session.RunEfStepAsync(true, async (data, token) => { await data.RequireOrderCommandAsync(context, binding.OrderId, token); data.Data.Add(new Entities.InventoryItem { Id = id, ProductId = binding.ProductId, CredentialContent = content, SourceFingerprint = fingerprint, OriginKind = "supplier_bonus", SupplierRequestId = binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, State = "admin_held" }); return true; }, ct); }
+                finally { CryptographicOperations.ZeroMemory(content); }
             }
         }
     }
@@ -276,13 +277,21 @@ public sealed class SupplierRequestStore(DbSessionFactory sessions, SecretSnapsh
     {
         await using var session = await sessions.BeginAsync(ct);
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        var rows = await session.RunEfStepAsync(false, (data, token) => (from i in data.Data.Set<Entities.InventoryItem>() join r in data.Data.Set<Entities.SupplierRequest>() on i.SupplierRequestId equals r.Id join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where i.Id == item && r.Id == request && i.State == "admin_held" && i.OriginKind == "supplier_bonus" && b.Id == context.BrandId && b.BotId == context.BotId select new { Reference = i.RemoteItemRef!, Cipher = i.CredentialCiphertext, Key = i.CredentialKeyId }).Take(1).ToListAsync(token), ct);
+        var rows = await session.RunEfStepAsync(false, (data, token) =>
+        {
+            var owned = from i in data.Data.Set<Entities.InventoryItem>() join r in data.Data.Set<Entities.SupplierRequest>() on i.SupplierRequestId equals r.Id join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where i.Id == item && r.Id == request && i.State == "admin_held" && i.OriginKind == "supplier_bonus" && b.Id == context.BrandId && b.BotId == context.BotId select i;
+            return owned.Select(row => new Bonus(row.RemoteItemRef!, row.CredentialContent)).Take(1).ToListAsync(token);
+        }, ct);
         if (rows.Count != 1) throw new UnauthorizedAccessException("Protected supplier bonus is unavailable.");
         var data = rows[0];
         await AdminAuditStore.AppendAsync(session, actor, new(command, AuditAction.Maintenance, AuditEntity.SupplierRequest, request, context.BrandId, AuditReason.OperatorReview, command, AdminCommand.Hash("supplier-bonus-access-v1", request.ToString("D"), item.ToString("D"))), ct);
-        byte[] plain = new InventoryCipher(secrets).Decrypt(item, data.Key, data.Cipher);
+        byte[] plain = data.Content;
         try { await session.CommitAsync(ct); return new(data.Reference, SupplierItemDisposition.Bonus, "code", plain); }
         finally { CryptographicOperations.ZeroMemory(plain); }
+    }
+    private sealed record Bonus(string Reference, byte[] Content)
+    {
+        public override string ToString() => "Supplier bonus [redacted]";
     }
     private static Guid AttemptId(Guid job, long number) => new(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes("supplier-attempt-v1:" + job.ToString("D") + ":" + number.ToString(System.Globalization.CultureInfo.InvariantCulture))).AsSpan(0, 16));
     private static void Require(BrandContext context, JobLease lease)

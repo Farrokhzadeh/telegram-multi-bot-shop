@@ -1,9 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class LocalPreorderStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed class LocalPreorderStore(DbSessionFactory sessions)
 {
 
     public async Task<Guid?> DrainAsync(JobLease lease, IReadOnlyList<BrandContext> contexts, CancellationToken ct = default)
@@ -40,7 +39,7 @@ public sealed class LocalPreorderStore(DbSessionFactory sessions, SecretSnapshot
                     var stock = await CheckoutStore.ReadStockAsync(session, product, state.Quantity, ct);
                     if (stock.Count == state.Quantity)
                     {
-                        await new CheckoutStore(sessions, secrets).AcquireAsync(session, context, current.Order, stock, ct);
+                        await new CheckoutStore(sessions).AcquireAsync(session, context, current.Order, stock, ct);
                         await PaymentSettlementStore.FulfillmentAsync(session, current.Order, "acquiring", null, ct);
                         await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, current.Order), current.Order, DateTime.UtcNow, ct);
                         allocated = current.Order; again = true;

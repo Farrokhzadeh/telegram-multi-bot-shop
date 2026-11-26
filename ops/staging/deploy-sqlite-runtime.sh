@@ -5,6 +5,8 @@ umask 077
 image=${1:?}
 commit=${2:?}
 qualification=${3:?}
+[[ $# == 4 && $4 == --plaintext ]] || { printf 'SQLite staging requires an accepted plaintext runtime and --plaintext.\n' >&2; exit 1; }
+format=2
 [[ $image =~ ^docker\.io/[a-z0-9][a-z0-9_-]*/akanti@sha256:[a-f0-9]{64}$ ]]
 [[ $commit =~ ^[a-f0-9]{40}$ ]]
 [[ $qualification =~ ^akanti-staging-[a-f0-9]{20}$ ]]
@@ -12,14 +14,10 @@ work=/var/lib/akanti-staging
 persistent=$work/sqlite
 private=$work/sqlite-private
 previous=$work/sqlite-active
-db=akanti-staging-commerce-db
 source_root=$(cat "$work/shop-root")
 [[ $source_root == /var/lib/teleg-cli/akanti-cold-staging-* && $(realpath -e "$source_root") == "$source_root" ]]
-commerce=$(cat "$source_root/staging-commerce.path")
 preview=$(cat "$source_root/telegram-preview.path")
-[[ $(realpath -e "$commerce") == "$source_root"/commerce-* ]]
 [[ $(realpath -e "$preview") == "$source_root"/telegram-preview-* ]]
-[[ $(docker inspect -f '{{.State.Running}} {{.HostConfig.NetworkMode}} {{index .Config.Labels "org.akanti.environment"}}' "$db") == 'true none staging-commerce' ]]
 [[ $(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image") == "$commit" ]]
 [[ $(docker inspect -f '{{.State.Running}}' "$qualification") == true ]]
 [[ $(df -PB1 "$work" | awk 'NR==2 {print $4}') -ge 1610612736 ]]
@@ -27,48 +25,67 @@ preview=$(cat "$source_root/telegram-preview.path")
 lock=$work/sqlite.lock
 exec 8>"$lock"
 flock -n 8
+[[ ! -L $persistent && ( ! -e $persistent || -d $persistent ) ]]
 
-old_api=
-old_worker=
-old_bot=
-old_commit=
-if [[ -s $previous ]]; then
-    mapfile -t old < "$previous"
-    [[ ${#old[@]} == 5 && ${old[0]} =~ ^akanti-sqlite-api-[a-zA-Z0-9-]+$ &&
-       ${old[1]} =~ ^akanti-sqlite-worker-[a-zA-Z0-9-]+$ &&
-       ${old[2]} =~ ^akanti-sqlite-bot-[a-zA-Z0-9-]+$ &&
-       ${old[3]} =~ ^sha256:[a-f0-9]{64}$ && ${old[4]} =~ ^[a-f0-9]{40}$ ]]
-    old_api=${old[0]}
-    old_worker=${old[1]}
-    old_bot=${old[2]}
-    old_commit=${old[4]}
-    [[ $(docker inspect -f '{{.State.Running}}' "$old_api") == true ]]
-    [[ $(docker inspect -f '{{.State.Running}}' "$old_worker") == true ]]
-    [[ $(docker inspect -f '{{.State.Running}}' "$old_bot") == true ]]
-    [[ -f $persistent/shop.db ]]
-    if [[ $old_commit == "$commit" ]]; then
-        printf 'Persistent SQLite staging is already serving %s\n' "$commit"
-        exit 0
-    fi
-else
-    [[ ! -e $persistent/shop.db ]] || { printf 'Unclaimed persistent SQLite state: refusing PG fallback.\n' >&2; exit 1; }
-    mapfile -t pg < "$work/shop-active"
-    [[ ${#pg[@]} == 4 && ${pg[0]} =~ ^akanti-staging-[a-zA-Z0-9-]+-core$ &&
-       ${pg[1]} == "${pg[0]%-core}" && ${pg[3]} =~ ^[a-f0-9]{40}$ ]]
-    [[ $(docker inspect -f '{{.State.Running}} {{index .Config.Labels "org.akanti.environment"}}' "${pg[0]}") == 'true staging-shop' ]]
-    systemctl is-active --quiet "${pg[1]}"
-    [[ -s $commerce/target/ready.json && -s $commerce/target/telegram-ready ]]
+runtime_sqlite_format() {
+	python3 - "$persistent/shop.db" "$format" <<'PY'
+import pathlib, sqlite3, sys
+path = pathlib.Path(sys.argv[1])
+expected = int(sys.argv[2])
+if path.is_symlink() or not path.is_file():
+    raise SystemExit(1)
+with path.open("rb") as file:
+    header = file.read(100)
+if len(header) != 100 or header[:16] != b"SQLite format 3\x00" or header[18:20] != b"\x02\x02":
+    raise SystemExit(1)
+wal, shm = (pathlib.Path(str(path) + suffix) for suffix in ("-wal", "-shm"))
+journal = pathlib.Path(str(path) + "-journal")
+if wal.is_symlink() or shm.is_symlink() or wal.exists() != shm.exists() or journal.exists() or journal.is_symlink():
+    raise SystemExit(1)
+has_wal = wal.exists()
+if has_wal and (not wal.is_file() or not shm.is_file()):
+    raise SystemExit(1)
+options = "?mode=ro" if has_wal else "?mode=ro&immutable=1"
+with sqlite3.connect(path.as_uri() + options, uri=True, timeout=2) as data:
+    version = data.execute("PRAGMA user_version").fetchone()[0]
+    application = data.execute("PRAGMA application_id").fetchone()[0]
+    staged = data.execute("SELECT 1 FROM sqlite_schema WHERE name='_akanti_row_copy'").fetchone() is not None
+    if (version, application) != (expected, 0) or staged:
+        raise SystemExit(1)
+    migrations = data.execute('SELECT MigrationId FROM "__EFMigrationsHistory" LIMIT 2').fetchall()
+raise SystemExit(0 if migrations == [("20261126000000_InitialPlaintext",)] else 1)
+PY
+}
+
+[[ -s $previous && ! -L $previous ]] || { printf 'Plaintext requires a separately accepted SQLite runtime.\n' >&2; exit 1; }
+mapfile -t old < "$previous"
+[[ ${#old[@]} == 6 && ${old[5]} == 2 &&
+   ${old[0]} =~ ^akanti-sqlite-api-[a-zA-Z0-9-]+$ &&
+   ${old[1]} =~ ^akanti-sqlite-worker-[a-zA-Z0-9-]+$ &&
+   ${old[2]} =~ ^akanti-sqlite-bot-[a-zA-Z0-9-]+$ &&
+   ${old[3]} =~ ^sha256:[a-f0-9]{64}$ && ${old[4]} =~ ^[a-f0-9]{40}$ ]]
+old_api=${old[0]}
+old_worker=${old[1]}
+old_bot=${old[2]}
+for prior in "$old_api" "$old_worker" "$old_bot"; do
+    [[ $(docker inspect -f '{{.State.Running}} {{index .Config.Labels "org.akanti.schema-format"}}' "$prior") == 'true 2' ]]
+done
+[[ -d $persistent/supplier-evidence && ! -L $persistent/supplier-evidence ]]
+old_asset_identity=$(stat -c '%d:%i' "$persistent/supplier-evidence")
+runtime_sqlite_format || { printf 'SQLite state format differs from the accepted deployment.\n' >&2; exit 1; }
+old_db_identity=$(stat -c '%d:%i' "$persistent/shop.db")
+if [[ ${old[4]} == "$commit" ]]; then
+    printf 'Persistent SQLite staging is already serving %s\n' "$commit"
+    exit 0
 fi
 
 install -d -m 0700 "$persistent"
 chown 10001:10001 "$persistent"
 docker exec "$qualification" cat /app/sqlite-stage-provision.py > "$work/sqlite-stage-provision.py.next"
 chmod 0500 "$work/sqlite-stage-provision.py.next"
-python3 "$work/sqlite-stage-provision.py.next" "$commerce/target" "$preview/config" "$commerce/runtime.env"
+python3 "$work/sqlite-stage-provision.py.next" --plaintext "$preview/config"
 mv -f "$work/sqlite-stage-provision.py.next" "$work/sqlite-stage-provision.py"
-[[ -f $private/qualified-api-v1/service-config.json &&
-   -f $private/qualified-job-v1/service-config.json &&
-   -f $private/tester/api-key ]]
+[[ -f $private/tester/api-key ]]
 
 digest=${image##*:}
 release="${digest:0:12}-${commit:0:8}"
@@ -82,6 +99,12 @@ for name in "$api" "$worker" "$bot"; do
     }
 done
 
+same_accepted_sqlite() {
+    runtime_sqlite_format && [[ $(stat -c '%d:%i' "$persistent/shop.db") == "$old_db_identity" ]] &&
+        [[ ! -L $persistent/supplier-evidence &&
+            $(stat -c '%d:%i' "$persistent/supplier-evidence") == "$old_asset_identity" ]]
+}
+
 switched=0
 succeeded=0
 cleanup() {
@@ -91,20 +114,13 @@ cleanup() {
         docker rm -f "$name" >/dev/null 2>&1 || true
     done
     if (( switched )); then
-        if [[ -n $old_api ]]; then
-            docker start "$old_api" >/dev/null 2>&1 || true
-            docker start "$old_worker" >/dev/null 2>&1 || true
-            docker start "$old_bot" >/dev/null 2>&1 || true
-            printf 'Returned to the previously qualified SQLite executable with persistent database unchanged.\n' >&2
-        elif [[ ! -e $persistent/shop.db ]]; then
-            if docker start "${pg[0]}" >/dev/null 2>&1 &&
-                systemctl start "${pg[1]}" >/dev/null 2>&1; then
-                printf 'Initial SQLite copy failed before publication; previous PostgreSQL staging was restored.\n' >&2
-            else
-                printf 'Initial SQLite copy failed and PostgreSQL staging requires manual recovery.\n' >&2
-            fi
+        if same_accepted_sqlite &&
+            docker start "$old_api" >/dev/null 2>&1 && docker start "$old_worker" >/dev/null 2>&1 &&
+            docker start "$old_bot" >/dev/null 2>&1; then
+            printf 'Restarted the previously qualified SQLite executable on its persistent database.\n' >&2
         else
-            printf 'SQLite database state remains intact; PostgreSQL staging was NOT restarted.\n' >&2
+            docker stop "$old_bot" "$old_worker" "$old_api" >/dev/null 2>&1 || true
+            printf 'Same-database SQLite recovery could not be verified. Runtime stopped.\n' >&2
         fi
     fi
     exit "$result"
@@ -112,19 +128,10 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' INT TERM
 
-if [[ -z $old_api ]]; then
-    switched=1
-    systemctl stop "${pg[1]}"
-    docker stop --time 10 "${pg[0]}" >/dev/null
-    docker run --rm --pull never --name "akanti-sqlite-copy-$release"         --network "container:$db" --user 10001:10001         --read-only --cap-drop ALL --security-opt no-new-privileges         --cpus .4 --memory 320m --memory-swap 320m --pids-limit 55         --tmpfs /tmp:rw,nosuid,nodev,size=48m,uid=10001,gid=10001         --env-file "$private/staging-copy.env"         --mount "type=bind,src=$persistent,dst=/stage/sqlite"         --entrypoint /app/Api/Platform.Api         "$image" --copy-staging-postgres-to-sqlite --destination /stage/sqlite/shop.db
-    [[ -s $persistent/shop.db ]]
-    [[ $(stat -c '%u:%g %a' "$persistent/shop.db") == '10001:10001 600' ]]
-else
-    switched=1
-    docker stop --time 15 "$old_bot" >/dev/null
-    docker stop --time 15 "$old_worker" >/dev/null
-    docker stop --time 15 "$old_api" >/dev/null
-fi
+switched=1
+docker stop --time 15 "$old_bot" >/dev/null
+docker stop --time 15 "$old_worker" >/dev/null
+docker stop --time 15 "$old_api" >/dev/null
 
 mounts=(
     --mount "type=bind,src=$persistent,dst=/stage/sqlite"
@@ -132,7 +139,7 @@ mounts=(
 )
 runtime=(
     --env INSTANCE_ID=staging
-    --env SHOP_SQLITE_STAGING=synthetic-acc-abad-v1
+    --env "SHOP_SQLITE_STAGING=synthetic-acc-abad-v$format"
     --env SHOP_STAGING_SQLITE_PATH=/stage/sqlite/shop.db
 )
 security=(
@@ -142,7 +149,7 @@ security=(
     --log-driver json-file --log-opt max-size=1m --log-opt max-file=2
 )
 
-docker create --name "$api" --label org.akanti.environment=staging-sqlite     --network bridge --memory 256m --memory-swap 256m --pids-limit 60     "${security[@]}" "${runtime[@]}" "${mounts[@]}"     --env SHOP_STAGING_SECRET_ROOT=/stage/secrets/qualified-api-v1     --mount "type=bind,src=$private/qualified-api-v1,dst=/stage/secrets/qualified-api-v1,readonly"     --entrypoint /app/Api/Platform.Api "$image" --serve-sqlite-staging >/dev/null
+docker create --name "$api" --label org.akanti.environment=staging-sqlite --label "org.akanti.schema-format=$format"     --network bridge --memory 256m --memory-swap 256m --pids-limit 60     "${security[@]}" "${runtime[@]}" "${mounts[@]}"         --entrypoint /app/Api/Platform.Api "$image" --serve-sqlite-staging >/dev/null
 docker start "$api" >/dev/null
 ready=0
 for attempt in {1..40}; do
@@ -155,7 +162,7 @@ for attempt in {1..40}; do
 done
 [[ $ready == 1 ]] || { printf 'Managed SQLite API health check failed.\n' >&2; exit 1; }
 
-docker create --name "$worker" --label org.akanti.environment=staging-sqlite     --network "container:$api" --memory 256m --memory-swap 256m --pids-limit 55     "${security[@]}" "${runtime[@]}" "${mounts[@]}"     --env SHOP_STAGING_SECRET_ROOT=/stage/secrets/qualified-job-v1     --mount "type=bind,src=$private/qualified-job-v1,dst=/stage/secrets/qualified-job-v1,readonly"     --entrypoint /app/JobHost/Platform.JobHost "$image" --serve-sqlite-staging >/dev/null
+docker create --name "$worker" --label org.akanti.environment=staging-sqlite --label "org.akanti.schema-format=$format"     --network "container:$api" --memory 256m --memory-swap 256m --pids-limit 55     "${security[@]}" "${runtime[@]}" "${mounts[@]}"         --entrypoint /app/JobHost/Platform.JobHost "$image" --serve-sqlite-staging >/dev/null
 docker start "$worker" >/dev/null
 for attempt in {1..40}; do
     [[ $(docker inspect -f '{{.State.Running}}' "$worker") == true ]] || break
@@ -166,7 +173,7 @@ done
     docker logs "$worker" 2>&1 | grep -q 'managed SQLite staging delivery worker is running' ||
     { printf 'Managed SQLite delivery worker health check failed.\n' >&2; exit 1; }
 
-docker create --name "$bot" --label org.akanti.environment=staging-sqlite     --network "container:$api" --memory 224m --memory-swap 224m --pids-limit 55     "${security[@]}" "${runtime[@]}" "${mounts[@]}"     --entrypoint /app/BotHost/Platform.BotHost "$image" --serve-sqlite-staging >/dev/null
+docker create --name "$bot" --label org.akanti.environment=staging-sqlite --label "org.akanti.schema-format=$format"     --network "container:$api" --memory 224m --memory-swap 224m --pids-limit 55     "${security[@]}" "${runtime[@]}" "${mounts[@]}"     --entrypoint /app/BotHost/Platform.BotHost "$image" --serve-sqlite-staging >/dev/null
 docker start "$bot" >/dev/null
 for attempt in {1..45}; do
     [[ $(docker inspect -f '{{.State.Running}}' "$bot") == true ]] || break
@@ -179,9 +186,11 @@ done
 docker exec "$api" sh -ec     'key=$(cat /stage/tester/api-key); test "$(curl -fsS --max-time 2 --noproxy "*" -H "X-Staging-Key: $key" http://127.0.0.1:18081/health/sqlite)" = "sqlite:ready"'
 
 docker exec "$api" /app/Api/Platform.Api --verify-sqlite-staging
+same_accepted_sqlite
 
 next=$(mktemp "$work/sqlite-active.XXXXXX")
 printf '%s\n' "$api" "$worker" "$bot" "sha256:$digest" "$commit" > "$next"
+if [[ $format == 2 ]]; then printf '2\n' >> "$next"; fi
 chmod 0600 "$next"
 if [[ -n $old_api ]]; then
     cp "$previous" "$work/sqlite-previous.next"

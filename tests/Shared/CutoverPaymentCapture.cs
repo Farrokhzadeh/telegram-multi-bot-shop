@@ -11,7 +11,7 @@ namespace Platform.Testing;
 public sealed record CutoverPaymentKey(Guid Run, Guid Payment, Guid Member, string Origin, string Provider, string Secret) { public override string ToString() => "CutoverPaymentKey [redacted]"; }
 public sealed record CutoverPaymentInput(Guid Run, Guid Nonce, string Event, string Body, string Signature) { public override string ToString() => "CutoverPaymentInput [redacted]"; }
 public sealed record CutoverPaymentVerification(Guid Run, Guid Nonce, string BodySha256, string Event, bool Verified);
-public sealed record CutoverPaymentArchive(Guid Run, Guid Payment, Guid Brand, string KeyId, string Digest, string Signature, byte[] Ciphertext) { public override string ToString() => "CutoverPaymentArchive [redacted]"; }
+public sealed record CutoverPaymentArchive(Guid Run, Guid Payment, Guid Brand, string Digest, string Signature, byte[] Content) { public override string ToString() => "CutoverPaymentArchive [redacted]"; }
 public sealed record CutoverPaymentAudit(Guid Run, int Count, string ManifestSha256);
 [JsonSerializable(typeof(CutoverPaymentKey))]
 [JsonSerializable(typeof(CutoverPaymentInput))]
@@ -36,7 +36,7 @@ public static class CutoverPaymentCapture
         }
         finally { CryptographicOperations.ZeroMemory(secret); }
     }
-    public static async Task<string> CaptureAsync(DbSessionFactory sessions, SecretSnapshot secrets, BrandContext context, Guid member, Guid run, CutoverPaymentKey key, CutoverPaymentInput input, Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default)
+    public static async Task<string> CaptureAsync(DbSessionFactory sessions, BrandContext context, Guid member, Guid run, CutoverPaymentKey key, CutoverPaymentInput input, Func<PaymentEvidenceContent, CancellationToken, Task<string>> archive, CancellationToken ct = default)
     {
         if (context.BrandId != SyntheticSecretFiles.BrandA || context.BotId != 1001 || member != key.Member) throw new PaymentNoticeRejectedException();
         using var notice = Verify(run, key, input);
@@ -47,12 +47,12 @@ public static class CutoverPaymentCapture
             bool bound = await read.QuerySingleAsync(new DbStatement("SELECT EXISTS(SELECT 1 FROM shop.payments WHERE id=$1 AND topup_user_id=$2 AND order_id IS NULL AND idempotency_ref=$3 AND provider_payment_ref=$4)", DbValue.Uuid(key.Payment), DbValue.Uuid(member), DbValue.Text(key.Origin), DbValue.Text(key.Provider)), r => r.GetBoolean(0), ct);
             if (!bound) return "Held";
         }
-        return (await new PaymentEvidenceStore(sessions, secrets).CaptureAsync(context, notice, archive, ct)).Outcome.ToString();
+        return (await new PaymentEvidenceStore(sessions).CaptureAsync(context, notice, archive, ct)).Outcome.ToString();
     }
 }
-public sealed class CutoverPaymentFiles(string directory, SecretSnapshot secrets, BrandContext context, CutoverPaymentKey key, CutoverPaymentInput input)
+public sealed class CutoverPaymentFiles(string directory, BrandContext context, CutoverPaymentKey key, CutoverPaymentInput input)
 {
-    public Task<string> SaveAsync(ProtectedPaymentEvidence evidence, CancellationToken ct)
+    public Task<string> SaveAsync(PaymentEvidenceContent evidence, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (!OperatingSystem.IsLinux() || evidence.PaymentId != key.Payment || evidence.BrandId != context.BrandId || evidence.Digest != Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(input.Body)))) throw new PaymentNoticeRejectedException();
@@ -60,7 +60,7 @@ public sealed class CutoverPaymentFiles(string directory, SecretSnapshot secrets
         string path = Path.Combine(directory, evidence.PaymentId.ToString("N") + "-" + evidence.Digest + ".json");
         if (!File.Exists(path))
         {
-            var row = new CutoverPaymentArchive(key.Run, evidence.PaymentId, evidence.BrandId, evidence.EncryptionKeyId, evidence.Digest, input.Signature, evidence.Ciphertext.ToArray());
+            var row = new CutoverPaymentArchive(key.Run, evidence.PaymentId, evidence.BrandId, evidence.Digest, input.Signature, evidence.Content.ToArray());
             try { CutoverStageRuntime.Write(path, JsonSerializer.Serialize(row, CutoverPaymentJson.Default.CutoverPaymentArchive)); }
             catch (IOException) when (File.Exists(path)) { }
         }
@@ -75,7 +75,7 @@ public sealed class CutoverPaymentFiles(string directory, SecretSnapshot secrets
         if (Path.GetDirectoryName(path) != directory) throw new PaymentNoticeRejectedException();
         var row = JsonSerializer.Deserialize(ArchivePrivateFile.Read(path, 1, 8192), CutoverPaymentJson.Default.CutoverPaymentArchive) ?? throw new PaymentNoticeRejectedException();
         if (row.Run != key.Run || row.Payment != key.Payment || row.Brand != context.BrandId || Path.GetFileName(path) != row.Payment.ToString("N") + "-" + row.Digest + ".json") throw new PaymentNoticeRejectedException();
-        byte[] plain = new BrandCipher(secrets).Decrypt(context, "payments", row.Payment, "ipn_evidence", row.KeyId, row.Ciphertext);
+        byte[] plain = row.Content.ToArray();
         try
         {
             if (row.Digest != Convert.ToHexStringLower(SHA256.HashData(plain))) throw new PaymentNoticeRejectedException();

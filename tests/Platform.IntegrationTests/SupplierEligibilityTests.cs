@@ -26,7 +26,7 @@ public sealed class SupplierEligibilityTests
         await payments.EnableAsync(Ct);
         await payments.EnableBankAsync(Ct);
         int calls = 0;
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [new("synthetic", "public account")], (request, _) =>
+        var catalog = new CatalogStore(f.Sessions, [new("synthetic", "public account")], (request, _) =>
         {
             calls++;
             Assert.Equal("public product", request.ProductRef);
@@ -55,7 +55,7 @@ public sealed class SupplierEligibilityTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierRecoveryTests.Coupon(f, 100);
         int calls = 0;
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [new("synthetic", "public account")], (_, _) =>
+        var catalog = new CatalogStore(f.Sessions, [new("synthetic", "public account")], (_, _) =>
         {
             calls++;
             return Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Error, 0, ReadyItem: false));

@@ -1,19 +1,15 @@
+using static Platform.Persistence.PaymentEvidenceArchive;
 using Microsoft.EntityFrameworkCore;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
 public enum PaymentCaptureOutcome { Pending, Ready, Review, Replayed }
-public sealed record ProtectedPaymentEvidence(Guid PaymentId, Guid BrandId, string Digest, string EncryptionKeyId, ReadOnlyMemory<byte> Ciphertext)
-{
-    public override string ToString() => "ProtectedPaymentEvidence [redacted]";
-}
 public sealed record PaymentCapture(PaymentCaptureOutcome Outcome, Guid PaymentId);
 
-public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions)
 {
     public Task<Guid> CreateTopupAsync(BrandContext context, long actor, Guid payment, Money amount, CryptoAsset network, CancellationToken ct = default)
         => CreateTopupCoreAsync(context, actor, payment, amount, network, null, ct);
@@ -91,15 +87,16 @@ public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions, Secr
     }
 
     public Task<PaymentCapture> CaptureAsync(BrandContext context, VerifiedPaymentNotice notice,
-        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default) => CaptureCoreAsync(context, notice, archive, null, ct);
+        Func<PaymentEvidenceContent, CancellationToken, Task<string>> archive, CancellationToken ct = default) => CaptureCoreAsync(context, notice, PaymentEvidenceArchive.Plain(archive), null, ct);
     public Task<PaymentCapture> CaptureForBrandAsync(BrandContext context, long expectedRevision, VerifiedPaymentNotice notice,
-        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default)
+        Func<PaymentEvidenceContent, CancellationToken, Task<string>> archive, CancellationToken ct = default)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(expectedRevision);
-        return CaptureCoreAsync(context, notice, archive, expectedRevision, ct);
+        return CaptureCoreAsync(context, notice, PaymentEvidenceArchive.Plain(archive), expectedRevision, ct);
     }
+
     private async Task<PaymentCapture> CaptureCoreAsync(BrandContext context, VerifiedPaymentNotice notice,
-        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, long? writerRevision, CancellationToken ct)
+        Func<Evidence, CancellationToken, Task<string>> archive, long? writerRevision, CancellationToken ct)
     {
         Payment before;
         DateTime observedAt;
@@ -111,25 +108,29 @@ public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions, Secr
             observedAt = await preflight.RunEfStepAsync(false, (data, token) => data.BrandClockAsync(context.BrandId, token), ct);
         }
         if (!Matches(before, notice)) throw new PaymentNoticeRejectedException();
-        byte[] encrypted = new BrandCipher(secrets).Encrypt(context, "payments", before.Id, "ipn_evidence", notice.Body.Span);
-        var proof = new ProtectedPaymentEvidence(before.Id, context.BrandId, Convert.ToHexStringLower(notice.RawHash), secrets.CurrentBrandKeyId(context), encrypted);
-        if (before.ArchivePending)
-            await ResumeArchiveAsync(context, before.Id, archive, writerRevision, ct);
-        if (before.OrderStatus == "awaiting_payment" && before.Deadline >= observedAt && Qualifies(before, notice))
+        byte[] content = notice.Body.ToArray();
+        var proof = new Evidence(before.Id, context.BrandId, Convert.ToHexStringLower(notice.RawHash), content);
+        try
         {
-            var staged = await PersistAsync(context, notice, before, observedAt, null, proof, writerRevision, ct);
-            if (staged is not null)
+            if (before.ArchivePending)
+                await ResumeCoreAsync(context, before.Id, archive, writerRevision, ct);
+            if (before.OrderStatus == "awaiting_payment" && before.Deadline >= observedAt && Qualifies(before, notice))
             {
-                await ResumeArchiveAsync(context, before.Id, archive, writerRevision, ct);
-                return staged;
+                var staged = await PersistAsync(context, notice, before, observedAt, null, proof, writerRevision, ct);
+                if (staged is not null)
+                {
+                    await ResumeCoreAsync(context, before.Id, archive, writerRevision, ct);
+                    return staged;
+                }
             }
+            string asset = await PaymentEvidenceArchive.SaveAsync(archive, proof, ct);
+            return await PersistAsync(context, notice, before, observedAt, asset, proof, writerRevision, ct) ?? throw new PaymentNoticeRejectedException();
         }
-        string asset = await ArchiveAsync(archive, proof, ct);
-        return await PersistAsync(context, notice, before, observedAt, asset, proof, writerRevision, ct) ?? throw new PaymentNoticeRejectedException();
+        finally { CryptographicOperations.ZeroMemory(content); }
     }
 
     private async Task<PaymentCapture?> PersistAsync(BrandContext context, VerifiedPaymentNotice notice, Payment before, DateTime observedAt,
-        string? asset, ProtectedPaymentEvidence proof, long? writerRevision, CancellationToken ct)
+        string? asset, Evidence proof, long? writerRevision, CancellationToken ct)
     {
         await using var session = await sessions.BeginAsync(ct);
         try
@@ -185,7 +186,7 @@ public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions, Secr
                 row.FirstPaymentObservedAt = first;
                 if (decision == PaymentEvidenceDecision.Ready) { row.ConfirmedAt ??= observedAt; row.AmountReceived = row.AmountDue; }
                 row.IpnKeyId = notice.KeyId; row.IpnSignature = notice.Signature; row.IpnPayloadSha256 = notice.CanonicalHash; row.IpnVerifiedAt = observedAt; row.EvidenceAssetRef = asset; row.EvidenceDigest = notice.RawHash;
-                row.PendingEvidenceCiphertext = asset is null ? proof.Ciphertext.ToArray() : null; row.PendingEvidenceKeyId = asset is null ? proof.EncryptionKeyId : null;
+                row.PendingEvidence = asset is null ? proof.Content.ToArray() : null;
                 return true;
             }, ct);
             if (data.Order is Guid live && first is DateTime observed && data.Deadline is DateTime deadline && observed <= deadline && data.OrderStatus == "awaiting_payment")
@@ -206,35 +207,52 @@ public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions, Secr
         catch { if (session.State == DbSessionState.Active) session.RejectApplication(); throw; }
     }
 
-    public async Task ResumeArchiveAsync(BrandContext context, Guid payment, Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive,
-        long? writerRevision = null, CancellationToken ct = default)
+    public Task ResumeArchiveAsync(BrandContext context, Guid payment, Func<PaymentEvidenceContent, CancellationToken, Task<string>> archive,
+        long? writerRevision = null, CancellationToken ct = default) =>
+        ResumeCoreAsync(context, payment, PaymentEvidenceArchive.Plain(archive), writerRevision, ct);
+
+    private async Task ResumeCoreAsync(BrandContext context, Guid payment, Func<Evidence, CancellationToken, Task<string>> archive,
+        long? writerRevision, CancellationToken ct)
     {
-        ProtectedPaymentEvidence? proof;
+        Evidence? proof;
         await using (var read = await sessions.BeginAsync(ct))
         {
             await AdmitAsync(read, context, writerRevision, ct);
             var pending = await read.RunEfStepAsync(false, (data, token) =>
-                (from value in data.Data.Set<Entities.Payment>()
-                 join order in data.Data.Set<Entities.Order>() on value.OrderId equals order.Id
-                 join user in data.Data.Set<Entities.User>() on order.UserId equals user.Id
-                 join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
-                 where value.Id == payment && brand.Id == context.BrandId && brand.BotId == context.BotId && value.PendingEvidenceCiphertext != null
-                 select new { value.EvidenceDigest, value.PendingEvidenceKeyId, value.PendingEvidenceCiphertext }).SingleOrDefaultAsync(token), ct);
-            proof = pending?.EvidenceDigest is null ? null : new(payment, context.BrandId, Convert.ToHexStringLower(pending.EvidenceDigest), pending.PendingEvidenceKeyId!, pending.PendingEvidenceCiphertext!);
+            {
+                var rows = from value in data.Data.Set<Entities.Payment>()
+                           join order in data.Data.Set<Entities.Order>() on value.OrderId equals order.Id
+                           join user in data.Data.Set<Entities.User>() on order.UserId equals user.Id
+                           join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
+                           where value.Id == payment && brand.Id == context.BrandId && brand.BotId == context.BotId &&
+                               value.PendingEvidence != null
+                           select value;
+                return rows.Select(value => new Pending(value.EvidenceDigest, value.PendingEvidence)).SingleOrDefaultAsync(token);
+            }, ct);
+            if (pending is null) return;
+            if (pending.Digest is null || pending.Content is null) throw new PaymentNoticeRejectedException();
+            proof = new(payment, context.BrandId, Convert.ToHexStringLower(pending.Digest), pending.Content);
         }
-        if (proof is null) return;
-        string asset = await ArchiveAsync(archive, proof, ct);
-        await using var session = await sessions.BeginAsync(ct);
-        await AdmitAsync(session, context, writerRevision, ct);
-        byte[] digest = Convert.FromHexString(proof.Digest);
-        await session.RunEfStepAsync(true, async (data, token) =>
+        try
         {
-            await data.RequirePaymentCommandAsync(context, payment, token);
-            var row = await data.Data.Set<Entities.Payment>().SingleOrDefaultAsync(value => value.Id == payment && value.EvidenceDigest == digest && value.PendingEvidenceCiphertext != null, token);
-            if (row is not null) { row.EvidenceAssetRef = asset; row.PendingEvidenceCiphertext = null; row.PendingEvidenceKeyId = null; }
-            return true;
-        }, ct);
-        await session.CommitAsync(ct);
+            string asset = await PaymentEvidenceArchive.SaveAsync(archive, proof, ct);
+            await using var session = await sessions.BeginAsync(ct);
+            await AdmitAsync(session, context, writerRevision, ct);
+            byte[] digest = Convert.FromHexString(proof.Digest);
+            await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequirePaymentCommandAsync(context, payment, token);
+                var row = await data.Data.Set<Entities.Payment>().SingleOrDefaultAsync(value =>
+                    value.Id == payment && value.EvidenceDigest == digest && value.PendingEvidence != null, token);
+                if (row is not null)
+                {
+                    row.EvidenceAssetRef = asset; row.PendingEvidence = null;
+                }
+                return true;
+            }, ct);
+            await session.CommitAsync(ct);
+        }
+        finally { CryptographicOperations.ZeroMemory(proof.Content); }
     }
 
     private static bool Qualifies(Payment payment, VerifiedPaymentNotice notice) =>
@@ -249,12 +267,6 @@ public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions, Secr
             ? payment.HostedReference is not null && notice.QuoteCurrency == "usd" && payment.Due == notice.QuoteAmount &&
                 string.Equals(payment.Asset, notice.Asset, StringComparison.OrdinalIgnoreCase)
             : payment.Provider == notice.ProviderPayment && payment.Expected is not null);
-    private static async Task<string> ArchiveAsync(Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, ProtectedPaymentEvidence proof, CancellationToken ct)
-    {
-        string asset = await archive(proof, ct);
-        if (!asset.StartsWith("protected:", StringComparison.Ordinal) || asset.Length is < 12 or > 1024 || asset.Any(char.IsControl)) throw new PaymentNoticeRejectedException();
-        return asset;
-    }
     private static async Task AdmitAsync(DbSession session, BrandContext context, long? writerRevision, CancellationToken ct)
     {
         if (writerRevision is long revision) await BrandWriterStore.RequireAsync(session, context, revision, ct);
@@ -278,7 +290,7 @@ public sealed partial class PaymentEvidenceStore(DbSessionFactory sessions, Secr
                 Guid? id = await query.Select(value => (Guid?)value.Value.Id).SingleOrDefaultAsync(token);
                 if (id is Guid found) await data.LockPaymentAsync(found, token);
             }
-            return await query.Select(value => new Payment(value.Value.Id, value.Member, value.Value.OrderId, value.Value.PaymentMethod, value.Value.QuoteCurrency, value.Value.AmountDue, value.Value.NetworkAsset ?? "", value.Value.ProviderPaymentRef, value.Value.ExpectedNetworkAmount, value.Value.IdempotencyRef, value.Value.Status, value.Value.IpnPayloadSha256, value.Value.FirstPaymentObservedAt, value.Value.ConfirmedAt, value.Deadline, value.OrderStatus, value.Value.ProviderCode, value.Value.PendingEvidenceCiphertext != null, value.Value.HostedInvoiceStartedAt != null, value.Value.HostedInvoiceRef, value.Value.HostedInvoiceUrl)).SingleOrDefaultAsync(token);
+            return await query.Select(value => new Payment(value.Value.Id, value.Member, value.Value.OrderId, value.Value.PaymentMethod, value.Value.QuoteCurrency, value.Value.AmountDue, value.Value.NetworkAsset ?? "", value.Value.ProviderPaymentRef, value.Value.ExpectedNetworkAmount, value.Value.IdempotencyRef, value.Value.Status, value.Value.IpnPayloadSha256, value.Value.FirstPaymentObservedAt, value.Value.ConfirmedAt, value.Deadline, value.OrderStatus, value.Value.ProviderCode, value.Value.PendingEvidence != null, value.Value.HostedInvoiceStartedAt != null, value.Value.HostedInvoiceRef, value.Value.HostedInvoiceUrl)).SingleOrDefaultAsync(token);
         }, ct);
         if (result is null) Reject(session);
         return result;

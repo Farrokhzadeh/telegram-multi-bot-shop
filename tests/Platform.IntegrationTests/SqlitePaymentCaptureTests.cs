@@ -1,6 +1,5 @@
 using Platform.Core;
 using Platform.Persistence;
-using Platform.Security;
 using Platform.Testing;
 
 namespace Platform.IntegrationTests;
@@ -15,20 +14,17 @@ public sealed class SqlitePaymentCaptureTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
-            var sessions = new SqliteSessionFactory(path);
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var keys = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid member = Guid.NewGuid(), payment = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var sql = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active,allow_crypto,allow_wallet_topup,zero_balance_topup)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1,1,1,1);
+                        bot_token,active,allow_crypto,allow_wallet_topup,zero_balance_topup)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1,1,1,1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$member", member));
                 await sql.ExecuteNonQueryAsync(token);
@@ -38,15 +34,15 @@ public sealed class SqlitePaymentCaptureTests
             Assert.Equal(payment, await evidence.CreateTopupAsync(brand, 0, 7001, payment,
                 new Money(10.25m, Currency.Usd), CryptoAsset.UsdtTrc20, ct));
             await evidence.BindInvoiceAsync(brand, 0, 7001, payment, "123456789", 10.4m, ct);
-            var capture = new SqlitePaymentCaptureStore(sessions, keys);
+            var capture = new SqlitePaymentCaptureStore(sessions);
             using var notice = PaymentNoticeFixture.Notice(origin: "topup:" + payment.ToString("D"));
             int archives = 0;
-            Task<string> Save(ProtectedPaymentEvidence proof, CancellationToken _)
+            Task<string> Save(PaymentEvidenceContent proof, CancellationToken _)
             {
                 archives++;
                 Assert.Equal(payment, proof.PaymentId);
                 Assert.Equal(brand.BrandId, proof.BrandId);
-                Assert.NotEmpty(proof.Ciphertext.ToArray());
+                Assert.Equal(System.Text.Encoding.UTF8.GetBytes(PaymentNoticeFixture.Body(origin: notice.Origin)), proof.Content.ToArray());
                 return Task.FromResult("protected:synthetic/" + proof.Digest);
             }
             var accepted = await capture.CaptureAsync(brand, 0, notice, Save, ct);
@@ -56,7 +52,7 @@ public sealed class SqlitePaymentCaptureTests
             Assert.Equal(1, archives);
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 capture.CaptureAsync(other, 0, notice, Save, ct));
-            var settle = new SqliteTopupSettlementStore(new SqliteSessionFactory(path));
+            var settle = new SqliteTopupSettlementStore(SqliteSessionFactory.ForPlaintext(path));
             Assert.Equal(PaymentSettlementOutcome.Settled,
                 (await settle.SettleAsync(brand, 0, payment, PaymentSettlementFixture.Lookup, ct)).Outcome);
             Assert.Equal(PaymentSettlementOutcome.Replayed,
@@ -69,7 +65,7 @@ public sealed class SqlitePaymentCaptureTests
                         (SELECT count(*) FROM wallet_entries WHERE user_id=$member AND is_posting=1),
                         (SELECT count(*) FROM jobs WHERE job_kind='verify_payment' AND payment_id=$payment),
                         (SELECT count(*) FROM payments WHERE id=$payment AND status='settled'
-                            AND evidence_asset_ref IS NOT NULL AND pending_evidence_ciphertext IS NULL)
+                            AND evidence_asset_ref IS NOT NULL AND pending_evidence IS NULL)
                     """, ("$member", member), ("$payment", payment));
                 await using var row = await sql.ExecuteReaderAsync(token);
                 Assert.True(await row.ReadAsync(token));
@@ -91,12 +87,10 @@ public sealed class SqlitePaymentCaptureTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
             var brand = CheckoutFixture.ResolveContexts()[0];
-            var sessions = new SqliteSessionFactory(path);
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var keys = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: CheckoutFixture.BrandIds));
+            SqliteSessionFactory Open() => SqliteSessionFactory.ForPlaintext(path);
+            var sessions = Open();
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid(), payment = Guid.NewGuid();
             DateTime created = DateTime.UtcNow;
             string now = SqliteSchema.UtcText(created);
@@ -105,8 +99,8 @@ public sealed class SqlitePaymentCaptureTests
             {
                 using var sql = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active,allow_crypto)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1,1);
+                        bot_token,active,allow_crypto)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1,1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title)
                     VALUES ($product,'local','immediate','Synthetic item');
@@ -127,13 +121,14 @@ public sealed class SqlitePaymentCaptureTests
                 return 0;
             }, ct);
             using var notice = PaymentNoticeFixture.Notice(origin: "order:" + order.ToString("D"));
-            var capture = new SqlitePaymentCaptureStore(sessions, keys);
-            await Assert.ThrowsAsync<IOException>(() => capture.CaptureAsync(brand, 0, notice,
-                (_, _) => throw new IOException("Synthetic protected archive unavailable."), ct));
+            var capture = new SqlitePaymentCaptureStore(sessions);
+            Task<PaymentCapture> Unavailable(SqlitePaymentCaptureStore store) =>
+                store.CaptureAsync(brand, 0, notice, (_, _) => throw new IOException("Synthetic archive unavailable."), ct);
+            await Assert.ThrowsAsync<IOException>(() => Unavailable(capture));
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
                 using var sql = SqliteWallet.Command(tx, """
-                    SELECT p.status,p.pending_evidence_ciphertext IS NOT NULL,p.evidence_asset_ref IS NULL,
+                    SELECT p.status,p.pending_evidence IS NOT NULL,p.evidence_asset_ref IS NULL,
                         o.payment_status,(SELECT count(*) FROM jobs WHERE job_kind='verify_payment')
                     FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=$payment
                     """, ("$payment", payment));
@@ -146,13 +141,16 @@ public sealed class SqlitePaymentCaptureTests
                 Assert.Equal(1, row.GetInt64(4));
                 return 0;
             }, ct);
-            var recovered = new SqlitePaymentCaptureStore(new SqliteSessionFactory(path), keys);
-            await recovered.ResumeArchiveAsync(brand, 0, payment,
-                (proof, _) => Task.FromResult("protected:synthetic/" + proof.Digest), ct);
-            Assert.Equal(PaymentCaptureOutcome.Replayed,
-                (await recovered.CaptureAsync(brand, 0, notice,
-                    (_, _) => throw new IOException("Replayed evidence must not be archived again."), ct)).Outcome);
-            var settled = await new SqliteOrderPaymentSettlementStore(new SqliteSessionFactory(path), keys)
+            var recovered = new SqlitePaymentCaptureStore(Open());
+            await recovered.ResumeArchiveAsync(brand, 0, payment, (proof, _) =>
+            {
+                byte[] expected = System.Text.Encoding.UTF8.GetBytes(PaymentNoticeFixture.Body(origin: "order:" + order.ToString("D")));
+                Assert.Equal(expected, proof.Content.ToArray());
+                Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(expected)), proof.Digest);
+                return Task.FromResult("protected:synthetic/" + proof.Digest);
+            }, ct);
+            Assert.Equal(PaymentCaptureOutcome.Replayed, (await Unavailable(recovered)).Outcome);
+            var settled = await new SqliteOrderPaymentSettlementStore(Open())
                 .SettleAsync(brand, 0, payment, PaymentSettlementFixture.Lookup, ct);
             Assert.Equal(PaymentSettlementOutcome.Settled, settled.Outcome);
             Assert.Equal(ExternalSettlementRoute.LocalShortageCredit, settled.Route);
@@ -162,7 +160,7 @@ public sealed class SqlitePaymentCaptureTests
                     SELECT (SELECT balance FROM wallets WHERE user_id=$member),
                         (SELECT count(*) FROM wallet_entries WHERE order_id=$order AND is_posting=1),
                         (SELECT count(*) FROM payments WHERE id=$payment AND status='settled'
-                            AND evidence_asset_ref IS NOT NULL AND pending_evidence_ciphertext IS NULL),
+                            AND evidence_asset_ref IS NOT NULL AND pending_evidence IS NULL),
                         (SELECT fulfillment_status FROM orders WHERE id=$order)
                     """, ("$member", member), ("$order", order), ("$payment", payment));
                 await using var row = await sql.ExecuteReaderAsync(token);

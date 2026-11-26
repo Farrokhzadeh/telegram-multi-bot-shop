@@ -2,14 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
 public enum PaymentSettlementOutcome { Pending, Review, Settled, Replayed }
 public sealed record PaymentSettlement(PaymentSettlementOutcome Outcome, ExternalSettlementRoute Route, Guid? Credit = null);
 
-public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnapshot secrets, CatalogStore catalog)
+public sealed class PaymentSettlementStore(DbSessionFactory sessions, CatalogStore catalog)
 {
     public Task<PaymentSettlement> SettleAsync(BrandContext context, Guid payment,
         Func<InvoiceExpectation, CancellationToken, Task<ProviderPaymentSnapshot>> lookup, CancellationToken ct = default) => SettleCoreAsync(context, payment, lookup, null, ct);
@@ -106,7 +105,7 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
         Guid order = data.Order!.Value, product = data.Product!.Value;
         if (data.Kind == "prepaid_units")
         {
-            await new PricingStore(sessions, secrets).IssuePaidSourceAsync(session, context, order, ct);
+            await new PricingStore(sessions).IssuePaidSourceAsync(session, context, order, ct);
             return ExternalSettlementRoute.Prepaid;
         }
         if (data.Preorder)
@@ -140,7 +139,7 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
         string? review = null;
         if (data.Fulfillment == "supplier" && stock.Count < data.Quantity)
             review = await catalog.BindAcceptedAsync(session, context, product, order, data.Quantity - stock.Count, ct);
-        await new CheckoutStore(sessions, secrets).AcquireAsync(session, context, order, stock, ct);
+        await new CheckoutStore(sessions).AcquireAsync(session, context, order, stock, ct);
         await FulfillmentAsync(session, order, review is null ? "acquiring" : "requires_admin", review, ct);
         if (stock.Count == data.Quantity) await OutboxStore.EnqueueAsync(session, JobIntent.Order(JobKind.PrepareManifest, context.BrandId, order), order, DateTime.UtcNow, ct);
         return data.Fulfillment == "supplier" ? ExternalSettlementRoute.Supplier : ExternalSettlementRoute.LocalGoods;
@@ -155,7 +154,7 @@ public sealed class PaymentSettlementStore(DbSessionFactory sessions, SecretSnap
     private async Task ReleaseAsync(DbSession session, BrandContext context, Guid order, CancellationToken ct)
     {
         Guid? coupon = await session.RunEfStepAsync(false, (ef, token) => ef.Data.Set<Entities.DiscountUse>().Where(value => value.OrderId == order && value.Status == "held").Select(value => (Guid?)value.DiscountId).SingleOrDefaultAsync(token), ct);
-        if (coupon is Guid id) await new PricingStore(sessions, secrets).TransitionClaimAsync(session, context, id, order, false, ct);
+        if (coupon is Guid id) await new PricingStore(sessions).TransitionClaimAsync(session, context, id, order, false, ct);
     }
     internal static async Task NoticeAsync(DbSession session, BrandContext context, State data, CancellationToken ct)
     {

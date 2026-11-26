@@ -5,7 +5,7 @@ namespace Platform.Migration;
 
 public sealed class LegacyCustomerHistoryProjection(SecretSnapshot secrets)
 {
-    public IReadOnlyDictionary<Guid, byte[]> SealAll(BrandContext context, VerifiedImportManifest manifest, IReadOnlyList<ArchivedLegacyRecord> source)
+    public IReadOnlyDictionary<Guid, byte[]> EncodeAll(BrandContext context, VerifiedImportManifest manifest, IReadOnlyList<ArchivedLegacyRecord> source)
     {
         if (context.BrandId != manifest.TargetBrand || source is null) throw new MigrationRejectedException();
         var owners = manifest.Proofs.Where(p => p.Projection == LegacyProjection.User).ToDictionary(p => p.LegacyId, p => p.Target, StringComparer.Ordinal);
@@ -27,7 +27,6 @@ public sealed class LegacyCustomerHistoryProjection(SecretSnapshot secrets)
             catch (Exception error) when (error is System.Text.Json.JsonException or InvalidOperationException or FormatException)
             { throw new MigrationRejectedException(); }
         }
-        var cipher = new CustomerHistoryArchive(secrets);
-        return grouped.ToDictionary(pair => pair.Key, pair => cipher.Seal(context, pair.Key, pair.Value));
+        return grouped.ToDictionary(pair => pair.Key, pair => CustomerHistoryContent.Encode(pair.Key, pair.Value));
     }
 }

@@ -19,21 +19,18 @@ internal static class SqliteStagingWorker
     internal static async Task<int> RunAsync(CancellationToken ct = default)
     {
         SqliteStagingConfiguration state;
-        SecretSnapshot secrets;
         string token;
         try
         {
             state = await SqliteStagingConfiguration.LoadAsync(ct);
-            secrets = state.LoadSecrets(SecretService.JobHost);
             token = state.ReadTelegramToken();
         }
-        catch (Exception error) when (error is IOException or InvalidOperationException or SecretConfigurationException
+        catch (Exception error) when (error is IOException or InvalidOperationException
             or UnauthorizedAccessException or ArgumentException)
         {
             Console.Error.WriteLine("The staging SQLite worker identity is unavailable.");
             return HostBootstrap.ConfigurationRequiredExitCode;
         }
-        using (secrets)
         using (var http = TelegramTransport.CreateHttpClient(TimeSpan.FromSeconds(45)))
         {
             try
@@ -46,20 +43,16 @@ internal static class SqliteStagingWorker
                 var workerId = Guid.CreateVersion7();
                 var jobs = new SqliteStagingJobs(state.Sessions);
                 var status = new SqliteStatusDeliveryStore(state.Sessions);
-                var credentials = new SqliteDeliveryStore(state.Sessions, secrets);
+                var credentials = new SqliteDeliveryStore(state.Sessions);
                 var expiry = new SqlitePaymentExpiryStore(state.Sessions);
-                var preorders = new SqliteLocalPreorderStore(state.Sessions, secrets);
-                var coupons = new SqliteCouponDeliveryStore(state.Sessions, secrets);
-                var suppliers = new SqliteSupplierRequestStore(state.Sessions, secrets);
+                var preorders = new SqliteLocalPreorderStore(state.Sessions);
+                var coupons = new SqliteCouponDeliveryStore(state.Sessions);
+                var suppliers = new SqliteSupplierRequestStore(state.Sessions);
                 var supplierWorker = new SqliteSupplierFulfillmentWorker(suppliers,
                     new SqliteSyntheticSupplierAdapter(), new SqliteSyntheticSupplierEvidenceArchive());
-                Task inventory = SqliteStageInventoryBridge.ServeAsync(state.Sessions, secrets,
-                    state.ReadApiKey(), ct);
                 Console.WriteLine("The managed SQLite staging delivery worker is running.");
                 while (!ct.IsCancellationRequested)
                 {
-                    if (inventory.IsCompleted && !ct.IsCancellationRequested)
-                        throw new InvalidOperationException("Staging inventory import bridge is unavailable.");
                     await status.RecoverExpiredAsync(state.Context, ct);
                     await coupons.RecoverExpiredAsync(state.Context, ct);
                     foreach (Guid expired in await jobs.ExpiredCredentialsAsync(state.Context, ct))

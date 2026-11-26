@@ -23,8 +23,8 @@ public sealed class AdminApiTests
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 4, ct: Ct);
         var actor = await f.AdminAsync(Ct);
-        var pricing = new PricingStore(f.Sessions, f.Secrets);
-        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException()));
+        var pricing = new PricingStore(f.Sessions);
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException()));
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
@@ -35,7 +35,7 @@ public sealed class AdminApiTests
         JobLease lease;
         await using (var claim = await f.Sessions.BeginAsync(Ct))
         { lease = (await OutboxStore.ClaimAsync(claim, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromSeconds(30), Ct))!; await claim.CommitAsync(Ct); }
-        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), lease, Ct);
+        await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), lease, Ct);
         await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 1), Member, Ct);
         var edit = new CouponOwnerEdit(10, 0, 0, 0, DateTime.UtcNow.AddDays(-2), DateTime.UtcNow.AddDays(-1), false, f.Product, f.Users[0]);
         Guid command = Guid.NewGuid();
@@ -62,7 +62,7 @@ public sealed class AdminApiTests
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
         await f.AdminAsync(Ct);
-        var store = new BrandAdministrationStore(f.Sessions, f.Secrets);
+        var store = new BrandAdministrationStore(f.Sessions);
         int checks = 0;
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");

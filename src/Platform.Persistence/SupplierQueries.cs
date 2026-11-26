@@ -1,3 +1,5 @@
+using Platform.Core;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using Platform.Security;
 
@@ -10,6 +12,39 @@ internal sealed partial class EfSession
 }
 internal static class SupplierQueries
 {
+    internal static Task<(bool Found, bool Matches)> MatchItemAsync(EfSession data, SupplierBinding binding,
+        SupplierItem item, byte[] reference, CancellationToken ct) => MatchItemAsync(binding, item,
+            data.Data.Set<Entities.Fulfillment>().Where(row => row.SupplierItemKey == reference)
+                .Select(row => new { row.Id, Request = row.SupplierRequestId, Customer = true, Bytes = row.DeliveredContent, Kind = row.ContentKind })
+                .Concat(data.Data.Set<Entities.InventoryItem>().Where(row => row.SupplierItemKey == reference)
+                    .Select(row => new { row.Id, Request = row.SupplierRequestId, Customer = false, Bytes = (byte[]?)row.CredentialContent, Kind = (string?)null }))
+                .Select(row => new StoredItem(row.Request, row.Customer, row.Bytes, row.Kind)),
+            ct);
+
+    private sealed record StoredItem(Guid? Request, bool Customer, byte[]? Bytes, string? Kind)
+    {
+        public override string ToString() => "Supplier item [redacted]";
+    }
+
+    private static async Task<(bool Found, bool Matches)> MatchItemAsync(SupplierBinding binding,
+        SupplierItem item, IQueryable<StoredItem> matches, CancellationToken ct)
+    {
+        var rows = await matches.Take(3).ToListAsync(ct);
+        if (rows.Count == 0) return (false, false);
+        try
+        {
+            var row = rows[0];
+            if (rows.Count != 1 || row.Request != binding.RequestId || row.Customer != (item.Disposition == SupplierItemDisposition.Customer) ||
+                row.Bytes is null || row.Kind is not null && row.Kind != item.ContentKind) return (true, false);
+            return (true, CryptographicOperations.FixedTimeEquals(row.Bytes, item.Content.Span));
+        }
+        finally
+        {
+            foreach (var row in rows)
+                if (row.Bytes is not null) CryptographicOperations.ZeroMemory(row.Bytes);
+        }
+    }
+
     internal static Task<bool> ChangeAsync(DbSession session, BrandContext context, Guid request, Action<Entities.SupplierRequest, DateTime> change, CancellationToken ct) => session.RunEfStepAsync(true, async (data, token) =>
     {
         await data.LockRequestAsync(request, token);

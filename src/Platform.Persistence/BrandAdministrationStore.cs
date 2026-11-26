@@ -1,12 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
 public sealed record BrandConfiguration(Guid Id, long BotId, string BotUsername, bool HasBotToken, long Revision, DateTime UpdatedAt);
-public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed class BrandAdministrationStore(DbSessionFactory sessions)
 {
     public async Task<BrandConfiguration> ReadAsync(AuthenticatedAdmin actor, BrandContext context, CancellationToken ct = default)
     {
@@ -29,7 +28,6 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
         VerifiedBotProfile verified = await verify(token, ct).WaitAsync(TimeSpan.FromSeconds(15), ct);
         if (verified.Id != context.BotId || verified.Username.Length is < 5 or > 32 || !verified.Username.All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
             throw new UnauthorizedAccessException("Bot verification failed.");
-        ProtectedBotToken encrypted = new BotTokenVault(secrets).Protect(context, token);
         await using var session = await sessions.BeginAsync(ct);
         try
         {
@@ -41,8 +39,7 @@ public sealed class BrandAdministrationStore(DbSessionFactory sessions, SecretSn
                 await data.LockBrandAsync(context.BrandId, cancel);
                 var brand = await data.Data.Set<Entities.Brand>().SingleAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, cancel);
                 if (brand.PolicyVersion != revision) data.RejectConflict("Brand configuration revision conflict.");
-                brand.BotTokenCiphertext = encrypted.Ciphertext.ToArray();
-                brand.BotTokenKeyId = encrypted.KeyId;
+                brand.BotToken = token.ForTrustedTransport().ToArray();
                 brand.BotUsername = verified.Username;
                 brand.PolicyVersion++;
                 brand.UpdatedAt = await data.BrandClockAsync(context.BrandId, cancel);

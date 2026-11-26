@@ -8,7 +8,10 @@ public sealed partial class SqliteSessionFactory
     private readonly string connectionString;
     private readonly int timeoutSeconds;
 
-    public SqliteSessionFactory(string path, int timeoutSeconds = 5)
+    internal SqliteSessionFactory RequirePlaintext() => this;
+    public static SqliteSessionFactory ForPlaintext(string path, int timeoutSeconds = 5) => new(path, timeoutSeconds);
+
+    internal SqliteSessionFactory(string path, int timeoutSeconds = 5)
     {
         if (!Path.IsPathFullyQualified(path)) throw new ArgumentException("An absolute SQLite database path is required.", nameof(path));
         if (timeoutSeconds < 1) throw new ArgumentOutOfRangeException(nameof(timeoutSeconds));
@@ -29,6 +32,7 @@ public sealed partial class SqliteSessionFactory
         await connection.OpenAsync(ct);
         SqliteSchema.Configure(connection);
         await using var journal = connection.CreateCommand();
+        await SchemaManifest.RequirePlaintextSqliteAsync(journal, ct);
         journal.CommandText = "PRAGMA journal_mode";
         if (!string.Equals((string?)await journal.ExecuteScalarAsync(ct), "wal", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The SQLite database must be initialized in WAL mode.");
@@ -44,7 +48,7 @@ public sealed partial class SqliteSessionFactory
         }
         ct.ThrowIfCancellationRequested();
         await using var transaction = connection.BeginTransaction(deferred: !write);
-        efTransactions.Add(transaction, new EfTransaction(write, timeoutSeconds));
+        efTransactions.Add(transaction, new EfTransaction(write, timeoutSeconds, true));
         try
         {
             var result = await operation(connection, transaction, ct);

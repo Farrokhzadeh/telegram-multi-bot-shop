@@ -21,7 +21,7 @@ def memory(compose_file, metric):
     return int((Path("/sys/fs/cgroup") / cgroup.lstrip("/") / metric).read_text())
 
 
-def check(executable, schema, workspace):
+def check(executable, schema, workspace, expected_sha256):
     schema_hash = hashlib.sha256(schema.read_bytes()).hexdigest()
     print(f"Synthetic canary schema SHA-256 {schema_hash}", flush=True)
     stage.ROOT = workspace / "fixture"
@@ -34,19 +34,25 @@ def check(executable, schema, workspace):
     else:
         bundle.mkdir()
         shutil.copy2(executable, bundle / "Platform.Api")
-    settings = stage.provision(bundle, schema)
+    settings = stage.provision(bundle, schema, expected_sha256)
     assert settings[2] == schema_hash
     compose_file = stage.ROOT / "compose.json"
     config = json.loads(compose_file.read_text())
     db, bot = (config["services"][n] for n in ("stage-db", "stage-bot-a"))
-    config["services"] = {"stage-db": db, "stage-bot-a": bot}
-    for service, size in ((db, "128m"), (bot, "128m")):
-        service.update(cpus=0.1, mem_limit=size, memswap_limit=size)
-    bot["entrypoint"] = ["/opt/runtime/Platform.Api", "--serve-synthetic-staging", "bot-a"]
+    roles = list(stage.ROLES)
+    for service in (db, bot):
+        service.update(cpus=0.1, mem_limit="128m", memswap_limit="128m")
+    from verify_synthetic_stage import validate_expected_mounts
+    for role in roles:
+        actor = config["services"]["stage-" + role]
+        actor["entrypoint"] = ["/opt/runtime/Platform.Api", "--serve-synthetic-staging", role]
+        validate_expected_mounts(stage.ROOT, role, actor)
     compose_file.chmod(0o600)
     compose_file.write_text(json.dumps(config))
     compose_file.chmod(0o400)
     inspector = "shop-staging-ci-inspector"
+    certificates = [flag for role in roles for flag in (
+        "--mount", f"type=bind,src={stage.ROOT}/operator/stage-{role}.crt,dst=/cert-{role},readonly")]
     try:
         stage.compose("up", "-d", "--no-deps", "--pull", "never", "stage-db")
         wait_for(lambda: subprocess.run(
@@ -56,14 +62,16 @@ def check(executable, schema, workspace):
         stage.run("docker", "run", "-d", "--name", inspector, "--pull", "never", "--network", "shop-staging-private",
                   "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--cpus", ".1",
                   "--memory", "48m", "--memory-swap", "48m", "--pids-limit", "20",
-                  "--mount", f"type=bind,src={stage.ROOT}/operator/stage-bot-a.crt,dst=/cert,readonly",
+                  *certificates,
                   "--entrypoint", "sleep", stage.SDK, "180", stdout=subprocess.DEVNULL)
         header = (stage.ROOT / "operator/bot-a-header").read_text()
         payload = {"update_id": 501, "callback_query": {"from": {"id": 7001, "is_bot": False},
                    "data": "v1|1|p|" + stage.PRODUCT.replace("-", ""), "message": {"from": {"id": 1001, "is_bot": True},
                    "message_id": 77, "chat": {"type": "private", "id": 7001}}}}
-        stage.compose("up", "-d", "--no-deps", "--pull", "never", "stage-bot-a")
-        wait_for(lambda: request(inspector, "/ready") == "bot-a\n200")
+        stage.compose("up", "-d", "--no-deps", "--pull", "never", *("stage-" + role for role in roles))
+        for role in roles:
+            wait_for(lambda: request(inspector, "/ready", role=role) == role + "\n200")
+            stage.compose("exec", "-T", "stage-" + role, "sh", "-ec", "test ! -e /run/staging/keys")
         idle = memory(compose_file, "memory.current")
         wrong = dict(payload, callback_query=dict(payload["callback_query"], message=dict(payload["callback_query"]["message"], **{"from": {"id": 1002, "is_bot": True}})))
         assert request(inspector, "/callbacks/stage-a", header, wrong).endswith("\n401")
@@ -88,14 +96,14 @@ def check(executable, schema, workspace):
         stage.compose("down", "--volumes", "--timeout", "10")
 
 
-def request(inspector, route, key=None, payload=None):
+def request(inspector, route, key=None, payload=None, role="bot-a"):
     data = ""
     if key is not None:
         data = "header = " + json.dumps("X-Telegram-Bot-Api-Secret-Token: " + key) + "\n"
         data += 'header = "Content-Type: application/json"\ndata-binary = ' + json.dumps(json.dumps(payload)) + "\n"
     result = subprocess.run(["docker", "exec", "-i", inspector, "curl", "--silent", "--show-error", "--max-time", "5",
-                             "--noproxy", "*", "--cacert", "/cert", "--config", "-", "--write-out", "\n%{http_code}",
-                             "https://stage-bot-a:8443" + route], input=data, capture_output=True, text=True, timeout=8)
+                             "--noproxy", "*", "--cacert", "/cert-" + role, "--config", "-", "--write-out", "\n%{http_code}",
+                             "https://stage-" + role + ":8443" + route], input=data, capture_output=True, text=True, timeout=8)
     return result.stdout if result.returncode == 0 else ""
 
 
@@ -108,6 +116,9 @@ def wait_for(predicate):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) != 5 or sys.argv[3] != "--plaintext-sha256":
+        raise SystemExit("Usage: check_ci_canary.py EXECUTABLE SCHEMA --plaintext-sha256 SHA256")
     os.umask(0o077)
     with tempfile.TemporaryDirectory(prefix="t081-ci-") as directory:
-        check(Path(sys.argv[1]).resolve(strict=True), Path(sys.argv[2]).resolve(strict=True), Path(directory))
+        check(Path(sys.argv[1]).resolve(strict=True), Path(sys.argv[2]).resolve(strict=True), Path(directory),
+              sys.argv[4])

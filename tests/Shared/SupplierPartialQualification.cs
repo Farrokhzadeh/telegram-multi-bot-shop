@@ -14,11 +14,11 @@ public static class SupplierPartialQualification
         var actor = await f.AdminAsync(ct);
         await using (var issue = await f.Sessions.BeginAsync(ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), actor, new(Guid.NewGuid(), "PUBLIC-PARTIAL-REVIEW", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), actor, new(Guid.NewGuid(), "PUBLIC-PARTIAL-REVIEW", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), ct);
             await issue.CommitAsync(ct);
         }
         Guid order = await SupplierFixture.AcceptAsync(f, 5, ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { Submit = b => SyntheticSupplier.Complete(b, customers: 3), Lookup = b => SyntheticSupplier.Complete(b, customers: 3) };
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, ct);
         Guid request = (await store.ReadAsync(f.Context(0), lease, ct)).RequestId;
@@ -26,7 +26,7 @@ public static class SupplierPartialQualification
         foreach (JobKind kind in new[] { JobKind.ReconcileSupplier, JobKind.ExportSupplier })
         {
             await ScheduleAsync(f, request, kind, ct);
-            await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, kind, ct), ct);
+            await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, kind, ct), ct);
         }
         if (port.Submits != 1 || port.Lookups != 1 || port.Exports != 1 || await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts", ct) != 3 ||
             await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE (attempt_no=1 AND operation='submit') OR (attempt_no=2 AND operation='status_lookup') OR (attempt_no=3 AND operation='export')", ct) != 3 ||
@@ -37,7 +37,7 @@ public static class SupplierPartialQualification
         await RequireBlockedAsync(f, order, ct);
         port.Lookup = b => SyntheticSupplier.Complete(b);
         await ScheduleAsync(f, request, JobKind.ReconcileSupplier, ct);
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, ct), ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, ct), ct);
         await RequireBlockedAsync(f, order, ct);
         long revision = await RevisionAsync(f, order, ct);
         Guid command = Guid.NewGuid();
@@ -46,7 +46,7 @@ public static class SupplierPartialQualification
             await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", ct) != 1 ||
             await f.CountAsync("SELECT count(*) FROM shop.orders WHERE review_code IS NULL AND release_authorized_at IS NULL", ct) != 1)
             throw new InvalidOperationException("Supplier review approval changed release or coupon facts.");
-        var delivery = new DeliveryStore(f.Sessions, f.Secrets);
+        var delivery = new DeliveryStore(f.Sessions);
         await delivery.PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, ct), ct);
         byte[] manifest = await delivery.ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, ct);
         try { if (manifest.Length == 0) throw new InvalidOperationException("Complete supplier manifest is empty."); }
@@ -75,7 +75,7 @@ public static class SupplierPartialQualification
     {
         try
         {
-            byte[] content = await new DeliveryStore(f.Sessions, f.Secrets).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, ct);
+            byte[] content = await new DeliveryStore(f.Sessions).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, ct);
             CryptographicOperations.ZeroMemory(content);
             throw new InvalidOperationException("Unapproved supplier acquisition exposed a manifest.");
         }

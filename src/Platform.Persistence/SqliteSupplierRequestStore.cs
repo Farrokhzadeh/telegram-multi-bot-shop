@@ -7,8 +7,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<JobLease?> ClaimAsync(BrandContext context, JobKind kind, Guid worker, CancellationToken ct = default)
     {
         if (kind is not (JobKind.SubmitSupplier or JobKind.ReconcileSupplier or JobKind.ExportSupplier))
@@ -127,7 +129,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             if (!archived && (result.Kind != SupplierOutcomeKind.Unknown ||
                 result.Evidence.Length > 0 || result.Items.Count > 0)) review = "credential_recovery";
             if (identity && archived && result.Items.Count > 0 &&
-                !await ExistingItemsMatchAsync(tx, context, state, result, token))
+                !await ExistingItemsMatchAsync(tx, state, result, token))
             {
                 identity = false;
                 review = "identity_mismatch";
@@ -199,7 +201,7 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
             return true;
         }, ct);
 
-    private async Task<bool> ExistingItemsMatchAsync(SqliteTransaction tx, BrandContext context, State state, SupplierOutcome result, CancellationToken ct)
+    private static async Task<bool> ExistingItemsMatchAsync(SqliteTransaction tx, State state, SupplierOutcome result, CancellationToken ct)
     {
         var binding = state.Binding;
         int newCustomers = 0;
@@ -208,22 +210,16 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
         foreach (var item in result.Items)
         {
             byte[] key = SupplierRules.ItemKey(binding, item.Reference);
-            var existing = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Fulfillment>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "customer", Bytes = row.DeliveredContent!, Key = row.DeliveredContentKeyId!, row.ContentKind }).Concat(data.Data.Set<Entities.InventoryItem>().Where(row => row.SupplierItemKey == key).Select(row => new { row.Id, Request = row.SupplierRequestId!.Value, Kind = "bonus", Bytes = row.CredentialCiphertext, Key = row.CredentialKeyId, ContentKind = (string?)null })).Take(3).ToListAsync(token), ct);
-            if (existing.Count == 0) { if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++; continue; }
-            if (existing.Count != 1 || existing[0].Request != binding.RequestId || existing[0].Kind != (item.Disposition == SupplierItemDisposition.Customer ? "customer" : "bonus")) return false;
-            var value = existing[0];
-            if (value.ContentKind is not null && value.ContentKind != item.ContentKind) return false;
-            byte[] plain = value.Kind == "customer" ? new BrandCipher(secrets).Decrypt(context, "fulfillments", value.Id, "delivered_content", value.Key, value.Bytes) : new InventoryCipher(secrets).Decrypt(value.Id, value.Key, value.Bytes);
-            try { if (!CryptographicOperations.FixedTimeEquals(plain, item.Content.Span)) return false; }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            var existing = await SqliteSessionFactory.StepEfAsync(tx, false,
+                (data, token) => SupplierQueries.MatchItemAsync(data, binding, item, key, token), ct);
+            if (!existing.Found) { if (item.Disposition == SupplierItemDisposition.Customer) newCustomers++; continue; }
+            if (!existing.Matches) return false;
         }
         return newCustomers <= available;
     }
-    private async Task<bool> CaptureAsync(SqliteTransaction tx, BrandContext context,
+    private static async Task<bool> CaptureAsync(SqliteTransaction tx, BrandContext context,
         State state, SupplierOutcome result, CancellationToken ct)
     {
-        var inventory = new InventoryCipher(secrets);
-        var brandCipher = new BrandCipher(secrets);
         bool acquired = false;
         foreach (SupplierItem item in result.Items.OrderBy(x => x.Reference, StringComparer.Ordinal))
         {
@@ -241,17 +237,17 @@ public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions, Se
                 int unit = Enumerable.Range(1, state.Quantity).FirstOrDefault(n => !occupied.Contains(n));
                 if (unit == 0) throw new InvalidOperationException("Supplier item would exceed the accepted order.");
                 Guid fulfillment = Guid.CreateVersion7();
-                byte[] cipher = brandCipher.Encrypt(context, "fulfillments", fulfillment,
-                    "delivered_content", item.Content.Span);
-                await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { await data.RequireOrderCommandAsync(context, state.Binding.OrderId, token); data.Data.Add(new Entities.Fulfillment { Id = fulfillment, OrderId = state.Binding.OrderId, UnitNo = unit, Kind = "supplier", Status = "acquired", SupplierRequestId = state.Binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, DeliveredContent = cipher, DeliveredContentKeyId = secrets.CurrentBrandKeyId(context), ContentKind = item.ContentKind }); return true; }, ct);
+                byte[] content = item.Content.ToArray();
+                try { await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { await data.RequireOrderCommandAsync(context, state.Binding.OrderId, token); data.Data.Add(new Entities.Fulfillment { Id = fulfillment, OrderId = state.Binding.OrderId, UnitNo = unit, Kind = "supplier", Status = "acquired", SupplierRequestId = state.Binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, DeliveredContent = content, ContentKind = item.ContentKind }); return true; }, ct); }
+                finally { CryptographicOperations.ZeroMemory(content); }
             }
             else
             {
                 Guid inventoryId = Guid.CreateVersion7();
-                byte[] cipher = inventory.Encrypt(inventoryId, item.Content.Span);
-                byte[] digest = secrets.UseInventoryKey(secrets.CurrentInventoryKeyId,
-                    key => HMACSHA256.HashData(key, item.Content.Span));
-                await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { await data.RequireOrderCommandAsync(context, state.Binding.OrderId, token); data.Data.Add(new Entities.InventoryItem { Id = inventoryId, ProductId = state.Binding.ProductId, CredentialCiphertext = cipher, CredentialKeyId = secrets.CurrentInventoryKeyId, SourceFingerprint = digest, OriginKind = "supplier_bonus", SupplierRequestId = state.Binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, State = "admin_held" }); return true; }, ct);
+                byte[] content = item.Content.ToArray();
+                byte[] digest = SHA256.HashData(content);
+                try { await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) => { await data.RequireOrderCommandAsync(context, state.Binding.OrderId, token); data.Data.Add(new Entities.InventoryItem { Id = inventoryId, ProductId = state.Binding.ProductId, CredentialContent = content, SourceFingerprint = digest, OriginKind = "supplier_bonus", SupplierRequestId = state.Binding.RequestId, RemoteItemRef = item.Reference, SupplierItemKey = key, State = "admin_held" }); return true; }, ct); }
+                finally { CryptographicOperations.ZeroMemory(content); }
             }
             acquired = true;
         }

@@ -42,7 +42,7 @@ public static class AiBoundaryQualification
         await EnableSupport(f, ct);
         byte[] secret = SHA256.HashData("public synthetic AI-off support"u8);
         using var verifier = new TelegramWebhookVerifier(f.Context(0), secret);
-        var support = await new HumanSupportRouter(f.Sessions, f.Secrets).RouteAsync(verifier.Verify([TelegramFixture.Header(secret)], TelegramFixture.Body("/support", updateId: 912, messageId: 912)), ct);
+        var support = await new HumanSupportRouter(f.Sessions).RouteAsync(verifier.Verify([TelegramFixture.Header(secret)], TelegramFixture.Body("/support", updateId: 912, messageId: 912)), ct);
         Require(support.Created && calls == 0);
         Require(await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid'", ct) == 1);
         Require(await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", ct) == 1);

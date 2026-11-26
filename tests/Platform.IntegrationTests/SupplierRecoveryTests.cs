@@ -16,7 +16,7 @@ public sealed class SupplierRecoveryTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 1, Ct);
         var port = new SyntheticSupplier { Enforced = false, UnitCost = 1.10m, Submit = b => new(SupplierOutcomeKind.Completed, "public purchase", b.Currency, 1.11m, [new("public item", SupplierItemDisposition.Customer, "code", "public acquired code"u8)], "public actual higher charge"u8) };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Assert.Equal(1, port.Submits);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE cost_baseline_amount=1 AND review_code='cost_limit'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
@@ -34,7 +34,7 @@ public sealed class SupplierRecoveryTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets, -100777, crash ? TimeSpan.FromSeconds(1) : null);
+        var store = new SupplierRequestStore(f.Sessions, -100777, crash ? TimeSpan.FromSeconds(1) : null);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
         var worker = new SupplierFulfillmentWorker(store, port, port);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
@@ -50,7 +50,7 @@ public sealed class SupplierRecoveryTests
         else await worker.RunAsync(f.Context(0), lease, Ct);
         await Due(f);
         var lookup = await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct);
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), lookup, Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), lookup, Ct);
         Assert.Equal(crash ? 0 : 1, port.Submits);
         Assert.Equal(1, port.Lookups);
         Assert.All(port.Intents, value => Assert.Equal(binding.Intent, value));
@@ -67,7 +67,7 @@ public sealed class SupplierRecoveryTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 1, Ct);
         var port = new SyntheticSupplier { ProvenIntentLookup = false, Submit = _ => SyntheticSupplier.Unknown() };
-        var worker = new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets, -100777), port, port);
+        var worker = new SupplierFulfillmentWorker(new(f.Sessions, -100777), port, port);
         await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         await Due(f);
         await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct), Ct);
@@ -88,7 +88,7 @@ public sealed class SupplierRecoveryTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 2, Ct);
         var port = new SyntheticSupplier { SupportsExport = false, Submit = b => SyntheticSupplier.Complete(b, customers: 1) };
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var worker = new SupplierFulfillmentWorker(store, port, port);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         Guid request = (await store.ReadAsync(f.Context(0), lease, Ct)).RequestId;
@@ -107,7 +107,7 @@ public sealed class SupplierRecoveryTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 1, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         await Expire(f, lease);
         Assert.True(await store.RecoverExpiredAsync(f.Context(0), Ct));
@@ -130,7 +130,7 @@ public sealed class SupplierRecoveryTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 1, Ct);
         var port = new SyntheticSupplier { UnitCost = ExactDecimal.Parse(cost), Enforced = enforced, Ready = ready };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Assert.Equal(blocker is null ? 1 : 0, port.Submits);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE cost_baseline_amount=1", Ct));
         if (blocker is not null) Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='requires_admin' AND review_code='" + blocker + "'", Ct));
@@ -144,7 +144,7 @@ public sealed class SupplierRecoveryTests
         await Coupon(f, 100);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
         var port = new SyntheticSupplier { Submit = b => SyntheticSupplier.Complete(b, customers: 3) };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='partial_pending_admin'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", Ct));
@@ -159,7 +159,7 @@ public sealed class SupplierRecoveryTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 1, Ct);
         var port = new SyntheticSupplier { ArchiveFails = true };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Assert.Equal(1, port.Submits);
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='unknown' AND review_code='credential_recovery'", Ct));
@@ -171,7 +171,7 @@ public sealed class SupplierRecoveryTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets, -100777);
+        var store = new SupplierRequestStore(f.Sessions, -100777);
         var port = new SyntheticSupplier { Submit = b => SyntheticSupplier.Complete(b, 1) };
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         var binding = await store.ReadAsync(f.Context(0), lease, Ct);
@@ -197,7 +197,7 @@ public sealed class SupplierRecoveryTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { Submit = b => SyntheticSupplier.Complete(b, 1, 3) };
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         var binding = await store.ReadAsync(f.Context(0), lease, Ct);
@@ -223,7 +223,7 @@ public sealed class SupplierRecoveryTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 1, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { UnitCost = 2 };
         var worker = new SupplierFulfillmentWorker(store, port, port);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
@@ -248,12 +248,12 @@ public sealed class SupplierRecoveryTests
         await Coupon(f, 100);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
         var port = new SyntheticSupplier();
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.payments", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind IN ('expire_order_payment','verify_payment','issue_prepaid_coupon')", Ct));
-        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, Ct), Ct);
+        await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, Ct), Ct);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed' AND units_covered=5", Ct));
         Assert.Equal(5L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
     }
@@ -266,7 +266,7 @@ public sealed class SupplierRecoveryTests
         await using (var edit = await f.Sessions.BeginAsync(Ct))
         { await edit.ExecuteAsync(new DbStatement("UPDATE shop.product_supplier_sources SET enabled=false,revision=revision+1 WHERE id=$1", DbValue.Uuid(source)), Ct); await edit.CommitAsync(Ct); }
         var port = new SyntheticSupplier();
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Assert.Equal(0, port.Submits);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='blocked' AND source_revision=1 AND review_code='source_disabled'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='paid' AND fulfillment_status='requires_admin' AND release_authorized_at IS NULL", Ct));
@@ -275,7 +275,7 @@ public sealed class SupplierRecoveryTests
     {
         var admin = await f.AdminAsync(Ct);
         await using var session = await f.Sessions.BeginAsync(Ct);
-        await new PricingStore(f.Sessions, f.Secrets).IssueAsync(session, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-SUPPLIER-COUPON", CouponKind.Goodwill, percent, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+        await new PricingStore(f.Sessions).IssueAsync(session, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-SUPPLIER-COUPON", CouponKind.Goodwill, percent, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
         await session.CommitAsync(Ct);
     }
     internal static async Task Due(CheckoutFixture f)

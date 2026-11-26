@@ -23,7 +23,7 @@ public sealed class ManualDepositTests
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
             Guid coupon = Guid.NewGuid();
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-" + coupon.ToString("N"), CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-" + coupon.ToString("N"), CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         var order = await fixture.BankOrderAsync(Ct);
@@ -65,7 +65,7 @@ public sealed class ManualDepositTests
         await fixture.EnableAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-RACE-COUPON", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-RACE-COUPON", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         var original = await fixture.BankOrderAsync(Ct);
@@ -114,7 +114,7 @@ public sealed class ManualDepositTests
         await fixture.EnableBankAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-RECEIPT-EXPIRY", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-RECEIPT-EXPIRY", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         var order = await fixture.BankOrderAsync(Ct);
@@ -134,7 +134,7 @@ public sealed class ManualDepositTests
         };
         await using var controlled = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         var sessions = new DbSessionFactory(controlled);
-        var manual = new ManualDepositService(sessions, new PaymentSettlementStore(sessions, f.Secrets, fixture.Catalog));
+        var manual = new ManualDepositService(sessions, new PaymentSettlementStore(sessions, fixture.Catalog));
         Task<ManualDepositOutcome> Submit() => manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), order.Payment, "protected:synthetic/expiry-receipt", Ct);
         if (receiptFirst) Assert.Equal(ManualDepositOutcome.Submitted, await Submit());
         await using (var advance = f.Database.Data.CreateCommand("UPDATE receipt_probe.instant SET utc=utc+INTERVAL '1 microsecond'"))
@@ -146,7 +146,7 @@ public sealed class ManualDepositTests
             await claim.CommitAsync(Ct);
         }
         Assert.NotNull(lease);
-        PaymentExpiryOutcome result = await new PaymentExpiryService(sessions, f.Secrets).RunAsync(f.Context(0), lease, Ct);
+        PaymentExpiryOutcome result = await new PaymentExpiryService(sessions).RunAsync(f.Context(0), lease, Ct);
         Assert.Equal(receiptFirst ? PaymentExpiryOutcome.Protected : PaymentExpiryOutcome.Expired, result);
         if (!receiptFirst) Assert.Equal(ManualDepositOutcome.LateReview, await Submit());
         await using var read = await f.Sessions.BeginAsync(Ct);
@@ -201,7 +201,7 @@ public sealed class ManualDepositTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => fixture.Manual.SubmitAsync(f.Context(1), CheckoutFixture.Actor(1), order.Payment, "protected:synthetic/receipt", Ct));
         await fixture.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), order.Payment, "protected:synthetic/receipt", Ct);
         await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), order.Payment, "protected:synthetic/other", Ct));
-        using var bank = new BankDestinationService(f.Sessions, f.Secrets, new byte[32]);
+        using var bank = new BankDestinationService(f.Sessions, new byte[32]);
         var admin = await f.AdminAsync(Ct);
         long revision;
         await using (var read = await f.Sessions.BeginAsync(Ct)) revision = await read.QuerySingleAsync(new DbStatement("SELECT policy_version FROM shop.brands WHERE id=$1", DbValue.Uuid(f.Brands[0])), r => r.GetInt64(0), Ct);
@@ -224,7 +224,7 @@ public sealed class ManualDepositTests
         await fixture.EnableBankAsync(Ct);
         await using (var edit = await f.Sessions.BeginAsync(Ct))
         { await edit.ExecuteAsync(new DbStatement("UPDATE shop.brands SET market='iran',policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(f.Brands[1])), Ct); await edit.CommitAsync(Ct); }
-        using var bank = new BankDestinationService(f.Sessions, f.Secrets, new byte[32]);
+        using var bank = new BankDestinationService(f.Sessions, new byte[32]);
         var admin = await f.AdminAsync(Ct);
         var error = await Assert.ThrowsAsync<DbOperationException>(() => bank.SaveAsync(f.Context(1), admin, "1111222233334444", "Public duplicate", 1, Guid.NewGuid(), Ct));
         Assert.Equal(DbFailureKind.Constraint, error.Failure.Kind);

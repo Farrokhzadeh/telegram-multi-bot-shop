@@ -7,8 +7,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public async Task<PaymentSettlement> SettleAsync(BrandContext context, long expectedRevision, Guid payment,
         Func<InvoiceExpectation, CancellationToken, Task<ProviderPaymentSnapshot>> lookup, CancellationToken ct)
     {
@@ -67,7 +69,7 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
                 if (current.Kind == "prepaid_units")
                 {
                     route = ExternalSettlementRoute.Prepaid;
-                    await new SqlitePrepaidSourceStore(sessions, secrets)
+                    await new SqlitePrepaidSourceStore(sessions)
                         .IssueAsync(tx, context, current.Order, token);
                 }
                 else if (current.Kind != "product_purchase")
@@ -146,36 +148,32 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
             new Entities.WalletEntry { Id = Guid.CreateVersion7(), MovementKind = kind, IdempotencyKey = "payment-credit:" + state.PaymentId.ToString("D"), OrderId = state.Order, PaymentId = state.PaymentId, Reason = "verified_original_invoice" }, token, DateTime.ParseExact(now, "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal)), ct);
     }
 
-    internal async Task AcquireAsync(SqliteTransaction tx, BrandContext context, Guid order,
-        IReadOnlyList<Stock> stock, string now, CancellationToken ct)
+    internal static async Task AcquireAsync(SqliteTransaction tx, BrandContext context, Guid order,
+        IReadOnlyList<Guid> stock, string now, CancellationToken ct)
     {
-        var inventory = new InventoryCipher(secrets);
-        var cipher = new BrandCipher(secrets);
         int unit = 0;
         foreach (var item in stock)
         {
             Guid fulfillment = Guid.CreateVersion7();
-            byte[] plain = inventory.Decrypt(item.Id, item.Key, item.Content);
-            byte[] encrypted;
-            try { encrypted = cipher.Encrypt(context, "fulfillments", fulfillment, "delivered_content", plain); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
             int number = ++unit;
             await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
             {
                 await data.RequireOrderCommandAsync(context, order, token);
-                var content = new Entities.Fulfillment { Id = fulfillment, OrderId = order, UnitNo = number, Kind = "local" };
-                data.Data.Add(content); await data.FlushAsync(token, false);
-                var row = await data.Data.Set<Entities.InventoryItem>().SingleAsync(value => value.Id == item.Id && value.State == "available", token);
-                row.State = "allocated"; row.AssignedFulfillmentId = fulfillment; row.AllocatedAt = Utc(now); await data.FlushAsync(token, false);
-                content.Status = "acquired"; content.DeliveredContent = encrypted; content.DeliveredContentKeyId = secrets.CurrentBrandKeyId(context); content.ContentKind = "text"; return true;
+                await CheckoutQueries.AcquireStockAsync(data, order, item, fulfillment, number, Utc(now), token);
+                return true;
             }, ct);
         }
     }
 
-    internal static async Task<List<Stock>> ReadStockAsync(SqliteTransaction tx, Guid product, int quantity, CancellationToken ct)
+    internal static Task<List<Guid>> ReadStockAsync(SqliteTransaction tx, Guid product, int quantity, CancellationToken ct) =>
+        SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => ReadStockAsync(data, product, quantity, token), ct);
+
+    internal static Task<List<Guid>> ReadStockAsync(EfSession data, Guid product, int quantity, CancellationToken ct)
     {
-        return await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.InventoryItem>().Where(value => value.ProductId == product && value.State == "available").OrderBy(value => value.Id).Take(quantity).Select(value => new Stock(value.Id, value.CredentialCiphertext, value.CredentialKeyId)).ToListAsync(token), ct);
+        var rows = data.Data.Set<Entities.InventoryItem>().Where(value => value.ProductId == product && value.State == "available").OrderBy(value => value.Id).Take(quantity);
+        return rows.Select(row => row.Id).ToListAsync(ct);
     }
+
     private static Task<bool> FulfillmentAsync(SqliteTransaction tx, Guid order, string status, string? review, string now, CancellationToken ct) => SqlitePaymentOperations.OrderAsync(tx, order, row => { row.FulfillmentStatus = status; row.ReviewCode = review; }, Utc(now), ct);
     private static async Task QueueStatusAsync(SqliteTransaction tx, BrandContext context, State state, CancellationToken ct)
     {
@@ -184,7 +182,6 @@ public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessi
     }
     private static DateTime Utc(string value) => DateTime.ParseExact(value, "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
 
-    internal sealed record Stock(Guid Id, byte[] Content, string Key);
     private sealed record State(Guid Member, Guid Order, Guid Product, string Status, string OrderStatus, string Fulfillment,
         bool Preorder, int Quantity, string Kind, string Method, decimal Due, decimal? Expected, decimal? Tokens,
         decimal? Received, string? Provider, string Origin, string? Asset, string? ProviderStatus, string? ProviderCode,

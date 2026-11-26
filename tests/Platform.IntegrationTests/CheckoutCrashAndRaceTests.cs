@@ -10,7 +10,7 @@ namespace Platform.IntegrationTests;
 public sealed class CheckoutCrashAndRaceTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private static CatalogStore Catalog(CheckoutFixture f) => new(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Unexpected supplier read."));
+    private static CatalogStore Catalog(CheckoutFixture f) => new(f.Sessions, [], (_, _) => throw new InvalidOperationException("Unexpected supplier read."));
     private static WalletCheckoutService Service(CheckoutFixture f, CatalogStore? catalog = null) => new(f.Sessions, f.Store, catalog ?? Catalog(f));
     private static Task<ChannelMembership> Member(long chat, long actor, CancellationToken ct) => Task.FromResult(ChannelMembership.Member);
 
@@ -65,7 +65,7 @@ public sealed class CheckoutCrashAndRaceTests
         var admin = await f.AdminAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin,
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin,
                 new(Guid.NewGuid(), "PUBLIC-LOST-COMMIT", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
@@ -80,7 +80,7 @@ public sealed class CheckoutCrashAndRaceTests
         await using var proxy = new DropCommitReplyProxy(options.ConnectionString);
         await using var transport = proxy.CreateClientDataSource();
         var sessions = new DbSessionFactory(transport);
-        var service = new WalletCheckoutService(sessions, new CheckoutStore(sessions, f.Secrets), catalog);
+        var service = new WalletCheckoutService(sessions, new CheckoutStore(sessions), catalog);
         var error = await Assert.ThrowsAsync<DbOperationException>(() => service.AcceptAsync(f.Context(0), CheckoutFixture.Actor(0), request, quote, access, Ct));
         Assert.Equal(DbFailureKind.OutcomeUnknown, error.Failure.Kind);
         await proxy.CommitObserved.WaitAsync(TimeSpan.FromSeconds(10), Ct);

@@ -51,7 +51,7 @@ public static class SupplierQualification
         await SupplierFixture.ConfigureAsync(f, ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 5, ct);
         var port = new SyntheticSupplier { Submit = b => SyntheticSupplier.Complete(b, 1) };
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets, -100777);
+        var store = new SupplierRequestStore(f.Sessions, -100777);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, ct);
         await new SupplierFulfillmentWorker(store, port, port).RunAsync(f.Context(0), lease, ct);
         if (port.Submits != 1 || port.Archives != 1 || await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE kind='supplier' AND status='acquired'", ct) != 2 ||
@@ -59,7 +59,7 @@ public static class SupplierQualification
             await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=2 AND status='succeeded'", ct) != 1 ||
             await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit' AND signed_amount=-50", ct) != 1) throw new InvalidOperationException("Supplier acquisition qualification failed.");
         var manifest = await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, ct);
-        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), manifest, ct);
+        await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), manifest, ct);
         if (await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='ready'", ct) != 5 || await f.CountAsync("SELECT count(*) FROM shop.orders WHERE id='" + order.ToString("D") + "' AND release_authorized_at IS NOT NULL", ct) != 1) throw new InvalidOperationException("Complete mixed manifest failed.");
     }
 }

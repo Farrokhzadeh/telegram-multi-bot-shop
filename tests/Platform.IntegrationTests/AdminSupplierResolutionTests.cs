@@ -18,7 +18,7 @@ public sealed class AdminSupplierResolutionTests
         var actor = await f.AdminAsync(Ct);
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
-        { await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), actor, new(coupon, "PUBLIC-MIXED-RESOLVE", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct); await issue.CommitAsync(Ct); }
+        { await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), actor, new(coupon, "PUBLIC-MIXED-RESOLVE", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct); await issue.CommitAsync(Ct); }
         var order = await fixture.OrderAsync(5, ct: Ct);
         await fixture.CaptureAsync(order.Payment, order.Origin, order.Due, ct: Ct);
         await fixture.Store.SettleAsync(f.Context(0), order.Payment, PaymentSettlementFixture.Lookup, Ct);
@@ -28,7 +28,7 @@ public sealed class AdminSupplierResolutionTests
             var rejected = await Assert.ThrowsAsync<DbOperationException>(() => OutboxStore.EnqueueAsync(forbidden, JobIntent.Supplier(JobKind.SubmitSupplier, f.Brands[0], request), Guid.NewGuid(), DateTime.UtcNow, Ct));
             Assert.Equal(DbFailureKind.Constraint, rejected.Failure.Kind);
         }
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         long revision = await AdminCatalogAndResolutionTests.Revision(f, order.Order);
         long requestRevision = await RequestRevision(f, request);
         Guid retry = Guid.NewGuid();
@@ -70,7 +70,7 @@ public sealed class AdminSupplierResolutionTests
         }
         await Fail(f, order.Order);
         var actor = await f.AdminAsync(Ct);
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         long revision = await AdminCatalogAndResolutionTests.Revision(f, order.Order);
         long requestRevision = await RequestRevision(f, request);
         foreach (string action in new[] { "retry_supplier", "credit_supplier_failure" })
@@ -91,7 +91,7 @@ public sealed class AdminSupplierResolutionTests
         await fixture.Manual.SubmitAsync(f.Context(0), CheckoutFixture.Actor(0), order.Payment, "protected:synthetic/receipt", Ct);
         await fixture.Manual.DecideAsync(f.Context(0), actor, order.Payment, true, await AdminCatalogAndResolutionTests.Revision(f, order.Order), Guid.NewGuid(), "Public verified bank receipt", Ct);
         Guid request = await Fail(f, order.Order);
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         long revision = await AdminCatalogAndResolutionTests.Revision(f, order.Order);
         var credit = new OrderResolution("credit_supplier_failure", revision, "Public staff credit", Guid.NewGuid(), request, await RequestRevision(f, request));
         await Assert.ThrowsAsync<ArgumentException>(() => store.ResolveAsync(actor, f.Context(0), order.Order, credit, Ct));

@@ -6,10 +6,12 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public async Task<PaymentCapture> CaptureAsync(BrandContext context, long revision, VerifiedPaymentNotice notice,
-        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default)
+        Func<PaymentEvidenceContent, CancellationToken, Task<string>> archive, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(notice);
@@ -23,58 +25,68 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
         if (before.Canonical is not null &&
             CryptographicOperations.FixedTimeEquals(before.Canonical, notice.CanonicalHash))
             return new PaymentCapture(PaymentCaptureOutcome.Replayed, before.Id);
-        byte[] encrypted = new BrandCipher(secrets).Encrypt(context, "payments", before.Id, "ipn_evidence", notice.Body.Span);
-        var proof = new ProtectedPaymentEvidence(before.Id, context.BrandId,
-            Convert.ToHexStringLower(notice.RawHash), secrets.CurrentBrandKeyId(context), encrypted);
-        DateTime observed = DateTime.UtcNow;
-        if (before.Order is not null && before.OrderStatus == "awaiting_payment" &&
-            before.Deadline is DateTime due && due >= observed && Qualifies(before, notice))
+        byte[] content = notice.Body.ToArray();
+        try
         {
-            PaymentCapture? staged = await PersistAsync(context, revision, notice, before, proof, null, observed, ct);
-            if (staged is not null)
+            DateTime observed = DateTime.UtcNow;
+            if (before.Order is not null && before.OrderStatus == "awaiting_payment" &&
+                before.Deadline is DateTime due && due >= observed && Qualifies(before, notice))
             {
-                await ResumeArchiveAsync(context, revision, before.Id, archive, ct);
-                return staged;
+                PaymentCapture? staged = await PersistAsync(context, revision, notice, before, content, null, observed, ct);
+                if (staged is not null)
+                {
+                    await ResumeArchiveAsync(context, revision, before.Id, archive, ct);
+                    return staged;
+                }
             }
+            string asset = await PaymentEvidenceArchive.SavePlaintextAsync(archive, before.Id, context.BrandId, notice.RawHash, content, ct);
+            return await PersistAsync(context, revision, notice, before, content, asset, observed, ct)
+                ?? throw new PaymentNoticeRejectedException();
         }
-        string asset = await ArchiveAsync(archive, proof, ct);
-        return await PersistAsync(context, revision, notice, before, proof, asset, observed, ct)
-            ?? throw new PaymentNoticeRejectedException();
+        finally { CryptographicOperations.ZeroMemory(content); }
     }
 
     public async Task ResumeArchiveAsync(BrandContext context, long revision, Guid payment,
-        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, CancellationToken ct = default)
+        Func<PaymentEvidenceContent, CancellationToken, Task<string>> archive, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(archive);
         ArgumentOutOfRangeException.ThrowIfNegative(revision);
-        ProtectedPaymentEvidence? proof = await sessions.RunAsync(false, async (_, tx, token) =>
+        Pending? proof = await sessions.RunAsync<Pending?>(false, async (_, tx, token) =>
         {
             State state = await ReadAsync(tx, context, revision, payment, null, token);
             if (!state.Pending) return null;
-            var pending = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Payment>().Where(value => value.Id == payment && value.PendingEvidenceCiphertext != null).Select(value => new { value.EvidenceDigest, value.PendingEvidenceKeyId, value.PendingEvidenceCiphertext }).SingleOrDefaultAsync(cancel), token);
-            if (pending?.EvidenceDigest is null || pending.PendingEvidenceKeyId is null || pending.PendingEvidenceCiphertext is null) throw new PaymentNoticeRejectedException();
-            return new ProtectedPaymentEvidence(payment, context.BrandId, Convert.ToHexStringLower(pending.EvidenceDigest), pending.PendingEvidenceKeyId, pending.PendingEvidenceCiphertext);
+            var pending = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) =>
+                data.Data.Set<Entities.Payment>().Where(value => value.Id == payment)
+                    .Select(value => new Pending(value.EvidenceDigest, value.PendingEvidence)).SingleOrDefaultAsync(cancel), token);
+            if (pending?.Digest is null || pending.Content is null) throw new PaymentNoticeRejectedException();
+            return pending;
         }, ct);
-        if (proof is null) return;
-        string asset = await ArchiveAsync(archive, proof, ct);
-        await sessions.RunAsync(true, async (_, tx, token) =>
+        if (proof is not { Digest: { } digest, Content: { } content }) return;
+        try
         {
-            await ReadAsync(tx, context, revision, payment, null, token);
-            byte[] digest = Convert.FromHexString(proof.Digest);
-            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
+            string asset = await PaymentEvidenceArchive.SavePlaintextAsync(archive, payment, context.BrandId, digest, content, ct);
+            await sessions.RunAsync(true, async (_, tx, token) =>
             {
-                await data.RequirePaymentCommandAsync(context, payment, cancel);
-                var row = await data.Data.Set<Entities.Payment>().SingleOrDefaultAsync(value => value.Id == payment && value.EvidenceDigest == digest && value.PendingEvidenceCiphertext != null, cancel);
-                if (row is null) throw new PaymentNoticeRejectedException();
-                row.EvidenceAssetRef = asset; row.PendingEvidenceCiphertext = null; row.PendingEvidenceKeyId = null; return true;
-            }, token);
-            return 0;
-        }, ct);
+                State current = await ReadAsync(tx, context, revision, payment, null, token);
+                await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) =>
+                {
+                    await data.RequirePaymentCommandAsync(context, payment, cancel);
+                    var row = await data.Data.Set<Entities.Payment>().SingleOrDefaultAsync(value => value.Id == payment && value.EvidenceDigest == digest, cancel);
+                    if (row is null || !current.Pending && row.EvidenceAssetRef != asset) throw new PaymentNoticeRejectedException();
+                    if (!current.Pending) return true;
+                    row.EvidenceAssetRef = asset;
+                    row.PendingEvidence = null;
+                    return true;
+                }, token);
+                return 0;
+            }, ct);
+        }
+        finally { CryptographicOperations.ZeroMemory(content); }
     }
 
     private async Task<PaymentCapture?> PersistAsync(BrandContext context, long revision, VerifiedPaymentNotice notice,
-        State before, ProtectedPaymentEvidence proof, string? asset, DateTime observed, CancellationToken ct) =>
+        State before, byte[] content, string? asset, DateTime observed, CancellationToken ct) =>
         await sessions.RunAsync(true, async (_, tx, token) =>
         {
             State state = await ReadAsync(tx, context, revision, before.Id, null, token);
@@ -130,7 +142,7 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
                 row.FirstPaymentObservedAt = first;
                 if (decision == PaymentEvidenceDecision.Ready) { row.ConfirmedAt ??= observed; row.AmountReceived = row.AmountDue; }
                 row.IpnKeyId = notice.KeyId; row.IpnSignature = notice.Signature; row.IpnPayloadSha256 = notice.CanonicalHash; row.IpnVerifiedAt = observed; row.EvidenceAssetRef = asset; row.EvidenceDigest = notice.RawHash;
-                row.PendingEvidenceCiphertext = asset is null ? proof.Ciphertext.ToArray() : null; row.PendingEvidenceKeyId = asset is null ? proof.EncryptionKeyId : null;
+                row.PendingEvidence = asset is null ? content.ToArray() : null;
             }, token);
             if (state.Order is Guid order && first is DateTime observedFirst &&
                 state.Deadline is DateTime deadline && observedFirst <= deadline &&
@@ -171,7 +183,7 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
              join user in data.Data.Set<Entities.User>() on (value.TopupUserId ?? (Guid?)order.UserId) equals user.Id
              join brand in data.Data.Set<Entities.Brand>() on user.BrandId equals brand.Id
              where brand.Id == context.BrandId && brand.BotId == context.BotId && brand.Active && brand.PolicyVersion == revision && ((payment != null && value.Id == payment) || (origin != null && value.IdempotencyRef == origin))
-             select new State(value.Id, user.Id, value.OrderId, value.PaymentMethod, value.QuoteCurrency, value.AmountDue, value.NetworkAsset ?? "", value.ProviderPaymentRef, value.ExpectedNetworkAmount, value.IdempotencyRef, value.Status, value.IpnPayloadSha256, value.FirstPaymentObservedAt, value.ConfirmedAt, order == null ? null : order.PaymentDueAt, order == null ? null : order.PaymentStatus, value.ProviderCode, value.PendingEvidenceCiphertext != null, value.HostedInvoiceStartedAt != null, value.HostedInvoiceRef)).SingleOrDefaultAsync(token), ct);
+             select new State(value.Id, user.Id, value.OrderId, value.PaymentMethod, value.QuoteCurrency, value.AmountDue, value.NetworkAsset ?? "", value.ProviderPaymentRef, value.ExpectedNetworkAmount, value.IdempotencyRef, value.Status, value.IpnPayloadSha256, value.FirstPaymentObservedAt, value.ConfirmedAt, order == null ? null : order.PaymentDueAt, order == null ? null : order.PaymentStatus, value.ProviderCode, value.PendingEvidence != null, value.HostedInvoiceStartedAt != null, value.HostedInvoiceRef)).SingleOrDefaultAsync(token), ct);
         return state ?? throw new UnauthorizedAccessException("The payment is unavailable.");
     }
 
@@ -189,14 +201,9 @@ public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions, Sec
                 payment.Due == notice.QuoteAmount && string.Equals(payment.Asset, notice.Asset, StringComparison.OrdinalIgnoreCase)
             : payment.Provider == notice.ProviderPayment && payment.Expected is not null);
 
-    private static async Task<string> ArchiveAsync(
-        Func<ProtectedPaymentEvidence, CancellationToken, Task<string>> archive, ProtectedPaymentEvidence proof,
-        CancellationToken ct)
+    private sealed record Pending(byte[]? Digest, byte[]? Content)
     {
-        string asset = await archive(proof, ct);
-        if (!asset.StartsWith("protected:", StringComparison.Ordinal) || asset.Length is < 12 or > 1024 ||
-            asset.Any(char.IsControl)) throw new PaymentNoticeRejectedException();
-        return asset;
+        public override string ToString() => "Pending payment evidence [redacted]";
     }
 
     private sealed record State(Guid Id, Guid Member, Guid? Order, string Method, string Currency, decimal Due, string Asset,

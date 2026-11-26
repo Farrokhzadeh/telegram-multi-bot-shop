@@ -70,7 +70,7 @@ public sealed partial class CheckoutStore
         var stock = await ReadStockAsync(session, request.ProductId, local, ct);
         if (stock.Count != local) return new(CheckoutOutcome.OutOfStock);
         if (System.Diagnostics.Stopwatch.GetElapsedTime(prepared.IssuedAt) > TimeSpan.FromSeconds(30)) Reject(session);
-        var pricing = new PricingStore(sessions, secrets);
+        var pricing = new PricingStore(sessions);
         foreach (var old in pending)
         {
             await session.RunEfStepAsync(true, async (data, token) =>
@@ -141,7 +141,8 @@ public sealed partial class CheckoutStore
             var rows = await session.RunEfStepAsync(false, async (data, token) =>
             {
                 await data.LockInventoryAsync(product, stock.Count, batch, token);
-                return await data.Data.Set<Entities.InventoryItem>().Where(value => value.ProductId == product && value.State == "available").OrderBy(value => value.Id).Skip(stock.Count).Take(batch).Select(value => new Stock(value.Id, value.CredentialCiphertext, value.CredentialKeyId)).ToListAsync(token);
+                var rows = data.Data.Set<Entities.InventoryItem>().Where(value => value.ProductId == product && value.State == "available").OrderBy(value => value.Id).Skip(stock.Count).Take(batch);
+                return await CheckoutQueries.ReadStockAsync(data, rows, token);
             }, ct);
             stock.AddRange(rows);
             if (rows.Count != batch) break;
@@ -150,27 +151,16 @@ public sealed partial class CheckoutStore
     }
     internal async Task AcquireAsync(DbSession session, BrandContext context, Guid order, IReadOnlyList<Stock> stock, CancellationToken ct)
     {
-        var inventory = new InventoryCipher(secrets);
-        var cipher = new BrandCipher(secrets);
         int unit = 0;
         foreach (Stock item in stock)
         {
             Guid fulfillment = Guid.CreateVersion7();
-            byte[] plain = inventory.Decrypt(item.Id, item.Key, item.Content);
-            byte[] encrypted;
-            try { encrypted = cipher.Encrypt(context, "fulfillments", fulfillment, "delivered_content", plain); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
             int number = ++unit;
             await session.RunEfStepAsync(true, async (data, token) =>
             {
                 await data.RequireOrderCommandAsync(context, order, token);
-                var content = new Entities.Fulfillment { Id = fulfillment, OrderId = order, UnitNo = number, Kind = "local" };
-                data.Data.Add(content);
-                await data.FlushAsync(token, false);
-                var inventoryItem = await data.Data.Set<Entities.InventoryItem>().SingleAsync(value => value.Id == item.Id && value.State == "available", token);
-                inventoryItem.State = "allocated"; inventoryItem.AssignedFulfillmentId = fulfillment; inventoryItem.AllocatedAt = await data.BrandClockAsync(context.BrandId, token);
-                await data.FlushAsync(token, false);
-                content.Status = "acquired"; content.DeliveredContent = encrypted; content.DeliveredContentKeyId = secrets.CurrentBrandKeyId(context); content.ContentKind = "text";
+                DateTime now = await data.BrandClockAsync(context.BrandId, token);
+                await CheckoutQueries.AcquireStockAsync(data, order, item, fulfillment, number, now, token);
                 return true;
             }, ct);
         }

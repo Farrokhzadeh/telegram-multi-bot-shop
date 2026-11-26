@@ -20,21 +20,17 @@ public sealed class SqliteSupplierWorkerTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var secrets = SecretFiles.Load(files.Root, "service-config.json",
-                files.Grant(brands: CheckoutFixture.BrandIds));
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), source = Guid.NewGuid(),
                 order = Guid.NewGuid(), request = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
-                        bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_id,bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,title,fulfillment_kind,availability_policy)
                     VALUES ($product,'Synthetic supplier goods','supplier','immediate');
@@ -62,7 +58,7 @@ public sealed class SqliteSupplierWorkerTests
                     request, DateTime.UtcNow, token);
                 return 0;
             }, ct);
-            var store = new SqliteSupplierRequestStore(sessions, secrets);
+            var store = new SqliteSupplierRequestStore(sessions);
             JobLease? lease = await store.ClaimAsync(brand, JobKind.SubmitSupplier, Guid.NewGuid(), ct);
             Assert.NotNull(lease);
             ISupplierAdapter adapter = uncertain ? new SyntheticAdapter(true) :
@@ -71,7 +67,7 @@ public sealed class SqliteSupplierWorkerTests
             await new SqliteSupplierFulfillmentWorker(store, adapter, archive).RunAsync(brand, lease, ct);
             if (adapter is SyntheticAdapter fake) Assert.Equal(1, fake.Submissions);
             Assert.Equal(uncertain ? 0 : 1, archive.Saves);
-            await new SqliteSessionFactory(path).RunAsync(false, async (_, tx, token) =>
+            await SqliteSessionFactory.ForPlaintext(path).RunAsync(false, async (_, tx, token) =>
             {
                 using var inspect = SqliteWallet.Command(tx, """
                     SELECT r.status,r.review_code,

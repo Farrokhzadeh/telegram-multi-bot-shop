@@ -18,7 +18,7 @@ public sealed class HumanSupportTests
         await using var fixture = await SecretFixture();
         using var files = new SyntheticSecretFiles();
         using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
-        var router = new UpdateRouter(fixture.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(fixture.Sessions, secrets));
+        var router = new UpdateRouter(fixture.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(fixture.Sessions));
         var first = await router.RouteAsync(Support(fixture, 501), Ct);
         var reply = await router.RouteAsync(Message(fixture, "2", 502), Ct);
         Assert.Equal(UpdateRouteCode.Support, reply.Code);
@@ -35,7 +35,7 @@ public sealed class HumanSupportTests
         await using var fixture = await SecretFixture();
         using var files = new SyntheticSecretFiles();
         using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
-        var router = new HumanSupportRouter(fixture.Sessions, secrets);
+        var router = new HumanSupportRouter(fixture.Sessions);
         var first = await router.RouteAsync(Support(fixture, 31), Ct);
         Assert.True(first.Created);
         var replay = await router.RouteAsync(Support(fixture, 32), Ct);
@@ -176,7 +176,7 @@ public sealed class HumanSupportTests
         await using var fixture = await SecretFixture();
         using var files = new SyntheticSecretFiles();
         using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
-        var support = new HumanSupportRouter(fixture.Sessions, secrets);
+        var support = new HumanSupportRouter(fixture.Sessions);
         var router = new UpdateRouter(fixture.Sessions, (_, _, _) => throw new InvalidOperationException(), support);
         Guid order = await SeedPaidPreorder(fixture);
         string before = await FinancialSnapshot(fixture);
@@ -205,14 +205,14 @@ public sealed class HumanSupportTests
         using var files = new SyntheticSecretFiles();
         using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var update = Message(fixture, "/support", 201);
-        var first = await new HumanSupportRouter(fixture.Sessions, secrets).RouteAsync(update, Ct);
+        var first = await new HumanSupportRouter(fixture.Sessions).RouteAsync(update, Ct);
         var actor = await Actor(fixture);
         await using (var close = await fixture.Sessions.BeginAsync(Ct))
         {
             await SupportStore.CloseTicketAsync(close, actor, first.TicketId, Ct);
             await close.CommitAsync(Ct);
         }
-        var replay = await new HumanSupportRouter(fixture.Sessions, secrets).RouteAsync(update, Ct);
+        var replay = await new HumanSupportRouter(fixture.Sessions).RouteAsync(update, Ct);
         Assert.Equal(first.TicketId, replay.TicketId);
         Assert.False(replay.Created);
         Assert.Equal("closed", (await Ticket(fixture, first.TicketId)).Status);
@@ -231,7 +231,7 @@ public sealed class HumanSupportTests
         await using var fixture = await SecretFixture();
         using var files = new SyntheticSecretFiles();
         using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
-        var router = new HumanSupportRouter(fixture.Sessions, secrets);
+        var router = new HumanSupportRouter(fixture.Sessions);
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Message(fixture, "/menu", 301), Ct));
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Message(fixture, "public text outside support", 302), Ct));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => router.RouteAsync(Message(fixture, "/support " + fixture.Orders[1].ToString("D"), 303), Ct));
@@ -251,7 +251,7 @@ public sealed class HumanSupportTests
         await using var fixture = await SecretFixture();
         using var files = new SyntheticSecretFiles();
         using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
-        var router = new HumanSupportRouter(fixture.Sessions, secrets);
+        var router = new HumanSupportRouter(fixture.Sessions);
         var ticket = await router.RouteAsync(Message(fixture, "/support", 351), Ct);
         using var verifier = new TelegramWebhookVerifier(fixture.Contexts[0], Secret);
         byte[] body = TelegramFixture.Replace(TelegramFixture.Body("public media caption", updateId: 352, messageId: 352), "\"text\":", "\"document\":{\"file_id\":\"public-synthetic-media\"},\"text\":");
@@ -273,7 +273,7 @@ public sealed class HumanSupportTests
             await disable.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=false,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(fixture.Brands[0])), Ct);
             await disable.CommitAsync(Ct);
         }
-        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => new HumanSupportRouter(fixture.Sessions, secrets).RouteAsync(Message(fixture, "/support", 401), Ct));
+        await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => new HumanSupportRouter(fixture.Sessions).RouteAsync(Message(fixture, "/support", 401), Ct));
         Assert.Equal(0L, await CountAll(fixture, "SELECT count(*) FROM shop.support_tickets"));
     }
 

@@ -2,11 +2,11 @@
 
 Akanti is a multi-brand commerce backend for Telegram shops. Each brand has its own bot, customer memberships, wallets, orders, and payment settings. Brands can share a product catalog and stock pool. AccAbad (`acc-abad`) is the first brand Akanti will replace.
 
-The staging backend uses managed C# and ASP.NET Core on .NET 10 with PostgreSQL. SQLite support is in progress and is not yet wired into the staging bot. It models payments, inventory, durable jobs, and delivery in a 28-table relational schema. The [admin API guide](docs/ADMIN_API.md) explains how to get the OpenAPI contract and start a frontend.
+The staging backend uses managed C# and ASP.NET Core on .NET 10. The current deployment path redeploys accepted SQLite v2 state. PostgreSQL v2 is available for isolated qualification. It models payments, inventory, durable jobs, and delivery in a 28-table relational schema. The current Spec Kit feature covers EF Core and plaintext content for SQLite and PostgreSQL. Its [qualification quickstart](specs/005-full-ef-no-encryption/quickstart.md) documents the isolated v2 paths and offline conversion. The [admin API guide](docs/ADMIN_API.md) explains how to get the OpenAPI contract and start a frontend.
 
 ## Release status
 
-Spec Kit records 96/96 tasks complete for the approved backend scope. The [staging image qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44502732355) passed 1,268 tests, Native AOT checks, and a one-brand synthetic canary. The staging Telegram bot can browse a synthetic product and use a test wallet. Akanti still needs the customer and operator workflows wired into the deployed runtime before it can replace AccAbad.
+The earlier multibrand backend specification records 96/96 tasks complete for its approved scope. [Feature 005](specs/005-full-ef-no-encryption/tasks.md) tracks the current EF Core and plaintext work separately. The [staging image qualification](https://github.com/Farrokhzadeh/telegram-multi-bot-shop/actions/runs/44502732355) passed 1,268 tests, Native AOT checks, and a one-brand synthetic canary. The staging Telegram bot can browse a synthetic product and use a test wallet. Akanti still needs the customer and operator workflows wired into the deployed runtime before it can replace AccAbad.
 
 ## Method 1 — Run or update the local demo
 
@@ -81,7 +81,7 @@ Serving real Telegram users requires a qualified Telegram receiver and job runti
 Akanti uses `Telegram.Bot` for Telegram API requests. For the Python staging scripts, set `AKANTI_TELEGRAM_BOT_HOST` to the absolute path of the executable `Platform.BotHost` from the same build. The scripts pass Telegram requests to that executable over local pipes.
 
 
-- Use the SDK pinned in [global.json](global.json). The [qualification workflow](.github/workflows/backend-ci.yml) specifies locked restore, formatting checks, disposable PostgreSQL tests, managed staging builds, and a separate Native AOT baseline comparison.
+- Use the SDK pinned in [global.json](global.json). The [qualification workflow](.github/workflows/backend-ci.yml) specifies locked restore, formatting checks, disposable PostgreSQL tests, managed staging builds, and a separate pinned historical Native AOT canary.
 - Start with the [functional spec](specs/001-multibrand-redesign/spec.md), [architecture plan](specs/001-multibrand-redesign/plan.md), [schema contract](specs/001-multibrand-redesign/schema-contract.md), and [implementation tasks](specs/001-multibrand-redesign/tasks.md).
 - Read the [operator handoff](specs/001-multibrand-redesign/CONVERSATION-HANDOFF.md) for qualification history and the [supplier matrix](specs/001-multibrand-redesign/contracts/supplier-provider-matrix.md) for approved provider scope.
 - The repository uses Spec Kit 1.2.0 with Bash scripts in `.specify/scripts/bash/`. Run `bash .specify/scripts/bash/check-prerequisites.sh --paths-only --json` to locate the active feature. See [AGENTS.md](AGENTS.md) for contribution and evidence rules.

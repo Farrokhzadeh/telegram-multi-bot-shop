@@ -16,7 +16,7 @@ public static class WorkflowActivityQualification
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_channels(brand_id,chat_id,required,active) VALUES($1,-1001,true,true)", DbValue.Uuid(f.Brands[0])), ct);
             await seed.CommitAsync(ct);
         }
-        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException()));
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException()));
         Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(OrderIds.New(), f.Product, 1), (_, _, _) => Task.FromResult(ChannelMembership.Unknown), ct)).Outcome == CheckoutOutcome.Unavailable, "unverified channel policy still blocks checkout");
         var accepted = new CheckoutRequest(OrderIds.New(), f.Product, 1);
         Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), accepted, Member, ct)).Outcome == CheckoutOutcome.Purchased, "current verified policy permits original checkout");
@@ -40,7 +40,7 @@ public static class WorkflowActivityQualification
     public static async Task CheckoutErrorsAsync(CancellationToken ct = default)
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 2, ct: ct);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException());
+        var catalog = new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException());
         var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
         Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(OrderIds.New(), f.Product, 1), Member, ct)).Outcome == CheckoutOutcome.InsufficientBalance, "authorized wallet rejection");
         bool shortage = false;
@@ -104,7 +104,7 @@ public static class WorkflowActivityQualification
                 CustomerFlowState.Quantity, productId: f.Product, anchorMessageId: 77, expiresAt: DateTime.UtcNow.AddHours(1), ct: ct);
             await seed.CommitAsync(ct);
         }
-        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(f.Sessions, f.Secrets));
+        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(f.Sessions));
         string[] digits = ["2", "۲", "٢"];
         for (int i = 0; i < digits.Length; i++)
         {
@@ -128,7 +128,7 @@ public static class WorkflowActivityQualification
             await seed.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET min_quantity=2,max_quantity=5 WHERE brand_id=$1", DbValue.Uuid(f.Brands[0])), ct);
             await seed.CommitAsync(ct);
         }
-        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(f.Sessions, f.Secrets));
+        var router = new UpdateRouter(f.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(f.Sessions));
         string[] invalid = ["0", "-1", "1", "6", "10001", "2147483648", "1.5", "1e1", "+2", " 2", "public private message"];
         for (int i = 0; i < invalid.Length; i++)
         {
@@ -190,7 +190,7 @@ public static class WorkflowActivityQualification
         await using var f = await CheckoutFixture.CreateAsync(users: 6, stock: 8, ct: ct);
         var local = f.Request();
         Require((await f.Store.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), local, ct)).Outcome == CheckoutOutcome.Purchased, "direct local checkout");
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException());
+        var catalog = new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException());
         var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
         var request = new CheckoutRequest(OrderIds.New(), f.Product, 2);
         Require((await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, ct)).Outcome == CheckoutOutcome.Purchased, "prepared checkout");
@@ -216,7 +216,7 @@ public static class WorkflowActivityQualification
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 4, ct: ct);
         await using (var fail = f.Database.Data.CreateCommand("CREATE FUNCTION shop.synthetic_workflow_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION USING ERRCODE='23514',MESSAGE='synthetic workflow failure'; END $$; CREATE CONSTRAINT TRIGGER synthetic_workflow_failure AFTER INSERT ON shop.bot_activity_events DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.action_code='checkout_created') EXECUTE FUNCTION shop.synthetic_workflow_failure()")) await fail.ExecuteNonQueryAsync(ct);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException());
+        var catalog = new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException());
         var service = new WalletCheckoutService(f.Sessions, f.Store, catalog);
         var request = new CheckoutRequest(OrderIds.New(), f.Product, 1);
         bool failed = false;

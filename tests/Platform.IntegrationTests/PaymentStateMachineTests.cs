@@ -57,7 +57,7 @@ public sealed class PaymentStateMachineTests
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database, IncludeErrorDetail = false };
         await using var proxy = new DropCommitReplyProxy(connection.ConnectionString);
         await using var data = proxy.CreateClientDataSource();
-        var error = await Assert.ThrowsAsync<DbOperationException>(() => new PaymentSettlementStore(new(data), f.Secrets, fixture.Catalog).SettleAsync(f.Context(0), old.Payment, PaymentSettlementFixture.Lookup, Ct));
+        var error = await Assert.ThrowsAsync<DbOperationException>(() => new PaymentSettlementStore(new(data), fixture.Catalog).SettleAsync(f.Context(0), old.Payment, PaymentSettlementFixture.Lookup, Ct));
         Assert.Equal(DbRecovery.ReconcileBeforeRetry, error.Failure.Recovery);
         await proxy.CommitObserved.WaitAsync(TimeSpan.FromSeconds(10), Ct);
         Assert.Equal(PaymentSettlementOutcome.Replayed, (await fixture.Store.SettleAsync(f.Context(0), old.Payment, (_, _) => throw new InvalidOperationException(), Ct)).Outcome);
@@ -122,7 +122,7 @@ public sealed class PaymentStateMachineTests
             JobLease lease;
             await using (var claim = await f.Sessions.BeginAsync(Ct))
             { lease = (await OutboxStore.ClaimAsync(claim, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromSeconds(30), Ct))!; await claim.CommitAsync(Ct); }
-            await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), lease, Ct);
+            await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), lease, Ct);
             Assert.Equal(1L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
             Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed'", Ct));
             Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
@@ -152,7 +152,7 @@ public sealed class PaymentStateMachineTests
         await using (var observe = await f.Sessions.BeginAsync(Ct))
         { await BrandUserStore.ObservePrivateAsync(observe, f.Context(0), 9999, Ct); await observe.CommitAsync(Ct); }
         Guid payment = Guid.NewGuid();
-        var evidence = new PaymentEvidenceStore(f.Sessions, f.Secrets);
+        var evidence = new PaymentEvidenceStore(f.Sessions);
         await evidence.CreateTopupAsync(f.Context(0), 9999, payment, new(20, Currency.Usd), CryptoAsset.UsdtTrc20, Ct);
         await using (var bind = await f.Sessions.BeginAsync(Ct))
         { await evidence.BindInvoiceAsync(bind, f.Context(0), 9999, payment, PaymentSettlementFixture.Provider(payment), 10.4m, Ct); await bind.CommitAsync(Ct); }
@@ -167,7 +167,7 @@ public sealed class PaymentStateMachineTests
         Guid coupon = Guid.NewGuid();
         var admin = await f.AdminAsync(Ct);
         await using var issue = await f.Sessions.BeginAsync(Ct);
-        await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-" + coupon.ToString("N"), CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1, EndsAt: ends), Guid.NewGuid(), Ct);
+        await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-" + coupon.ToString("N"), CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 1, EndsAt: ends), Guid.NewGuid(), Ct);
         await issue.CommitAsync(Ct);
         return coupon;
     }

@@ -119,7 +119,7 @@ public sealed class PaymentExpiryTests
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(coupon, "PUBLIC-SWITCH-COUPON", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(coupon, "PUBLIC-SWITCH-COUPON", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         var service = new WalletCheckoutService(f.Sessions, f.Store, payments.Catalog);
@@ -133,7 +133,7 @@ public sealed class PaymentExpiryTests
         if (firstMethod == CheckoutPayment.Crypto)
         {
             await using var bind = await f.Sessions.BeginAsync(Ct);
-            await new PaymentEvidenceStore(f.Sessions, f.Secrets).BindInvoiceAsync(bind, f.Context(0), CheckoutFixture.Actor(0), firstPayment, PaymentSettlementFixture.Provider(firstPayment), 10.4m, Ct);
+            await new PaymentEvidenceStore(f.Sessions).BindInvoiceAsync(bind, f.Context(0), CheckoutFixture.Actor(0), firstPayment, PaymentSettlementFixture.Provider(firstPayment), 10.4m, Ct);
             await bind.CommitAsync(Ct);
         }
         async Task<(string Method, string Currency, decimal Due, string? Provider, byte[]? Card)> OriginalAsync()
@@ -283,7 +283,7 @@ public sealed class PaymentExpiryTests
         }
         long revision;
         await using (var read = await f.Sessions.BeginAsync(Ct)) revision = await read.QuerySingleAsync(new DbStatement("SELECT policy_version FROM shop.brands WHERE id=$1", DbValue.Uuid(f.Brands[1])), r => r.GetInt64(0), Ct);
-        using var bank = new BankDestinationService(f.Sessions, f.Secrets, new byte[32]);
+        using var bank = new BankDestinationService(f.Sessions, new byte[32]);
         var err = await Assert.ThrowsAsync<DbOperationException>(() => bank.SaveAsync(f.Context(1), admin, "1111222233334444", "Public second holder", revision, Guid.NewGuid(), Ct));
         Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
     }

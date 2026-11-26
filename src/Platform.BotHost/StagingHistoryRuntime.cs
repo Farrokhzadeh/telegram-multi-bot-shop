@@ -51,7 +51,7 @@ internal static class StagingHistoryRuntime
         using var config = JsonDocument.Parse(ReadPrivate(Path.Combine(root, "runtime-binding.json"), 4096));
         var binding = config.RootElement;
         if (binding.ValueKind != JsonValueKind.Object || binding.EnumerateObject().Count() != 8 ||
-            binding.GetProperty("schemaVersion").GetInt32() != 1 ||
+            binding.GetProperty("schemaVersion").GetInt32() != 2 ||
             binding.GetProperty("instanceId").GetString() != "staging" ||
             binding.GetProperty("botUsername").GetString() != "testadbadbot")
             throw new UnauthorizedAccessException();
@@ -81,12 +81,10 @@ internal static class StagingHistoryRuntime
             connection.Username != "shop_staging_history_reader" || connection.IncludeErrorDetail || connection.Multiplexing)
             throw new UnauthorizedAccessException();
         await using var data = NpgsqlDataSource.Create(connection.ConnectionString);
-        using var secrets = SecretFiles.Load(root, "service-config.json",
-            new SecretLoadGrant(SecretService.BotHost, deployment, revision, [brand], false));
-        var files = new CustomerHistoryFiles(Path.Combine(root, "teleg-customer-history-reviewed"), secrets);
-        var sessions = new DbSessionFactory(data);
-        var router = new CustomerHistoryCommandRouter(sessions, new CustomerHistoryArchive(secrets), files);
-        using var receipt = JsonDocument.Parse(ReadPrivate(Path.Combine(root, "offline-readonly-history.receipt.json"), 4096));
+        var files = new CustomerHistoryFiles(Path.Combine(root, "teleg-customer-history-reviewed-v2"));
+        var sessions = DbSessionFactory.ForPlaintext(data);
+        var router = new CustomerHistoryCommandRouter(sessions, files);
+        using var receipt = JsonDocument.Parse(ReadPrivate(Path.Combine(root, "offline-readonly-history-v2.receipt.json"), 4096));
         var evidence = receipt.RootElement;
         if (evidence.GetProperty("source").GetString() != source ||
             !evidence.GetProperty("source_archive_sha256_verified").GetBoolean() ||
@@ -101,10 +99,8 @@ internal static class StagingHistoryRuntime
             var owner = await BrandUserStore.RequireAsync(membership, context!, actor, member, ct);
             if (owner.Blocked || owner.Banned) throw new UnauthorizedAccessException();
         }
-        var encrypted = await files.ReadAsync(context!, member, ct);
-        string sha256 = Convert.ToHexString(SHA256.HashData(encrypted.Span)).ToLowerInvariant();
-        if (sha256 != evidence.GetProperty("encrypted_history_sha256").GetString() ||
-            new CustomerHistoryArchive(secrets).Open(context!, member, encrypted.Span).Count != expected)
+        var localArchive = await files.ReadCommitmentAsync(context!, member, ct);
+        if (localArchive.Sha256 != evidence.GetProperty("plaintext_history_sha256").GetString() || localArchive.Orders != expected)
             throw new UnauthorizedAccessException();
         if (!deliver)
         {

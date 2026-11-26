@@ -4,11 +4,23 @@ import subprocess
 import time
 from provision_synthetic_stage import BRANDS, PRODUCT, ROOT, ROLES, SDK, compose, output, query, run
 
+def validate_expected_mounts(root, role, service):
+    expected = {"SHOP_STAGING_MODE", "SHOP_STAGING_DEPLOYMENT", "SHOP_STAGING_SCHEMA_SHA256",
+                "DOTNET_PROCESSOR_COUNT", "DOTNET_EnableDiagnostics"}
+    assert set(service["environment"]) == expected
+    mount = [entry for entry in service["volumes"] if ":/run/staging:ro" in entry]
+    assert mount == [f"{root}/roles/{role}:/run/staging:ro"]
+    assert set(path.name for path in (root / "roles" / role).iterdir()) == (
+        {"db-password", "tls.pfx"} | ({"webhook"} if role.startswith("bot-") else
+                                     {"recipient-probe"} if role == "jobs" else set()))
+
+
 def inspect(kind, name):
     return json.loads(output("docker", kind, "inspect", name))[0]
 
 def verify():
     stage = json.loads((ROOT / "operator/identity.json").read_text())
+    assert stage["environment"] == "isolated-synthetic-v2"
     network = inspect("network", "shop-staging-private")
     assert network["Internal"] and not network["EnableIPv6"]
     assert network["Options"]["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
@@ -36,25 +48,23 @@ def verify():
         run("docker", "exec", container, "sh", "-ec", """
             test -z "$(awk '$2 == "00000000" {print}' /proc/net/route)"
             test "$(stat -c '%a %u' /run/staging/db-password)" = "400 $(id -u)"
-            test -r /run/staging/keys/service-config.json
-            test ! -w /run/staging/keys/service-config.json
-            if [ "$1" = jobs ]; then test -r /run/staging/keys/inventory-current; else test ! -e /run/staging/keys/inventory-current; fi
+            test ! -e /run/staging/keys
             case "$1" in
-                bot-*) alias=${1#bot-}
+                bot-*)
                     test -r /run/receipt/receipt
-                    test ! -w /run/receipt/receipt
-                    for other in a b c; do
-                        if [ "$other" = "$alias" ]; then test -r "/run/staging/keys/$other-current"; else test ! -e "/run/staging/keys/$other-current"; fi
-                    done;;
+                    test ! -w /run/receipt/receipt;;
                 *) test ! -e /run/receipt;;
             esac
         """, "stage", role)
+    assert query("SELECT obj_description('shop'::regnamespace,'pg_namespace');") == "akanti-plaintext-v2"
+    assert query("SELECT shobj_description((SELECT oid FROM pg_database WHERE datname=current_database()),'pg_database');") == (
+        f"shop-staging-synthetic-v2:{stage['deployment']}:{stage['schema']}")
     for alias, brand in BRANDS.items():
         role = "shop_staging_bot_" + alias
         assert query(f"SET ROLE {role}; SELECT count(*)||':'||min(code) FROM shop.brands;") == f"1:stage-{alias}"
         assert query(f"SET ROLE {role}; SELECT count(*) FROM shop.users WHERE brand_id<>'{brand}';") == "0"
         assert query(f"SELECT has_schema_privilege('{role}','shop','CREATE') OR has_table_privilege('{role}','shop.admin_sessions','SELECT') OR has_table_privilege('{role}','shop.inventory_items','SELECT');") == "f"
-    assert query("SELECT count(*) FROM pg_tables WHERE schemaname='shop';") == "28"
+    assert query("SELECT count(*) FROM pg_tables WHERE schemaname='shop' AND tablename<>'__EFMigrationsHistory';") == "28"
     assert query("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='shop' AND p.prosecdef AND p.proowner='shop_staging_migrator'::regrole;") == "2"
     assert query("SELECT has_function_privilege('shop_staging_maintenance','shop.activity_cleanup_candidates(integer)','EXECUTE') AND NOT has_function_privilege('shop_staging_api','shop.activity_cleanup_candidates(integer)','EXECUTE');") == "t"
     print("PASS container isolation, scope of mounts, database roles and row-level separation", flush=True)

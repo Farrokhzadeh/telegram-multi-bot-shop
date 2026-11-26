@@ -40,11 +40,11 @@ public sealed class AkundingSupplierAdapterTests
             return Reply(Delivered);
         }));
         await Configure(f);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, adapter.InspectCatalogAsync);
+        var catalog = new CatalogStore(f.Sessions, SupplierCredentialQualification.Grant(), credentials, adapter.InspectCatalogAsync);
         var result = await new WalletCheckoutService(f.Sessions, f.Store, catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 2),
             (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
         Assert.Equal(CheckoutOutcome.Purchased, result.Outcome);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         var binding = await store.ReadAsync(f.Context(0), lease, Ct);
         var archive = new SyntheticSupplier();
@@ -55,7 +55,7 @@ public sealed class AkundingSupplierAdapterTests
         Assert.False(adapter.ProvenIntentLookup);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE provider_code='akunding' AND cost_currency='USDT' AND cost_baseline_amount=1 AND status='succeeded' AND remote_ref='71'", Ct));
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='acquired'", Ct));
-        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, Ct), Ct);
+        await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.PrepareManifest, Ct), Ct);
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE status='ready'", Ct));
     }
     [Theory]
@@ -186,9 +186,9 @@ public sealed class AkundingSupplierAdapterTests
             return Task.FromResult(Reply(body));
         }));
         await Configure(f);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, adapter.InspectCatalogAsync);
+        var catalog = new CatalogStore(f.Sessions, SupplierCredentialQualification.Grant(), credentials, adapter.InspectCatalogAsync);
         var accepted = await new WalletCheckoutService(f.Sessions, f.Store, catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 2), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var first = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         var binding = await store.ReadAsync(f.Context(0), first, Ct);
         var worker = new SupplierFulfillmentWorker(store, adapter, new SyntheticSupplier());
@@ -196,7 +196,7 @@ public sealed class AkundingSupplierAdapterTests
         var actor = await f.AdminAsync(Ct);
         long revision = await f.CountAsync("SELECT revision FROM shop.orders", Ct), requestRevision = await f.CountAsync("SELECT revision FROM shop.supplier_requests", Ct);
         var command = new OrderResolution("retry_supplier", revision, "Public verified recredited failure", Guid.NewGuid(), binding.RequestId, requestRevision);
-        var administration = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var administration = new OrderAdministrationStore(f.Sessions);
         await administration.ResolveAsync(actor, f.Context(0), accepted.OrderId!.Value, command, Ct);
         await administration.ResolveAsync(actor, f.Context(0), accepted.OrderId.Value, command, Ct);
         await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
@@ -230,7 +230,7 @@ public sealed class AkundingSupplierAdapterTests
     {
         using var preview = new HttpClient(new Handler((_, _) => Task.FromResult(Reply(Product))));
         var chosen = await new AkundingCatalogClient(preview).GetProductAsync(7, Ct);
-        return new(f.Secrets, credentials, "public account", [new(7, "code", chosen.EligibilityFingerprint!)], verify ?? VerifySyntheticUnits, handler);
+        return new(SupplierCredentialQualification.Grant(), credentials, "public account", [new(7, "code", chosen.EligibilityFingerprint!)], verify ?? VerifySyntheticUnits, handler);
     }
     private static SupplierItem[] VerifySyntheticUnits(SupplierBinding binding, AkundingOrderReceipt receipt)
     {

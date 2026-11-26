@@ -6,8 +6,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteCatalogStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<Guid[]> VisibleProductsAsync(BrandContext context, long actor, CancellationToken ct = default) =>
         sessions.RunEfAsync(false, null, async (data, token) => await (from listing in data.Data.Set<Entities.BrandProduct>()
                                                                        join product in data.Data.Set<Entities.Product>() on listing.ProductId equals product.Id
@@ -106,7 +108,7 @@ public sealed class SqliteCatalogStore(SqliteSessionFactory sessions, SecretSnap
         var state = await CatalogQueries.LoadAsync(data, context, actor, product, token);
         return state is null ? null : new Data(state.Member, product, state.Kind, state.Policy, state.LocalFirst, state.PolicyRevision, state.ProductRevision, state.ListingRevision, new(state.UnitUsdt, state.UnitToman, state.AutoToman, state.FxEnabled, state.Fx, state.MaximumFxAge), state.Presentation, state.Wallet, state.Crypto, state.Bank, state.Market, state.Minimum, state.Maximum, state.Local);
     }, ct);
-    private Task<IReadOnlyList<QuoteCoupon>> CouponsAsync(SqliteTransaction tx, BrandContext context, Data data, CancellationToken ct) => SqliteSessionFactory.StepEfAsync(tx, false, (ef, token) => CatalogQueries.CouponsAsync(ef, secrets, context, data.Product, data.Member, token), ct);
+    private Task<IReadOnlyList<QuoteCoupon>> CouponsAsync(SqliteTransaction tx, BrandContext context, Data data, CancellationToken ct) => SqliteSessionFactory.StepEfAsync(tx, false, (ef, token) => CatalogQueries.CouponsAsync(ef, context, data.Product, data.Member, token), ct);
 
     private static CheckoutSupply? Supply(Data data, int quantity, CheckoutKind kind = CheckoutKind.ProductPurchase)
     {

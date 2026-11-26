@@ -169,7 +169,7 @@ public static class SqliteStagingCopy
             throw new InvalidOperationException("Staging table columns do not match SQLite schema.");
     }
 
-    private static object? ConvertValue(object? value) => value switch
+    internal static object? ConvertValue(object? value) => value switch
     {
         null or DBNull => null,
         bool boolean => boolean ? 1L : 0L,
@@ -186,7 +186,7 @@ public static class SqliteStagingCopy
         _ => throw new NotSupportedException("Unrecognized staging column type.")
     };
 
-    private static void HashValue(IncrementalHash hash, object? value)
+    internal static void HashValue(IncrementalHash hash, object? value)
     {
         byte tag;
         byte[] bytes;

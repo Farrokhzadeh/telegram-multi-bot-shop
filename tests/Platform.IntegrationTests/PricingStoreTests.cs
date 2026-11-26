@@ -14,7 +14,7 @@ public sealed class PricingStoreTests
     public async Task CouponCodeIsKeyedEncryptedScopedAndAuditedWithChangedInputReplayRejection()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(users: 6, ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         var actor = await fixture.AdminAsync(Ct);
         var terms = new CouponTerms(Guid.NewGuid(), " public-coupon ", CouponKind.Goodwill, 50, fixture.Product, fixture.Users[0], MaximumUses: 5);
         Guid command = Guid.NewGuid();
@@ -47,9 +47,9 @@ public sealed class PricingStoreTests
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
         for (int i = 0; i < 20; i++)
-            Assert.Equal(CouponLookupOutcome.NotFound, (await new PricingStore(fixture.Sessions, fixture.Secrets).LookupAsync(fixture.Context(0), CheckoutFixture.Actor(0), "PUBLIC-MISSING-" + i, Ct)).Outcome);
-        Assert.Equal(CouponLookupOutcome.RateLimited, (await new PricingStore(fixture.Sessions, fixture.Secrets).LookupAsync(fixture.Context(0), CheckoutFixture.Actor(0), "PUBLIC-MISSING", Ct)).Outcome);
-        Assert.Equal(CouponLookupOutcome.NotFound, (await new PricingStore(fixture.Sessions, fixture.Secrets).LookupAsync(fixture.Context(1), CheckoutFixture.Actor(1), "PUBLIC-MISSING", Ct)).Outcome);
+            Assert.Equal(CouponLookupOutcome.NotFound, (await new PricingStore(fixture.Sessions).LookupAsync(fixture.Context(0), CheckoutFixture.Actor(0), "PUBLIC-MISSING-" + i, Ct)).Outcome);
+        Assert.Equal(CouponLookupOutcome.RateLimited, (await new PricingStore(fixture.Sessions).LookupAsync(fixture.Context(0), CheckoutFixture.Actor(0), "PUBLIC-MISSING", Ct)).Outcome);
+        Assert.Equal(CouponLookupOutcome.NotFound, (await new PricingStore(fixture.Sessions).LookupAsync(fixture.Context(1), CheckoutFixture.Actor(1), "PUBLIC-MISSING", Ct)).Outcome);
         Assert.Equal(21L, await fixture.CountAsync("SELECT count(*) FROM shop.bot_activity_events WHERE idempotency_key LIKE 'coupon_lookup:%'", Ct));
         Assert.Equal(0L, await fixture.CountAsync("SELECT count(*) FROM shop.orders", Ct));
     }
@@ -58,7 +58,7 @@ public sealed class PricingStoreTests
     public async Task ConcurrentWholeClaimsEnforceTheCouponCapWithoutReservingStockOrDebitingWallets()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(users: 30, ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         var terms = new CouponTerms(Guid.NewGuid(), "PUBLIC-CAPPED", CouponKind.Promotion, 10, fixture.Product, MaximumUses: 3);
         await Issue(fixture, store, terms);
         var results = await Task.WhenAll(Enumerable.Range(0, 10).Select(async i =>
@@ -85,7 +85,7 @@ public sealed class PricingStoreTests
     public async Task CheckoutRechecksCouponEligibilityAfterItsTransactionStart()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         await using var purchase = await fixture.Sessions.BeginAsync(Ct);
         DateTime started = await purchase.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()"), row => row.GetUtc(0), Ct);
         var terms = new CouponTerms(Guid.NewGuid(), "PUBLIC-NEWLY-ACTIVE", CouponKind.Promotion, 50, fixture.Product, MaximumUses: 5, StartsAt: started);
@@ -100,7 +100,7 @@ public sealed class PricingStoreTests
     public async Task OneOrderCannotConsumeTwoDifferentCouponCodes()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         var first = new CouponTerms(Guid.NewGuid(), "PUBLIC-FIRST", CouponKind.Promotion, 10, fixture.Product, MaximumUses: 5);
         var second = first with { Id = Guid.NewGuid(), Code = "PUBLIC-SECOND" };
         await Issue(fixture, store, first);
@@ -121,7 +121,7 @@ public sealed class PricingStoreTests
     public async Task ExistingHoldKeepsItsGrantAndCancellationReleaseIsExactlyOnce()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         var terms = new CouponTerms(Guid.NewGuid(), "PUBLIC-HELD", CouponKind.Promotion, 50, fixture.Product, MaximumUses: 2);
         await Issue(fixture, store, terms);
         Guid order;
@@ -172,7 +172,7 @@ public sealed class PricingStoreTests
     public async Task PrepaidSourceIssuesExactlyOneAccountBoundNUseCodeAndRejectsForeignMembership()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         Guid source;
         await using (var paid = await fixture.Sessions.BeginAsync(Ct))
         {
@@ -193,7 +193,7 @@ public sealed class PricingStoreTests
     public async Task RedemptionRequiresCompleteOrderAndPostsTheRealUseCounterExactlyOnce()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         var terms = new CouponTerms(Guid.NewGuid(), "PUBLIC-REDEEM", CouponKind.Promotion, 50, fixture.Product, MaximumUses: 1);
         await Issue(fixture, store, terms);
         Guid order;
@@ -231,7 +231,7 @@ public sealed class PricingStoreTests
     public async Task FxRefreshIsHourlyAndFencedAndPreservesManualTomanPrices()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         await EnableFx(fixture);
         Guid? job = await store.ScheduleFxAsync(fixture.Context(0), Ct);
         Assert.NotNull(job);
@@ -254,7 +254,7 @@ public sealed class PricingStoreTests
     public async Task WrongSourceCannotSuppressAnHourlyNobitexRefresh()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         await EnableFx(fixture);
         await using (var wrong = await fixture.Sessions.BeginAsync(Ct))
         {
@@ -268,7 +268,7 @@ public sealed class PricingStoreTests
     public async Task FxFailureRetainsTheLastGoodRateAndPolicyChangesFenceOldResponses()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        var store = new PricingStore(fixture.Sessions, fixture.Secrets);
+        var store = new PricingStore(fixture.Sessions);
         await EnableFx(fixture);
         await using (var old = await fixture.Sessions.BeginAsync(Ct))
         {

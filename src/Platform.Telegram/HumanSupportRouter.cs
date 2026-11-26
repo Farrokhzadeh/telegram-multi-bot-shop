@@ -12,7 +12,7 @@ public sealed record HumanSupportRouteResult(Guid TicketId, bool Created, bool B
     public override string ToString() => "HumanSupportRouteResult [redacted]";
 }
 
-public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed class HumanSupportRouter(DbSessionFactory sessions)
 {
     public Task<HumanSupportRouteResult> RouteAsync(VerifiedTelegramUpdate update, CancellationToken ct = default) => RouteCoreAsync(update, null, ct);
     public Task<HumanSupportRouteResult> RouteForBrandAsync(VerifiedTelegramUpdate update, long expectedRevision, CancellationToken ct = default) => RouteCoreAsync(update, expectedRevision, ct);
@@ -47,9 +47,7 @@ public sealed class HumanSupportRouter(DbSessionFactory sessions, SecretSnapshot
         byte[] plain = Encoding.UTF8.GetBytes(update.Value);
         try
         {
-            string keyId = secrets.CurrentBrandKeyId(update.Context);
-            byte[] encrypted = new BrandCipher(secrets).Encrypt(update.Context, "support_messages", messageId, "body_ciphertext", plain);
-            await SupportStore.RecordCustomerMessageAsync(session, update.Context, update.ActorId, ticketId, update.AssetRef, encrypted, keyId, ct, messageId, update.MessageId);
+            await SupportStore.RecordCustomerMessageAsync(session, update.Context, update.ActorId, ticketId, update.AssetRef, plain, ct, messageId, update.MessageId);
         }
         finally { CryptographicOperations.ZeroMemory(plain); }
         await session.RunEfStepAsync(true, async (data, token) => { await data.RequireMembershipAsync(update.Context, update.ActorId, false, false, token); string key = "telegram:" + update.UpdateId.ToString(System.Globalization.CultureInfo.InvariantCulture); if (!await data.Data.Set<BotActivityEvent>().AnyAsync(row => row.UserId == member.Id && row.IdempotencyKey == key, token)) data.Data.Add(new BotActivityEvent { Id = Guid.NewGuid(), UserId = member.Id, EventType = "support", SourceKind = command ? "command" : "flow", ActionCode = command ? "support_open" : "support_reply", SupportTicketId = ticketId, FlowRevision = member.Flow.Revision, TelegramUpdateId = update.UpdateId, OutcomeCode = "accepted", IdempotencyKey = key }); return true; }, ct);

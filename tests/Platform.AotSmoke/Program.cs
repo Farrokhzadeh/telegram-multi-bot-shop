@@ -178,7 +178,7 @@ await using (var checkout = await CheckoutFixture.CreateAsync())
         await checkout.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='allocated'") != 1 ||
         await checkout.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'") != 1)
         throw new InvalidOperationException("Native atomic wallet checkout/replay failed.");
-    var pricing = new PricingStore(checkout.Sessions, checkout.Secrets);
+    var pricing = new PricingStore(checkout.Sessions);
     var actor = await checkout.AdminAsync();
     var coupon = new CouponTerms(Guid.NewGuid(), "PUBLIC-NATIVE-COUPON", CouponKind.Goodwill, 10, checkout.Product, checkout.Users[0], MaximumUses: 3);
     await using (var issue = await checkout.Sessions.BeginAsync())
@@ -192,7 +192,7 @@ await using (var checkout = await CheckoutFixture.CreateAsync())
         throw new InvalidOperationException("Native coupon/pricing qualification failed.");
     Console.WriteLine("PASS: native keyed/encrypted coupon issue and scoped lookup with exact legacy FX/cent arithmetic.");
     await checkout.AddStockAsync(1);
-    var catalog = new CatalogStore(checkout.Sessions, checkout.Secrets, [new SupplierAccount("synthetic", "public-native-account")],
+    var catalog = new CatalogStore(checkout.Sessions, [new SupplierAccount("synthetic", "public-native-account")],
         (request, _) => Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, request.Quantity, 2, "USD", "public native quote")));
     var localQuote = await catalog.PrepareAsync(checkout.Context(0), CheckoutFixture.Actor(0), new(checkout.Product, 1, CheckoutPayment.Wallet));
     if (localQuote.Quote.TotalUsd.Amount != 9 || localQuote.Quote.Terms.DiscountId != coupon.Id) throw new InvalidOperationException("Native automatic quote failed.");
@@ -226,7 +226,7 @@ await using (var checkout = await CheckoutFixture.CreateAsync())
 }
 await using (var sourceSale = await CheckoutFixture.CreateAsync(balance: 1000, stock: 0))
 {
-    var sourceCatalog = new CatalogStore(sourceSale.Sessions, sourceSale.Secrets, [], (_, _) => throw new InvalidOperationException("Native prepaid must not fetch supplier stock."));
+    var sourceCatalog = new CatalogStore(sourceSale.Sessions, [], (_, _) => throw new InvalidOperationException("Native prepaid must not fetch supplier stock."));
     var service = new WalletCheckoutService(sourceSale.Sessions, sourceSale.Store, sourceCatalog);
     var source = new CheckoutRequest(OrderIds.New(), sourceSale.Product, 100, CheckoutPayment.Wallet, CheckoutKind.PrepaidUnits);
     var result = await service.PurchaseAsync(sourceSale.Context(0), CheckoutFixture.Actor(0), source,
@@ -260,7 +260,7 @@ await using (var deliveryFixture = await CheckoutFixture.CreateAsync())
         preparation = await OutboxStore.ClaimAsync(claim, JobKind.PrepareManifest, Guid.NewGuid(), TimeSpan.FromSeconds(30)) ?? throw new InvalidOperationException();
         await claim.CommitAsync();
     }
-    var deliveryStore = new DeliveryStore(deliveryFixture.Sessions, deliveryFixture.Secrets);
+    var deliveryStore = new DeliveryStore(deliveryFixture.Sessions);
     if (await deliveryStore.PrepareAsync(deliveryFixture.Context(0), preparation) is not null) throw new InvalidOperationException("Missing anchor silently created a send.");
     await deliveryStore.AuthorizeSendRecoveryAsync(deliveryFixture.Context(0), await deliveryFixture.AdminAsync(), order, Guid.NewGuid());
     JobLease sending;
@@ -286,7 +286,7 @@ await using (var paymentFixture = await CheckoutFixture.CreateAsync(balance: 0, 
         await enable.ExecuteAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,allow_wallet_topup=true,zero_balance_topup=true,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(paymentFixture.Brands[0])));
         await enable.CommitAsync();
     }
-    var evidenceStore = new PaymentEvidenceStore(paymentFixture.Sessions, paymentFixture.Secrets);
+    var evidenceStore = new PaymentEvidenceStore(paymentFixture.Sessions);
     Guid payment = Guid.NewGuid();
     await evidenceStore.CreateTopupAsync(paymentFixture.Context(0), CheckoutFixture.Actor(0), payment, new Money(10.25m, Currency.Usd), CryptoAsset.UsdtTrc20);
     await using (var bind = await paymentFixture.Sessions.BeginAsync())
@@ -296,10 +296,10 @@ await using (var paymentFixture = await CheckoutFixture.CreateAsync(balance: 0, 
     }
     using var notice = PaymentNoticeFixture.Notice("topup:" + payment.ToString("D"));
     var encryptedEvidence = new Dictionary<string, byte[]>();
-    Task<string> Archive(ProtectedPaymentEvidence item, CancellationToken ct)
+    Task<string> Archive(PaymentEvidenceContent item, CancellationToken ct)
     {
         string asset = "protected:native/" + item.PaymentId.ToString("N") + "/" + item.Digest;
-        encryptedEvidence.TryAdd(asset, item.Ciphertext.ToArray());
+        encryptedEvidence.TryAdd(asset, item.Content.ToArray());
         return Task.FromResult(asset);
     }
     if ((await evidenceStore.CaptureAsync(paymentFixture.Context(0), notice, Archive)).Outcome != PaymentCaptureOutcome.Ready ||
@@ -408,11 +408,11 @@ await using (var database = await DisposablePostgres.CreateAsync())
         supportFiles.WriteManifest(SecretService.BotHost, false, brands: [customerBrand]);
         using var supportSecrets = SecretFiles.Load(supportFiles.Root, "service-config.json", supportFiles.Grant(SecretService.BotHost, false, brands: [customerBrand]));
         using var verifier = new TelegramWebhookVerifier(customerContext!, webhookSecret);
-        var support = new HumanSupportRouter(userSessions, supportSecrets);
+        var support = new HumanSupportRouter(userSessions);
         var opened = await support.RouteAsync(verifier.Verify([TelegramFixture.Header(webhookSecret)], TelegramFixture.Body("/support", updateId: 930002, actorId: 97001, chatId: 97001, messageId: 930002)));
         var text = verifier.Verify([TelegramFixture.Header(webhookSecret)], TelegramFixture.Body("public native support text", updateId: 930003, actorId: 97001, chatId: 97001, messageId: 930003));
         await support.RouteAsync(text);
-        await new HumanSupportRouter(userSessions, supportSecrets).RouteAsync(text);
+        await new HumanSupportRouter(userSessions).RouteAsync(text);
         await using var read = await userSessions.BeginAsync();
         var message = await read.QuerySingleAsync(new DbStatement("SELECT id,body_ciphertext,body_key_id FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=930003", DbValue.Uuid(opened.TicketId)),
             row => (Id: row.GetGuid(0), Bytes: row.GetBinary(1), Key: row.GetString(2)));

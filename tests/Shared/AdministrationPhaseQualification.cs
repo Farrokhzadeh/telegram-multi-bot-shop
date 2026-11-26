@@ -10,8 +10,8 @@ public static class AdministrationPhaseQualification
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 0, ct: ct);
         var admin = await f.AdminAsync(ct);
-        var catalog = new AdminCatalogStore(f.Sessions, f.Secrets);
-        var orders = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var catalog = new AdminCatalogStore(f.Sessions);
+        var orders = new OrderAdministrationStore(f.Sessions);
         Guid item = Guid.CreateVersion7(), import = Guid.NewGuid();
         InventoryImportItem[] stock = [new(item, "Public synthetic phase credential")];
         await catalog.ImportAsync(admin, f.Product, stock, import, ct);

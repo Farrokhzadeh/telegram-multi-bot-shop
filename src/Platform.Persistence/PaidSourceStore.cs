@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -23,7 +22,7 @@ public sealed partial class PricingStore
             if (prior is Guid existing) return existing;
             var due = PrepaidEntitlements.Due(sale);
             if (due.Amount <= 0 || !await session.RunEfStepAsync(false, (data, token) => PrepaidEntitlements.EvidenceAsync(data, sale, sourceOrder, due.Amount, token), ct)) Reject(session);
-            Guid id = await session.RunEfStepAsync(true, (data, token) => PrepaidEntitlements.CreateAsync(data, secrets, context, sourceOrder, sale, token), ct);
+            Guid id = await session.RunEfStepAsync(true, (data, token) => PrepaidEntitlements.CreateAsync(data, context, sourceOrder, sale, token), ct);
             Guid? held = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.DiscountUse>().Where(value => value.OrderId == sourceOrder && value.Status == "held").Select(value => (Guid?)value.DiscountId).SingleOrDefaultAsync(token), ct);
             if (held is Guid coupon) await TransitionClaimAsync(session, context, coupon, sourceOrder, true, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Coupon(context.BrandId, id), sourceOrder, DateTime.UtcNow, ct);

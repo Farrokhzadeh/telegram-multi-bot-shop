@@ -11,11 +11,28 @@ internal sealed class SqliteSnapshotDbContext(DbContextOptions<SqliteSnapshotDbC
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
-        foreach (var entity in builder.Model.GetEntityTypes()) foreach (var property in entity.GetProperties()) { property.ValueGenerated = ValueGenerated.Never; property.SetBeforeSaveBehavior(PropertySaveBehavior.Save); }
+        SnapshotCopyQueries.PreserveExplicitValues(builder);
+    }
+}
+internal sealed class PlainTargetCopyDbContext(DbContextOptions<PlainTargetCopyDbContext> options) : PlainTargetDbContext(options)
+{
+    protected override void OnModelCreating(ModelBuilder builder)
+    {
+        base.OnModelCreating(builder);
+        SnapshotCopyQueries.PreserveExplicitValues(builder);
     }
 }
 internal static class SnapshotCopyQueries
 {
+    internal static void PreserveExplicitValues(ModelBuilder builder)
+    {
+        foreach (var entity in builder.Model.GetEntityTypes())
+            foreach (var property in entity.GetProperties())
+            {
+                property.ValueGenerated = ValueGenerated.Never;
+                property.SetBeforeSaveBehavior(PropertySaveBehavior.Save);
+            }
+    }
     internal static Task<long> CountAsync(AkantiDbContext data, string table, CancellationToken ct)
     {
         var entity = data.Model.GetEntityTypes().SingleOrDefault(value => value.GetTableName() == table) ?? throw new InvalidOperationException("Snapshot entity is unavailable.");
@@ -57,6 +74,127 @@ internal static class SnapshotCopyQueries
         if (await target.Set<T>().LongCountAsync(ct) != count || !CryptographicOperations.FixedTimeEquals(sourceHash.GetHashAndReset(), targetHash.GetHashAndReset())) throw new InvalidOperationException("Snapshot row count or content differs.");
         return count;
     }
+    internal static Task HashRowsAsync(AkantiDbContext source, IEntityType entity, IncrementalHash hash, CancellationToken ct, Action<object>? inspect = null)
+    {
+        var key = entity.FindPrimaryKey()!.Properties.Select(property => property.PropertyInfo!).ToArray();
+        var properties = entity.GetProperties().OrderBy(property => property.Name, StringComparer.Ordinal).ToArray();
+        var method = typeof(SnapshotCopyQueries).GetMethod(nameof(HashTableAsync), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(entity.ClrType);
+        SqliteStagingCopy.HashValue(hash, entity.GetTableName());
+        foreach (var property in properties) SqliteStagingCopy.HashValue(hash, property.Name);
+        return (Task)method.Invoke(null, [source, key, properties.Select(property => property.PropertyInfo!).ToArray(), hash, ct, inspect])!;
+    }
+
+    private static async Task HashTableAsync<T>(AkantiDbContext source, PropertyInfo[] key, PropertyInfo[] fields, IncrementalHash hash, CancellationToken ct, Action<object>? inspect) where T : class
+    {
+        T? cursor = null;
+        while (true)
+        {
+            IQueryable<T> query = source.Set<T>().AsNoTracking();
+            if (cursor is not null) query = query.Where(After(cursor, key));
+            var rows = await Ordered(query, key).Take(128).ToListAsync(ct);
+            foreach (T row in rows)
+            {
+                inspect?.Invoke(row);
+                SqliteStagingCopy.HashValue(hash, "row");
+                foreach (var field in fields)
+                    SqliteStagingCopy.HashValue(hash, SqliteStagingCopy.ConvertValue(field.GetValue(row)));
+            }
+            if (rows.Count < 128) break;
+            cursor = rows[^1];
+        }
+        SqliteStagingCopy.HashValue(hash, "end");
+    }
+
+    internal static Task<long> CopyOrVerifyAsync(AkantiDbContext source, PlainTargetCopyDbContext target, IEntityType entity,
+        Func<object, object, CancellationToken, Task> transform, bool verifyOnly, CancellationToken ct,
+        Func<Func<CancellationToken, Task>, CancellationToken, Task>? commitBatch = null)
+    {
+        var destination = target.Model.FindEntityType(entity.ClrType) ?? throw new InvalidOperationException("Snapshot entity is unavailable.");
+        var key = entity.FindPrimaryKey()!.Properties.Select(property => property.PropertyInfo!).ToArray();
+        if (!destination.FindPrimaryKey()!.Properties.Select(property => property.Name).SequenceEqual(key.Select(property => property.Name)))
+            throw new InvalidOperationException("Snapshot primary key differs.");
+        var fields = destination.GetProperties().Select(property => property.PropertyInfo!).ToArray();
+        var method = typeof(SnapshotCopyQueries).GetMethod(nameof(CopyOrVerifyRowsAsync), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(entity.ClrType);
+        return (Task<long>)method.Invoke(null, [source, target, key, fields, transform, verifyOnly, ct, commitBatch])!;
+    }
+
+    private static async Task<long> CopyOrVerifyRowsAsync<T>(AkantiDbContext source, PlainTargetCopyDbContext target,
+        PropertyInfo[] key, PropertyInfo[] fields, Func<object, object, CancellationToken, Task> transform, bool verifyOnly, CancellationToken ct,
+        Func<Func<CancellationToken, Task>, CancellationToken, Task>? commitBatch) where T : class, new()
+    {
+        T? cursor = null;
+        long count = 0;
+        while (true)
+        {
+            IQueryable<T> query = source.Set<T>().AsNoTracking();
+            if (cursor is not null) query = query.Where(After(cursor, key));
+            var rows = await Ordered(query, key).Take(128).ToListAsync(ct);
+            if (rows.Count == 0) break;
+            var expected = new List<T>(rows.Count);
+            List<T>? actual = null;
+            try
+            {
+                foreach (T original in rows)
+                {
+                    var row = new T();
+                    expected.Add(row);
+                    await transform(original, row, ct);
+                }
+                async Task ReconcileAsync(CancellationToken token)
+                {
+                    if (commitBatch is not null)
+                    {
+                        var previous = await target.Set<T>().AsNoTracking().Where(Keys(rows, key)).ToListAsync(token);
+                        if (previous.Count != 0)
+                        {
+                            actual = previous;
+                            Verify();
+                            return;
+                        }
+                    }
+                    if (!verifyOnly)
+                    {
+                        target.AddRange(expected);
+                        await target.SaveChangesAsync(token);
+                    }
+                    actual = await target.Set<T>().AsNoTracking().Where(Keys(rows, key)).ToListAsync(token);
+                    Verify();
+                }
+                void Verify()
+                {
+                    if (actual is null || actual.Count != expected.Count) throw new InvalidOperationException("Plaintext batch count differs.");
+                    foreach (T row in expected)
+                    {
+                        var stored = actual.Single(value => key.All(property => Equals(property.GetValue(value), property.GetValue(row))));
+                        if (fields.Any(field => !SameField(field.GetValue(row), field.GetValue(stored))))
+                            throw new InvalidOperationException("Plaintext batch content differs.");
+                    }
+                }
+                if (commitBatch is null) await ReconcileAsync(ct);
+                else await commitBatch(ReconcileAsync, ct);
+            }
+            finally
+            {
+                target.ChangeTracker.Clear();
+                foreach (var row in expected) ClearBytes(row, fields);
+                if (actual is not null) foreach (var row in actual) ClearBytes(row, fields);
+            }
+            count = checked(count + rows.Count);
+            cursor = rows[^1];
+        }
+        if (await target.Set<T>().LongCountAsync(ct) != count) throw new InvalidOperationException("Plaintext table count differs.");
+        return count;
+    }
+
+    private static bool SameField(object? expected, object? actual) => expected is byte[] bytes
+        ? actual is byte[] stored && CryptographicOperations.FixedTimeEquals(bytes, stored)
+        : Equals(expected, actual);
+
+    private static void ClearBytes<T>(T row, PropertyInfo[] fields)
+    {
+        foreach (var field in fields) if (field.GetValue(row) is byte[] bytes) CryptographicOperations.ZeroMemory(bytes);
+    }
+
     private static IQueryable<T> Ordered<T>(IQueryable<T> query, PropertyInfo[] key)
     {
         var row = Expression.Parameter(typeof(T), "row");

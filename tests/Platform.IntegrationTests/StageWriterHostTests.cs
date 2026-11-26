@@ -341,7 +341,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions); using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true)); var store = new DeliveryStore(sessions, secrets);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions); using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true)); var store = new DeliveryStore(sessions);
             actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);
             if (savedAnchor)
             {
@@ -426,7 +426,7 @@ public sealed class StageWriterHostTests
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
             data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data);
             using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
-            var store = new DeliveryStore(sessions, secrets); var context = CheckoutFixture.ResolveContexts()[0];
+            var store = new DeliveryStore(sessions); var context = CheckoutFixture.ResolveContexts()[0];
             actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);
             Guid prepare = Guid.NewGuid(); Request(prepare, "manifest-worker"); Assert.Equal("PreparedWithoutSend", (await Result(prepare, actor)).Outcome);
             await store.AuthorizeSendRecoveryAsync(context, await Admin(sessions), order, Guid.NewGuid(), Ct);

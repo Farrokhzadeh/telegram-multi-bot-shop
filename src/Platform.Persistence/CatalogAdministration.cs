@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -46,7 +45,7 @@ internal static class CatalogAdministration
     internal static async Task<long> ListingAsync(EfSession data, AuthenticatedAdmin actor, BrandContext context, Guid product, ListingEdit value, long revision, CancellationToken ct)
     {
         await data.RequireAdminAsync(actor, null, ct);
-        bool requireActive = data.Data is SqliteAkantiDbContext;
+        bool requireActive = data.Data.Database.IsSqlite();
         if (!await data.Data.Set<Entities.Product>().AnyAsync(row => row.Id == product, ct) ||
             !await data.Data.Set<Entities.Brand>().AnyAsync(row => row.Id == context.BrandId && row.BotId == context.BotId && (!requireActive || row.Active), ct))
             data.RejectScope("The listing scope is unavailable.");
@@ -66,46 +65,36 @@ internal static class CatalogAdministration
         row.UpdatedAt = await data.BrandClockAsync(context.BrandId, ct);
         return row.Revision;
     }
-    internal static async Task ImportAsync(EfSession data, AuthenticatedAdmin actor, Guid product, InventoryImportItem[] items, SecretSnapshot secrets, CancellationToken ct)
+    private static async Task RequireInventoryImportAsync(EfSession data, AuthenticatedAdmin actor, Guid product, CancellationToken ct)
     {
         await data.RequireAdminAsync(actor, null, ct);
         if (!await data.Data.Set<Entities.Product>().AnyAsync(value => value.Id == product, ct)) data.RejectScope("Inventory product is unavailable.");
-        var previous = await data.Data.Set<Entities.InventoryItem>().Select(value => value.CredentialKeyId).Distinct().OrderBy(value => value).Take(33).ToArrayAsync(ct);
-        if (previous.Length > 32) data.RejectScope("Inventory key history needs review.");
-        string key = secrets.CurrentInventoryKeyId;
-        string[] keys = previous.Append(key).Distinct(StringComparer.Ordinal).ToArray();
-        var cipher = new InventoryCipher(secrets);
-        int count = 0;
+    }
+    internal static async Task ImportAsync(EfSession data, AuthenticatedAdmin actor, Guid product, InventoryImportItem[] items, CancellationToken ct)
+    {
+        await RequireInventoryImportAsync(data, actor, product, ct);
         foreach (var item in items)
         {
-            byte[] plain = Encoding.UTF8.GetBytes(item.Credential);
+            byte[] bytes = Encoding.UTF8.GetBytes(item.Credential);
             try
             {
-                bool exists = false;
-                foreach (string known in keys)
+                var existing = await data.Data.Set<Entities.InventoryItem>().AsNoTracking()
+                    .Where(row => row.Id == item.Id || row.CredentialContent == bytes)
+                    .Select(row => new { row.Id, row.ProductId, Same = row.CredentialContent == bytes }).Take(2).ToArrayAsync(ct);
+                if (existing.Length != 0)
                 {
-                    byte[] fingerprint = secrets.UseInventoryKey(known, bytes => HMACSHA256.HashData(bytes, plain));
-                    var duplicate = await data.Data.Set<Entities.InventoryItem>().AsNoTracking().Where(value => value.SourceFingerprint == fingerprint)
-                        .Select(value => new { value.Id, value.ProductId }).FirstOrDefaultAsync(ct);
-                    if (duplicate is null) continue;
-                    if (duplicate.Id != item.Id || duplicate.ProductId != product) data.RejectConflict("Duplicate inventory content.");
-                    exists = true;
-                    break;
+                    if (existing.Length != 1 || existing[0].Id != item.Id || existing[0].ProductId != product || !existing[0].Same)
+                        data.RejectConflict("Duplicate inventory content.");
+                    continue;
                 }
-                if (exists) continue;
-                data.Data.Add(new Entities.InventoryItem
-                {
-                    Id = item.Id,
-                    ProductId = product,
-                    CredentialCiphertext = cipher.Encrypt(item.Id, plain),
-                    CredentialKeyId = key,
-                    SourceFingerprint = secrets.UseInventoryKey(key, bytes => HMACSHA256.HashData(bytes, plain)),
-                    OriginKind = "local_import"
-                });
+                var credential = new Entities.InventoryItem { Id = item.Id, ProductId = product, CredentialContent = bytes,
+                    SourceFingerprint = SHA256.HashData(bytes), OriginKind = "local_import" };
+                data.Data.Add(credential);
                 await data.FlushAsync(ct, false);
-                if (++count % 128 == 0) data.Data.ChangeTracker.Clear();
+                data.Data.Entry(credential).State = EntityState.Detached;
             }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            finally { CryptographicOperations.ZeroMemory(bytes); }
         }
     }
+
 }

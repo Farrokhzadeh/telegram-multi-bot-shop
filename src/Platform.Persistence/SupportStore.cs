@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Platform.Persistence.Configurations;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -29,16 +28,20 @@ public static class SupportStore
         return (id, true);
     }
 
-    public static async Task<Guid> RecordCustomerMessageAsync(DbSession session, BrandContext brand, long verifiedActorId, Guid ticketId,
-        string? assetRef, byte[]? bodyCiphertext = null, string? bodyKeyId = null, CancellationToken ct = default, Guid? messageId = null, long? telegramMessageId = null)
+    public static Task<Guid> RecordCustomerMessageAsync(DbSession session, BrandContext brand, long verifiedActorId, Guid ticketId,
+        string? assetRef, byte[]? body = null, CancellationToken ct = default, Guid? messageId = null, long? telegramMessageId = null) =>
+        RecordCustomerAsync(session, brand, verifiedActorId, ticketId, assetRef, body, ct, messageId, telegramMessageId);
+
+    private static async Task<Guid> RecordCustomerAsync(DbSession session, BrandContext brand, long verifiedActorId, Guid ticketId,
+        string? assetRef, byte[]? body, CancellationToken ct, Guid? messageId, long? telegramMessageId)
     {
         BrandUser member = await RequireCustomerAsync(session, brand, verifiedActorId, ct);
         Ticket t = await RequireTicketAsync(session, ticketId, ct);
         if (t.UserId != member.Id || t.Status == "closed") Deny(session);
-        ValidateContent(assetRef, bodyCiphertext, bodyKeyId);
+        ValidateContent(assetRef, body);
         Guid id = messageId ?? Guid.NewGuid();
         if (id == Guid.Empty || telegramMessageId <= 0) throw new ArgumentException("Invalid message identity.");
-        await session.RunEfStepAsync(true, async (data, token) => { await data.RequireBrandCommandAsync(brand.BrandId, token); data.Data.Add(new Entities.SupportMessage { Id = id, TicketId = ticketId, SenderKind = "customer", SenderTelegramId = verifiedActorId, AssetRef = assetRef, BodyCiphertext = bodyCiphertext, BodyKeyId = bodyKeyId, TelegramMessageId = telegramMessageId }); return true; }, ct);
+        await session.RunEfStepAsync(true, async (data, token) => { await data.RequireBrandCommandAsync(brand.BrandId, token); data.Data.Add(new Entities.SupportMessage { Id = id, TicketId = ticketId, SenderKind = "customer", SenderTelegramId = verifiedActorId, AssetRef = assetRef, BodyContent = body, TelegramMessageId = telegramMessageId }); return true; }, ct);
         await ChangeTicketAsync(session, t, row => true, (row, now) => { row.Status = row.AssignedAdminId == null ? "open" : "assigned"; row.UpdatedAt = now; }, ct);
         await OutboxStore.EnqueueAsync(session, JobIntent.Support(t.BrandId, id), id, DateTime.UtcNow, ct);
         return id;
@@ -57,23 +60,35 @@ public static class SupportStore
         return ticketId;
     }
 
-    public static async Task<Guid> RecordStaffReplyAsync(DbSession session, AuthenticatedAdmin actor, Guid ticketId, string? assetRef,
-        byte[]? bodyCiphertext = null, string? bodyKeyId = null, CancellationToken ct = default, Guid? requestId = null)
+    public static Task<Guid> RecordStaffReplyAsync(DbSession session, AuthenticatedAdmin actor, Guid ticketId, string? assetRef,
+        byte[]? body = null, CancellationToken ct = default, Guid? requestId = null) =>
+        RecordStaffAsync(session, actor, ticketId, assetRef, body, ct, requestId);
+
+    private static async Task<Guid> RecordStaffAsync(DbSession session, AuthenticatedAdmin actor, Guid ticketId, string? assetRef,
+        byte[]? body, CancellationToken ct, Guid? requestId)
     {
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
         Ticket t = await RequireTicketAsync(session, ticketId, ct);
+        ValidateContent(assetRef, body);
         Guid messageId = requestId ?? Guid.NewGuid();
         if (messageId == Guid.Empty) throw new ArgumentException("Invalid message identity.");
-        Reply? prior = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.SupportMessage>().Where(row => row.Id == messageId).Select(row => new Reply(row.TicketId, row.SenderAdminId, row.AssetRef, row.BodyCiphertext, row.BodyKeyId)).SingleOrDefaultAsync(token), ct);
+        Reply? prior = await session.RunEfStepAsync(false, (data, token) =>
+        {
+            var rows = data.Data.Set<Entities.SupportMessage>().Where(row => row.Id == messageId);
+            return rows.Select(row => new Reply(row.TicketId, row.SenderAdminId, row.AssetRef, row.BodyContent)).SingleOrDefaultAsync(token);
+        }, ct);
         if (prior is not null)
         {
-            if (prior.Ticket != ticketId || prior.Admin != actor.AdminId || prior.Asset != assetRef || prior.Key != bodyKeyId ||
-                (prior.Body is null) != (bodyCiphertext is null) || (prior.Body is not null && !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(prior.Body, bodyCiphertext!))) Deny(session);
-            return messageId;
+            try
+            {
+                if (prior.Ticket != ticketId || prior.Admin != actor.AdminId || prior.Asset != assetRef ||
+                    (prior.Body is null) != (body is null) || (prior.Body is not null && !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(prior.Body, body!))) Deny(session);
+                return messageId;
+            }
+            finally { if (prior.Body is not null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(prior.Body); }
         }
         if (t.Status == "closed") Deny(session);
-        ValidateContent(assetRef, bodyCiphertext, bodyKeyId);
-        await session.RunEfStepAsync(true, async (data, token) => { await data.RequireAdminAsync(actor, null, token); data.Data.Add(new Entities.SupportMessage { Id = messageId, TicketId = ticketId, SenderKind = "admin", SenderAdminId = actor.AdminId, AssetRef = assetRef, BodyCiphertext = bodyCiphertext, BodyKeyId = bodyKeyId }); return true; }, ct);
+        await session.RunEfStepAsync(true, async (data, token) => { await data.RequireAdminAsync(actor, null, token); data.Data.Add(new Entities.SupportMessage { Id = messageId, TicketId = ticketId, SenderKind = "admin", SenderAdminId = actor.AdminId, AssetRef = assetRef, BodyContent = body }); return true; }, ct);
         await ChangeTicketAsync(session, t, row => row.Status != "closed", (row, now) => { row.Status = "waiting_customer"; row.AssignedAdminId = actor.AdminId; row.UpdatedAt = now; }, ct);
         await AuditAsync(session, actor, t, "update", ct);
         await EnqueueCustomerNoticeAsync(session, t, messageId, ct);
@@ -132,13 +147,11 @@ public static class SupportStore
     private static Task<int> AuditAsync(DbSession session, AuthenticatedAdmin actor, Ticket ticket, string action, CancellationToken ct, string reason = "operator_review") => session.RunEfStepAsync(true, async (data, token) => { await data.RequireAdminAsync(actor, null, token); data.Data.Add(new Entities.AuditEvent { Id = Guid.NewGuid(), ActorKind = "admin", ActorAdminId = actor.AdminId, BrandId = ticket.BrandId, Action = action, EntityKind = "support_ticket", EntityId = ticket.Id, Reason = reason, CorrelationId = Guid.NewGuid() }); return 1; }, ct);
     private static Task<bool> ChangeTicketAsync(DbSession session, Ticket ticket, Func<Entities.SupportTicket, bool> predicate, Action<Entities.SupportTicket, DateTime> change, CancellationToken ct) => session.RunEfStepAsync(true, async (data, token) => { await data.RequireBrandCommandAsync(ticket.BrandId, token); var row = await data.Data.Set<Entities.SupportTicket>().SingleAsync(row => row.Id == ticket.Id, token); if (!predicate(row)) Deny(session); DateTime now = await data.Data.Set<Entities.SupportTicket>().Where(row => row.Id == ticket.Id).Select(row => EfValues.TransactionTime()).SingleAsync(token); change(row, now); return true; }, ct);
 
-    private static void ValidateContent(string? assetRef, byte[]? bodyCiphertext, string? bodyKeyId)
+    private static void ValidateContent(string? assetRef, byte[]? body)
     {
-        bool hasBody = bodyCiphertext is not null;
-        if (hasBody != (bodyKeyId is not null)) throw new ArgumentException("Message requires both an encrypted body and its key id.");
-        if (!hasBody && assetRef is null) throw new ArgumentException("Message requires an asset reference or an encrypted body.");
-        if (assetRef is not null && (assetRef.Length < 1 || assetRef.Length > 1024)) throw new ArgumentException("Invalid asset reference.");
-        if (bodyCiphertext is not null && bodyCiphertext.Length == 0) throw new ArgumentException("Encrypted body cannot be empty.");
+        if (body is null && assetRef is null) throw new ArgumentException("Message requires an asset reference or a body.");
+        if (assetRef is not null && assetRef.Length is < 1 or > 1024) throw new ArgumentException("Invalid asset reference.");
+        if (body is { Length: 0 or > 1048576 }) throw new ArgumentException("Invalid message body size.");
     }
 
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
@@ -148,6 +161,6 @@ public static class SupportStore
         throw new UnauthorizedAccessException("Support ticket or message is unavailable.");
     }
 
-    private sealed record Reply(Guid Ticket, Guid? Admin, string? Asset, byte[]? Body, string? Key);
+    private sealed record Reply(Guid Ticket, Guid? Admin, string? Asset, byte[]? Body);
     private sealed record Ticket(Guid Id, Guid UserId, Guid BrandId, string Category, string Status, Guid? OrderId, Guid? AssignedAdminId);
 }

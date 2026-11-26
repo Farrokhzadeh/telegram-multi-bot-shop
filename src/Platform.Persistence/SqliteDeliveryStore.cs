@@ -6,8 +6,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<Guid?> PrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {
         Guid order = Require(lease, JobKind.PrepareManifest, context);
@@ -19,7 +21,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
                 throw new UnauthorizedAccessException("Order is unavailable for manifest preparation.");
             if (state.Generation is null)
             {
-                using var manifest = await BuildAsync(tx, context, order, state.Quantity, false, token);
+                using var manifest = await BuildAsync(tx, order, state.Quantity, false, token);
                 bool unresolved = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.SupplierRequest>().AnyAsync(row => row.OrderId == order && row.Status != "succeeded" && row.Status != "resolved", cancel), token);
                 if (!manifest.Complete || unresolved)
                 {
@@ -32,7 +34,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
                 await SqliteDiscountClaimStore.TransitionAsync(tx, context, order, true, token);
                 state = await ReadAsync(tx, context, order, token);
             }
-            using var frozen = await BuildAsync(tx, context, order, state.Quantity, true, token);
+            using var frozen = await BuildAsync(tx, order, state.Quantity, true, token);
             Verify(state, order, frozen);
             long? target = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.TelegramDelivery>().Where(row => row.OrderId == order && row.UserId == state.Member && row.BrandId == context.BrandId && row.Purpose == "order_status" && row.Status == "succeeded").OrderBy(row => row.CreatedAt).ThenBy(row => row.Id).Select(row => row.TelegramMessageId).FirstOrDefaultAsync(cancel), token);
             Guid? delivery = null;
@@ -80,7 +82,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
                     if (row.Status == "leased") { await OutboxStore.RetrySqliteAsync(tx, renewed, TimeSpan.FromSeconds(1), 100, JobError.Busy, token); return (DeliveryDispatch?)null; }
                 }
             }
-            using var frozen = await BuildAsync(tx, context, intent.Order, state.Quantity, true, token);
+            using var frozen = await BuildAsync(tx, intent.Order, state.Quantity, true, token);
             Verify(state, intent.Order, frozen);
             if (intent.Target is not null && frozen.IsFile)
             {
@@ -142,7 +144,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
             var state = await ReadAsync(tx, context, order, token);
             if (state.Telegram != actor || !state.Released || state.Held || state.Review || state.Blocked)
                 throw new UnauthorizedAccessException("Manifest is unavailable.");
-            using var manifest = await BuildAsync(tx, context, order, state.Quantity, true, token);
+            using var manifest = await BuildAsync(tx, order, state.Quantity, true, token);
             Verify(state, order, manifest);
             return manifest.Bytes.ToArray();
         }, ct);
@@ -169,7 +171,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
         return result ?? throw new UnauthorizedAccessException("Delivery is unavailable.");
     }
 
-    private async Task<Manifest> BuildAsync(SqliteTransaction tx, BrandContext context, Guid order, int quantity, bool frozen,
+    private async Task<Manifest> BuildAsync(SqliteTransaction tx, Guid order, int quantity, bool frozen,
         CancellationToken ct)
     {
         using var bytes = new MemoryStream();
@@ -177,30 +179,47 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
         var text = new StringBuilder();
         bool file = false;
         int count = 0;
-        var cipher = new BrandCipher(secrets);
-        writer.Write(1);
-        writer.Write(quantity);
+        DeliveryManifestEncoding.WriteHeader(writer, quantity);
         while (true)
         {
-            var rows = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order).OrderBy(row => row.UnitNo).Skip(count).Take(1000).Select(row => new { row.Id, row.UnitNo, row.Status, row.ContentKind, row.DeliveredContent, row.DeliveredContentKeyId, row.ManifestGeneration }).ToListAsync(token), ct);
-            foreach (var row in rows)
+            var rows = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) =>
             {
-                if (row.UnitNo != count + 1 || row.ContentKind is null || row.DeliveredContent is null || row.DeliveredContentKeyId is null || (frozen ? row.Status is not ("ready" or "released") || row.ManifestGeneration == null : row.Status != "acquired")) return new([], [], false, true);
-                byte[] plain = cipher.Decrypt(context, "fulfillments", row.Id, "delivered_content", row.DeliveredContentKeyId, row.DeliveredContent);
-                try
+                var parts = data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order).OrderBy(row => row.UnitNo).Skip(count).Take(1000);
+                return parts.Select(row => new ManifestPart(row.UnitNo, row.Status, row.ContentKind, row.DeliveredContent, row.ManifestGeneration)).ToListAsync(token);
+            }, ct);
+            try
+            {
+                foreach (var row in rows)
                 {
-                    writer.Write(row.UnitNo); writer.Write(row.ContentKind); writer.Write(plain.Length); writer.Write(plain);
-                    if (bytes.Length > 16777216) throw new InvalidOperationException("Manifest exceeds delivery limit.");
+                    if (row.UnitNo != count + 1 || row.ContentKind is null || row.Bytes is null ||
+                        (frozen ? row.Status is not ("ready" or "released") || row.Generation == null : row.Status != "acquired"))
+                        return new([], [], false, true);
+                    DeliveryManifestEncoding.WritePart(writer, row.UnitNo, row.ContentKind, row.Bytes);
+                    if (bytes.Length > DeliveryManifestEncoding.MaximumBytes) throw new InvalidOperationException("Manifest exceeds delivery limit.");
                     if (row.ContentKind == "file") file = true;
-                    if (!file) { try { text.Append(row.UnitNo).Append(". ").Append(new UTF8Encoding(false, true).GetString(plain)).Append('\n'); } catch (DecoderFallbackException) { file = true; } if (text.Length > 4096) file = true; }
+                    if (!file)
+                    {
+                        try { text.Append(row.UnitNo).Append(". ").Append(new UTF8Encoding(false, true).GetString(row.Bytes)).Append('\n'); }
+                        catch (DecoderFallbackException) { file = true; }
+                        if (text.Length > 4096) file = true;
+                    }
+                    count++;
                 }
-                finally { CryptographicOperations.ZeroMemory(plain); }
-                count++;
+            }
+            finally
+            {
+                foreach (var row in rows)
+                    if (row.Bytes is not null) CryptographicOperations.ZeroMemory(row.Bytes);
             }
             if (rows.Count < 1000) break;
         }
         byte[] content = bytes.ToArray();
         return new(content, file ? content.ToArray() : Encoding.UTF8.GetBytes(text.ToString()), count == quantity, file);
+    }
+
+    private sealed record ManifestPart(int UnitNo, string Status, string? ContentKind, byte[]? Bytes, Guid? Generation)
+    {
+        public override string ToString() => "Manifest part [redacted]";
     }
 
     private static void Verify(State state, Guid order, Manifest manifest)
@@ -210,7 +229,7 @@ public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions, SecretSna
             state.Digest is null || !CryptographicOperations.FixedTimeEquals(state.Digest, SHA256.HashData(manifest.Bytes)))
             throw new UnauthorizedAccessException("Manifest is unavailable.");
     }
-    private static string Asset(Guid order, Guid generation) => "manifest:" + order.ToString("D") + ":" + generation.ToString("D");
+    private static string Asset(Guid order, Guid generation) => DeliveryManifestEncoding.Reference(order, generation);
     private static Guid Require(JobLease lease, JobKind kind, BrandContext context) =>
         lease.Intent.Kind == kind && lease.Intent.BrandId == context.BrandId && lease.Intent.OriginId is Guid id
             ? id : throw new UnauthorizedAccessException("Job origin is unavailable.");

@@ -145,9 +145,9 @@ public sealed class ReconciliationReport(DbSessionFactory sessions, ReadOnlyReco
             long paid = await orders.LongCountAsync(o => (o.PaymentStatus == "paid" || o.PaymentStatus == "not_required") && o.FulfillmentStatus != "completed" && o.FulfillmentStatus != "cancelled" && o.FulfillmentStatus != "compensated", token);
             long held = await (from d in data.Data.Set<DiscountUse>() join o in orders on d.OrderId equals o.Id where d.Status == "held" select (long?)d.UnitsCovered).SumAsync(token) ?? 0L;
             long ciphers = await (from f in data.Data.Set<Fulfillment>() join o in orders on f.OrderId equals o.Id where f.DeliveredContent != null select f.Id).LongCountAsync(token);
-            ciphers += await data.Data.Set<Discount>().LongCountAsync(d => d.BrandId == manifest.TargetBrand && d.CodeCiphertext != null, token);
-            ciphers += await (from m in data.Data.Set<SupportMessage>() join t in data.Data.Set<SupportTicket>() on m.TicketId equals t.Id join u in data.Data.Set<User>() on t.UserId equals u.Id where u.BrandId == manifest.TargetBrand && m.BodyCiphertext != null select m.Id).LongCountAsync(token);
-            ciphers += await (from p in data.Data.Set<Payment>() join o in orders on p.OrderId equals o.Id where p.BankDestinationCiphertext != null select p.Id).LongCountAsync(token);
+            ciphers += await data.Data.Set<Discount>().LongCountAsync(d => d.BrandId == manifest.TargetBrand && d.CodeContent != null, token);
+            ciphers += await (from m in data.Data.Set<SupportMessage>() join t in data.Data.Set<SupportTicket>() on m.TicketId equals t.Id join u in data.Data.Set<User>() on t.UserId equals u.Id where u.BrandId == manifest.TargetBrand && m.BodyContent != null select m.Id).LongCountAsync(token);
+            ciphers += await (from p in data.Data.Set<Payment>() join o in orders on p.OrderId equals o.Id where p.BankDestination != null select p.Id).LongCountAsync(token);
             return (Paid: paid, Held: held, Ciphers: ciphers, Stock: await data.Data.Set<InventoryItem>().LongCountAsync(i => i.State == "available", token));
         }, ct);
         long mapped = coverage.BatchCount;

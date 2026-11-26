@@ -31,9 +31,17 @@ def put(path, value, uid=0):
 def token(value):
     return base64.urlsafe_b64encode(value).decode().rstrip("=")
 
-def provision(runtime, schema):
+def provision(runtime, schema, plaintext_sha256):
     if not (os.geteuid() == 0 and runtime.is_dir() and schema.is_file()):
         raise ValueError("Staging requires a reviewed artifact and operator access")
+    ddl = schema.read_bytes()
+    schema_hash = hashlib.sha256(ddl).hexdigest()
+    if schema_hash != plaintext_sha256:
+        raise ValueError("Reviewed plaintext schema digest differs")
+    sql = ddl.decode("utf-8")
+    if sql.splitlines().count("COMMENT ON SCHEMA shop IS 'akanti-plaintext-v2';") != 1:
+        raise ValueError("A version 2 PostgreSQL schema is required")
+    mode = "isolated-synthetic-v2"
     if output("docker", "ps", "-aq", "--filter", "label=com.docker.compose.project=shop-staging"):
         raise ValueError("Staging project name is in use")
     for kind, name in [("network", "shop-staging-private"), ("volume", "shop-staging-postgres")]:
@@ -46,11 +54,8 @@ def provision(runtime, schema):
     shutil.copytree(runtime, built)
     artifacts = {str(path.relative_to(built)): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(built.rglob("*")) if path.is_file()}
     run("chmod", "-R", "a+rX", built)
-    sql = schema.read_text()
-    schema_hash = hashlib.sha256(sql.encode()).hexdigest()
     admin = secrets.token_bytes(32)
     staff_probe = secrets.token_hex(32)
-    keys = {alias: secrets.token_bytes(32) for alias in [*BRANDS, "inventory"]}
     passwords = {role: secrets.token_hex(32) for role in ["root", *ROLES]}
     for part in ("roles", "assets", "backups", "operator", "bootstrap"):
         (ROOT / part).mkdir()
@@ -76,7 +81,6 @@ def provision(runtime, schema):
     for role, uid in ROLES.items():
         directory = ROOT / "roles" / role
         directory.mkdir()
-        (directory / "keys").mkdir()
         host = "stage-" + role
         cert = ROOT / "operator" / (host + ".crt")
         private = ROOT / "operator" / (host + ".temporary")
@@ -87,26 +91,15 @@ def provision(runtime, schema):
         private.unlink()
         fingerprints[host] = output("openssl", "x509", "-in", cert, "-noout", "-fingerprint", "-sha256")
         bot = role.startswith("bot-")
-        aliases = [role[-1]] if bot else BRANDS.keys()
-        inventory = role == "jobs"
-        def keyring(alias):
-            put(directory / "keys" / (alias + "-current"), keys[alias], uid)
-            return {"currentKeyId": "current", "keys": [{"id": "current", "file": alias + "-current"}]}
-        manifest = {"schemaVersion": 1, "deploymentId": deploy, "revision": 1,
-                    "service": "BotHost" if bot else "JobHost" if inventory else "Api",
-                    "brands": [{"brandId": BRANDS[a], **keyring(a)} for a in aliases],
-                    "inventory": keyring("inventory") if inventory else None}
-        put(directory / "keys/service-config.json", json.dumps(manifest), uid)
         put(directory / "db-password", passwords[role], uid)
         if bot:
             value = secrets.token_bytes(32)
             put(directory / "webhook", value, uid)
             put(ROOT / "operator" / (role + "-header"), token(value))
-        if inventory:
+        if role == "jobs":
             put(directory / "recipient-probe", staff_probe, uid)
         os.chown(directory / "tls.pfx", uid, uid)
         (directory / "tls.pfx").chmod(0o400)
-        os.chown(directory / "keys", uid, uid)
         os.chown(directory, uid, uid)
         mounts = [f"{built}:/opt/runtime:ro", f"{directory}:/run/staging:ro"]
         if bot:
@@ -114,14 +107,14 @@ def provision(runtime, schema):
         services[host] = {
             **limits, "image": SDK, "user": f"{uid}:{uid}", "init": True,
             "entrypoint": ["dotnet", "/opt/runtime/Platform.Api.dll", "--serve-synthetic-staging", role],
-            "environment": {"SHOP_STAGING_MODE": "isolated-synthetic-v1", "SHOP_STAGING_DEPLOYMENT": deploy,
+            "environment": {"SHOP_STAGING_MODE": mode, "SHOP_STAGING_DEPLOYMENT": deploy, "SHOP_STAGING_SCHEMA_SHA256": schema_hash,
                             "DOTNET_PROCESSOR_COUNT": "1", "DOTNET_EnableDiagnostics": "0"},
             "volumes": mounts, "tmpfs": ["/tmp:rw,nosuid,size=16m"], "depends_on": ["stage-db"]}
     config = {"name": "shop-staging", "services": services, "volumes": {"postgres": {"name": "shop-staging-postgres"}},
               "networks": {"default": {"name": "shop-staging-private", "internal": True,
                           "driver_opts": {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}}}}
     put(ROOT / "compose.json", json.dumps(config))
-    put(ROOT / "operator/identity.json", json.dumps({"deployment": deploy, "environment": "isolated-synthetic-v1",
+    put(ROOT / "operator/identity.json", json.dumps({"deployment": deploy, "environment": mode,
         "database": DB, "schema": schema_hash, "runtime": artifacts, "runtimeImage": SDK, "databaseImage": pg,
         "brands": BRANDS, "roles": ROLES, "certificates": fingerprints,
         "source": "synthetic-only", "customerTester": 7001, "staffTester": -10088}))
@@ -149,11 +142,11 @@ def initialize(sql, deploy, schema_hash, passwords, admin_hash):
             f"GRANT CONNECT ON DATABASE shop_staging TO {name};",
         ]
     statements += [f"SET ROLE {OWNER};", sql,
-                   f"COMMENT ON SCHEMA shop IS 'shop-staging-synthetic:{deploy}:{schema_hash}';",
+                   f"COMMENT ON DATABASE shop_staging IS 'shop-staging-synthetic-v2:{deploy}:{schema_hash}';",
                    f"INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ('{PRODUCT}','local','immediate','Synthetic stage listing');"]
     for index, (alias, brand) in enumerate(BRANDS.items(), start=1001):
         statements += [
-            f"INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active) VALUES ('{brand}','stage-{alias}','Stage {alias}','Stage {alias}','international','en','synthetic_stage_{alias}_bot',{index},decode('01','hex'),'current',true);",
+            f"INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token,active) VALUES ('{brand}','stage-{alias}','Stage {alias}','Stage {alias}','international','en','synthetic_stage_{alias}_bot',{index},decode('01','hex'),true);",
             f"INSERT INTO shop.brand_products(brand_id,product_id,visible,price_usdt) VALUES ('{brand}','{PRODUCT}',true,10);",
             f"INSERT INTO shop.users(id,brand_id,telegram_id,language,flow_state,flow_revision,flow_anchor_message_id) VALUES (md5('staging-{alias}-tester')::uuid,'{brand}',7001,'en','catalog',1,77);",
         ]
@@ -168,6 +161,7 @@ def initialize(sql, deploy, schema_hash, passwords, admin_hash):
         "GRANT SELECT (id,admin_id,token_hash,auth_version_at_issue,expires_at,revoked_at) ON shop.admin_sessions TO shop_staging_api;",
         "GRANT EXECUTE ON FUNCTION shop.activity_cleanup_candidates(integer) TO shop_staging_maintenance;",
     ]
+    statements.append('GRANT SELECT ON shop."__EFMigrationsHistory" TO ' + ",".join(roles.values()) + ";")
     for table in ("brands", "users", "brand_products", "bot_activity_events", "orders", "products"):
         statements.append(f"ALTER TABLE shop.{table} ENABLE ROW LEVEL SECURITY;")
     for alias, brand in BRANDS.items():
@@ -192,12 +186,12 @@ def initialize(sql, deploy, schema_hash, passwords, admin_hash):
 if __name__ == "__main__":
     import time
     os.umask(0o077)
-    if len(sys.argv) != 3:
-        raise SystemExit("Usage: provision_synthetic_stage.py RUNTIME_DIRECTORY CANONICAL_SQL")
+    if len(sys.argv) != 5 or sys.argv[3] != "--plaintext-sha256":
+        raise SystemExit("Usage: provision_synthetic_stage.py RUNTIME_DIRECTORY SCHEMA_SQL --plaintext-sha256 SHA256")
     memory = int(next(line for line in Path("/proc/meminfo").read_text().splitlines() if line.startswith("MemAvailable:")).split()[1])
     if memory < 1048576 or shutil.disk_usage(ROOT.parent).free < 3 * 1024 ** 3:
         raise SystemExit("Staging requires 1 GiB available RAM and 3 GiB free disk")
-    settings = provision(Path(sys.argv[1]), Path(sys.argv[2]))
+    settings = provision(Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[4])
     compose("up", "-d", "--pull", "never", "stage-db")
     for _ in range(35):
         result = subprocess.run(["docker", "compose", "-f", str(ROOT / "compose.json"), "exec", "-T", "stage-db",

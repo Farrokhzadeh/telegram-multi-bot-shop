@@ -14,9 +14,15 @@ public sealed class AkundingSourceInspection : IDisposable
     private readonly string account;
     private readonly HttpClient http;
     private readonly AkundingCatalogClient catalog;
-    public AkundingSourceInspection(DbSessionFactory sessions, SecretSnapshot commerce, SupplierCredentialSnapshot credentials, string account, HttpMessageHandler? transport = null)
+    public AkundingSourceInspection(DbSessionFactory sessions, SupplierCredentialGrant grant, SupplierCredentialSnapshot credentials,
+        string account, HttpMessageHandler? transport = null)
+        : this(sessions, credentials.ForGrant(grant), account, transport, grant.DeploymentId, grant.Service) { }
+
+    private AkundingSourceInspection(DbSessionFactory sessions, SupplierCredentialSnapshot credentials,
+        string account, HttpMessageHandler? transport, Guid deployment, SecretService service)
     {
-        if (credentials.DeploymentId != commerce.DeploymentId || credentials.Service != commerce.Service) throw new UnauthorizedAccessException("Supplier credential scope is unavailable.");
+        if (credentials.DeploymentId != deployment || credentials.Service != service)
+            throw new UnauthorizedAccessException("Supplier credential scope is unavailable.");
         credentials.UseCredential("akunding", account, key => key.Length);
         this.sessions = sessions; this.credentials = credentials; this.account = account;
         http = new(new Authorization(credentials, account, transport ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false }));

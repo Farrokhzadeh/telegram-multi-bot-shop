@@ -99,7 +99,7 @@ public sealed class SupplierSourceSelectionTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid next = await SupplierSourceSelectionQualification.AddAsync(f, Ct);
         var admin = await f.AdminAsync(Ct);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [new("synthetic", "public account")], async (_, ct) =>
+        var catalog = new CatalogStore(f.Sessions, [new("synthetic", "public account")], async (_, ct) =>
         {
             await new SupplierSourceSelectionStore(f.Sessions).SelectAsync(admin, f.Product, next, 1, 1, Guid.NewGuid(), ct);
             return new(SupplierCatalogStatus.Available, 10, 1, "USD", "public old quote");

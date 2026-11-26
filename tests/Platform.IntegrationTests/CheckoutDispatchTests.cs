@@ -11,7 +11,7 @@ public sealed class CheckoutDispatchTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static CatalogStore Catalog(CheckoutFixture f, Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>>? fetch = null) =>
-        new(f.Sessions, f.Secrets, [new("synthetic", "public account")], fetch ?? ((_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
+        new(f.Sessions, [new("synthetic", "public account")], fetch ?? ((_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
     private static WalletCheckoutService Service(CheckoutFixture f, CatalogStore? catalog = null) => new(f.Sessions, f.Store, catalog ?? Catalog(f));
     private static Task<ChannelMembership> Member(long chat, long actor, CancellationToken ct) => Task.FromResult(ChannelMembership.Member);
     private static CheckoutRequest Request(CheckoutFixture f, CheckoutPayment payment = CheckoutPayment.Crypto, int qty = 1, CheckoutKind kind = CheckoutKind.ProductPurchase) => new(OrderIds.New(), f.Product, qty, payment, kind);
@@ -139,7 +139,7 @@ public sealed class CheckoutDispatchTests
         var service = Service(f);
         Assert.Equal(CheckoutOutcome.Purchased, (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct)).Outcome);
         Assert.Equal(CheckoutOutcome.Replayed, (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct)).Outcome);
-        var pricing = new PricingStore(f.Sessions, f.Secrets);
+        var pricing = new PricingStore(f.Sessions);
         Guid first;
         await using (var retry = await f.Sessions.BeginAsync(Ct))
         {
@@ -174,7 +174,7 @@ public sealed class CheckoutDispatchTests
         Guid id = Guid.NewGuid();
         var actor = await f.AdminAsync(Ct);
         await using var issue = await f.Sessions.BeginAsync(Ct);
-        await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), actor, new(id, "PUBLIC-" + id.ToString("N"), CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: cap, EndsAt: DateTime.UtcNow.AddHours(1)), Guid.NewGuid(), Ct);
+        await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), actor, new(id, "PUBLIC-" + id.ToString("N"), CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: cap, EndsAt: DateTime.UtcNow.AddHours(1)), Guid.NewGuid(), Ct);
         await issue.CommitAsync(Ct);
         return id;
     }

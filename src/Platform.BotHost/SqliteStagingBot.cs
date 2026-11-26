@@ -17,9 +17,10 @@ internal static class SqliteStagingBot
 {
     internal static async Task<int> RunAsync(CancellationToken ct = default)
     {
+        string? format = Environment.GetEnvironmentVariable("SHOP_SQLITE_STAGING");
         if (!OperatingSystem.IsLinux() ||
             Environment.GetEnvironmentVariable("INSTANCE_ID") != "staging" ||
-            Environment.GetEnvironmentVariable("SHOP_SQLITE_STAGING") != "synthetic-acc-abad-v1")
+            format != "synthetic-acc-abad-v2")
             return HostBootstrap.ConfigurationRequiredExitCode;
         string token;
         string key;
@@ -50,6 +51,9 @@ internal static class SqliteStagingBot
         api.DefaultRequestHeaders.Add("X-Staging-Key", key);
         try
         {
+            using (var health = await api.GetAsync("/health/sqlite", ct))
+                if (!health.IsSuccessStatusCode || !health.Headers.TryGetValues("X-Sqlite-Format", out var values) ||
+                    !values.SequenceEqual(["2"], StringComparer.Ordinal)) throw new UnauthorizedAccessException();
             var identity = await TelegramTransport.ReadRawResultAsync(token, telegram,
                 (client, cancel) => client.GetMe(cancel), ct);
             var webhook = await TelegramTransport.ReadRawResultAsync(token, telegram,

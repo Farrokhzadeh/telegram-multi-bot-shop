@@ -24,20 +24,16 @@ internal static class SyntheticStaging
     {
         try
         {
-            if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_STAGING_MODE") != "isolated-synthetic-v1" ||
+            string? mode = Environment.GetEnvironmentVariable("SHOP_STAGING_MODE");
+            if (!OperatingSystem.IsLinux() || mode != "isolated-synthetic-v2" ||
                 !Guid.TryParseExact(Environment.GetEnvironmentVariable("SHOP_STAGING_DEPLOYMENT"), "D", out var deployment) ||
                 deployment == Guid.Empty) return 78;
 
             int bot = Array.IndexOf(BotRoles, role);
-            SecretService service = role switch
-            {
-                "api" => SecretService.Api,
-                "jobs" => SecretService.JobHost,
-                _ when bot >= 0 => SecretService.BotHost,
-                _ => throw new InvalidOperationException()
-            };
-            var grant = new SecretLoadGrant(service, deployment, 1, bot >= 0 ? [Brands[bot]] : Brands, role == "jobs");
-            using var keys = SecretFiles.Load(Path.Combine(Root, "keys"), "service-config.json", grant);
+            if (role is not ("api" or "jobs") && bot < 0) return 78;
+            if (Directory.Exists(Path.Combine(Root, "keys"))) return 78;
+            string? checksum = Environment.GetEnvironmentVariable("SHOP_STAGING_SCHEMA_SHA256");
+            if (checksum is not { Length: 64 } || !checksum.All(char.IsAsciiHexDigit)) return 78;
             var options = new NpgsqlConnectionStringBuilder
             {
                 Host = "stage-db",
@@ -54,11 +50,12 @@ internal static class SyntheticStaging
                 SELECT current_database()='shop_staging' AND current_user=$1
                     AND current_setting('server_version_num')='180006'
                     AND NOT has_schema_privilege(current_user,'shop','CREATE')
-                    AND obj_description('shop'::regnamespace,'pg_namespace')=$2
+                    AND obj_description('shop'::regnamespace,'pg_namespace')='akanti-plaintext-v2'
+                    AND shobj_description((SELECT oid FROM pg_database WHERE datname=current_database()),'pg_database')=$2
                 """, connection))
             {
                 query.Parameters.Add(new() { Value = options.Username });
-                query.Parameters.Add(new() { Value = "shop-staging-synthetic:" + deployment.ToString("D") + ":" + SchemaRunner.BaselineSqlSha256 });
+                query.Parameters.Add(new() { Value = $"shop-staging-synthetic-v2:{deployment:D}:{checksum}" });
                 if (await query.ExecuteScalarAsync() is not true) return 78;
             }
 
@@ -71,7 +68,7 @@ internal static class SyntheticStaging
                 server.ListenAnyIP(8443, endpoint => endpoint.UseHttps(certificate));
             });
             await using var app = builder.Build();
-            var sessions = new DbSessionFactory(data);
+            var sessions = DbSessionFactory.ForPlaintext(data);
             app.UseRouting();
             app.UseMiddleware<DiagnosticsMiddleware>((Action<string>)(_ => { }));
             app.MapGet("/ready", () => Results.Text(role));

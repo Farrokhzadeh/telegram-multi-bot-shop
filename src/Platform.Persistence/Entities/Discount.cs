@@ -6,6 +6,7 @@ public sealed class Discount
     public Guid BrandId { get; set; }
     public byte[] CodeDigest { get; set; } = null!;
     public byte[] CodeCiphertext { get; set; } = null!;
+    public byte[] CodeContent { get; set; } = null!;
     public string CodeKeyId { get; set; } = null!;
     public string DisplayPrefix { get; set; } = null!;
     public Guid IssuanceBatchId { get; set; }

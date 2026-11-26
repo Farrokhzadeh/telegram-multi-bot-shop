@@ -8,8 +8,10 @@ namespace Platform.Persistence;
 
 public enum SqliteBankDecisionOutcome { ConfirmedPaid, DeniedUnverified, Replayed }
 
-public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<SqliteBankDecisionOutcome> DecideAsync(BrandContext context, AuthenticatedAdmin actor, Guid payment,
         bool approve, long expectedOrderRevision, Guid command, string reason, CancellationToken ct = default)
     {
@@ -49,17 +51,17 @@ public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions, SecretS
                 row.PaymentStatus = "paid"; row.PaymentConfirmedAt = instant;
             }, instant, token);
             if (state.OrderKind == "prepaid_units")
-                await new SqlitePrepaidSourceStore(sessions, secrets)
+                await new SqlitePrepaidSourceStore(sessions)
                     .IssueAsync(tx, context, state.Order, token);
             else if (state.Kind == "local")
             {
                 bool queued = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Order>().AnyAsync(value => value.ProductId == state.Product && value.Id != state.Order && value.IsPreorder && (value.PaymentStatus == "paid" || value.PaymentStatus == "not_required") && (value.FulfillmentStatus == "waiting_stock" || value.FulfillmentStatus == "requires_admin"), cancel), token);
-                List<SqliteOrderPaymentSettlementStore.Stock> stock = queued ? [] :
+                List<Guid> stock = queued ? [] :
                     await SqliteOrderPaymentSettlementStore.ReadStockAsync(
                     tx, state.Product, state.Quantity, token);
                 if (!queued && stock.Count == state.Quantity)
                 {
-                    await new SqliteOrderPaymentSettlementStore(sessions, secrets).AcquireAsync(
+                    await SqliteOrderPaymentSettlementStore.AcquireAsync(
                         tx, context, state.Order, stock, now, token);
                     await FulfillmentAsync(tx, state.Order, "acquiring", null, now, token);
                 }

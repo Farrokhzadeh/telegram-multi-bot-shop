@@ -8,8 +8,8 @@ internal static class CouponEdits
     internal static async Task<long> WriteAsync(EfSession data, BrandContext context, AuthenticatedAdmin actor, Guid coupon, long revision, CouponOwnerEdit edit, Guid audit, CancellationToken ct)
     {
         await data.RequireAdminAsync(actor, null, ct);
-        bool sqlite = data.Data is SqliteAkantiDbContext;
-        if (sqlite && !await data.Data.Set<Entities.Brand>().AnyAsync(value => value.Id == context.BrandId && value.BotId == context.BotId && value.Active, ct)) data.RejectScope("Coupon brand is unavailable.");
+        bool sqlite = data.Data.Database.IsSqlite();
+        if (sqlite && !await data.Data.Set<Entities.Brand>().AnyAsync(value => value.Id == context.BrandId && value.BotId == context.BotId && value.Active, ct)) data.RejectConflict("Coupon revision conflict.");
         if (edit.MemberId is Guid member && !await data.Data.Set<Entities.User>().AnyAsync(value => value.Id == member && value.BrandId == context.BrandId, ct)) data.RejectScope("Coupon member is outside this brand.");
         if (sqlite && edit.ProductId is Guid product && !await data.Data.Set<Entities.Product>().AnyAsync(value => value.Id == product, ct)) data.RejectScope("Coupon product is unavailable.");
         await data.LockDiscountAsync(coupon, context.BrandId, ct);

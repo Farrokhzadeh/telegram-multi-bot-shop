@@ -139,7 +139,7 @@ public sealed class BotActivityFloodTests
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(coupon, "PUBLIC-REV-TEST", CouponKind.Promotion, 20, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(coupon, "PUBLIC-REV-TEST", CouponKind.Promotion, 20, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         await using (var invalid = await f.Sessions.BeginAsync(Ct))

@@ -58,3 +58,59 @@ EF affected-scope queries bind UUID collections. Slim PostgreSQL data sources us
 
 ## Full model validation candidate
 Current EF command checks include all18 former SQLite assertions and related mutations; original SQL validation remains until runtime conversion closes. Original-baseline parity tests intentionally migrate only the first EF baseline, so historical encrypted constraints/indexes remain independently compared even after later schema lineages evolve. New accepted-state defaults write explicit replay0 and false flags exactly; invalid zeros hit their original constraints. These runtime-only unset markers do not change reviewed schema scripts or snapshots. Run the affected provider suites at the exact candidate; local SQLite success does not qualify PostgreSQL or a completed EF runtime.
+
+For an isolated fresh plaintext SQLite schema, use `SHOP_TEST_ALLOW_DATABASE_CREATION=1 Platform.SchemaRunner --create-plain-qualification-sqlite`. The command creates a private temporary database and prints the schema digest and format version.
+
+## Offline synthetic SQLite conversion
+
+Use `Platform.SchemaRunner --describe-plain-ef-schema sqlite` or `Platform.SchemaRunner --describe-plain-ef-schema postgres` to print the v2 migration ID and candidate DDL and model digests without opening a database. Each provider has its own EF context and migration snapshot. Fresh and converted targets carry the v2 migration history. The historical v1 migration remains available for recovery.
+
+Use a private Linux x64 directory named `akanti-ef-qualification-*` and set `SHOP_TEST_ALLOW_DATABASE_CREATION=1`. The commands below take absolute paths inside that directory. Use a disposable synthetic source and the keyring that encrypted it. A WAL-mode input requires its existing private database, WAL and shared-memory files. Freezing uses a read-only SQLite backup, then publishes a private read-only snapshot in rollback-journal format, with no sidecars.
+
+```sh
+Platform.SchemaRunner --freeze-plain-qualification-source --database "$work/input.db" --snapshot "$work/source.db"
+Platform.SchemaRunner --inspect-plain-qualification-source --snapshot "$work/source.db" --inventory "$work/references.json"
+Platform.SchemaRunner --prepare-plain-qualification-target --database "$work/target.db"
+Platform.SchemaRunner --convert-plain-qualification --job "$work/job.json"
+Platform.SchemaRunner --verify-plain-qualification --job "$work/job.json"
+Platform.SchemaRunner --prepare-plain-runtime-copy --job "$work/job.json" --output "$work/runtime-example"
+Platform.SchemaRunner --verify-plain-runtime-copy --bundle "$work/runtime-example" --receipt-sha256 "$receipt_digest"
+```
+
+The optional inventory is owner-only and contains raw references. Use the printed snapshot and target schema digests in `job.json`. The job must be owner-only and specify these fields:
+
+| Field | Value |
+|---|---|
+| `version` | `1` |
+| `source`, `destination` | Distinct database filenames in the job directory |
+| `source_assets`, `destination_assets` | Distinct private subdirectories with owner-read-only input assets and conversion output |
+| `snapshot_sha256`, `target_schema_sha256` | Printed digests for the frozen source and prepared target |
+| `keys` | Private subdirectory `directory`, JobHost recovery-manifest filename `manifest`, `deployment` UUID, `revision`, and `preview` (private 32-byte key filename or null) |
+| `brands` | Array of exact source brand objects with UUID `id` and numeric `bot_id` |
+| `assets` | Array with one entry per file or archived capture. Use `[]` for an asset-free fixture. |
+
+Each asset entry supplies `format`, `reference_sha256`, `stored_sha256`, `plaintext_sha256`, `brand_id`, `row_id`, `key_id` and `update_id`. Put null in unused scope fields.
+
+| Format | Reference and scope | Input → output filename |
+|---|---|---|
+| `plain` | Reference digest from the inventory. Stored and plaintext digests must agree. | `<reference_sha256>.asset` → same |
+| `payment-evidence` | Reference digest from the inventory, brand, payment row ID and recovery key ID. The plaintext digest must match the stored payment digest. | `<reference_sha256>.asset` → same |
+| `customer-history` | Null reference digest, brand and member row ID | `<brand:N>-<member:N>.history` → `<brand:N>-<member:N>.history-v2` |
+| `preview-capture` | Null reference digest and numeric Telegram update ID | `<update_id>.capture` → `<update_id>.capture-v2` |
+| `preview-cursor` | Null reference digest and previously accepted next offset in `update_id` | `next-offset` → same, with identical source and target byte digests |
+
+Database-generated order manifests stay in the database and are reconstructed to verify their original digest. Other enumerated references need file entries. Preview captures require a matching cursor entry. The asset directories must match the declared layout. Repeat the same convert command and byte-identical job to resume. Rows commit in private batches of 128, and individual asset files publish atomically. The staged marker blocks runtime access. Foreign-key enforcement is restored and the whole database is checked before the row checkpoint can complete. Verification rechecks rows and assets against the frozen originals.
+
+Runtime-copy preparation creates a separate private directory after re-verifying the staged database and assets against the originals. It writes a WAL-mode database, puts files in the runtime layout where a local consumer owns the reference, and records a private file inventory. Take `receipt_digest` from the preparation output. Verification compares every package file to that receipt before first start. Ordinary referenced files remain under `assets/` with their identity in the receipt. The staged database retains its checkpoint. First SQLite activation requires a separate accepted-state operation. The historical PostgreSQL commerce deployment is retired from the current release path.
+
+The isolated preview uses `state-v2` with an explicit private `next-offset` and stores exact JSON bytes in `*.capture-v2`. The synthetic history fixture uses private `*.history-v2` files and binding version 2. Retain older state roots and original files for recovery.
+
+## Plaintext runtime candidate
+
+The SQLite API, worker and bot accept the explicit synthetic mode `SHOP_SQLITE_STAGING=synthetic-acc-abad-v2`. The API and worker require a fresh runtime v2 SQLite schema in WAL mode at the existing private staging path. The API retains its local service key and administrator session checks. The worker and bot retain their Telegram identity files. The v2 API imports synthetic stock in its own transaction, and the v2 bot checks the authenticated API’s `X-Sqlite-Format` value before polling. An offline conversion database remains staged until separate publication work is authorized and completed.
+
+The SQLite staging redeploy source accepts `--plaintext` only for an already accepted v2 runtime. It uses the existing database and supplier evidence directory, requires compatible prior containers for rollback, and leaves first activation to a separate step. It sources API and Telegram identity through the plaintext provisioning branch.
+
+For PostgreSQL, `--create-plain-qualification-postgres --connection-file FILE --expected-ddl-sha256 DIGEST` creates v2 tables in an empty, owned, disposable qualification database. The digest comes from `--describe-plain-ef-schema postgres`. For synthetic provisioning, `--write-plain-postgres-schema --output FILE` writes a candidate SQL artifact in the private qualification directory and prints its file digest. The separate synthetic provisioner accepts the artifact and `--plaintext-sha256 FILE_DIGEST`. Its v2 roles use database credentials, TLS, webhook verification and the delivery probe. Provisioning and runtime qualification require separate execution.
+
+The protected customer history export writes direct per-brand and per-member v2 files. The read-only staging history actor requires a v2 database and a matching private receipt. Historical encrypted snapshots are read by offline recovery.

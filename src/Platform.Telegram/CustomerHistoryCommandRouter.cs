@@ -4,7 +4,7 @@ using Platform.Security;
 
 namespace Platform.Telegram;
 
-public sealed class CustomerHistoryCommandRouter(DbSessionFactory sessions, CustomerHistoryArchive archive, CustomerHistoryFiles files)
+public sealed class CustomerHistoryCommandRouter(DbSessionFactory sessions, CustomerHistoryFiles files)
 {
     public static bool TryParsePage(string value, out int offset)
     {
@@ -23,8 +23,7 @@ public sealed class CustomerHistoryCommandRouter(DbSessionFactory sessions, Cust
         await using var session = await sessions.BeginReadOnlyAsync(ct);
         var member = await BrandUserStore.RequireAsync(session, update.Context, update.ActorId, null, ct);
         if (member.Blocked || member.Banned) throw new TelegramIngressRejectedException();
-        var encrypted = await files.ReadAsync(update.Context, member.Id, ct);
-        var originals = archive.Open(update.Context, member.Id, encrypted.Span);
+        var originals = await files.ReadOrdersAsync(update.Context, member.Id, ct);
         var imported = await CustomerHistoricalTypedAliasReader.ReadAsync(session, update.Context, member.Id, ct);
         await using var fresh = await sessions.BeginReadOnlyAsync(ct);
         var current = await BrandUserStore.RequireAsync(fresh, update.Context, update.ActorId, member.Id, ct);

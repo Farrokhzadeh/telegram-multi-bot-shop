@@ -19,14 +19,14 @@ public sealed class AdminCatalogAndResolutionTests
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         var admin = await f.AdminAsync(Ct);
-        var store = new AdminCatalogStore(f.Sessions, f.Secrets);
+        var store = new AdminCatalogStore(f.Sessions);
         var listing = new ListingEdit(true, "override", "Public override", "clear", null, "inherit", null, "inherit", null, "12.50", "20000", false, true, false, false, 1, 5);
         Guid command = Guid.NewGuid();
         Assert.Equal(1, await store.ListingAsync(admin, f.Context(0), f.Product, listing, 0, command, Ct));
         Assert.Equal(1, await store.ListingAsync(admin, f.Context(0), f.Product, listing, 0, command, Ct));
         await Assert.ThrowsAsync<InvalidOperationException>(() => store.ListingAsync(admin, f.Context(0), f.Product, listing with { PriceUsd = "13" }, 0, Guid.NewGuid(), Ct));
         await store.ProductAsync(admin, f.Product, new("Public revised master", "Public inherited description", null, null, "local", "immediate", true, true), 0, Guid.NewGuid(), Ct);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException());
+        var catalog = new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException());
         Guid item = Guid.NewGuid();
         InventoryImportItem[] items = [new(item, "Public synthetic stock value")];
         Guid import = Guid.NewGuid();
@@ -70,7 +70,7 @@ public sealed class AdminCatalogAndResolutionTests
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, ct: Ct);
         var admin = await f.AdminAsync(Ct);
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         var value = new WalletAdjustment(f.Users[0], "5.25", 0, "Public correction", Guid.NewGuid());
         using var limit = new SemaphoreSlim(8);
         var results = await Task.WhenAll(Enumerable.Range(0, 100).Select(async _ => { await limit.WaitAsync(Ct); try { return await store.AdjustAsync(admin, f.Context(0), value, Ct); } finally { limit.Release(); } }));
@@ -90,15 +90,15 @@ public sealed class AdminCatalogAndResolutionTests
         await using (var policy = await f.Sessions.BeginAsync(Ct))
         { await policy.ExecuteAsync(new DbStatement("UPDATE shop.products SET availability_policy='local_preorder',revision=revision+1"), Ct); await policy.CommitAsync(Ct); }
         var admin = await f.AdminAsync(Ct);
-        var pricing = new PricingStore(f.Sessions, f.Secrets);
+        var pricing = new PricingStore(f.Sessions);
         Guid coupon = Guid.NewGuid();
         DateTime ends;
         await using (var clock = await f.Sessions.BeginAsync(Ct)) ends = await clock.QuerySingleAsync(new DbStatement("SELECT clock_timestamp()+INTERVAL '1 hour'"), r => r.GetUtc(0), Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         { await pricing.IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-PAUSE", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 2, EndsAt: ends), Guid.NewGuid(), Ct); await issue.CommitAsync(Ct); }
-        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException()));
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException()));
         var order = await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), new(Guid.CreateVersion7(), f.Product, 2), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         long revision = await Revision(f, order.OrderId!.Value);
         var pause = new OrderResolution("pause_preorder", revision, "Public blocking hold", Guid.NewGuid());
         await store.ResolveAsync(admin, f.Context(0), order.OrderId.Value, pause, Ct);

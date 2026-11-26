@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
@@ -7,8 +6,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task ApproveCostAsync(AuthenticatedAdmin actor, BrandContext context, Guid request,
         long expectedRevision, decimal maximumUnitCost, string currency, Guid command, CancellationToken ct = default)
     {
@@ -61,12 +62,23 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
             int offset = 0;
             while (true)
             {
-                var contents = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order).OrderBy(row => row.UnitNo).Skip(offset).Take(1000).Select(row => new { row.Id, row.UnitNo, row.DeliveredContent, row.DeliveredContentKeyId, row.ContentKind }).ToListAsync(cancel), token);
-                foreach (var row in contents)
+                var contents = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) =>
                 {
-                    if (!slots.Add(row.UnitNo) || row.DeliveredContent == null || row.DeliveredContentKeyId == null || row.ContentKind == null) throw new InvalidOperationException("Incomplete verified supplier manifest.");
-                    byte[] plain = new BrandCipher(secrets).Decrypt(context, "fulfillments", row.Id, "delivered_content", row.DeliveredContentKeyId, row.DeliveredContent);
-                    try { if (plain.Length == 0) throw new InvalidOperationException("Empty supplier credential."); } finally { CryptographicOperations.ZeroMemory(plain); }
+                    var rows = data.Data.Set<Entities.Fulfillment>().Where(row => row.OrderId == order).OrderBy(row => row.UnitNo).Skip(offset).Take(1000);
+                    return rows.Select(row => new ReviewedPart(row.UnitNo, row.DeliveredContent, row.ContentKind)).ToListAsync(cancel);
+                }, token);
+                try
+                {
+                    foreach (var row in contents)
+                    {
+                        if (!slots.Add(row.UnitNo) || row.Bytes is not { Length: > 0 } || row.Kind is null)
+                            throw new InvalidOperationException("Incomplete verified supplier manifest.");
+                    }
+                }
+                finally
+                {
+                    foreach (var row in contents)
+                        if (row.Bytes is not null) CryptographicOperations.ZeroMemory(row.Bytes);
                 }
                 if (contents.Count < 1000) break; offset += contents.Count;
             }
@@ -92,13 +104,27 @@ public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions, Sec
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             bool replay = await AuditReplayAsync(tx, actor, audit, token);
-            var original = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) => (from i in data.Data.Set<Entities.InventoryItem>() join r in data.Data.Set<Entities.SupplierRequest>() on i.SupplierRequestId equals r.Id join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where i.Id == inventory && r.Id == request && i.State == "admin_held" && i.OriginKind == "supplier_bonus" && b.Id == context.BrandId && b.BotId == context.BotId select new { Reference = i.RemoteItemRef!, Encrypted = i.CredentialCiphertext, Key = i.CredentialKeyId }).SingleOrDefaultAsync(cancel), token) ?? throw new UnauthorizedAccessException("Protected supplier bonus is unavailable.");
-            string reference = original.Reference, key = original.Key; byte[] encrypted = original.Encrypted;
-            if (!replay) await WriteAuditAsync(tx, actor, audit, token);
-            byte[] plain = new InventoryCipher(secrets).Decrypt(inventory, key, encrypted);
-            try { return new SupplierItem(reference, SupplierItemDisposition.Bonus, "code", plain); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            var original = await SqliteSessionFactory.StepEfAsync(tx, false, (data, cancel) =>
+            {
+                var owned = from i in data.Data.Set<Entities.InventoryItem>() join r in data.Data.Set<Entities.SupplierRequest>() on i.SupplierRequestId equals r.Id join o in data.Data.Set<Entities.Order>() on r.OrderId equals o.Id join u in data.Data.Set<Entities.User>() on o.UserId equals u.Id join b in data.Data.Set<Entities.Brand>() on u.BrandId equals b.Id where i.Id == inventory && r.Id == request && i.State == "admin_held" && i.OriginKind == "supplier_bonus" && b.Id == context.BrandId && b.BotId == context.BotId select i;
+                return owned.Select(row => new Bonus(row.RemoteItemRef!, row.CredentialContent)).SingleOrDefaultAsync(cancel);
+            }, token) ?? throw new UnauthorizedAccessException("Protected supplier bonus is unavailable.");
+            try
+            {
+                if (!replay) await WriteAuditAsync(tx, actor, audit, token);
+                return new SupplierItem(original.Reference, SupplierItemDisposition.Bonus, "code", original.Bytes);
+            }
+            finally { CryptographicOperations.ZeroMemory(original.Bytes); }
         }, ct);
+    }
+
+    private sealed record ReviewedPart(int UnitNo, byte[]? Bytes, string? Kind)
+    {
+        public override string ToString() => "Supplier part [redacted]";
+    }
+    private sealed record Bonus(string Reference, byte[] Bytes)
+    {
+        public override string ToString() => "Supplier bonus [redacted]";
     }
 
     private static Task<bool> AuditReplayAsync(SqliteTransaction tx, AuthenticatedAdmin actor, AuditCommand audit, CancellationToken ct) =>

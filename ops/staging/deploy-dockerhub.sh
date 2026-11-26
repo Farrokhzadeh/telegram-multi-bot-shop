@@ -3,8 +3,7 @@ set -Eeuo pipefail
 
 image=${1:-}
 commit=${2:-}
-mode=${3:-postgres}
-[[ $mode == postgres || $mode == sqlite ]]
+[[ $# == 3 && $3 == sqlite ]] || { printf 'Only SQLite staging redeployment is supported.\n' >&2; exit 1; }
 [[ $image =~ ^docker\.io/[a-z0-9][a-z0-9_-]*/akanti(@sha256:[a-f0-9]{64})$ ]]
 [[ $commit =~ ^[a-f0-9]{40}$ ]]
 digest=${image##*:}
@@ -62,28 +61,11 @@ if (( ! ready )); then
     exit 1
 fi
 
-if [[ $mode == sqlite ]]; then
-    [[ -f $work/shop-root ]] || { printf 'No qualified staging source is registered.\n' >&2; exit 1; }
-    helper=$work/deploy-sqlite-runtime.sh
-    docker exec "$candidate" cat /app/deploy-sqlite-runtime.sh > "$helper.next"
-    bash "$helper.next" "$image" "$commit" "$candidate"
-    mv -f "$helper.next" "$helper"
-elif [[ -s $work/sqlite-active ]]; then
-    printf 'Refusing to restart PostgreSQL staging after accepted SQLite writes.\n' >&2
-    exit 1
-elif [[ -f $work/shop-root ]]; then
-    helper=$work/deploy-shop-runtime.sh
-    if docker exec "$candidate" test -d /app/Api; then
-        docker exec "$candidate" cat /app/deploy-shop-runtime.sh > "$helper.next"
-        bash "$helper.next" "$image" "$commit" "$candidate"
-        mv -f "$helper.next" "$helper"
-    else
-        if [[ ! -s $helper ]]; then
-            docker exec "$candidate" cat /app/deploy-shop-runtime.sh > "$helper"
-        fi
-        bash "$helper" "$image" "$commit" "$candidate"
-    fi
-fi
+[[ -f $work/shop-root ]] || { printf 'No qualified staging source is registered.\n' >&2; exit 1; }
+helper=$work/deploy-sqlite-runtime.sh
+docker exec "$candidate" cat /app/deploy-sqlite-runtime.sh > "$helper.next"
+bash "$helper.next" "$image" "$commit" "$candidate" --plaintext
+mv -f "$helper.next" "$helper"
 
 created=0
 previous=$(docker ps -a --filter "label=$label" --format '{{.Names}}')

@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -20,7 +19,7 @@ public sealed record BrandPolicyDetail(BrandPolicyEdit Value, bool RequireChanne
 public sealed record ExchangeRateMetadata(string? TomanPerUsd, string? Source, DateTime? ObservedAt, string? Error);
 public sealed record AdminProduct(Guid Id, string Title, string Fulfillment, string Availability, bool LocalFirst, bool Active, long Revision);
 public sealed record InventoryMetadata(Guid Id, Guid ProductId, string State, string Origin, DateTime CreatedAt);
-public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed class AdminCatalogStore(DbSessionFactory sessions)
 {
     public async Task<AdminPage<AdminBrand>> BrandsAsync(AuthenticatedAdmin actor, Guid? after, int limit, CancellationToken ct = default)
     {
@@ -126,7 +125,7 @@ public sealed class AdminCatalogStore(DbSessionFactory sessions, SecretSnapshot 
             await session.RunEfStepAsync(false, (data, token) => data.LockProductAsync(product, token), ct);
             await session.ExecuteAsync(new DbStatement("SELECT pg_advisory_xact_lock(739285126)"), ct);
             await session.AdmitSharedWriterAsync(ct);
-            await session.RunEfStepAsync(true, async (data, token) => { await CatalogAdministration.ImportAsync(data, actor, product, items, secrets, token); return true; }, ct);
+            await session.RunEfStepAsync(true, async (data, token) => { await CatalogAdministration.ImportAsync(data, actor, product, items, token); return true; }, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.DrainLocalPreorders, product), command, DateTime.UtcNow, ct);
             await OutboxStore.EnqueueAsync(session, JobIntent.Product(JobKind.EvaluateRestock, product), command, DateTime.UtcNow, ct);
             await session.CommitAsync(ct);

@@ -15,11 +15,11 @@ public sealed record CustomerHistoricalPage(IReadOnlyList<CustomerHistoricalOrde
     public bool ReadOnly => true;
     public override string ToString() => "CustomerHistoricalPage [redacted]";
 }
-public sealed class CustomerHistoryArchive(SecretSnapshot secrets)
+public static class CustomerHistoryContent
 {
     private const int MaximumOrders = 10000;
     private static readonly UTF8Encoding Utf8 = new(false, true);
-    public byte[] Seal(BrandContext brand, Guid member, IReadOnlyList<CustomerHistoricalOrder> original)
+    public static byte[] Encode(Guid member, IReadOnlyList<CustomerHistoricalOrder> original)
     {
         if (member == Guid.Empty || original is null || original.Count > MaximumOrders) throw new UnauthorizedAccessException("Historical order scope rejected.");
         var entries = original.OrderByDescending(o => o.CreatedAt).ThenBy(o => o.OriginalReference, StringComparer.Ordinal).ToArray();
@@ -41,18 +41,16 @@ public sealed class CustomerHistoryArchive(SecretSnapshot secrets)
             }
             writer.Flush();
         }
-        byte[] plain = memory.ToArray();
-        try { return new BrandCipher(secrets).Encrypt(brand, "customer_history", member, "orders", plain); }
-        finally { CryptographicOperations.ZeroMemory(plain); }
+        try
+        {
+            if (memory.Length > 1048576) throw new UnauthorizedAccessException("Historical order archive rejected.");
+            return memory.ToArray();
+        }
+        finally { CryptographicOperations.ZeroMemory(memory.GetBuffer()); }
     }
-    public IReadOnlyList<CustomerHistoricalOrder> Open(BrandContext brand, Guid member, ReadOnlySpan<byte> sealedBytes)
+    internal static IReadOnlyList<CustomerHistoricalOrder> Decode(Guid member, byte[] plain)
     {
-        if (member == Guid.Empty || sealedBytes.Length is < 40 or > 1048769 || sealedBytes[4] is < 1 or > 64 || sealedBytes.Length < 5 + sealedBytes[4] + 28)
-            throw new UnauthorizedAccessException("Historical order archive rejected.");
-        string key = Encoding.ASCII.GetString(sealedBytes.Slice(5, sealedBytes[4]));
-        byte[] plain;
-        try { plain = new BrandCipher(secrets).Decrypt(brand, "customer_history", member, "orders", key, sealedBytes); }
-        catch (CipherRejectedException) { throw new UnauthorizedAccessException("Historical order archive rejected."); }
+        if (member == Guid.Empty || plain.Length > 1048576) throw new UnauthorizedAccessException("Historical order archive rejected.");
         try
         {
             using var stream = new MemoryStream(plain, false); using var reader = new BinaryReader(stream, Utf8);
@@ -75,16 +73,14 @@ public sealed class CustomerHistoryArchive(SecretSnapshot secrets)
         }
         catch (Exception error) when (error is IOException or ArgumentException or OverflowException or InvalidOperationException)
         { throw new UnauthorizedAccessException("Historical order archive rejected."); }
-        finally { CryptographicOperations.ZeroMemory(plain); }
     }
-    public CustomerHistoricalPage Page(BrandContext brand, Guid member, ReadOnlySpan<byte> sealedBytes, int offset, int limit = 20)
+    internal static CustomerHistoricalPage Page(IReadOnlyList<CustomerHistoricalOrder> all, int offset, int limit = 20)
     {
-        if (offset < 0 || limit is < 1 or > 50) throw new ArgumentOutOfRangeException(nameof(offset));
-        var all = Open(brand, member, sealedBytes);
-        if (offset > all.Count) throw new ArgumentOutOfRangeException(nameof(offset));
+        if (offset < 0 || offset > all.Count || limit is < 1 or > 50) throw new ArgumentOutOfRangeException(nameof(offset));
         var rows = all.Skip(offset).Take(limit).ToArray();
         return new(Array.AsReadOnly(rows), offset + rows.Length < all.Count ? offset + rows.Length : null);
     }
+
     private static void Validate(IReadOnlyList<CustomerHistoricalOrder> entries)
     {
         var references = new HashSet<string>(StringComparer.Ordinal);

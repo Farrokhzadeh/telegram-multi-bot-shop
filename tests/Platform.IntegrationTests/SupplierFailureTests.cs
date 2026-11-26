@@ -16,7 +16,7 @@ public sealed class SupplierFailureTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets, -100777);
+        var store = new SupplierRequestStore(f.Sessions, -100777);
         var port = new SyntheticSupplier { Submit = _ => recovered ? SyntheticSupplier.Unknown() : SyntheticSupplier.NoEffect(), Lookup = _ => SyntheticSupplier.NoEffect() };
         var worker = new SupplierFulfillmentWorker(store, port, port);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
@@ -32,7 +32,7 @@ public sealed class SupplierFailureTests
         var admin = await f.AdminAsync(Ct);
         long revision = await AdminCatalogAndResolutionTests.Revision(f, order);
         var resolution = new OrderResolution("retry_supplier", revision, "Public reconciled retry", Guid.NewGuid(), binding.RequestId, 0);
-        var administration = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var administration = new OrderAdministrationStore(f.Sessions);
         await administration.ResolveAsync(admin, f.Context(0), order, resolution, Ct);
         await administration.ResolveAsync(admin, f.Context(0), order, resolution, Ct);
         port.Submit = b => SyntheticSupplier.Complete(b);
@@ -48,14 +48,14 @@ public sealed class SupplierFailureTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 1, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.NoEffect() };
         var worker = new SupplierFulfillmentWorker(store, port, port);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         var binding = await store.ReadAsync(f.Context(0), lease, Ct);
         await worker.RunAsync(f.Context(0), lease, Ct);
         var actor = await f.AdminAsync(Ct);
-        var admin = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var admin = new OrderAdministrationStore(f.Sessions);
         await admin.ResolveAsync(actor, f.Context(0), order, new("retry_supplier", await AdminCatalogAndResolutionTests.Revision(f, order), "Public first safe retry", Guid.NewGuid(), binding.RequestId, 0), Ct);
         port.UnitCost = 2;
         await worker.RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
@@ -78,13 +78,13 @@ public sealed class SupplierFailureTests
         await SupplierRecoveryTests.Coupon(f, 50);
         Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.NoEffect() };
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets, -100777);
+        var store = new SupplierRequestStore(f.Sessions, -100777);
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         var binding = await store.ReadAsync(f.Context(0), lease, Ct);
         await new SupplierFulfillmentWorker(store, port, port).RunAsync(f.Context(0), lease, Ct);
         var actor = await f.AdminAsync(Ct);
         long revision = await AdminCatalogAndResolutionTests.Revision(f, order);
-        var admin = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var admin = new OrderAdministrationStore(f.Sessions);
         async Task<bool> Resolve(string action)
         {
             try { await admin.ResolveAsync(actor, f.Context(0), order, new(action, revision, "Public race decision", Guid.NewGuid(), binding.RequestId, 0), Ct); return true; }

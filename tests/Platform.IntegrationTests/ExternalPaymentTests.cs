@@ -17,16 +17,16 @@ public sealed class ExternalPaymentTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private sealed class Archive
     {
-        public ConcurrentDictionary<string, (byte[] Bytes, string Key)> Items { get; } = new();
-        public Task<string> Save(ProtectedPaymentEvidence evidence, CancellationToken ct)
+        public ConcurrentDictionary<string, byte[]> Items { get; } = new();
+        public Task<string> Save(PaymentEvidenceContent evidence, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
             string asset = "protected:synthetic/" + evidence.BrandId.ToString("N") + "/" + evidence.PaymentId.ToString("N") + "/" + evidence.Digest;
-            Items.TryAdd(asset, (evidence.Ciphertext.ToArray(), evidence.EncryptionKeyId));
+            Items.TryAdd(asset, evidence.Content.ToArray());
             return Task.FromResult(asset);
         }
     }
-    private static PaymentEvidenceStore Store(CheckoutFixture f) => new(f.Sessions, f.Secrets);
+    private static PaymentEvidenceStore Store(CheckoutFixture f) => new(f.Sessions);
 
     [Fact]
     public async Task StandaloneTopupNeedsNoOrderOrWalletAndReplaysItsFrozenOriginalIntent()
@@ -79,10 +79,7 @@ public sealed class ExternalPaymentTests
         Assert.Equal((10.25m, 10.25m, 10.4m, 10.4m, "confirming", "synthetic-v1"), (values.Due, values.Received, values.Tokens, values.Expected, values.Status, values.Key));
         Assert.Equal(64, values.Signature.Length);
         var saved = archive.Items[values.Asset];
-        byte[] plain = new BrandCipher(f.Secrets).Decrypt(f.Context(0), "payments", origin.Id, "ipn_evidence", saved.Key, saved.Bytes);
-        try { Assert.Equal(values.Digest, SHA256.HashData(plain)); Assert.Equal(PaymentNoticeFixture.Body(origin.Origin), Encoding.UTF8.GetString(plain)); }
-        finally { CryptographicOperations.ZeroMemory(plain); }
-        Assert.Throws<CipherRejectedException>(() => new BrandCipher(f.Secrets).Decrypt(f.Context(1), "payments", origin.Id, "ipn_evidence", saved.Key, saved.Bytes));
+        Assert.Equal(values.Digest, SHA256.HashData(saved)); Assert.Equal(PaymentNoticeFixture.Body(origin.Origin), Encoding.UTF8.GetString(saved));
         await NoPosting(f);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment'", Ct));
     }
@@ -101,7 +98,7 @@ public sealed class ExternalPaymentTests
         var tasks = Enumerable.Range(0, 100).Select(async _ =>
         {
             using var notice = PaymentNoticeFixture.Notice(origin.Origin);
-            return await new PaymentEvidenceStore(sessions, f.Secrets).CaptureAsync(f.Context(0), notice, archive.Save, Ct);
+            return await new PaymentEvidenceStore(sessions).CaptureAsync(f.Context(0), notice, archive.Save, Ct);
         });
         var results = await Task.WhenAll(tasks);
         Assert.Single(results, r => r.Outcome == PaymentCaptureOutcome.Ready);
@@ -211,7 +208,7 @@ public sealed class ExternalPaymentTests
         await fixture.EnableBankAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-CRYPTO-RACE", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), await f.AdminAsync(Ct), new(Guid.NewGuid(), "PUBLIC-CRYPTO-RACE", CouponKind.Promotion, 50, f.Product, f.Users[0], MaximumUses: 2), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         var original = await fixture.OrderAsync(ct: Ct);
@@ -292,7 +289,7 @@ public sealed class ExternalPaymentTests
                 if (job is null) await Task.Delay(100, Ct);
             }
             Assert.NotNull(job);
-            var expired = await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(0), job, Ct);
+            var expired = await new PaymentExpiryService(f.Sessions).RunAsync(f.Context(0), job, Ct);
             Assert.Equal(PaymentExpiryOutcome.Protected, expired);
         }
         finally
@@ -340,7 +337,7 @@ public sealed class ExternalPaymentTests
         var pending = await fixture.Store.SettleAsync(f.Context(0), original.Payment, (_, _) => throw new InvalidOperationException("Archived proof is required."), Ct);
         Assert.Equal(PaymentSettlementOutcome.Pending, pending.Outcome);
         var archive = new Archive();
-        var recovered = new PaymentEvidenceStore(new(f.Database.Data), f.Secrets);
+        var recovered = new PaymentEvidenceStore(new(f.Database.Data));
         await recovered.ResumeArchiveAsync(f.Context(1), original.Payment, (_, _) => throw new InvalidOperationException("Foreign evidence must not be archived."), ct: Ct);
         JobLease? lease;
         await using (var claim = await f.Sessions.BeginAsync(Ct))
@@ -461,7 +458,7 @@ public sealed class ExternalPaymentTests
     private static async Task<(Guid Id, string Origin)> Order(CheckoutFixture f, string provider = "123456789")
     {
         var request = new CheckoutRequest(OrderIds.New(), f.Product, 1, CheckoutPayment.Crypto);
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException());
+        var catalog = new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException());
         Assert.Equal(CheckoutOutcome.AwaitingPayment, (await new WalletCheckoutService(f.Sessions, f.Store, catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request,
             (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct)).Outcome);
         await using var bind = await f.Sessions.BeginAsync(Ct);

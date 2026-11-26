@@ -35,6 +35,8 @@ public sealed partial class DbSessionFactory
     private readonly DbSessionOptions options;
     private WriterBinding? writer;
 
+    public static DbSessionFactory ForPlaintext(NpgsqlDataSource data, DbSessionOptions? options = null) => new(data, options);
+
     public DbSessionFactory(NpgsqlDataSource data, DbSessionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(data);
@@ -78,10 +80,16 @@ public sealed partial class DbSessionFactory
             }
             session = new DbSession(connection, transaction, options);
             session.BindWriter(writer);
-            await session.ExecuteAsync(new DbStatement(
-                "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true),set_config('TimeZone','UTC',true)",
+            bool compatible = await session.QuerySingleAsync(new DbStatement(
+                "SELECT set_config('statement_timeout',$1,true),set_config('lock_timeout',$2,true),set_config('TimeZone','UTC',true)," + SchemaManifest.PlaintextPostgresRequired,
                 DbValue.Text(((int)options.StatementTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + "ms"),
-                DbValue.Text(((int)options.LockTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + "ms")), cancellationToken);
+                DbValue.Text(((int)options.LockTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + "ms")),
+                row => row.GetBoolean(3), cancellationToken);
+            if (!compatible) throw new InvalidOperationException("The PostgreSQL target format differs from the runtime format.");
+            if (!await session.QuerySingleAsync(new DbStatement("""
+                SELECT count(*)=1 AND min("MigrationId")=$1 FROM shop."__EFMigrationsHistory"
+                """, DbValue.Text(Migrations.PlainContentBaseline.MigrationId)), row => row.GetBoolean(0), cancellationToken))
+                throw new InvalidOperationException("The PostgreSQL plaintext migration history differs from the runtime.");
             return session;
         }
         catch (Exception error)

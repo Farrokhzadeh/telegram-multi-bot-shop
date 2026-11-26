@@ -14,14 +14,12 @@ public sealed class SqliteStagingConfiguration
     private static readonly Guid StageBrand = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid StageDeployment = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
 
-    private SqliteStagingConfiguration(BrandContext context, long telegramBotId, long recipient,
-        string secretRoot)
+    private SqliteStagingConfiguration(BrandContext context, long telegramBotId, long recipient)
     {
         Context = context;
         TelegramBotId = telegramBotId;
         Recipient = recipient;
-        SecretRoot = secretRoot;
-        Sessions = new SqliteSessionFactory(Database);
+        Sessions = SqliteSessionFactory.ForPlaintext(Database);
     }
 
     public BrandContext Context { get; }
@@ -29,22 +27,19 @@ public sealed class SqliteStagingConfiguration
     public long TelegramBotId { get; }
     public long Recipient { get; }
     public long SyntheticActor => 7001;
-    public string SecretRoot { get; }
 
     public static async Task<SqliteStagingConfiguration> LoadAsync(CancellationToken ct = default)
     {
+        string? format = Environment.GetEnvironmentVariable("SHOP_SQLITE_STAGING");
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("INSTANCE_ID") != "staging" ||
-            Environment.GetEnvironmentVariable("SHOP_SQLITE_STAGING") != "synthetic-acc-abad-v1" ||
+            format != "synthetic-acc-abad-v2" ||
             Environment.GetEnvironmentVariable("SHOP_STAGING_SQLITE_PATH") != Database ||
             !File.Exists(Database) || new FileInfo(Database).LinkTarget is not null ||
             (File.GetUnixFileMode(Database) & (UnixFileMode)63) != 0)
             throw new UnauthorizedAccessException("The persistent SQLite staging database is unavailable.");
 
-        string secretRoot = Environment.GetEnvironmentVariable("SHOP_STAGING_SECRET_ROOT") ?? "";
-        if (!secretRoot.StartsWith("/stage/secrets/qualified-", StringComparison.Ordinal) ||
-            !Directory.Exists(secretRoot) || new DirectoryInfo(secretRoot).LinkTarget is not null ||
-            (File.GetUnixFileMode(secretRoot) & (UnixFileMode)63) != 0)
-            throw new UnauthorizedAccessException("The staging secret scope is unavailable.");
+        if (Environment.GetEnvironmentVariable("SHOP_STAGING_SECRET_ROOT") is not null)
+            throw new UnauthorizedAccessException("Plaintext SQLite staging cannot use a legacy key mount.");
 
         long botId = ReadNumber("/stage/tester/bot-id");
         long recipient = ReadNumber("/stage/tester/tester-id");
@@ -54,22 +49,13 @@ public sealed class SqliteStagingConfiguration
         var registry = new BotBrandRegistry([binding]);
         if (!registry.TryResolveAuthenticated(binding.Scheme, new ClaimsPrincipal(identity), out var context) ||
             context is null) throw new UnauthorizedAccessException("Staging registration is unavailable.");
-        var state = new SqliteStagingConfiguration(context, botId, recipient, secretRoot);
+        var state = new SqliteStagingConfiguration(context, botId, recipient);
         bool valid = await state.Sessions.RunAsync(false, async (_, tx, token) =>
         {
             return await SqliteSessionFactory.StepEfAsync(tx, false, async (data, cancel) => await data.Data.Set<Entities.Brand>().AnyAsync(row => row.Id == StageBrand && row.BotId == 1001 && row.PolicyVersion >= 0 && row.Active, cancel) && await data.Data.Set<Entities.User>().AnyAsync(row => row.BrandId == StageBrand && row.TelegramId == 7001 && row.BlockedAt == null && row.BannedAt == null, cancel), token);
         }, ct);
         if (!valid) throw new UnauthorizedAccessException("SQLite staging brand fixture is unavailable.");
         return state;
-    }
-
-    public SecretSnapshot LoadSecrets(SecretService service)
-    {
-        if (service is not (SecretService.BotHost or SecretService.Api or SecretService.JobHost))
-            throw new ArgumentOutOfRangeException(nameof(service));
-        bool inventory = service == SecretService.JobHost;
-        return SecretFiles.Load(SecretRoot, "service-config.json",
-            new SecretLoadGrant(service, StageDeployment, 7, [StageBrand], inventory));
     }
 
     public byte[] ReadApiKey()

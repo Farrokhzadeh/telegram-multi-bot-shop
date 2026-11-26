@@ -28,7 +28,7 @@ public sealed class LocalPreorderTests
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-FIFO", CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(coupon, "PUBLIC-FIFO", CouponKind.Promotion, percent, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         Guid a = await Purchase(f, 0, 5), b = await Purchase(f, 1, 2);
@@ -40,7 +40,7 @@ public sealed class LocalPreorderTests
         Assert.Equal(5L, await Units(f, a)); Assert.Equal(0L, await Units(f, b));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE release_authorized_at IS NOT NULL", Ct));
-        var delivery = new DeliveryStore(f.Sessions, f.Secrets);
+        var delivery = new DeliveryStore(f.Sessions);
         Assert.Null(await delivery.PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct));
         Assert.Equal(5L, await f.CountAsync("SELECT redeemed_count FROM shop.discounts", Ct));
         byte[] manifest = await delivery.ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), a, Ct);
@@ -65,7 +65,7 @@ public sealed class LocalPreorderTests
         DateTime accepted;
         await using (var read = await f.Sessions.BeginAsync(Ct)) accepted = await read.QuerySingleAsync(new DbStatement("SELECT payment_confirmed_at FROM shop.orders WHERE id=$1", DbValue.Uuid(a)), r => r.GetUtc(0), Ct);
         var admin = await f.AdminAsync(Ct);
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         await store.ResolveAsync(admin, f.Context(0), a, new("pause_preorder", await Revision(f, a), "Public hold", Guid.NewGuid()), Ct);
         await Restock(f, 7); await DrainAll(f);
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
@@ -88,7 +88,7 @@ public sealed class LocalPreorderTests
         {
             await locked.QuerySingleAsync(new DbStatement("SELECT id FROM shop.orders WHERE id=$1 FOR UPDATE", DbValue.Uuid(a)), r => r.GetGuid(0), Ct);
             var sessions = new DbSessionFactory(f.Database.Data, new() { LockTimeout = TimeSpan.FromMilliseconds(100) });
-            var worker = new LocalPreorderWorker(new(sessions, f.Secrets), f.Contexts);
+            var worker = new LocalPreorderWorker(new(sessions), f.Contexts);
             var error = await Assert.ThrowsAsync<DbOperationException>(() => worker.RunAsync(lease, Ct));
             Assert.Equal(PostgresErrorCodes.LockNotAvailable, error.Failure.SqlState);
             Assert.Equal(0L, await Units(f, b));
@@ -160,7 +160,7 @@ public sealed class LocalPreorderTests
         await using var f = await Fixture();
         await Purchase(f, 0, 5); await Purchase(f, 1, 2); await Restock(f, 7);
         JobLease lease = await Claim(f);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new LocalPreorderWorker(new(f.Sessions, f.Secrets), [f.Context(1)]).RunAsync(lease, Ct));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new LocalPreorderWorker(new(f.Sessions), [f.Context(1)]).RunAsync(lease, Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
         Assert.NotNull(await Worker(f).RunAsync(lease, Ct));
     }
@@ -236,12 +236,12 @@ public sealed class LocalPreorderTests
         var admin = await f.AdminAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-RACE-FIFO", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-RACE-FIFO", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         Guid order = await Purchase(f, 0, 5); await Restock(f, 5);
         var resolution = new OrderResolution(hold ? "pause_preorder" : "cancel_local_preorder", await Revision(f, order), "Public cancellation race", Guid.NewGuid());
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         var cancel = Record.ExceptionAsync(() => store.ResolveAsync(admin, f.Context(0), order, resolution, Ct));
         await Worker(f).RunAsync(await Claim(f), Ct);
         Exception? error = await cancel;
@@ -272,7 +272,7 @@ public sealed class LocalPreorderTests
     {
         await using var f = await Fixture();
         var admin = await f.AdminAsync(Ct);
-        var pricing = new PricingStore(f.Sessions, f.Secrets);
+        var pricing = new PricingStore(f.Sessions);
         Guid coupon = Guid.NewGuid();
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
@@ -281,7 +281,7 @@ public sealed class LocalPreorderTests
         }
         Guid spent = await Purchase(f, 0, 2);
         await Restock(f, 2); await DrainAll(f);
-        await new DeliveryStore(f.Sessions, f.Secrets).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct);
+        await new DeliveryStore(f.Sessions).PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct);
         Guid waiting = await Purchase(f, 0, 5);
         Assert.Equal(1, await pricing.EditAsync(f.Context(0), admin, coupon, 0, new(10, 0, 0, 1, null, DateTime.UtcNow.AddMinutes(-1), false, f.Product, f.Users[0]), AuditReason.OperatorReview, Guid.NewGuid(), Ct));
         long revision = await Revision(f, waiting);
@@ -295,7 +295,7 @@ public sealed class LocalPreorderTests
         Assert.Equal(revision, await Revision(f, waiting));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.support_tickets WHERE category='preorder_cancellation'", Ct));
         await using (var fault = f.Database.Data.CreateCommand("CREATE FUNCTION shop.reject_fifo_release() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'Public synthetic release failure' USING ERRCODE='23514'; END $$; CREATE CONSTRAINT TRIGGER reject_fifo_release AFTER UPDATE ON shop.discount_uses DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.status='released') EXECUTE FUNCTION shop.reject_fifo_release()")) await fault.ExecuteNonQueryAsync(Ct);
-        var store = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var store = new OrderAdministrationStore(f.Sessions);
         var resolution = new OrderResolution("cancel_local_preorder", revision, "Public outside-shop resolution", Guid.NewGuid());
         Assert.Equal(DbFailureKind.Constraint, (await Assert.ThrowsAsync<DbOperationException>(() => store.ResolveAsync(admin, f.Context(0), waiting, resolution, Ct))).Failure.Kind);
         Assert.Equal(revision, await Revision(f, waiting));
@@ -323,7 +323,7 @@ public sealed class LocalPreorderTests
         await using var f = await Fixture();
         Guid head = await Purchase(f, 0, 5);
         var admin = await f.AdminAsync(Ct);
-        var orders = new OrderAdministrationStore(f.Sessions, f.Secrets);
+        var orders = new OrderAdministrationStore(f.Sessions);
         if (held) await orders.ResolveAsync(admin, f.Context(0), head, new("pause_preorder", await Revision(f, head), "Public FIFO hold", Guid.NewGuid()), Ct);
         await Restock(f, 3);
         await using (var edit = await f.Sessions.BeginAsync(Ct))
@@ -387,7 +387,7 @@ public sealed class LocalPreorderTests
         if (free)
         {
             await using var issue = await f.Sessions.BeginAsync(Ct);
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-FREE-RACE", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-FREE-RACE", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct); order = Guid.CreateVersion7();
         }
         else
@@ -423,13 +423,13 @@ public sealed class LocalPreorderTests
         var admin = await f.AdminAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-FILE-FIFO", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-FILE-FIFO", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         Guid order = await Purchase(f, 0, 5);
-        await new AdminCatalogStore(f.Sessions, f.Secrets).ImportAsync(admin, f.Product, Enumerable.Range(0, 5).Select(_ => new InventoryImportItem(Guid.NewGuid(), "Public file credential " + new string('s', 1000) + Guid.NewGuid())).ToArray(), Guid.NewGuid(), Ct);
+        await new AdminCatalogStore(f.Sessions).ImportAsync(admin, f.Product, Enumerable.Range(0, 5).Select(_ => new InventoryImportItem(Guid.NewGuid(), "Public file credential " + new string('s', 1000) + Guid.NewGuid())).ToArray(), Guid.NewGuid(), Ct);
         await DrainAll(f);
-        var store = new DeliveryStore(f.Sessions, f.Secrets);
+        var store = new DeliveryStore(f.Sessions);
         Assert.Null(await store.PrepareAsync(f.Context(0), await Claim(f, JobKind.PrepareManifest), Ct));
         Guid delivery = await store.AuthorizeSendRecoveryAsync(f.Context(0), admin, order, Guid.NewGuid(), Ct);
         JobLease first = await Claim(f, JobKind.SendTelegram);
@@ -468,7 +468,7 @@ public sealed class LocalPreorderTests
         var admin = await f.AdminAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-CANCEL-COMMIT", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-CANCEL-COMMIT", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
         Guid first = await Purchase(f, 0, 5), next = await Purchase(f, 1, 2);
@@ -478,11 +478,11 @@ public sealed class LocalPreorderTests
         { Database = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database };
         await using var proxy = new DropCommitReplyProxy(options.ConnectionString);
         await using var transport = proxy.CreateClientDataSource();
-        var error = await Assert.ThrowsAsync<DbOperationException>(() => new OrderAdministrationStore(new(transport), f.Secrets).ResolveAsync(admin, f.Context(0), first, resolution, Ct));
+        var error = await Assert.ThrowsAsync<DbOperationException>(() => new OrderAdministrationStore(new(transport)).ResolveAsync(admin, f.Context(0), first, resolution, Ct));
         Assert.Equal(DbFailureKind.OutcomeUnknown, error.Failure.Kind);
         Assert.Equal(DbRecovery.ReconcileBeforeRetry, error.Failure.Recovery);
         await proxy.CommitObserved.WaitAsync(TimeSpan.FromSeconds(10), Ct);
-        var restarted = new OrderAdministrationStore(new(f.Database.Data), f.Secrets);
+        var restarted = new OrderAdministrationStore(new(f.Database.Data));
         for (int i = 0; i < 100; i++) await restarted.ResolveAsync(admin, f.Context(0), first, resolution, Ct);
         await DrainAll(f);
         Assert.Equal(0L, await Units(f, first)); Assert.Equal(2L, await Units(f, next));
@@ -524,9 +524,9 @@ public sealed class LocalPreorderTests
         await payment.CaptureAsync(paid.Payment, paid.Origin, paid.Due, ct: Ct);
         Assert.Equal(ExternalSettlementRoute.LocalPreorder, (await payment.Store.SettleAsync(f.Context(0), paid.Payment, PaymentSettlementFixture.Lookup, Ct)).Route);
         long revision = await Revision(f, paid.Order);
-        Assert.Equal(PaymentExpiryOutcome.Terminal, await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(0), oldExpiry, Ct));
+        Assert.Equal(PaymentExpiryOutcome.Terminal, await new PaymentExpiryService(f.Sessions).RunAsync(f.Context(0), oldExpiry, Ct));
         var unpaid = await PaymentDeadlineQualification.SeedAsync(f, 1, true, ct: Ct, preorder: true);
-        Assert.Equal(PaymentExpiryOutcome.Expired, await new PaymentExpiryService(f.Sessions, f.Secrets).RunAsync(f.Context(1), await Claim(f, JobKind.ExpireOrderPayment), Ct));
+        Assert.Equal(PaymentExpiryOutcome.Expired, await new PaymentExpiryService(f.Sessions).RunAsync(f.Context(1), await Claim(f, JobKind.ExpireOrderPayment), Ct));
         await DrainAll(f);
         Assert.Equal(revision, await Revision(f, paid.Order));
         Assert.Equal(0L, await Units(f, paid.Order)); Assert.Equal(0L, await Units(f, unpaid.Order));
@@ -585,7 +585,7 @@ public sealed class LocalPreorderTests
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE signed_amount>0 AND movement_kind<>'admin_adjustment'", Ct));
     }
-    private static LocalPreorderWorker Worker(CheckoutFixture f) => new(new(f.Sessions, f.Secrets), f.Contexts);
+    private static LocalPreorderWorker Worker(CheckoutFixture f) => new(new(f.Sessions), f.Contexts);
     private static async Task<CheckoutFixture> Fixture()
     {
         var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
@@ -595,11 +595,11 @@ public sealed class LocalPreorderTests
     }
     private static async Task<Guid> Purchase(CheckoutFixture f, int user, int quantity)
     {
-        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Unexpected supplier call.")));
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException("Unexpected supplier call.")));
         var result = await service.PurchaseAsync(f.Context(user), CheckoutFixture.Actor(user), new(Guid.CreateVersion7(), f.Product, quantity), (_, _, _) => Task.FromResult(ChannelMembership.Member), Ct);
         Assert.Equal(CheckoutOutcome.Purchased, result.Outcome); return result.OrderId!.Value;
     }
-    private static async Task Restock(CheckoutFixture f, int count) => await new AdminCatalogStore(f.Sessions, f.Secrets).ImportAsync(await f.AdminAsync(Ct), f.Product, Enumerable.Range(0, count).Select(_ => new InventoryImportItem(Guid.NewGuid(), "Public FIFO stock " + Guid.NewGuid())).ToArray(), Guid.NewGuid(), Ct);
+    private static async Task Restock(CheckoutFixture f, int count) => await new AdminCatalogStore(f.Sessions).ImportAsync(await f.AdminAsync(Ct), f.Product, Enumerable.Range(0, count).Select(_ => new InventoryImportItem(Guid.NewGuid(), "Public FIFO stock " + Guid.NewGuid())).ToArray(), Guid.NewGuid(), Ct);
     private static async Task<JobLease> Claim(CheckoutFixture f, JobKind kind = JobKind.DrainLocalPreorders)
     {
         await using var claim = await f.Sessions.BeginAsync(Ct);

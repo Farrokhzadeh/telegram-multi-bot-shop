@@ -4,7 +4,7 @@ using Platform.Persistence.Entities;
 
 namespace Platform.Persistence.Configurations;
 
-internal sealed class PaymentConfiguration(bool sqlite) : IEntityTypeConfiguration<Payment>
+internal sealed class PaymentConfiguration(bool sqlite, bool plaintext = false) : IEntityTypeConfiguration<Payment>
 {
     public void Configure(EntityTypeBuilder<Payment> row)
     {
@@ -38,32 +38,37 @@ internal sealed class PaymentConfiguration(bool sqlite) : IEntityTypeConfigurati
                 table.HasCheckConstraint("ck_payments_24", "provider_confirmations >= 0");
                 table.HasCheckConstraint("ck_payments_25", "status IN ('created','awaiting','observed','confirming','settled','rejected','expired','review')");
                 table.HasCheckConstraint("ck_payments_26", "provider_status_code IS NULL OR (length(provider_status_code) BETWEEN 1 AND 160 AND trim(provider_status_code)<>'')");
-                table.HasCheckConstraint("ck_payments_27", "bank_destination_key_id IS NULL OR (length(bank_destination_key_id) BETWEEN 1 AND 160 AND trim(bank_destination_key_id)<>'')");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_27", "bank_destination_key_id IS NULL OR (length(bank_destination_key_id) BETWEEN 1 AND 160 AND trim(bank_destination_key_id)<>'')");
                 table.HasCheckConstraint("ck_payments_28", "receipt_asset_ref IS NULL OR (length(receipt_asset_ref) BETWEEN 1 AND 1024)");
                 table.HasCheckConstraint("ck_payments_29", "review_admin_id IS NULL OR akanti_uuid(review_admin_id)");
                 table.HasCheckConstraint("ck_payments_30", "review_reason IS NULL OR (length(review_reason)<=16384)");
                 table.HasCheckConstraint("ck_payments_31", "compensating_wallet_entry_id IS NULL OR akanti_uuid(compensating_wallet_entry_id)");
                 table.HasCheckConstraint("ck_payments_32", "evidence_asset_ref IS NULL OR (length(evidence_asset_ref) BETWEEN 1 AND 1024)");
-                table.HasCheckConstraint("ck_payments_33", "length(pending_evidence_ciphertext) BETWEEN 1 AND 66000");
-                table.HasCheckConstraint("ck_payments_34", "pending_evidence_key_id IS NULL OR (length(pending_evidence_key_id) BETWEEN 1 AND 160 AND trim(pending_evidence_key_id)<>'')");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_33", "length(pending_evidence_ciphertext) BETWEEN 1 AND 66000");
+                else table.HasCheckConstraint("ck_payments_33", "length(pending_evidence) BETWEEN 2 AND 65536");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_34", "pending_evidence_key_id IS NULL OR (length(pending_evidence_key_id) BETWEEN 1 AND 160 AND trim(pending_evidence_key_id)<>'')");
                 table.HasCheckConstraint("ck_payments_35", "length(evidence_digest)=32");
                 table.HasCheckConstraint("ck_payments_36", "legacy_kind IS NULL OR (length(legacy_kind) BETWEEN 1 AND 160 AND trim(legacy_kind)<>'')");
                 table.HasCheckConstraint("ck_payments_37", "((order_id IS NOT NULL) + (topup_user_id IS NOT NULL))=1");
-                table.HasCheckConstraint("ck_payments_38", "((bank_destination_ciphertext IS NOT NULL) + (bank_destination_key_id IS NOT NULL)) IN (0,2)");
-                table.HasCheckConstraint("ck_payments_39", "((pending_evidence_ciphertext IS NOT NULL) + (pending_evidence_key_id IS NOT NULL)) IN (0,2)");
-                table.HasCheckConstraint("ck_payments_40", "(evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL) = (evidence_digest IS NOT NULL)");
-                table.HasCheckConstraint("ck_payments_41", "pending_evidence_ciphertext IS NULL OR (evidence_asset_ref IS NULL AND order_id IS NOT NULL AND ipn_key_id IS NOT NULL AND first_payment_observed_at IS NOT NULL AND status IN ('confirming','review'))");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_38", "((bank_destination_ciphertext IS NOT NULL) + (bank_destination_key_id IS NOT NULL)) IN (0,2)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_39", "((pending_evidence_ciphertext IS NOT NULL) + (pending_evidence_key_id IS NOT NULL)) IN (0,2)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_40", "(evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL) = (evidence_digest IS NOT NULL)");
+                else table.HasCheckConstraint("ck_payments_40", "(evidence_asset_ref IS NOT NULL OR pending_evidence IS NOT NULL) = (evidence_digest IS NOT NULL)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_41", "pending_evidence_ciphertext IS NULL OR (evidence_asset_ref IS NULL AND order_id IS NOT NULL AND ipn_key_id IS NOT NULL AND first_payment_observed_at IS NOT NULL AND status IN ('confirming','review'))");
+                else table.HasCheckConstraint("ck_payments_41", "pending_evidence IS NULL OR (evidence_asset_ref IS NULL AND order_id IS NOT NULL AND ipn_key_id IS NOT NULL AND first_payment_observed_at IS NOT NULL AND status IN ('confirming','review'))");
                 table.HasCheckConstraint("ck_payments_42", "((review_admin_id IS NOT NULL) + (reviewed_at IS NOT NULL) + (review_reason IS NOT NULL)) IN (0,3)");
                 table.HasCheckConstraint("ck_payments_43", "provider_payment_ref IS NULL OR provider_code IS NOT NULL");
                 table.HasCheckConstraint("ck_payments_44", "hosted_invoice_started_at IS NULL OR akanti_utc_time(hosted_invoice_started_at)");
                 table.HasCheckConstraint("ck_payments_45", "((hosted_invoice_ref IS NOT NULL) + (hosted_invoice_url IS NOT NULL)) IN (0,2)");
                 table.HasCheckConstraint("ck_payments_46", "hosted_invoice_started_at IS NULL OR (payment_method='crypto' AND provider_code IS NOT DISTINCT FROM 'nowpayments')");
                 table.HasCheckConstraint("ck_payments_47", "hosted_invoice_ref IS NULL OR hosted_invoice_started_at IS NOT NULL");
-                table.HasCheckConstraint("ck_payments_48", "(payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination_ciphertext IS NULL) OR\n           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination_ciphertext IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_48", "(payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination_ciphertext IS NULL) OR\n           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination_ciphertext IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)");
+                else table.HasCheckConstraint("ck_payments_48", "(payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination IS NULL) OR\n           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)");
                 table.HasCheckConstraint("ck_payments_49", "topup_user_id IS NULL OR payment_method='crypto'");
                 table.HasCheckConstraint("ck_payments_50", "status <> 'settled' OR confirmed_at IS NOT NULL");
                 table.HasCheckConstraint("ck_payments_51", "((ipn_key_id IS NOT NULL) + (ipn_signature IS NOT NULL) + (ipn_payload_sha256 IS NOT NULL) + (ipn_verified_at IS NOT NULL)) IN (0,4)");
-                table.HasCheckConstraint("ck_payments_52", "ipn_key_id IS NULL OR (payment_method='crypto' AND provider_payment_ref IS NOT NULL AND expected_network_amount IS NOT NULL AND (evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL))");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_52", "ipn_key_id IS NULL OR (payment_method='crypto' AND provider_payment_ref IS NOT NULL AND expected_network_amount IS NOT NULL AND (evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL))");
+                else table.HasCheckConstraint("ck_payments_52", "ipn_key_id IS NULL OR (payment_method='crypto' AND provider_payment_ref IS NOT NULL AND expected_network_amount IS NOT NULL AND (evidence_asset_ref IS NOT NULL OR pending_evidence IS NOT NULL))");
                 table.HasCheckConstraint("ck_payments_53", "expected_network_amount IS NULL OR payment_method='crypto'");
                 table.HasCheckConstraint("ck_payments_54", "ipn_verified_at IS NULL OR akanti_utc_time(ipn_verified_at)");
                 table.HasCheckConstraint("ck_payments_55", "first_payment_observed_at IS NULL OR akanti_utc_time(first_payment_observed_at)");
@@ -85,24 +90,29 @@ internal sealed class PaymentConfiguration(bool sqlite) : IEntityTypeConfigurati
                 table.HasCheckConstraint("ck_payments_10", "network_amount >= 0");
                 table.HasCheckConstraint("ck_payments_11", "provider_confirmations >= 0");
                 table.HasCheckConstraint("ck_payments_12", "status IN ('created','awaiting','observed','confirming','settled','rejected','expired','review')");
-                table.HasCheckConstraint("ck_payments_13", "octet_length(pending_evidence_ciphertext) BETWEEN 1 AND 66000");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_13", "octet_length(pending_evidence_ciphertext) BETWEEN 1 AND 66000");
+                else table.HasCheckConstraint("ck_payments_13", "octet_length(pending_evidence) BETWEEN 2 AND 65536");
                 table.HasCheckConstraint("ck_payments_14", "octet_length(evidence_digest)=32");
                 table.HasCheckConstraint("ck_payments_15", "num_nonnulls(order_id,topup_user_id)=1");
-                table.HasCheckConstraint("ck_payments_16", "num_nonnulls(bank_destination_ciphertext,bank_destination_key_id) IN (0,2)");
-                table.HasCheckConstraint("ck_payments_17", "num_nonnulls(pending_evidence_ciphertext,pending_evidence_key_id) IN (0,2)");
-                table.HasCheckConstraint("ck_payments_18", "(evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL) = (evidence_digest IS NOT NULL)");
-                table.HasCheckConstraint("ck_payments_19", "pending_evidence_ciphertext IS NULL OR (evidence_asset_ref IS NULL AND order_id IS NOT NULL AND ipn_key_id IS NOT NULL AND first_payment_observed_at IS NOT NULL AND status IN ('confirming','review'))");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_16", "num_nonnulls(bank_destination_ciphertext,bank_destination_key_id) IN (0,2)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_17", "num_nonnulls(pending_evidence_ciphertext,pending_evidence_key_id) IN (0,2)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_18", "(evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL) = (evidence_digest IS NOT NULL)");
+                else table.HasCheckConstraint("ck_payments_18", "(evidence_asset_ref IS NOT NULL OR pending_evidence IS NOT NULL) = (evidence_digest IS NOT NULL)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_19", "pending_evidence_ciphertext IS NULL OR (evidence_asset_ref IS NULL AND order_id IS NOT NULL AND ipn_key_id IS NOT NULL AND first_payment_observed_at IS NOT NULL AND status IN ('confirming','review'))");
+                else table.HasCheckConstraint("ck_payments_19", "pending_evidence IS NULL OR (evidence_asset_ref IS NULL AND order_id IS NOT NULL AND ipn_key_id IS NOT NULL AND first_payment_observed_at IS NOT NULL AND status IN ('confirming','review'))");
                 table.HasCheckConstraint("ck_payments_20", "num_nonnulls(review_admin_id,reviewed_at,review_reason) IN (0,3)");
                 table.HasCheckConstraint("ck_payments_21", "provider_payment_ref IS NULL OR provider_code IS NOT NULL");
                 table.HasCheckConstraint("ck_payments_22", "isfinite(hosted_invoice_started_at)");
                 table.HasCheckConstraint("ck_payments_23", "num_nonnulls(hosted_invoice_ref,hosted_invoice_url) IN (0,2)");
                 table.HasCheckConstraint("ck_payments_24", "hosted_invoice_started_at IS NULL OR (payment_method='crypto' AND provider_code IS NOT DISTINCT FROM 'nowpayments')");
                 table.HasCheckConstraint("ck_payments_25", "hosted_invoice_ref IS NULL OR hosted_invoice_started_at IS NOT NULL");
-                table.HasCheckConstraint("ck_payments_26", "(payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination_ciphertext IS NULL) OR\n           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination_ciphertext IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_26", "(payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination_ciphertext IS NULL) OR\n           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination_ciphertext IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)");
+                else table.HasCheckConstraint("ck_payments_26", "(payment_method='crypto' AND quote_currency='USD' AND network_asset IS NOT NULL AND bank_destination IS NULL) OR\n           (payment_method='bank' AND quote_currency='TOMAN' AND order_id IS NOT NULL AND (bank_destination IS NOT NULL OR coalesce(legacy_kind='manual_deposit',false)) AND network_asset IS NULL AND network_amount IS NULL AND provider_confirmations IS NULL)");
                 table.HasCheckConstraint("ck_payments_27", "topup_user_id IS NULL OR payment_method='crypto'");
                 table.HasCheckConstraint("ck_payments_28", "status <> 'settled' OR confirmed_at IS NOT NULL");
                 table.HasCheckConstraint("ck_payments_29", "num_nonnulls(ipn_key_id,ipn_signature,ipn_payload_sha256,ipn_verified_at) IN (0,4)");
-                table.HasCheckConstraint("ck_payments_30", "ipn_key_id IS NULL OR (payment_method='crypto' AND provider_payment_ref IS NOT NULL AND expected_network_amount IS NOT NULL AND (evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL))");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_30", "ipn_key_id IS NULL OR (payment_method='crypto' AND provider_payment_ref IS NOT NULL AND expected_network_amount IS NOT NULL AND (evidence_asset_ref IS NOT NULL OR pending_evidence_ciphertext IS NOT NULL))");
+                else table.HasCheckConstraint("ck_payments_30", "ipn_key_id IS NULL OR (payment_method='crypto' AND provider_payment_ref IS NOT NULL AND expected_network_amount IS NOT NULL AND (evidence_asset_ref IS NOT NULL OR pending_evidence IS NOT NULL))");
                 table.HasCheckConstraint("ck_payments_31", "expected_network_amount IS NULL OR payment_method='crypto'");
                 table.HasCheckConstraint("ck_payments_32", "isfinite(ipn_verified_at)");
                 table.HasCheckConstraint("ck_payments_33", "isfinite(first_payment_observed_at)");
@@ -120,11 +130,11 @@ internal sealed class PaymentConfiguration(bool sqlite) : IEntityTypeConfigurati
                 table.HasCheckConstraint("ck_payments_45", "length(ipn_key_id) BETWEEN 1 AND 160 AND btrim(ipn_key_id)<>''");
                 table.HasCheckConstraint("ck_payments_46", "network_amount NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)");
                 table.HasCheckConstraint("ck_payments_47", "length(provider_status_code) BETWEEN 1 AND 160 AND btrim(provider_status_code)<>''");
-                table.HasCheckConstraint("ck_payments_48", "length(bank_destination_key_id) BETWEEN 1 AND 160 AND btrim(bank_destination_key_id)<>''");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_48", "length(bank_destination_key_id) BETWEEN 1 AND 160 AND btrim(bank_destination_key_id)<>''");
                 table.HasCheckConstraint("ck_payments_49", "length(receipt_asset_ref) BETWEEN 1 AND 1024 AND btrim(receipt_asset_ref)<>''");
                 table.HasCheckConstraint("ck_payments_50", "length(review_reason)<=16384");
                 table.HasCheckConstraint("ck_payments_51", "length(evidence_asset_ref) BETWEEN 1 AND 1024 AND btrim(evidence_asset_ref)<>''");
-                table.HasCheckConstraint("ck_payments_52", "length(pending_evidence_key_id) BETWEEN 1 AND 160 AND btrim(pending_evidence_key_id)<>''");
+                if (!plaintext) table.HasCheckConstraint("ck_payments_52", "length(pending_evidence_key_id) BETWEEN 1 AND 160 AND btrim(pending_evidence_key_id)<>''");
                 table.HasCheckConstraint("ck_payments_53", "length(legacy_kind) BETWEEN 1 AND 160 AND btrim(legacy_kind)<>''");
             }
         });
@@ -182,9 +192,14 @@ internal sealed class PaymentConfiguration(bool sqlite) : IEntityTypeConfigurati
         status.HasDefaultValueSql(sqlite ? "'created'" : "'created'");
         var provider_status_code = row.Property(v => v.ProviderStatusCode).HasColumnName("provider_status_code").HasColumnType(sqlite ? "TEXT" : "text");
         provider_status_code.HasMaxLength(160);
-        var bank_destination_ciphertext = row.Property(v => v.BankDestinationCiphertext).HasColumnName("bank_destination_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
-        var bank_destination_key_id = row.Property(v => v.BankDestinationKeyId).HasColumnName("bank_destination_key_id").HasColumnType(sqlite ? "TEXT" : "text");
-        bank_destination_key_id.HasMaxLength(160);
+        if (plaintext) row.Ignore(v => v.BankDestinationCiphertext); else row.Ignore(v => v.BankDestination);
+        var bank_destination_ciphertext = (plaintext ? row.Property(v => v.BankDestination) : row.Property(v => v.BankDestinationCiphertext)).HasColumnName(plaintext ? "bank_destination" : "bank_destination_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
+        if (plaintext) row.Ignore(v => v.BankDestinationKeyId);
+        else
+        {
+            var bank_destination_key_id = row.Property(v => v.BankDestinationKeyId).HasColumnName("bank_destination_key_id").HasColumnType(sqlite ? "TEXT" : "text");
+            bank_destination_key_id.HasMaxLength(160);
+        }
         var receipt_asset_ref = row.Property(v => v.ReceiptAssetRef).HasColumnName("receipt_asset_ref").HasColumnType(sqlite ? "TEXT" : "text");
         receipt_asset_ref.HasMaxLength(1024);
         var review_admin_id = row.Property(v => v.ReviewAdminId).HasColumnName("review_admin_id").HasColumnType(sqlite ? "TEXT" : "uuid");
@@ -199,9 +214,14 @@ internal sealed class PaymentConfiguration(bool sqlite) : IEntityTypeConfigurati
         if (sqlite) compensating_wallet_entry_id.UseCollation("NOCASE");
         var evidence_asset_ref = row.Property(v => v.EvidenceAssetRef).HasColumnName("evidence_asset_ref").HasColumnType(sqlite ? "TEXT" : "text");
         evidence_asset_ref.HasMaxLength(1024);
-        var pending_evidence_ciphertext = row.Property(v => v.PendingEvidenceCiphertext).HasColumnName("pending_evidence_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
-        var pending_evidence_key_id = row.Property(v => v.PendingEvidenceKeyId).HasColumnName("pending_evidence_key_id").HasColumnType(sqlite ? "TEXT" : "text");
-        pending_evidence_key_id.HasMaxLength(160);
+        if (plaintext) row.Ignore(v => v.PendingEvidenceCiphertext); else row.Ignore(v => v.PendingEvidence);
+        var pending_evidence_ciphertext = (plaintext ? row.Property(v => v.PendingEvidence) : row.Property(v => v.PendingEvidenceCiphertext)).HasColumnName(plaintext ? "pending_evidence" : "pending_evidence_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
+        if (plaintext) row.Ignore(v => v.PendingEvidenceKeyId);
+        else
+        {
+            var pending_evidence_key_id = row.Property(v => v.PendingEvidenceKeyId).HasColumnName("pending_evidence_key_id").HasColumnType(sqlite ? "TEXT" : "text");
+            pending_evidence_key_id.HasMaxLength(160);
+        }
         var evidence_digest = row.Property(v => v.EvidenceDigest).HasColumnName("evidence_digest").HasColumnType(sqlite ? "BLOB" : "bytea");
         var legacy_kind = row.Property(v => v.LegacyKind).HasColumnName("legacy_kind").HasColumnType(sqlite ? "TEXT" : "text");
         legacy_kind.HasMaxLength(160);

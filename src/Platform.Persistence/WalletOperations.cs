@@ -18,7 +18,7 @@ internal sealed partial class EfSession
             if (registration is null) RejectScope("Wallet owner scope is unavailable.");
             await RequireWriterAsync(registration.Context, ct);
         }
-        else if (Data is not SqliteAkantiDbContext) RejectScope("Wallet command scope is unavailable.");
+        else if (!Data.Database.IsSqlite()) RejectScope("Wallet command scope is unavailable.");
         admitted = true;
     }
 }

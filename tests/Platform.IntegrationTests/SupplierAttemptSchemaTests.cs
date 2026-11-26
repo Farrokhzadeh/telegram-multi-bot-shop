@@ -97,7 +97,7 @@ public sealed class SupplierAttemptSchemaTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
         var lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         await new SupplierFulfillmentWorker(store, port, port).RunAsync(f.Context(0), lease, Ct);
@@ -127,7 +127,7 @@ public sealed class SupplierAttemptSchemaTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
         await new SupplierFulfillmentWorker(store, port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Guid request, submit;
@@ -157,7 +157,7 @@ public sealed class SupplierAttemptSchemaTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Guid request;
         await using (var r = await f.Sessions.BeginAsync(Ct)) request = await r.QuerySingleAsync(new DbStatement("SELECT id FROM shop.supplier_requests"), r => r.GetGuid(0), Ct);
         await using (var invalid = await f.Sessions.BeginAsync(Ct))
@@ -174,7 +174,7 @@ public sealed class SupplierAttemptSchemaTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Guid request, submit;
         await using (var r = await f.Sessions.BeginAsync(Ct))
         { (request, submit) = await r.QuerySingleAsync(new DbStatement("SELECT r.id,a.id FROM shop.supplier_requests r JOIN shop.supplier_request_attempts a ON a.supplier_request_id=r.id"), r => (r.GetGuid(0), r.GetGuid(1)), Ct); }
@@ -199,13 +199,13 @@ public sealed class SupplierAttemptSchemaTests
         await SupplierFixture.ConfigureAsync(f, Ct);
         await SupplierFixture.AcceptAsync(f, 5, Ct);
         var port = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         await new SupplierFulfillmentWorker(store, port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         Guid request;
         await using (var r = await f.Sessions.BeginAsync(Ct)) request = await r.QuerySingleAsync(new DbStatement("SELECT id FROM shop.supplier_requests"), r => r.GetGuid(0), Ct);
         await SupplierPartialQualification.ScheduleAsync(f, request, JobKind.ReconcileSupplier, Ct);
         port.Lookup = _ => SyntheticSupplier.Complete(new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 1, "synthetic", "public account", "public product", "public variant", "public intent", 5, 1, "USD", null));
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct), Ct);
         Assert.Equal(1, port.Submits);
         Assert.Equal(1, port.Lookups);
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.supplier_request_attempts WHERE finished_at IS NOT NULL", Ct));

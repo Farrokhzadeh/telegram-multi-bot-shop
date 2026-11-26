@@ -34,7 +34,7 @@ public sealed class ThreeBrandStagingTests
             await using var read = await fixture.Sessions.BeginReadOnlyAsync(cancellation);
             return await AdminSessionStore.AuthenticateAsync(read, token, cancellation);
         }));
-        app.MapCatalogAdministration(fixture.Sessions, new(fixture.Sessions, fixture.Secrets), brand => fixture.Contexts.SingleOrDefault(context => context.BrandId == brand));
+        app.MapCatalogAdministration(fixture.Sessions, new(fixture.Sessions), brand => fixture.Contexts.SingleOrDefault(context => context.BrandId == brand));
         const string header = "X-Telegram-Bot-Api-Secret-Token";
         byte[][] keys = fixture.Contexts.Select(_ => RandomNumberGenerator.GetBytes(32)).ToArray();
         for (int i = 0; i < fixture.Contexts.Length; i++)

@@ -9,7 +9,7 @@ public static class BrandAdministrationQualification
     {
         await using var f = await CheckoutFixture.CreateAsync(ct: ct);
         var admin = await f.AdminAsync(ct);
-        var store = new BrandAdministrationStore(f.Sessions, f.Secrets);
+        var store = new BrandAdministrationStore(f.Sessions);
         using var token = BotToken.Parse("1001:" + new string('s', 35));
         Guid rotation = Guid.NewGuid();
         int checks = 0;

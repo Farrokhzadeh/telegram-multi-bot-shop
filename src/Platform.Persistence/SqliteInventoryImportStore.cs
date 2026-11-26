@@ -4,8 +4,18 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqliteInventoryImportStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqliteInventoryImportStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
+    public static void RequireSynthetic(InventoryImportItem[] items)
+    {
+        if (items.Length is < 1 or > 32 || items.Any(item => item is null || item.Id == Guid.Empty ||
+            item.Credential is null || !item.Credential.StartsWith("synthetic-", StringComparison.Ordinal) ||
+            Encoding.UTF8.GetByteCount(item.Credential) is < 11 or > 1024))
+            throw new UnauthorizedAccessException("Only synthetic staging stock is supported.");
+    }
+
     public Task ImportAsync(AuthenticatedAdmin actor, Guid product, InventoryImportItem[] items,
         Guid command, CancellationToken ct = default)
     {
@@ -24,7 +34,7 @@ public sealed class SqliteInventoryImportStore(SqliteSessionFactory sessions, Se
         return sessions.RunAsync(true, async (_, tx, token) =>
         {
             if (!await AdminAuditStore.AppendSqliteAsync(tx, actor, audit, token)) return 0;
-            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) => { await CatalogAdministration.ImportAsync(data, actor, product, items, secrets, cancel); return true; }, token);
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, cancel) => { await CatalogAdministration.ImportAsync(data, actor, product, items, cancel); return true; }, token);
             await OutboxStore.EnqueueSqliteAsync(tx,
                 JobIntent.Product(JobKind.DrainLocalPreorders, product), command, DateTime.UtcNow, token);
             await OutboxStore.EnqueueSqliteAsync(tx,

@@ -17,7 +17,7 @@ public static class SupplierSourceSelectionQualification
         using var supplierFiles = new SyntheticSecretFiles();
         SupplierCredentialQualification.Write(supplierFiles);
         using var credentials = SupplierCredentialFiles.Load(supplierFiles.Root, "supplier-config.json", SupplierCredentialQualification.Grant());
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, credentials, (request, _) =>
+        var catalog = new CatalogStore(f.Sessions, SupplierCredentialQualification.Grant(), credentials, (request, _) =>
         {
             if (credentials.UseCredential(request.Provider, request.AccountRef, token => token.Length) != 64) throw new InvalidOperationException("Synthetic supplier credential scope failed.");
             return Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, 10000, 1, "USD", "public quote"));

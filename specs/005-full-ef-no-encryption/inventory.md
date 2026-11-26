@@ -307,3 +307,14 @@ All28 field/relationship inventories are in data-model.md with immutable exact s
 
 ## T013 source checkpoint
 All28 baseline entity mappings and18 original SQLite assertion codes have current EF dispositions; see integrity-matrix.md. CHECK/index parity against the immutable first SQLite baseline and all existing field/FK/guard inventories are tested. Nonzero numeric defaults now preserve/reject explicit0 rather than substitute defaults. Runtime store/caller rows in this inventory remain open; no old business SQL or encryption dependency is declared retired by model validation alone. Exact full-provider CI is pending.
+
+## Local v2 source audit checkpoint
+
+| Surface | Observed path and disposition |
+| --- | --- |
+| SQLite daemon configuration and inventory IPC | `SqliteStagingConfiguration` requires v2 and rejects a legacy key mount. API inventory import uses the authenticated API transaction. The legacy bridge is only built into integration fixtures. |
+| Customer history and preview | Current writers use `CustomerHistoryContent` and direct preview files. `PlainSqliteConversionCommand` and the asset readers verify and recover historical envelopes. |
+| Supplier and payment evidence | `SqliteSyntheticSupplierEvidenceArchive` writes original bytes. `PaymentEvidenceArchive` selects the v2 or legacy contract from the session format. `payments.ipn_key_id` remains signature metadata. |
+| Configuration and credentials | `backend.compose.yaml` has no key grants. V2 staging keeps API and Telegram identity files and PostgreSQL database, TLS and webhook credentials. Legacy `SecretFiles` and cipher branches still exist in shared adapters and recovery tools. |
+| Provider SQL | The direct `DbStatement` scan of the converted persistence stores found existing PostgreSQL advisory locks for admin, checkout, support, campaign, payments and jobs. SQLite format and migration-history checks use provider metadata. Full transitive caller and SQL exception review remains open. |
+| PostgreSQL staging | The v2 canary and schema export are separate from the historical staging deployment path. The latter still needs an explicit retirement decision or a compatible accepted-state conversion. |

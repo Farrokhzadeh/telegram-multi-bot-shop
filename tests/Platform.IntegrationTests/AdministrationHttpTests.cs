@@ -22,7 +22,7 @@ public sealed class AdministrationHttpTests
     public async Task AuthenticatedAdministrationUsesFrozenBodiesScopedPostingsPaginationAndCorrelatedErrors()
     {
         await using var f = await CheckoutFixture.CreateAsync(balance: 0, stock: 0, ct: Ct);
-        using var bank = new BankDestinationService(f.Sessions, f.Secrets, new byte[32]);
+        using var bank = new BankDestinationService(f.Sessions, new byte[32]);
         var payments = new PaymentSettlementFixture(f);
         await f.AdminAsync(Ct);
         var lastProduct = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
@@ -39,8 +39,8 @@ public sealed class AdministrationHttpTests
         app.UseMiddleware<AdminGuardMiddleware>((Func<AdminToken, CancellationToken, Task<AuthenticatedAdmin?>>)(async (token, ct) =>
         { await using var session = await f.Sessions.BeginAsync(ct); return await AdminSessionStore.AuthenticateAsync(session, token, ct); }));
         BrandContext? Resolve(Guid brand) => f.Contexts.SingleOrDefault(c => c.BrandId == brand);
-        app.MapCatalogAdministration(f.Sessions, new(f.Sessions, f.Secrets), Resolve);
-        app.MapOrderAdministration(new(f.Sessions, f.Secrets), new(f.Sessions, f.Secrets), payments.Manual, bank, Resolve);
+        app.MapCatalogAdministration(f.Sessions, new(f.Sessions), Resolve);
+        app.MapOrderAdministration(new(f.Sessions), new(f.Sessions), payments.Manual, bank, Resolve);
         app.MapAdministrationOperations(new(f.Sessions));
         await app.StartAsync(Ct);
         using var client = new HttpClient { BaseAddress = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };

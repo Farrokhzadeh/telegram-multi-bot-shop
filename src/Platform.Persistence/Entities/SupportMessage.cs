@@ -8,6 +8,7 @@ public sealed class SupportMessage
     public Guid? SenderAdminId { get; set; }
     public long? SenderTelegramId { get; set; }
     public byte[]? BodyCiphertext { get; set; }
+    public byte[]? BodyContent { get; set; }
     public string? BodyKeyId { get; set; }
     public string? AssetRef { get; set; }
     public long? TelegramMessageId { get; set; }

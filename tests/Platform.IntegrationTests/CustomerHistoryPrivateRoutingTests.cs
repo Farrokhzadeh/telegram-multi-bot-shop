@@ -44,16 +44,15 @@ public sealed class CustomerHistoryPrivateRoutingTests
         if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException();
         var ct = Ct;
         await using var f = await CheckoutFixture.CreateAsync(users: 6, balance: 0, stock: 0, ct: ct);
-        string directory = Path.Combine(Path.GetTempPath(), "teleg-customer-history-" + Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(Path.GetTempPath(), "teleg-customer-history-" + Guid.NewGuid().ToString("N") + "-v2");
         Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
-            var archive = new CustomerHistoryArchive(f.Secrets);
-            var store = new CustomerHistoryFiles(directory, f.Secrets);
+            var store = new CustomerHistoryFiles(directory);
             int[] counts = [25, 3, 0, 2, 0, 1];
             for (int i = 0; i < counts.Length; i++)
-                await store.PublishAsync(f.Context(i), f.Users[i], archive.Seal(f.Context(i), f.Users[i], Orders(i, counts[i])), ct);
-            var router = new CustomerHistoryCommandRouter(f.Sessions, archive, store);
+                await store.PublishAsync(f.Context(i), f.Users[i], CustomerHistoryContent.Encode(f.Users[i], Orders(i, counts[i])), ct);
+            var router = new CustomerHistoryCommandRouter(f.Sessions, store);
             var first = await router.ReadAsync(Inbound(f.Context(0), CheckoutFixture.Actor(0), "/orders"), ct);
             var second = await router.ReadAsync(Inbound(f.Context(0), CheckoutFixture.Actor(0), "/orders 20"), ct);
             Assert.Equal(20, first.Orders.Count);
@@ -153,8 +152,8 @@ public sealed class CustomerHistoryPrivateRoutingTests
             Assert.Equal(2, anotherMemberSameBrand.Orders.Count);
             Assert.All(anotherMemberSameBrand.Orders, o => Assert.StartsWith("SOURCE-3-", o.OriginalReference, StringComparison.Ordinal));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => router.ReadAsync(Inbound(f.Context(0), 7004, "/orders"), ct));
-            var cipher = await store.ReadAsync(f.Context(0), f.Users[0], ct);
-            Assert.Throws<UnauthorizedAccessException>(() => archive.Open(f.Context(1), f.Users[1], cipher.Span));
+            var content = await store.ReadAsync(f.Context(0), f.Users[0], ct);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.PublishAsync(f.Context(1), f.Users[1], content, ct));
             await using (var session = await f.Sessions.BeginAsync(ct))
             {
                 await session.ExecuteAsync(new DbStatement("UPDATE shop.users SET blocked_at=clock_timestamp() WHERE id=$1", DbValue.Uuid(f.Users[0])), ct);

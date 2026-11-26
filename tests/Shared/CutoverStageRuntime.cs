@@ -112,7 +112,7 @@ public static class CutoverStageRuntime
             { await policy.QuerySingleAsync(new DbStatement("UPDATE shop.brands SET allow_crypto=true,allow_wallet_topup=true,policy_version=policy_version+1 WHERE id=$1 AND active AND policy_version=$2 RETURNING policy_version", DbValue.Uuid(context.BrandId), DbValue.Bigint(saved.WriterRevision)), r => r.GetInt64(0), ct); await policy.CommitAsync(ct); }
             saved = saved with { WriterRevision = checked(saved.WriterRevision + 1) };
             Write(path, JsonSerializer.Serialize(saved, CutoverStageJson.Default.CutoverStageState), true);
-            Guid payment = Guid.NewGuid(); var store = new PaymentEvidenceStore(sessions, secrets);
+            Guid payment = Guid.NewGuid(); var store = new PaymentEvidenceStore(sessions);
             _ = await store.CreateTopupAsync(context, CheckoutFixture.Actor(0), payment, new(10.25m, Currency.Usd), CryptoAsset.UsdtBsc, ct);
             string provider = PaymentSettlementFixture.Provider(payment);
             await using (var bind = await sessions.BeginAsync(ct))
@@ -176,7 +176,7 @@ public static class CutoverStageRuntime
             var member = await BrandUserStore.RequireAsync(read, context, CheckoutFixture.Actor(0), saved.User, ct);
             if (active != 1 || member.Id != saved.User) throw new InvalidOperationException();
         }
-        var catalog = new CatalogStore(sessions, secrets, [], (_, _) => throw new InvalidOperationException("Only synthetic local catalog operations are configured."));
+        var catalog = new CatalogStore(sessions, [], (_, _) => throw new InvalidOperationException("Only synthetic local catalog operations are configured."));
         using var administration = new BrandAdministrationServices(writers, context, secrets, catalog, new byte[32]);
         await using var api = await StartApiAsync(writers, administration, sessions, secrets, ct);
         Write(Path.Combine(root, "api.json"), JsonSerializer.Serialize(new CutoverStageApi(run, api.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()), CutoverStageJson.Default.CutoverStageApi), true);
@@ -210,7 +210,7 @@ public static class CutoverStageRuntime
                     {
                         var input = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment", id.ToString("N") + ".json"), 1, 8192), CutoverPaymentJson.Default.CutoverPaymentInput) ?? throw new InvalidOperationException();
                         var files = new CutoverPaymentFiles(Path.Combine(root, "payment-archives"), secrets, context, key, input);
-                        outcome = await CutoverPaymentCapture.CaptureAsync(sessions, secrets, context, saved.User, run, key, input, files.SaveAsync, ct);
+                        outcome = await CutoverPaymentCapture.CaptureAsync(sessions, context, saved.User, run, key, input, files.SaveAsync, ct);
                     }
                     catch (Exception error) when (error is PaymentNoticeRejectedException or UnauthorizedAccessException or ArgumentException or JsonException) { outcome = "Rejected"; }
                 }
@@ -228,7 +228,7 @@ public static class CutoverStageRuntime
                         else
                         {
                             using var provider = PaymentSettlementFixture.Client(request => request == "/v1/payment/" + key.Provider ? PaymentNoticeFixture.Body(key.Origin, quote: 10.25m, provider: key.Provider, asset: "usdtbsc") : throw new InvalidOperationException());
-                            outcome = (await new PaymentVerificationWorker(sessions, new PaymentSettlementStore(sessions, secrets, catalog), provider).RunForBrandAsync(context, saved.WriterRevision, lease, ct))?.Outcome.ToString() ?? "Rejected";
+                            outcome = (await new PaymentVerificationWorker(sessions, new PaymentSettlementStore(sessions, catalog), provider).RunForBrandAsync(context, saved.WriterRevision, lease, ct))?.Outcome.ToString() ?? "Rejected";
                         }
                     }
                     catch (UnauthorizedAccessException) { outcome = "Rejected"; }
@@ -239,7 +239,7 @@ public static class CutoverStageRuntime
                 {
                     try
                     {
-                        var store = new DeliveryStore(sessions, secrets);
+                        var store = new DeliveryStore(sessions);
                         if (command == "delivery-recover")
                         {
                             IReadOnlyList<Guid> deliveries;
@@ -289,13 +289,13 @@ public static class CutoverStageRuntime
                 }
                 if (command is "wallet" or "wallet-current")
                 {
-                    try { outcome = (await new CheckoutStore(sessions, secrets).PurchaseLocalAsync(context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10, PolicyRevision: command == "wallet-current" ? saved.WriterRevision : 0), ct)).Outcome.ToString(); }
+                    try { outcome = (await new CheckoutStore(sessions).PurchaseLocalAsync(context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10, PolicyRevision: command == "wallet-current" ? saved.WriterRevision : 0), ct)).Outcome.ToString(); }
                     catch (UnauthorizedAccessException) { outcome = "Rejected"; }
                 }
                 if (command == "wallet-paused")
                 {
                     await using var transaction = await sessions.BeginAsync(ct);
-                    var held = await new CheckoutStore(sessions, secrets).AcceptLocalAsync(transaction, context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10), ct);
+                    var held = await new CheckoutStore(sessions).AcceptLocalAsync(transaction, context, CheckoutFixture.Actor(0), new(id, saved.Product, 1, 10), ct);
                     if (held.Outcome != CheckoutOutcome.Purchased) throw new InvalidOperationException();
                     Write(Path.Combine(root, "held-" + id.ToString("N") + ".json"), JsonSerializer.Serialize(await Result(command, "transaction-held"), CutoverStageJson.Default.CutoverStageResult));
                     await Task.Delay(TimeSpan.FromMinutes(2), ct);
@@ -358,7 +358,7 @@ public static class CutoverStageRuntime
                 if (command.StartsWith(revealPrefix, StringComparison.Ordinal) &&
                     Guid.TryParseExact(command.AsSpan(revealPrefix.Length), "N", out Guid reveal))
                 {
-                    byte[] manifest = await new DeliveryStore(sessions, secrets).ReadManifestAsync(context, actor, reveal, ct);
+                    byte[] manifest = await new DeliveryStore(sessions).ReadManifestAsync(context, actor, reveal, ct);
                     try
                     {
                         using var stream = new MemoryStream(manifest, writable: false);
@@ -409,7 +409,7 @@ public static class CutoverStageRuntime
                 if (prior is not { Outcome: "Quoted", Quantity: int units, Amount: decimal expected } ||
                     prior.Run != run || prior.Product != saved.Product || prior.Order != order || prior.Currency is null)
                     return denied;
-                var store = new CheckoutStore(sessions, secrets);
+                var store = new CheckoutStore(sessions);
                 CheckoutRequest request = new(order, saved.Product, units);
                 var replay = await store.ReplayForBrandAsync(context, saved.WriterRevision, actor, request, ct);
                 if (replay is not null) return prior with { Outcome = replay.Outcome.ToString(), Order = replay.OrderId };

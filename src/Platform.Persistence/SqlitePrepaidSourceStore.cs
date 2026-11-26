@@ -4,8 +4,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqlitePrepaidSourceStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqlitePrepaidSourceStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<Guid> IssueAsync(BrandContext context, Guid source, CancellationToken ct = default) => sessions.RunAsync(true, (_, tx, token) => IssueAsync(tx, context, source, token), ct);
     internal async Task<Guid> IssueAsync(SqliteTransaction tx, BrandContext context, Guid source, CancellationToken ct)
     {
@@ -16,7 +18,7 @@ public sealed class SqlitePrepaidSourceStore(SqliteSessionFactory sessions, Secr
         Guid? prior = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => PrepaidEntitlements.PriorAsync(data, source, token), ct);
         if (prior is Guid existing) return existing;
         if (sale.Quantity <= 0 || due.Amount <= 0 || sale.Percent is < 0 or >= 100 || !await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => PrepaidEntitlements.EvidenceAsync(data, sale, source, due.Amount, token), ct)) throw new PricingRejectedException();
-        Guid coupon = await SqliteSessionFactory.StepEfAsync(tx, true, (data, token) => PrepaidEntitlements.CreateAsync(data, secrets, context, source, sale, token), ct);
+        Guid coupon = await SqliteSessionFactory.StepEfAsync(tx, true, (data, token) => PrepaidEntitlements.CreateAsync(data, context, source, sale, token), ct);
         await SqliteDiscountClaimStore.TransitionAsync(tx, context, source, true, ct);
         await OutboxStore.EnqueueSqliteAsync(tx, JobIntent.Coupon(context.BrandId, coupon), source, DateTime.UtcNow, ct);
         return coupon;

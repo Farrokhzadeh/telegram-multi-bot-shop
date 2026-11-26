@@ -15,13 +15,9 @@ public sealed class SqliteSupplierReviewTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await PlainTargetRuntimeTests.InitializeSqliteAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
-            using var files = new SyntheticSecretFiles();
-            files.WriteManifest(brands: CheckoutFixture.BrandIds);
-            using var secrets = SecretFiles.Load(files.Root, "service-config.json",
-                files.Grant(brands: CheckoutFixture.BrandIds));
             using var token = AdminToken.Create();
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), source = Guid.NewGuid();
             Guid order = Guid.NewGuid(), request = Guid.NewGuid(), admin = Guid.NewGuid(), session = Guid.NewGuid();
@@ -29,8 +25,8 @@ public sealed class SqliteSupplierReviewTests
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
-                        bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_id,bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,title,fulfillment_kind,availability_policy)
                     VALUES ($product,'Fixture','supplier','immediate');
@@ -61,7 +57,7 @@ public sealed class SqliteSupplierReviewTests
                 return 0;
             }, ct);
             var actor = await SqliteAdminSessionStore.AuthenticateAsync(sessions, token, ct);
-            var review = new SqliteSupplierReviewStore(sessions, secrets);
+            var review = new SqliteSupplierReviewStore(sessions);
             Guid command = Guid.NewGuid();
             await review.ApproveCostAsync(actor, brand, request, 0, 8m, "USD", command, ct);
             await review.ApproveCostAsync(actor, brand, request, 0, 8m, "USD", command, ct);

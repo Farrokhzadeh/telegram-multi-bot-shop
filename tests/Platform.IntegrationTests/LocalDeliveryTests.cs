@@ -11,9 +11,9 @@ namespace Platform.IntegrationTests;
 public sealed class LocalDeliveryTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
-    private static DeliveryStore Store(CheckoutFixture f) => new(f.Sessions, f.Secrets);
+    private static DeliveryStore Store(CheckoutFixture f) => new(f.Sessions);
     private static WalletCheckoutService Checkout(CheckoutFixture f) => new(f.Sessions, f.Store,
-        new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
+        new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
     private static Task<ChannelMembership> Member(long chat, long actor, CancellationToken ct) => Task.FromResult(ChannelMembership.Member);
     private static async Task<Guid> Purchase(CheckoutFixture f, int qty = 1)
     {
@@ -191,7 +191,7 @@ public sealed class LocalDeliveryTests
             await source.ExecuteAsync(new DbStatement("UPDATE shop.products SET fulfillment_kind='supplier',active_supplier_source_id=$1,revision=revision+1 WHERE id=$2", DbValue.Uuid(id), DbValue.Uuid(f.Product)), Ct);
             await source.CommitAsync(Ct);
         }
-        var catalog = new CatalogStore(f.Sessions, f.Secrets, [new("synthetic", "public account")], (_, _) => Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, 2, 1, "USD", "public quote")));
+        var catalog = new CatalogStore(f.Sessions, [new("synthetic", "public account")], (_, _) => Task.FromResult(new SupplierCatalogResult(SupplierCatalogStatus.Available, 2, 1, "USD", "public quote")));
         var request = new CheckoutRequest(OrderIds.New(), f.Product, 5);
         await new WalletCheckoutService(f.Sessions, f.Store, catalog).PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct);
         await using (var premature = await f.Sessions.BeginAsync(Ct))
@@ -204,7 +204,7 @@ public sealed class LocalDeliveryTests
         Guid coupon;
         await using (var read = await f.Sessions.BeginAsync(Ct)) coupon = await read.QuerySingleAsync(new DbStatement("SELECT discount_id FROM shop.discount_uses WHERE order_id=$1", DbValue.Uuid(request.OrderId)), row => row.GetGuid(0), Ct);
         await using (var early = await f.Sessions.BeginAsync(Ct))
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new PricingStore(f.Sessions, f.Secrets).TransitionClaimAsync(early, f.Context(0), coupon, request.OrderId, true, Ct));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new PricingStore(f.Sessions).TransitionClaimAsync(early, f.Context(0), coupon, request.OrderId, true, Ct));
         await using (var direct = await f.Sessions.BeginAsync(Ct))
         {
             await direct.ExecuteAsync(new DbStatement("UPDATE shop.discount_uses SET status='redeemed' WHERE order_id=$1", DbValue.Uuid(request.OrderId)), Ct);
@@ -227,7 +227,7 @@ public sealed class LocalDeliveryTests
         var admin = await f.AdminAsync(Ct);
         await using (var issue = await f.Sessions.BeginAsync(Ct))
         {
-            await new PricingStore(f.Sessions, f.Secrets).IssueAsync(issue, f.Context(0), admin,
+            await new PricingStore(f.Sessions).IssueAsync(issue, f.Context(0), admin,
                 new(Guid.NewGuid(), "PUBLIC-SUPPLIER-SHORTFALL", CouponKind.Goodwill, 50, f.Product, f.Users[0], MaximumUses: 5), Guid.NewGuid(), Ct);
             await issue.CommitAsync(Ct);
         }
@@ -245,7 +245,7 @@ public sealed class LocalDeliveryTests
             binding.Currency, binding.Quantity, Enumerable.Range(0, count).Select(i => new SupplierItem("public item " + i,
                 SupplierItemDisposition.Customer, "code", wireContent)).ToArray(), "public protected response"u8);
 
-        var supplier = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var supplier = new SupplierRequestStore(f.Sessions);
         JobLease submit = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         var binding = await supplier.ReadAsync(f.Context(0), submit, Ct);
         await new SupplierFulfillmentWorker(supplier, port, port).RunAsync(f.Context(0), submit, Ct);
@@ -254,12 +254,12 @@ public sealed class LocalDeliveryTests
         port.Lookup = b => Goods(b, 3);
         await SupplierRecoveryTests.Due(f);
         JobLease lookup = await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new SupplierRequestStore(f.Sessions, f.Secrets).ReadAsync(f.Context(1), lookup, Ct));
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), lookup, Ct);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new SupplierRequestStore(f.Sessions).ReadAsync(f.Context(1), lookup, Ct));
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), lookup, Ct);
         foreach (JobKind kind in new[] { JobKind.ReconcileSupplier, JobKind.ExportSupplier, JobKind.ReconcileSupplier, JobKind.ExportSupplier })
         {
             await SupplierPartialQualification.ScheduleAsync(f, binding.RequestId, kind, Ct);
-            await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, kind, Ct), Ct);
+            await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, kind, Ct), Ct);
         }
 
         Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE kind='supplier' AND status='acquired' AND delivered_content_key_id IS NOT NULL AND delivered_content <> convert_to('" + credential + "','UTF8') AND manifest_generation IS NULL", Ct));
@@ -274,7 +274,7 @@ public sealed class LocalDeliveryTests
 
         port.Lookup = b => Goods(b, 5);
         await SupplierPartialQualification.ScheduleAsync(f, binding.RequestId, JobKind.ExportSupplier, Ct);
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ExportSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.ExportSupplier, Ct), Ct);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Store(f).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
         long revision = await SupplierPartialQualification.RevisionAsync(f, order, Ct);
         Guid approval = Guid.NewGuid();
@@ -450,7 +450,7 @@ public sealed class LocalDeliveryTests
     {
         var admin = await f.AdminAsync(Ct);
         await using var session = await f.Sessions.BeginAsync(Ct);
-        await new PricingStore(f.Sessions, f.Secrets).IssueAsync(session, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-FREE", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: cap), Guid.NewGuid(), Ct);
+        await new PricingStore(f.Sessions).IssueAsync(session, f.Context(0), admin, new(Guid.NewGuid(), "PUBLIC-FREE", CouponKind.Goodwill, 100, f.Product, f.Users[0], MaximumUses: cap), Guid.NewGuid(), Ct);
         await session.CommitAsync(Ct);
     }
 }

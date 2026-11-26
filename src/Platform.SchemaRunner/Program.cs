@@ -3,6 +3,80 @@ using Platform.Persistence;
 using Platform.Migration;
 using Platform.SchemaRunner;
 
+if (args is ["--inspect-plain-qualification-source", "--snapshot", _] or
+    ["--inspect-plain-qualification-source", "--snapshot", _, "--inventory", _] or
+    ["--freeze-plain-qualification-source", "--database", _, "--snapshot", _] or
+    ["--prepare-plain-qualification-target", "--database", _] or
+    ["--prepare-plain-runtime-copy", "--job", _, "--output", _] or
+    ["--verify-plain-runtime-copy", "--bundle", _, "--receipt-sha256", _] or
+    ["--convert-plain-qualification", "--job", _] or ["--verify-plain-qualification", "--job", _])
+{
+    using var interrupted = new CancellationTokenSource();
+    ConsoleCancelEventHandler cancel = (_, signal) => { signal.Cancel = true; interrupted.Cancel(); };
+    Console.CancelKeyPress += cancel;
+    try
+    {
+        if (args[0] == "--inspect-plain-qualification-source")
+        {
+            var receipt = await EfSchemaCommand.InspectPlainSqliteSourceAsync(args[2], args.Length == 5 ? args[4] : null, interrupted.Token);
+            Console.WriteLine($"source_format=1 snapshot_sha256={receipt.Snapshot} references_sha256={receipt.References} asset_references={receipt.FileReferences} database_manifests={receipt.DatabaseManifests}");
+        }
+        else if (args[0] == "--freeze-plain-qualification-source")
+        {
+            string snapshot = await EfSchemaCommand.FreezePlainSqliteSourceAsync(args[2], args[4], interrupted.Token);
+            Console.WriteLine($"source_format=1 snapshot_sha256={snapshot} state=frozen");
+        }
+        else if (args[0] == "--prepare-plain-qualification-target")
+        {
+            string schema = await EfSchemaCommand.PreparePlainSqliteConversionAsync(args[2], interrupted.Token);
+            Console.WriteLine($"target_format=2 target_schema_sha256={schema} state=staged");
+        }
+        else if (args[0] == "--verify-plain-runtime-copy")
+        {
+            int files = await EfSchemaCommand.VerifyPlainRuntimeCopyAsync(args[2], args[4], interrupted.Token);
+            Console.WriteLine($"target_format=2 asset_files={files} state=isolated-runtime-copy-verified");
+        }
+        else
+        {
+            string? runtimeCopy = args[0] == "--prepare-plain-runtime-copy" ? args[4] : null;
+            var receipt = await EfSchemaCommand.RunPlainSqliteConversionAsync(args[2], verify: args[0] != "--convert-plain-qualification", interrupted.Token, runtimeCopy);
+            Console.WriteLine($"source_format=1 target_format=2 snapshot_sha256={receipt.SourceSha256} target_schema_sha256={receipt.TargetSchemaSha256} model_sha256={receipt.ModelSha256} asset_manifest_sha256={receipt.AssetManifestSha256} rows={receipt.Rows} assets={receipt.Assets} state={(runtimeCopy is null ? "staged" : "isolated-runtime-copy")}");
+            if (receipt.RuntimeReceiptSha256 is not null) Console.WriteLine("runtime_receipt_sha256=" + receipt.RuntimeReceiptSha256);
+        }
+        return 0;
+    }
+    catch (OperationCanceledException) when (interrupted.IsCancellationRequested)
+    {
+        Console.Error.WriteLine("Plaintext qualification command interrupted.");
+        return 130;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or
+        NotSupportedException or MigrationRejectedException or Microsoft.Data.Sqlite.SqliteException or ArithmeticException or
+        System.Reflection.TargetInvocationException or System.Text.Json.JsonException or FormatException or KeyNotFoundException or EntryPointNotFoundException or
+        System.Security.Cryptography.CryptographicException or Platform.Security.SecretConfigurationException or Platform.Security.CipherRejectedException)
+    {
+        Console.Error.WriteLine("Plaintext qualification command rejected.");
+        return 78;
+    }
+    finally { Console.CancelKeyPress -= cancel; }
+}
+
+if (args is ["--create-plain-qualification-sqlite"])
+{
+    try
+    {
+        var receipt = await EfSchemaCommand.CreatePlainSqliteQualificationAsync();
+        Console.WriteLine("qualification_database=" + receipt.Path + " schema_sha256=" + receipt.SchemaSha256 + " format=2");
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or
+        NotSupportedException or MigrationRejectedException or Microsoft.Data.Sqlite.SqliteException)
+    {
+        Console.Error.WriteLine("Plaintext qualification schema creation rejected.");
+        return 78;
+    }
+}
+
 if (args is ["--create-ef-qualification-sqlite", "--expected-script-sha256", _] ||
     args is ["--adopt-ef-qualification-sqlite", "--database", _, "--expected-script-sha256", _])
 {
@@ -35,6 +109,54 @@ if (args is ["--create-ef-qualification-postgres", "--connection-file", var efQu
         NotSupportedException or FormatException or MigrationRejectedException or NpgsqlException)
     {
         Console.Error.WriteLine("PostgreSQL EF qualification rejected; preserve the isolated target and review identity and migration evidence.");
+        return 78;
+    }
+}
+
+if (args is ["--create-plain-qualification-postgres", "--connection-file", var plainConnection, "--expected-ddl-sha256", var expectedPlainDdl])
+{
+    try
+    {
+        await using var data = new NpgsqlSlimDataSourceBuilder(ArchivePrivateFile.ReadText(plainConnection)).EnableArrays().Build();
+        var receipt = await EfSchemaCommand.CreatePlainPostgresQualificationAsync(data, expectedPlainDdl);
+        Console.WriteLine($"qualification_database={receipt.Database} format=2 ddl_sha256={receipt.Ddl} model_sha256={receipt.Model}");
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or
+        NotSupportedException or FormatException or MigrationRejectedException or NpgsqlException)
+    {
+        Console.Error.WriteLine("Plaintext PostgreSQL qualification creation rejected.");
+        return 78;
+    }
+}
+
+if (args is ["--write-plain-postgres-schema", "--output", var plainSchemaOutput])
+{
+    try
+    {
+        string digest = await EfSchemaCommand.WritePlainPostgresSchemaAsync(plainSchemaOutput);
+        Console.WriteLine($"provider=postgres format=2 file_sha256={digest}");
+        return 0;
+    }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or
+        NotSupportedException or MigrationRejectedException or EntryPointNotFoundException)
+    {
+        Console.Error.WriteLine("Plaintext PostgreSQL schema export rejected.");
+        return 78;
+    }
+}
+
+if (args is ["--describe-plain-ef-schema", var plainProvider])
+{
+    try
+    {
+        var digest = EfSchemaCommand.DescribePlain(plainProvider);
+        Console.WriteLine($"provider={plainProvider} format=2 migration={Platform.Persistence.Migrations.PlainContentBaseline.MigrationId} ddl_sha256={digest.Ddl} model_sha256={digest.Model}");
+        return 0;
+    }
+    catch (Exception error) when (error is ArgumentException or InvalidOperationException or NotSupportedException)
+    {
+        Console.Error.WriteLine("Plaintext schema description rejected.");
         return 78;
     }
 }

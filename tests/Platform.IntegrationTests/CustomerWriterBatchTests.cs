@@ -13,7 +13,7 @@ public sealed class CustomerWriterBatchTests
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     private static readonly byte[] Secret = SHA256.HashData("public synthetic writer batch webhook"u8);
     private static CatalogStore Catalog(CheckoutFixture f, Func<SupplierCatalogRequest, CancellationToken, Task<SupplierCatalogResult>>? fetch = null) =>
-        new(f.Sessions, f.Secrets, [new("synthetic", "public account")], fetch ?? ((_, _) => throw new InvalidOperationException("Unexpected transport.")));
+        new(f.Sessions, [new("synthetic", "public account")], fetch ?? ((_, _) => throw new InvalidOperationException("Unexpected transport.")));
     private static Task<ChannelMembership> Member(long chat, long actor, CancellationToken ct) => Task.FromResult(ChannelMembership.Member);
     private static CheckoutRequest Request(CheckoutFixture f) => new(OrderIds.New(), f.Product, 1);
     private static VerifiedTelegramUpdate Update(CheckoutFixture f, string value, long id, int brand = 0, bool callback = false, long message = 77, long actor = 7001)
@@ -156,7 +156,7 @@ public sealed class CustomerWriterBatchTests
             await complete.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=true,customer_support_admin_id=$1,policy_version=policy_version+1 WHERE id=$2", DbValue.Uuid(actor.AdminId), DbValue.Uuid(f.Brands[0])), Ct);
             await complete.CommitAsync(Ct);
         }
-        var router = Router(f, support: new HumanSupportRouter(f.Sessions, f.Secrets));
+        var router = Router(f, support: new HumanSupportRouter(f.Sessions));
         Assert.Equal(UpdateRouteCode.Support, (await router.RouteForBrandAsync(Update(f, "/support", 101, message: 101), 1, Ct)).Code);
         actor = await f.AdminAsync(Ct); var writer = new BrandWriterStore(f.Sessions);
         await writer.SetActiveAsync(actor, f.Context(0), 1, false, Guid.NewGuid(), Ct);

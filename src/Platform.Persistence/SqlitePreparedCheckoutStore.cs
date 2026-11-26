@@ -7,8 +7,10 @@ using Platform.Security;
 
 namespace Platform.Persistence;
 
-public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, SecretSnapshot secrets)
+public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions)
 {
+    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+
     public Task<CheckoutResult> PurchaseAsync(BrandContext context, long actor, CheckoutRequest request,
         PreparedCheckout prepared, SqliteCatalogStore catalog, CancellationToken ct = default)
     {
@@ -67,7 +69,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             quote.Payable.Amount <= 0)
             throw new PricingRejectedException();
         if (local)
-            return await new SqliteCheckoutStore(sessions, secrets).AcceptLocalAsync(
+            return await new SqliteCheckoutStore(sessions).AcceptLocalAsync(
                 tx, context, revision, actor, localRequest, ct);
         if (request.Payment == CheckoutPayment.Wallet && request.Kind != CheckoutKind.PrepaidUnits && !walletCoupon)
             return new(CheckoutOutcome.Unavailable);
@@ -83,7 +85,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             return ids;
         }, ct);
         bool unsafePayment = await SqliteSessionFactory.StepEfAsync(tx, false, async (data, token) =>
-            await data.Data.Set<Entities.Payment>().AnyAsync(value => data.Data.Set<Entities.Order>().Any(order => order.Id == value.OrderId && order.UserId == member && (order.PaymentStatus == "awaiting_payment" || order.PaymentStatus == "under_review" || order.PaymentStatus == "confirmation_pending")) && (value.FirstPaymentObservedAt != null || value.ReceiptAssetRef != null || value.PendingEvidenceCiphertext != null || value.Status == "observed" || value.Status == "confirming" || value.Status == "settled" || value.Status == "review"), token) ||
+            await data.Data.Set<Entities.Payment>().AnyAsync(value => data.Data.Set<Entities.Order>().Any(order => order.Id == value.OrderId && order.UserId == member && (order.PaymentStatus == "awaiting_payment" || order.PaymentStatus == "under_review" || order.PaymentStatus == "confirmation_pending")) && (value.FirstPaymentObservedAt != null || value.ReceiptAssetRef != null || value.PendingEvidence != null || value.Status == "observed" || value.Status == "confirming" || value.Status == "settled" || value.Status == "review"), token) ||
             await data.Data.Set<Entities.Order>().AnyAsync(value => value.UserId == member && (value.PaymentStatus == "under_review" || value.PaymentStatus == "confirmation_pending"), token) ||
             await data.Data.Set<Entities.DiscountUse>().AnyAsync(value => value.Status == "held" && data.Data.Set<Entities.Order>().Any(order => order.Id == value.OrderId && order.UserId == member && order.PaymentStatus == "awaiting_payment"), token), ct);
         if (unsafePayment) return new(CheckoutOutcome.Unavailable);
@@ -92,7 +94,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         string kind = product.Kind;
         bool localFirst = product.LocalFirst, preorder = request.Kind == CheckoutKind.ProductPurchase && product.AvailabilityPolicy == "local_preorder";
 
-        List<SqliteOrderPaymentSettlementStore.Stock>? walletStock = null;
+        List<Guid>? walletStock = null;
         if (walletCoupon)
         {
             bool older = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Order>().AnyAsync(value => value.ProductId == request.ProductId && value.IsPreorder && (value.PaymentStatus == "paid" || value.PaymentStatus == "not_required") && (value.FulfillmentStatus == "waiting_stock" || value.FulfillmentStatus == "requires_admin"), token), ct);
@@ -132,7 +134,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
             if (wallet.Balance.Amount < quote.TotalUsd.Amount) throw new PricingRejectedException();
             await SqliteWallet.PostAsync(tx, member, wallet,
                 new Money(-quote.TotalUsd.Amount, Currency.Usd), request.OrderId, false, now, ct);
-            await new SqliteOrderPaymentSettlementStore(sessions, secrets).AcquireAsync(
+            await SqliteOrderPaymentSettlementStore.AcquireAsync(
                 tx, context, request.OrderId, walletStock!, now, ct);
             await OutboxStore.EnqueueSqliteAsync(tx,
                 JobIntent.Order(JobKind.PrepareManifest, context.BrandId, request.OrderId),
@@ -146,7 +148,7 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
                 throw new PricingRejectedException();
             await SqliteWallet.PostAsync(tx, member, wallet,
                 new Money(-quote.TotalUsd.Amount, Currency.Usd), request.OrderId, false, now, ct);
-            _ = await new SqlitePrepaidSourceStore(sessions, secrets).IssueAsync(tx, context, request.OrderId, ct);
+            _ = await new SqlitePrepaidSourceStore(sessions).IssueAsync(tx, context, request.OrderId, ct);
             return new(CheckoutOutcome.Purchased, request.OrderId);
         }
         await CreatePaymentAsync(tx, context, request, quote, ct);
@@ -156,55 +158,31 @@ public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions, S
         return new(CheckoutOutcome.AwaitingPayment, request.OrderId);
     }
 
-    private async Task CreatePaymentAsync(SqliteTransaction tx, BrandContext context, CheckoutRequest request,
+    private static async Task CreatePaymentAsync(SqliteTransaction tx, BrandContext context, CheckoutRequest request,
         CheckoutQuote quote, CancellationToken ct)
     {
         bool bank = request.Payment == CheckoutPayment.Bank;
         Guid payment = Guid.CreateVersion7();
         byte[]? destination = null;
-        string? key = null;
         if (bank)
+            destination = await SqliteSessionFactory.StepEfAsync(tx, false,
+                (data, token) => CheckoutQueries.FreezeBankDestinationAsync(data, context, true, token), ct) ?? throw new PricingRejectedException();
+        try
         {
-            byte[] number, holder;
-            var card = await SqliteSessionFactory.StepEfAsync(tx, false, (data, token) => data.Data.Set<Entities.Brand>().Where(value => value.Id == context.BrandId && value.AllowBank && value.BankNumberCiphertext != null && value.BankHolderCiphertext != null && value.BankKeyId != null).Select(value => new { Number = value.BankNumberCiphertext!, Holder = value.BankHolderCiphertext!, Key = value.BankKeyId! }).SingleOrDefaultAsync(token), ct);
-            if (card is null) throw new PricingRejectedException();
-            var cipher = new BrandCipher(secrets);
-            number = cipher.Decrypt(context, "brands", context.BrandId, "bank_number_ciphertext", card.Key, card.Number);
-            try { holder = cipher.Decrypt(context, "brands", context.BrandId, "bank_holder_ciphertext", card.Key, card.Holder); }
-            catch { CryptographicOperations.ZeroMemory(number); throw; }
-            try
+            Money due = bank ? quote.TotalToman ?? throw new PricingRejectedException() : quote.TotalUsd;
+            if (due.Amount <= 0) throw new PricingRejectedException();
+            await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
             {
-                using var data = new MemoryStream();
-                using (var writer = new BinaryWriter(data, Encoding.UTF8, leaveOpen: true))
-                {
-                    writer.Write(1);
-                    writer.Write(number.Length);
-                    writer.Write(number);
-                    writer.Write(holder.Length);
-                    writer.Write(holder);
-                }
-                try
-                {
-                    destination = new BrandCipher(secrets).Encrypt(context, "payments", payment,
-                        "bank_destination_ciphertext", data.GetBuffer().AsSpan(0, checked((int)data.Length)));
-                }
-                finally { CryptographicOperations.ZeroMemory(data.GetBuffer()); }
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(number);
-                CryptographicOperations.ZeroMemory(holder);
-            }
-            key = secrets.CurrentBrandKeyId(context);
+                await data.RequireOrderCommandAsync(context, request.OrderId, token);
+                data.Data.Add(new Entities.Payment { Id = payment, OrderId = request.OrderId, PaymentMethod = bank ? "bank" : "crypto", QuoteCurrency = due.Currency.ToCode(), AmountDue = due.Amount, IdempotencyRef = "order:" + request.OrderId.ToString("D"), NetworkAsset = bank ? null : request.Network == CryptoAsset.UsdtBsc ? "USDTBSC" : "USDTTRC20",
+                    BankDestination = destination });
+                return true;
+            }, ct);
         }
-        Money due = bank ? quote.TotalToman ?? throw new PricingRejectedException() : quote.TotalUsd;
-        if (due.Amount <= 0) throw new PricingRejectedException();
-        await SqliteSessionFactory.StepEfAsync(tx, true, async (data, token) =>
+        finally
         {
-            await data.RequireOrderCommandAsync(context, request.OrderId, token);
-            data.Data.Add(new Entities.Payment { Id = payment, OrderId = request.OrderId, PaymentMethod = bank ? "bank" : "crypto", QuoteCurrency = due.Currency.ToCode(), AmountDue = due.Amount, IdempotencyRef = "order:" + request.OrderId.ToString("D"), NetworkAsset = bank ? null : request.Network == CryptoAsset.UsdtBsc ? "USDTBSC" : "USDTTRC20", BankDestinationCiphertext = destination, BankDestinationKeyId = key });
-            return true;
-        }, ct);
+            if (destination is not null) CryptographicOperations.ZeroMemory(destination);
+        }
     }
 
     private static async Task QueueInstructionAsync(SqliteTransaction tx, BrandContext context, Guid member,

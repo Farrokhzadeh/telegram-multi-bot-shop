@@ -53,25 +53,31 @@ internal static class StagingPreviewBot
     {
         if (!OperatingSystem.IsLinux()) throw new UnauthorizedAccessException();
         string temp = path + "." + Guid.NewGuid().ToString("N");
-        using (var file = new FileStream(temp, new FileStreamOptions
+        try
         {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-            UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
-        }))
-        {
-            file.Write(bytes);
-            file.Flush(true);
+            using (var file = new FileStream(temp, new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
+            }))
+            {
+                file.Write(bytes);
+                file.Flush(true);
+            }
+            File.Move(temp, path, replace);
         }
-        File.Move(temp, path, replace);
+        finally { File.Delete(temp); }
     }
 
     private static async Task ListenAsync(string root, CancellationToken ct)
     {
-        var state = Path.Combine(root, "state");
+        var state = Path.Combine(root, "state-v2");
+        var oldState = new DirectoryInfo(Path.Combine(root, "state"));
         if (!OperatingSystem.IsLinux() || !Directory.Exists(state) || new DirectoryInfo(state).LinkTarget is not null ||
-            (File.GetUnixFileMode(state) & (UnixFileMode)63) != 0) throw new UnauthorizedAccessException();
+            (File.GetUnixFileMode(state) & (UnixFileMode)63) != 0 || oldState.Exists || oldState.LinkTarget is not null ||
+            File.Exists(oldState.FullName)) throw new UnauthorizedAccessException();
         await using var owner = new FileStream(Path.Combine(state, "listener.lock"), new FileStreamOptions
         {
             Mode = FileMode.OpenOrCreate,
@@ -80,6 +86,8 @@ internal static class StagingPreviewBot
             UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
         });
         var ready = Path.Combine(state, "ready");
+        long next = ReadNumber(Path.Combine(state, "next-offset"));
+        if (next is < 0 or > int.MaxValue) throw new UnauthorizedAccessException();
         File.Delete(ready);
         try
         {
@@ -103,14 +111,7 @@ internal static class StagingPreviewBot
             if (me.Id != expectedBot || !me.IsBot || me.Username != TestBot) throw new UnauthorizedAccessException();
             var hook = await client.GetWebhookInfo(ct);
             if (hook.Url != "") throw new UnauthorizedAccessException();
-            byte[] key = ReadPrivate(Path.Combine(root, "inbox-key"), 32);
-            try
-            {
-                if (key.Length != 32) throw new UnauthorizedAccessException();
-                using var inbox = new AesGcm(key, 16);
-                await PollAsync(http, token, tester, database, inbox, state, ready, ct);
-            }
-            finally { CryptographicOperations.ZeroMemory(key); }
+            await PollAsync(http, token, tester, database, state, ready, next, ct);
         }
         finally { File.Delete(ready); }
     }
@@ -129,10 +130,9 @@ internal static class StagingPreviewBot
         if (await command.ExecuteScalarAsync(ct) is not true) throw new UnauthorizedAccessException();
     }
 
-    private static async Task PollAsync(HttpClient http, string token, long tester, NpgsqlDataSource database, AesGcm inbox, string state, string ready, CancellationToken ct)
+    private static async Task PollAsync(HttpClient http, string token, long tester, NpgsqlDataSource database, string state, string ready, long next, CancellationToken ct)
     {
         var cursor = Path.Combine(state, "next-offset");
-        long next = File.Exists(cursor) ? ReadNumber(cursor) : 0;
         var sender = new CustomerHistoryTelegramSender(http);
         while (!ct.IsCancellationRequested)
         {
@@ -155,22 +155,26 @@ internal static class StagingPreviewBot
             foreach (var record in batch.EnumerateArray())
             {
                 long id = record.GetProperty("update_id").GetInt64();
-                if (id <= 0 || id >= long.MaxValue) throw new InvalidOperationException();
+                if (id is <= 0 or >= int.MaxValue) throw new InvalidOperationException();
                 if (id < next) continue;
-                var captured = Path.Combine(state, id.ToString(CultureInfo.InvariantCulture) + ".capture");
-                if (!File.Exists(captured))
+                var captured = Path.Combine(state, id.ToString(CultureInfo.InvariantCulture) + ".capture-v2");
+                byte[] body = Encoding.UTF8.GetBytes(record.GetRawText());
+                try
                 {
-                    if (Directory.EnumerateFiles(state, "*.capture").Take(2048).Count() >= 2048) throw new InvalidOperationException();
-                    byte[] body = Encoding.UTF8.GetBytes(record.GetRawText());
-                    try
+                    if (body.Length > 16777188) throw new InvalidOperationException();
+                    if (File.Exists(captured))
                     {
-                        byte[] encoded = new byte[28 + body.Length];
-                        RandomNumberGenerator.Fill(encoded.AsSpan(0, 12));
-                        inbox.Encrypt(encoded.AsSpan(0, 12), body, encoded.AsSpan(28), encoded.AsSpan(12, 16));
-                        WritePrivate(captured, encoded);
+                        byte[] prior = ReadPrivate(captured, 16777188);
+                        try { if (!CryptographicOperations.FixedTimeEquals(prior, body)) throw new InvalidOperationException(); }
+                        finally { CryptographicOperations.ZeroMemory(prior); }
                     }
-                    finally { CryptographicOperations.ZeroMemory(body); }
+                    else
+                    {
+                        if (Directory.EnumerateFiles(state, "*.capture-v2").Take(2048).Count() >= 2048) throw new InvalidOperationException();
+                        WritePrivate(captured, body);
+                    }
                 }
+                finally { CryptographicOperations.ZeroMemory(body); }
                 next = id + 1;
                 WritePrivate(cursor, Encoding.ASCII.GetBytes(next.ToString(CultureInfo.InvariantCulture)), replace: true);
                 if (!StagingPreviewCommand.Accepts(record, tester)) continue;

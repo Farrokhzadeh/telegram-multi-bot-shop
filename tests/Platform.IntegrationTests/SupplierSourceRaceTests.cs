@@ -106,7 +106,7 @@ public sealed class SupplierSourceRaceTests
         SupplierCredentialQualification.Write(files);
         using var oldCredentials = SupplierCredentialFiles.Load(files.Root, "supplier-config.json", SupplierCredentialQualification.Grant());
         var original = new SyntheticSupplier { Submit = _ => SyntheticSupplier.Unknown() };
-        await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), new AccountAdapter(original, "public account", oldCredentials), original).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
+        await new SupplierFulfillmentWorker(new(f.Sessions), new AccountAdapter(original, "public account", oldCredentials), original).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct), Ct);
         await using (var due = await f.Sessions.BeginAsync(Ct))
         { await due.ExecuteAsync(new DbStatement("UPDATE shop.jobs SET available_at=clock_timestamp() WHERE job_kind='reconcile_supplier' AND status='pending'"), Ct); await due.CommitAsync(Ct); }
         JobLease lease = await SupplierFixture.ClaimAsync(f, JobKind.ReconcileSupplier, Ct);
@@ -114,14 +114,14 @@ public sealed class SupplierSourceRaceTests
         SupplierCredentialQualification.Write(files, 8);
         using var newCredentials = SupplierCredentialFiles.Load(files.Root, "supplier-config.json", SupplierCredentialQualification.Grant(8));
         var adapter = new AccountAdapter(fresh, differentAccount ? "public different account" : "public account", newCredentials);
-        var worker = new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), adapter, fresh);
+        var worker = new SupplierFulfillmentWorker(new(f.Sessions), adapter, fresh);
         if (differentAccount)
         {
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => worker.RunAsync(f.Context(0), lease, Ct));
             Assert.Equal(0, adapter.Calls);
             Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE status='unknown' AND account_ref='public account'", Ct));
             Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments", Ct));
-            await new SupplierFulfillmentWorker(new(f.Sessions, f.Secrets), new AccountAdapter(fresh, "public account", newCredentials), fresh).RunAsync(f.Context(0), lease, Ct);
+            await new SupplierFulfillmentWorker(new(f.Sessions), new AccountAdapter(fresh, "public account", newCredentials), fresh).RunAsync(f.Context(0), lease, Ct);
         }
         else await worker.RunAsync(f.Context(0), lease, Ct);
         Assert.Equal(1, original.Submits); Assert.Equal(0, fresh.Submits); Assert.Equal(1, fresh.Lookups);

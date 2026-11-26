@@ -17,7 +17,7 @@ public sealed class SupplierPartialApprovalTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { Submit = b => SyntheticSupplier.Complete(b, customers: 3) };
         JobLease lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         Guid request = (await store.ReadAsync(f.Context(0), lease, Ct)).RequestId;
@@ -30,7 +30,7 @@ public sealed class SupplierPartialApprovalTests
             Guid command = Guid.NewGuid();
             await AdminAuditStore.AppendAsync(audit, actor, new(command, AuditAction.Maintenance, AuditEntity.Order, order, f.Brands[0], AuditReason.OperatorReview, command, new byte[32]), Ct);
             var sessions = new DbSessionFactory(f.Database.Data, new() { LockTimeout = TimeSpan.FromMilliseconds(100) });
-            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new DeliveryStore(sessions, f.Secrets).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new DeliveryStore(sessions).ReadManifestAsync(f.Context(0), CheckoutFixture.Actor(0), order, Ct));
         }
         await store.ApproveCompleteAsync(actor, f.Context(0), order, request, await SupplierPartialQualification.RevisionAsync(f, order, Ct), Guid.NewGuid(), "Public full acquisition review", Ct);
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'", Ct));
@@ -47,7 +47,7 @@ public sealed class SupplierPartialApprovalTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
         Guid order = await SupplierFixture.AcceptAsync(f, 5, Ct);
-        var store = new SupplierRequestStore(f.Sessions, f.Secrets);
+        var store = new SupplierRequestStore(f.Sessions);
         var port = new SyntheticSupplier { Submit = b => SyntheticSupplier.Complete(b, customers: 3) };
         JobLease lease = await SupplierFixture.ClaimAsync(f, JobKind.SubmitSupplier, Ct);
         Guid request = (await store.ReadAsync(f.Context(0), lease, Ct)).RequestId;
@@ -61,7 +61,7 @@ public sealed class SupplierPartialApprovalTests
         var actor = await f.AdminAsync(Ct);
         using var wrongFiles = invalid == "cipher" ? new SyntheticSecretFiles() : null;
         using var wrongKeys = wrongFiles is null ? null : SecretFiles.Load(wrongFiles.Root, "service-config.json", wrongFiles.Grant());
-        var reviewer = wrongKeys is null ? store : new SupplierRequestStore(f.Sessions, wrongKeys);
+        var reviewer = wrongKeys is null ? store : new SupplierRequestStore(f.Sessions);
         if (invalid == "revoked")
         {
             await using var logout = await f.Sessions.BeginAsync(Ct);

@@ -36,10 +36,14 @@ public sealed class ProdSellerSupplierAdapter : ISupplierAdapter, IDisposable
     public string Account { get; }
     public bool ProvenIntentLookup => false;
     public bool UsesPurchaseKey => true;
-    public ProdSellerSupplierAdapter(SecretSnapshot commerce, SupplierCredentialSnapshot credentials, string account, IEnumerable<ProdSellerProductApproval> approvals,
+    public ProdSellerSupplierAdapter(SupplierCredentialGrant grant, SupplierCredentialSnapshot credentials, string account, IEnumerable<ProdSellerProductApproval> approvals,
         Func<SupplierBinding, ProdSellerOrderReceipt, SupplierItem[]> verifyItems, HttpMessageHandler? transport = null)
+        : this(credentials.ForGrant(grant), account, approvals, verifyItems, transport, grant.DeploymentId, grant.Service) { }
+
+    private ProdSellerSupplierAdapter(SupplierCredentialSnapshot credentials, string account, IEnumerable<ProdSellerProductApproval> approvals,
+        Func<SupplierBinding, ProdSellerOrderReceipt, SupplierItem[]> verifyItems, HttpMessageHandler? transport, Guid deployment, SecretService service)
     {
-        if (credentials.DeploymentId != commerce.DeploymentId || credentials.Service != commerce.Service) throw new UnauthorizedAccessException("Supplier credential scope is unavailable.");
+        if (credentials.DeploymentId != deployment || credentials.Service != service) throw new UnauthorizedAccessException("Supplier credential scope is unavailable.");
         credentials.UseCredential("prodseller", account, key => key.Length);
         ArgumentNullException.ThrowIfNull(verifyItems);
         foreach (var item in approvals)

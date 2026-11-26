@@ -16,17 +16,17 @@ public static class LocalPreorderQualification
             await policy.ExecuteAsync(new DbStatement("UPDATE shop.products SET availability_policy='local_preorder',revision=revision+1"), ct);
             await policy.CommitAsync(ct);
         }
-        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, f.Secrets, [], (_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
+        var service = new WalletCheckoutService(f.Sessions, f.Store, new CatalogStore(f.Sessions, [], (_, _) => throw new InvalidOperationException("Unexpected supplier transport.")));
         for (int user = 0; user < 2; user++)
         {
             var order = await service.PurchaseAsync(f.Context(user), CheckoutFixture.Actor(user), new(Guid.CreateVersion7(), f.Product, user == 0 ? 5 : 2), (_, _, _) => Task.FromResult(ChannelMembership.Member), ct);
             if (order.Outcome != CheckoutOutcome.Purchased) throw new InvalidOperationException("Native preorder acceptance failed.");
         }
-        var worker = new LocalPreorderWorker(new(f.Sessions, f.Secrets), f.Contexts);
+        var worker = new LocalPreorderWorker(new(f.Sessions), f.Contexts);
         bool dropped = false;
         foreach (int count in new[] { 3, 3, 1 })
         {
-            await new AdminCatalogStore(f.Sessions, f.Secrets).ImportAsync(await f.AdminAsync(ct), f.Product, Enumerable.Range(0, count).Select(_ => new InventoryImportItem(Guid.NewGuid(), "Public native FIFO " + Guid.NewGuid())).ToArray(), Guid.NewGuid(), ct);
+            await new AdminCatalogStore(f.Sessions).ImportAsync(await f.AdminAsync(ct), f.Product, Enumerable.Range(0, count).Select(_ => new InventoryImportItem(Guid.NewGuid(), "Public native FIFO " + Guid.NewGuid())).ToArray(), Guid.NewGuid(), ct);
             while (await Claim(JobKind.DrainLocalPreorders) is JobLease lease)
             {
                 if (!lostCommit || dropped || await f.CountAsync("SELECT count(*) FROM shop.inventory_items", ct) != 6) { await worker.RunAsync(lease, ct); continue; }
@@ -35,7 +35,7 @@ public static class LocalPreorderQualification
                 await using var proxy = new DropCommitReplyProxy(options.ConnectionString);
                 await using var transport = proxy.CreateClientDataSource();
                 bool unknown = false, fenced = false;
-                try { await new LocalPreorderWorker(new(new(transport), f.Secrets), f.Contexts).RunAsync(lease, ct); }
+                try { await new LocalPreorderWorker(new(new(transport)), f.Contexts).RunAsync(lease, ct); }
                 catch (DbOperationException error) when (error.Failure.Kind == DbFailureKind.OutcomeUnknown && error.Failure.Recovery == DbRecovery.ReconcileBeforeRetry) { unknown = true; }
                 await proxy.CommitObserved.WaitAsync(TimeSpan.FromSeconds(10), ct);
                 try { await worker.RunAsync(lease, ct); }
@@ -47,7 +47,7 @@ public static class LocalPreorderQualification
             long expected = count == 1 ? 7 : await f.CountAsync("SELECT count(*) FROM shop.inventory_items", ct) == 3 ? 0 : 5;
             if (await f.CountAsync("SELECT count(*) FROM shop.fulfillments", ct) != expected) throw new InvalidOperationException("Native FIFO bypassed the whole head.");
         }
-        var delivery = new DeliveryStore(f.Sessions, f.Secrets);
+        var delivery = new DeliveryStore(f.Sessions);
         for (int user = 0; user < 2; user++)
         {
             JobLease lease = await Claim(JobKind.PrepareManifest) ?? throw new InvalidOperationException("Native manifest work missing.");

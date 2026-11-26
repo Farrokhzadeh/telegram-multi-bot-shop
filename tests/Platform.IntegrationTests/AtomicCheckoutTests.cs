@@ -106,7 +106,7 @@ public sealed class AtomicCheckoutTests
         await using var proxy = new DropCommitReplyProxy(options.ConnectionString);
         await using var transport = proxy.CreateClientDataSource();
         var request = fixture.Request();
-        var error = await Assert.ThrowsAsync<DbOperationException>(() => new CheckoutStore(new DbSessionFactory(transport), fixture.Secrets).PurchaseLocalAsync(fixture.Context(0), CheckoutFixture.Actor(0), request, Ct));
+        var error = await Assert.ThrowsAsync<DbOperationException>(() => new CheckoutStore(new DbSessionFactory(transport)).PurchaseLocalAsync(fixture.Context(0), CheckoutFixture.Actor(0), request, Ct));
         await proxy.CommitObserved.WaitAsync(TimeSpan.FromSeconds(10), Ct);
         Assert.Equal(DbRecovery.ReconcileBeforeRetry, error.Failure.Recovery);
         Assert.Equal(CheckoutOutcome.Replayed, (await fixture.Store.PurchaseLocalAsync(fixture.Context(0), CheckoutFixture.Actor(0), request, Ct)).Outcome);

@@ -5,7 +5,6 @@ using NpgsqlTypes;
 using Microsoft.EntityFrameworkCore;
 using Platform.Persistence.Configurations;
 using Platform.Core;
-using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -19,7 +18,7 @@ public sealed record CouponTerms(Guid Id, string Code, CouponKind Kind, decimal 
 }
 public sealed record CouponClaim(Guid DiscountId, Guid OrderId, Guid RevisionId, int Units, Money Saved, string Status);
 
-public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapshot secrets)
+public sealed partial class PricingStore(DbSessionFactory sessions)
 {
     public async Task<Guid> IssueAsync(DbSession session, BrandContext context, AuthenticatedAdmin actor, CouponTerms terms, Guid commandId, CancellationToken ct = default)
     {
@@ -37,8 +36,15 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
             (terms.Kind == CouponKind.Prepaid ? terms.ProductId is null || terms.MemberId is null || terms.SourceOrderId is null || terms.Percent != 100 || terms.MaximumUses is not > 0 || terms.BatchId is not null : terms.SourceOrderId is not null))
             throw new PricingRejectedException();
         await AdminSessionStore.RequireActiveAsync(session, actor, cancellationToken: ct);
-        string key = await session.RunEfStepAsync(false, async (data, token) => await data.Data.Set<Entities.Discount>().Where(value => value.Id == terms.Id && value.BrandId == context.BrandId).Select(value => value.CodeKeyId).SingleOrDefaultAsync(token) ?? secrets.CurrentBrandKeyId(context), ct);
-        byte[] digest = Digest(context, key, code);
+        byte[] digest;
+        byte[] codeBytes = Encoding.UTF8.GetBytes(code);
+        try
+        {
+            digest = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Entities.Discount>()
+                .Where(value => value.Id == terms.Id && value.BrandId == context.BrandId && value.CodeContent == codeBytes)
+                .Select(value => value.CodeDigest).SingleOrDefaultAsync(token), ct) ?? Digest(context, code);
+        }
+        finally { CryptographicOperations.ZeroMemory(codeBytes); }
         var command = new AuditCommand(commandId, AuditAction.CouponIssue, AuditEntity.Discount, terms.Id, context.BrandId, AuditReason.OperatorReview, Guid.NewGuid(), Commitment(terms, digest), newRevision: 0);
         if (!await AdminAuditStore.AppendAsync(session, actor, command, ct)) return terms.Id;
         await session.RunEfStepAsync(false, async (data, token) =>
@@ -49,18 +55,21 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
         }, ct);
         await LockBrandAsync(session, context, ct);
         byte[] plain = Encoding.UTF8.GetBytes(code);
-        byte[] encrypted;
-        try { encrypted = new BrandCipher(secrets).Encrypt(context, "discounts", terms.Id, "code_ciphertext", plain); }
-        finally { CryptographicOperations.ZeroMemory(plain); }
-        await session.RunEfStepAsync(true, async (data, token) =>
+        try
         {
-            await data.RequireAdminAsync(actor, null, token);
-            await data.RequireBrandCommandAsync(context.BrandId, token);
-            data.Data.Add(new Entities.Discount { Id = terms.Id, BrandId = context.BrandId, CodeDigest = digest, CodeCiphertext = encrypted, CodeKeyId = key, DisplayPrefix = code[..Math.Min(3, code.Length)], IssuanceBatchId = terms.BatchId ?? terms.Id, Kind = terms.Kind switch { CouponKind.Promotion => "promotion", CouponKind.Goodwill => "goodwill", CouponKind.Prepaid => "prepaid_entitlement", _ => throw new PricingRejectedException() }, PercentOff = terms.Percent, ProductId = terms.ProductId, EligibleUserId = terms.MemberId, SourceOrderId = terms.SourceOrderId, MaxTotalUses = terms.MaximumUses, MaxUsesPerUser = terms.MaximumPerMember, StartsAt = terms.StartsAt, EndsAt = terms.EndsAt, CreatedByAdminId = actor.AdminId });
-            await data.FlushAsync(token, false);
-            data.Data.Add(new Entities.DiscountRevision { Id = Guid.NewGuid(), DiscountId = terms.Id, RevisionNo = 0, AuditEventId = commandId, PercentOff = terms.Percent, MaxTotalUses = terms.MaximumUses, MaxUsesPerUser = terms.MaximumPerMember, StartsAt = terms.StartsAt, EndsAt = terms.EndsAt, Active = true, ProductId = terms.ProductId, EligibleUserId = terms.MemberId });
-            return true;
-        }, ct);
+            await session.RunEfStepAsync(true, async (data, token) =>
+            {
+                await data.RequireAdminAsync(actor, null, token);
+                await data.RequireBrandCommandAsync(context.BrandId, token);
+                if (await data.Data.Set<Entities.Discount>().AnyAsync(row => row.BrandId == context.BrandId && row.CodeContent == plain, token))
+                    data.RejectConflict("Duplicate coupon code.");
+                data.Data.Add(new Entities.Discount { Id = terms.Id, BrandId = context.BrandId, CodeDigest = digest, CodeContent = plain, DisplayPrefix = code[..Math.Min(3, code.Length)], IssuanceBatchId = terms.BatchId ?? terms.Id, Kind = terms.Kind switch { CouponKind.Promotion => "promotion", CouponKind.Goodwill => "goodwill", CouponKind.Prepaid => "prepaid_entitlement", _ => throw new PricingRejectedException() }, PercentOff = terms.Percent, ProductId = terms.ProductId, EligibleUserId = terms.MemberId, SourceOrderId = terms.SourceOrderId, MaxTotalUses = terms.MaximumUses, MaxUsesPerUser = terms.MaximumPerMember, StartsAt = terms.StartsAt, EndsAt = terms.EndsAt, CreatedByAdminId = actor.AdminId });
+                await data.FlushAsync(token, false);
+                data.Data.Add(new Entities.DiscountRevision { Id = Guid.NewGuid(), DiscountId = terms.Id, RevisionNo = 0, AuditEventId = commandId, PercentOff = terms.Percent, MaxTotalUses = terms.MaximumUses, MaxUsesPerUser = terms.MaximumPerMember, StartsAt = terms.StartsAt, EndsAt = terms.EndsAt, Active = true, ProductId = terms.ProductId, EligibleUserId = terms.MemberId });
+                return true;
+            }, ct);
+        }
+        finally { CryptographicOperations.ZeroMemory(plain); }
         if (terms.MemberId is not null) await OutboxStore.EnqueueAsync(session, JobIntent.Coupon(context.BrandId, terms.Id), terms.Id, DateTime.UtcNow, ct);
         return terms.Id;
     }
@@ -79,14 +88,11 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
             try { code = Normalize(suppliedCode); } catch (PricingRejectedException) { }
             if (code is not null)
             {
-                var keys = await data.Data.Set<Entities.Discount>().Where(value => value.BrandId == context.BrandId && value.Active).Select(value => value.CodeKeyId).Distinct().OrderBy(value => value).Take(33).ToArrayAsync(token);
-                if (keys.Length > 32) data.RejectScope("Coupon key bound exceeded.");
-                foreach (string key in keys)
-                {
-                    byte[] digest = Digest(context, key, code);
-                    found = await CustomerCoupons(data, context, member.Id).Where(value => value.CodeKeyId == key && value.CodeDigest == digest && value.Active && (value.StartsAt == null || value.StartsAt <= EfValues.UtcNow()) && (value.EndsAt == null || value.EndsAt > EfValues.UtcNow())).Select(value => (Guid?)value.Id).SingleOrDefaultAsync(token);
-                    if (found is not null) break;
-                }
+                var eligible = CustomerCoupons(data, context, member.Id).Where(value => value.Active &&
+                    (value.StartsAt == null || value.StartsAt <= EfValues.UtcNow()) && (value.EndsAt == null || value.EndsAt > EfValues.UtcNow()));
+                byte[] content = Encoding.UTF8.GetBytes(code);
+                try { found = await eligible.Where(value => value.CodeContent == content).Select(value => (Guid?)value.Id).SingleOrDefaultAsync(token); }
+                finally { CryptographicOperations.ZeroMemory(content); }
             }
             data.Data.Add(new Entities.BotActivityEvent { Id = Guid.NewGuid(), UserId = member.Id, EventType = "discount", SourceKind = "flow", ActionCode = "discounts_open", OutcomeCode = found is null ? "rejected" : "accepted", IdempotencyKey = "coupon_lookup:" + Guid.NewGuid().ToString("N") });
             return new CouponLookup(found is null ? CouponLookupOutcome.NotFound : CouponLookupOutcome.Found, found);
@@ -98,11 +104,14 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
     public async Task<string> ReadCodeAsync(DbSession session, BrandContext context, long verifiedActorId, Guid discountId, CancellationToken ct = default)
     {
         BrandUser member = await RequireCustomerAsync(session, context, verifiedActorId, ct);
-        var value = await session.RunEfStepAsync(false, (data, token) => CustomerCoupons(data, context, member.Id).Where(value => value.Id == discountId).Select(value => new ProtectedCode(value.CodeCiphertext, value.CodeKeyId)).SingleOrDefaultAsync(token), ct);
+        var value = await session.RunEfStepAsync(false, (data, token) =>
+        {
+            var rows = CustomerCoupons(data, context, member.Id).Where(value => value.Id == discountId);
+            return rows.Select(value => new StoredCode(value.CodeContent)).SingleOrDefaultAsync(token);
+        }, ct);
         if (value is null) Reject(session);
-        byte[] plain = new BrandCipher(secrets).Decrypt(context, "discounts", discountId, "code_ciphertext", value.Key, value.Content);
-        try { return Encoding.UTF8.GetString(plain); }
-        finally { CryptographicOperations.ZeroMemory(plain); }
+        try { return Encoding.UTF8.GetString(value.Content); }
+        finally { CryptographicOperations.ZeroMemory(value.Content); }
     }
 
     public async Task<CouponClaim> HoldAsync(DbSession session, BrandContext context, long verifiedActorId, Guid discountId, Guid orderId, CancellationToken ct = default)
@@ -238,10 +247,10 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
         catch { Poison(session); throw; }
     }
 
-    private byte[] Digest(BrandContext context, string key, string code)
+    private static byte[] Digest(BrandContext context, string code)
     {
         byte[] bytes = Encoding.UTF8.GetBytes("coupon-lookup-v1:" + context.BrandId.ToString("D") + ":" + code);
-        try { return secrets.UseBrandKey(context, key, secret => HMACSHA256.HashData(secret, bytes)); }
+        try { return SHA256.HashData(bytes); }
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }
     private static byte[] Commitment(CouponTerms terms, byte[] digest)
@@ -286,7 +295,10 @@ public sealed partial class PricingStore(DbSessionFactory sessions, SecretSnapsh
     private static void Poison(DbSession session) { if (session.State == DbSessionState.Active) session.RejectApplication(); }
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private static void Reject(DbSession session) { Poison(session); throw new UnauthorizedAccessException("Coupon or pricing operation is unavailable."); }
-    private sealed record ProtectedCode(byte[] Content, string Key);
+    private sealed record StoredCode(byte[] Content)
+    {
+        public override string ToString() => "Coupon code [redacted]";
+    }
     private sealed record Grant(Guid Id, decimal Percent);
     private sealed record ClaimOrder(int Quantity, string Currency, decimal UnitUsdt, decimal? UnitToman, bool Automatic, FxRate? Rate, decimal? Percent, int? Units, string Version, string Status, decimal Step);
     private sealed record ClaimState(string Payment, bool Release, string Kind, string Fulfillment, string? Resolution, bool ImmediateLocal);

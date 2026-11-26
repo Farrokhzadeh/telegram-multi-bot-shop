@@ -48,15 +48,12 @@ public sealed class LegacyCouponImportWorkflow(DbSessionFactory sessions, Secret
         foreach (var proof in proofs.Skip(1)) if (await LegacyMapStore.EnsureAsync(session, manifest, proof, ct) != first) throw new MigrationRejectedException();
         if (first)
         {
-            string key = row.Record.Evidence.KeyId; byte[] plain = Encoding.UTF8.GetBytes(terms.Code), encrypted;
-            try { encrypted = new BrandCipher(secrets).Encrypt(context, "discounts", row.Record.Target, "code_ciphertext", plain); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
-            if (key != secrets.CurrentBrandKeyId(context)) throw new MigrationRejectedException();
-            byte[] digest = Digest(context, key, terms.Code);
+            byte[] plain = Encoding.UTF8.GetBytes(terms.Code);
+            byte[] digest = Digest(context, terms.Code);
             await session.RunEfStepAsync(true, (data, token) =>
             {
                 data.RequireImportCommand(); Guid audit = LegacyValues.AuditId(manifest, row.Record);
-                data.Data.Add(new Discount { Id = row.Record.Target, BrandId = context.BrandId, CodeDigest = digest, CodeCiphertext = encrypted, CodeKeyId = key, DisplayPrefix = terms.Code[..Math.Min(3, terms.Code.Length)], IssuanceBatchId = manifest.Batch, Kind = row.Kind, PercentOff = terms.Percent, ProductId = row.Product, EligibleUserId = row.Member, SourceOrderId = row.PaidSourceOrder, MaxTotalUses = terms.Maximum, UsageAdjustmentUnits = terms.Used, Active = false });
+                data.Data.Add(new Discount { Id = row.Record.Target, BrandId = context.BrandId, CodeDigest = digest, CodeContent = plain, DisplayPrefix = terms.Code[..Math.Min(3, terms.Code.Length)], IssuanceBatchId = manifest.Batch, Kind = row.Kind, PercentOff = terms.Percent, ProductId = row.Product, EligibleUserId = row.Member, SourceOrderId = row.PaidSourceOrder, MaxTotalUses = terms.Maximum, UsageAdjustmentUnits = terms.Used, Active = false });
                 data.Data.Add(new AuditEvent { Id = audit, ActorKind = "system", BrandId = context.BrandId, Action = "legacy_import", EntityKind = "discount", EntityId = row.Record.Target, Reason = row.Record.Reference, CommandSha256 = row.Record.Digest, CorrelationId = manifest.Batch, NewRevision = 0 });
                 data.Data.Add(new DiscountRevision { Id = row.Revision, DiscountId = row.Record.Target, RevisionNo = 0, AuditEventId = audit, PercentOff = terms.Percent, MaxTotalUses = terms.Maximum, UsageAdjustmentUnits = terms.Used, RedeemedCountAtRevision = 0, HeldUnitsAtRevision = 0, Active = false, ProductId = row.Product, EligibleUserId = row.Member }); return Task.FromResult(true);
             }, ct);
@@ -64,20 +61,20 @@ public sealed class LegacyCouponImportWorkflow(DbSessionFactory sessions, Secret
         if (!await MatchesAsync(session, context, manifest, row, ct) || !await LegacyValues.MatchesAuditAsync(session, manifest, row.Record, "discount", ct)) throw new MigrationRejectedException();
         await session.CommitAsync(ct);
     }
-    private byte[] Digest(BrandContext context, string key, string code)
+    private static byte[] Digest(BrandContext context, string code)
     {
         byte[] bytes = Encoding.UTF8.GetBytes("coupon-lookup-v1:" + context.BrandId.ToString("D") + ":" + code);
-        try { return secrets.UseBrandKey(context, key, secret => HMACSHA256.HashData(secret, bytes)); }
+        try { return SHA256.HashData(bytes); }
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }
     internal async Task<bool> MatchesAsync(DbSession session, BrandContext context, VerifiedImportManifest manifest, LegacyCouponRecord row, CancellationToken ct)
     {
         var t = row.Terms();
-        byte[] digest = Digest(context, row.Record.Evidence.KeyId, t.Code); Guid audit = LegacyValues.AuditId(manifest, row.Record);
-        bool fields = await session.RunEfStepAsync(false, (data, token) => (from d in data.Data.Set<Discount>() join r in data.Data.Set<DiscountRevision>() on d.Id equals r.DiscountId where d.Id == row.Record.Target && d.BrandId == context.BrandId && d.CodeDigest == digest && d.CodeKeyId == row.Record.Evidence.KeyId && d.IssuanceBatchId == manifest.Batch && d.Kind == row.Kind && d.PercentOff == t.Percent && d.ProductId == row.Product && d.EligibleUserId == row.Member && d.SourceOrderId == row.PaidSourceOrder && d.MaxTotalUses == t.Maximum && d.RedeemedCount == 0 && d.UsageAdjustmentUnits == t.Used && !d.Active && d.Revision == 0 && d.CreatedByAdminId == null && d.MaxUsesPerUser == null && d.StartsAt == null && d.EndsAt == null && r.Id == row.Revision && r.RevisionNo == 0 && r.AuditEventId == audit && r.PercentOff == d.PercentOff && r.MaxTotalUses == d.MaxTotalUses && r.UsageAdjustmentUnits == d.UsageAdjustmentUnits && r.RedeemedCountAtRevision == 0 && r.HeldUnitsAtRevision == 0 && r.Active == d.Active && r.ProductId == d.ProductId && r.EligibleUserId == d.EligibleUserId && !data.Data.Set<DiscountUse>().Any(use => use.DiscountId == d.Id) select d.Id).AnyAsync(token), ct);
+        byte[] digest = Digest(context, t.Code); Guid audit = LegacyValues.AuditId(manifest, row.Record);
+        bool fields = await session.RunEfStepAsync(false, (data, token) => (from d in data.Data.Set<Discount>() join r in data.Data.Set<DiscountRevision>() on d.Id equals r.DiscountId where d.Id == row.Record.Target && d.BrandId == context.BrandId && d.CodeDigest == digest && d.IssuanceBatchId == manifest.Batch && d.Kind == row.Kind && d.PercentOff == t.Percent && d.ProductId == row.Product && d.EligibleUserId == row.Member && d.SourceOrderId == row.PaidSourceOrder && d.MaxTotalUses == t.Maximum && d.RedeemedCount == 0 && d.UsageAdjustmentUnits == t.Used && !d.Active && d.Revision == 0 && d.CreatedByAdminId == null && d.MaxUsesPerUser == null && d.StartsAt == null && d.EndsAt == null && r.Id == row.Revision && r.RevisionNo == 0 && r.AuditEventId == audit && r.PercentOff == d.PercentOff && r.MaxTotalUses == d.MaxTotalUses && r.UsageAdjustmentUnits == d.UsageAdjustmentUnits && r.RedeemedCountAtRevision == 0 && r.HeldUnitsAtRevision == 0 && r.Active == d.Active && r.ProductId == d.ProductId && r.EligibleUserId == d.EligibleUserId && !data.Data.Set<DiscountUse>().Any(use => use.DiscountId == d.Id) select d.Id).AnyAsync(token), ct);
         if (!fields) return false;
-        byte[] encrypted = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Discount>().Where(value => value.Id == row.Record.Target).Select(row => row.CodeCiphertext).SingleAsync(token), ct);
-        byte[] plain = new BrandCipher(secrets).Decrypt(context, "discounts", row.Record.Target, "code_ciphertext", row.Record.Evidence.KeyId, encrypted), expected = Encoding.UTF8.GetBytes(t.Code);
+        byte[] plain = await session.RunEfStepAsync(false, (data, token) => data.Data.Set<Discount>().Where(value => value.Id == row.Record.Target).Select(row => row.CodeContent).SingleAsync(token), ct);
+        byte[] expected = Encoding.UTF8.GetBytes(t.Code);
         try { return CryptographicOperations.FixedTimeEquals(plain, expected); }
         finally { CryptographicOperations.ZeroMemory(plain); CryptographicOperations.ZeroMemory(expected); }
     }
