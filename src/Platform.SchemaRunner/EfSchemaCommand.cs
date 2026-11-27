@@ -31,8 +31,8 @@ public static partial class EfSchemaCommand
     {
         using AkantiDbContext context = provider switch
         {
-            "sqlite" => new SqliteDesignTimeFactory().CreateDbContext([]),
-            "postgres" => new PostgresDesignTimeFactory().CreateDbContext([]),
+            "sqlite" => new SqlitePlainDesignTimeFactory().CreateDbContext([]),
+            "postgres" => new PostgresPlainDesignTimeFactory().CreateDbContext([]),
             _ => throw new ArgumentException("The EF provider is unsupported.", nameof(provider))
         };
         string[] migrations = context.Database.GetMigrations().ToArray();

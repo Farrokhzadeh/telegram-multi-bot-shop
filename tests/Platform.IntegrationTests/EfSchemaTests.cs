@@ -99,7 +99,7 @@ public sealed class EfSchemaTests
         var first = Platform.SchemaRunner.EfSchemaCommand.Describe(provider);
         Assert.Equal(first, Platform.SchemaRunner.EfSchemaCommand.Describe(provider));
         Assert.Equal(provider, first.Provider);
-        Assert.EndsWith("_InitialEfBaseline", first.Migration, StringComparison.Ordinal);
+        Assert.EndsWith("_InitialPlaintext", first.Migration, StringComparison.Ordinal);
         Assert.Equal(64, first.ScriptSha256.Length);
         Assert.All(first.ScriptSha256, value => Assert.True(char.IsAsciiHexDigitLower(value)));
         Assert.Throws<ArgumentException>(() => Platform.SchemaRunner.EfSchemaCommand.Describe("unknown"));

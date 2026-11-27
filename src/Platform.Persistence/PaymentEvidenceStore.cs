@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using Platform.Core;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

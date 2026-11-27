@@ -32,8 +32,6 @@ public sealed class SecretLoadGrant
     }
 }
 
-public delegate TResult SecretKeyOperation<TResult>(ReadOnlySpan<byte> key);
-
 /// <summary>Owned immutable key snapshot. Trusted synchronous cipher callbacks only; never log or return raw keys.</summary>
 public sealed class SecretSnapshot : IDisposable
 {

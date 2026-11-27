@@ -556,7 +556,7 @@ public sealed class LocalPreorderTests
                 Assert.True(await AdminAuditStore.AppendAsync(owner, admin, new(command, AuditAction.CancelPreorder, AuditEntity.Order, first, f.Brands[0], AuditReason.OperatorReview, command, new byte[32], revision, revision + 1), Ct));
                 await owner.QuerySingleAsync(new DbStatement("SELECT id FROM shop.users WHERE id=$1 FOR UPDATE", DbValue.Uuid(f.Users[0])), r => r.GetGuid(0), Ct);
                 await owner.QuerySingleAsync(new DbStatement("SELECT id FROM shop.products WHERE id=$1 FOR UPDATE", DbValue.Uuid(f.Product)), r => r.GetGuid(0), Ct);
-                running = new LocalPreorderWorker(new(new(data, new() { LockTimeout = TimeSpan.FromSeconds(3) }), f.Secrets), f.Contexts).RunAsync(lease, Ct);
+                running = new LocalPreorderWorker(new(new(data, new() { LockTimeout = TimeSpan.FromSeconds(3) })), f.Contexts).RunAsync(lease, Ct);
                 const string waiting = "SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='public-fifo-head-change' AND wait_event_type='Lock'";
                 for (int i = 0; i < 100 && await f.CountAsync(waiting, Ct) == 0; i++) await Task.Delay(TimeSpan.FromMilliseconds(20), Ct);
                 Assert.Equal(1L, await f.CountAsync(waiting, Ct));

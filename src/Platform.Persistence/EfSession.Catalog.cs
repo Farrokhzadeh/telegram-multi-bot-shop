@@ -20,7 +20,7 @@ internal sealed partial class EfSession
     internal Task RequireBrandCommandAsync(Guid brand, CancellationToken ct) => RequireNativeBrandAsync(brand, ct);
     private async Task RequireNativeBrandAsync(Guid brand, CancellationToken ct)
     {
-        if (!write || !nativeWriterBoundary) throw Denied("A native command transaction is required.");
+        if (!nativeWriterBoundary) throw Denied("A native command transaction is required.");
         if (writer is not null)
         {
             var registration = writer.Entries.SingleOrDefault(value => value.Context.BrandId == brand);

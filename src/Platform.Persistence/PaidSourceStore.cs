@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Platform.Persistence.Configurations;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

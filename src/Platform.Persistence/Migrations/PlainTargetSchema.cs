@@ -27,14 +27,13 @@ internal static class PlainTargetSchema
             : """SELECT CASE WHEN to_regnamespace('shop') IS NULL THEN 0 ELSE 1 END AS "Value" """;
         if (await data.Database.SqlQueryRaw<int>(existing).SingleAsync(ct) != 0)
             throw new InvalidOperationException("Plaintext schema creation requires an empty destination.");
-        foreach (string command in Commands(data))
-            await data.Database.ExecuteSqlRawAsync(command, ct);
+        var connection = data.Database.GetDbConnection();
+        var native = transaction.GetDbTransaction();
+        foreach (string text in Commands(data)) await ExecuteAsync(connection, native, text, ct);
         if (forConversion)
         {
-            await data.Database.ExecuteSqlRawAsync($"PRAGMA application_id={SqliteCopyApplicationId};", ct);
-            await data.Database.ExecuteSqlRawAsync($"CREATE TABLE {RowCopyTable}(id INTEGER PRIMARY KEY CHECK(id=1),schema_digest BLOB NOT NULL CHECK(length(schema_digest)=32),snapshot BLOB CHECK(length(snapshot)=32),row_count INTEGER CHECK(row_count>=0),draft BLOB CHECK(length(draft)=32),binding BLOB CHECK(binding IS NULL OR (length(binding)=32 AND snapshot IS NOT NULL)),asset_count INTEGER CHECK(asset_count IS NULL OR (asset_count>=0 AND binding IS NOT NULL)),CHECK((snapshot IS NULL)=(row_count IS NULL))) STRICT;", ct);
-            var connection = data.Database.GetDbConnection();
-            var native = transaction.GetDbTransaction();
+            await ExecuteAsync(connection, native, $"PRAGMA application_id={SqliteCopyApplicationId};", ct);
+            await ExecuteAsync(connection, native, $"CREATE TABLE {RowCopyTable}(id INTEGER PRIMARY KEY CHECK(id=1),schema_digest BLOB NOT NULL CHECK(length(schema_digest)=32),snapshot BLOB CHECK(length(snapshot)=32),row_count INTEGER CHECK(row_count>=0),draft BLOB CHECK(length(draft)=32),binding BLOB CHECK(binding IS NULL OR (length(binding)=32 AND snapshot IS NOT NULL)),asset_count INTEGER CHECK(asset_count IS NULL OR (asset_count>=0 AND binding IS NOT NULL)),CHECK((snapshot IS NULL)=(row_count IS NULL))) STRICT;", ct);
             byte[] digest = await SqliteSchemaDigestAsync(connection, native, ct);
             await using var seed = connection.CreateCommand();
             seed.Transaction = native;
@@ -44,6 +43,14 @@ internal static class PlainTargetSchema
             await seed.ExecuteNonQueryAsync(ct);
         }
         await transaction.CommitAsync(ct);
+    }
+
+    private static async Task ExecuteAsync(DbConnection connection, DbTransaction transaction, string text, CancellationToken ct)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = text;
+        await command.ExecuteNonQueryAsync(ct);
     }
 
     internal static string Script(PlainTargetDbContext data) =>

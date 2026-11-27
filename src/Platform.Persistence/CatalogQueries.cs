@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Persistence.Configurations;
 using Platform.Persistence.Entities;
+using Platform.Security;
 
 namespace Platform.Persistence;
 
@@ -77,7 +78,6 @@ internal static class CatalogQueries
             value.Discount.Id,
             value.Revision,
             value.Bytes,
-            value.Key,
             value.Discount.PercentOff,
             value.Discount.MaxTotalUses,
             value.Discount.RedeemedCount,

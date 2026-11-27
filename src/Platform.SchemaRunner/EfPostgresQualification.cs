@@ -21,7 +21,7 @@ public static partial class EfSchemaCommand
         RequireRedactedPostgres(data);
         await using var connection = await data.OpenConnectionAsync(ct);
         await RequireEmptyPostgresAsync(connection, identity, ct);
-        await using var context = new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>()
+        await using var context = new PostgresPlainTargetDbContext(new DbContextOptionsBuilder<PostgresPlainTargetDbContext>()
             .UseNpgsql(connection, provider => provider.CommandTimeout(30)).Options);
         await context.Database.MigrateAsync(ct);
         if ((await context.Database.GetPendingMigrationsAsync(ct)).Any()) throw new InvalidOperationException("The PostgreSQL schema is incomplete.");

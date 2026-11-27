@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

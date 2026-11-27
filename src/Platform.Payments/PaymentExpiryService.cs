@@ -3,6 +3,7 @@ using Platform.Persistence.Configurations;
 using Entities = Platform.Persistence.Entities;
 using Platform.Core;
 using Platform.Persistence;
+using Platform.Security;
 
 namespace Platform.Payments;
 

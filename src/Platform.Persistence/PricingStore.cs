@@ -5,6 +5,7 @@ using NpgsqlTypes;
 using Microsoft.EntityFrameworkCore;
 using Platform.Persistence.Configurations;
 using Platform.Core;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Platform.Payments;
 using Platform.Persistence;
+using Platform.Security;
 
 namespace Platform.Api;
 

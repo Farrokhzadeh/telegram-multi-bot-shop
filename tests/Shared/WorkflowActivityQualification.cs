@@ -297,7 +297,7 @@ public static class WorkflowActivityQualification
     internal static async Task<string> DomainAsync(DbSessionFactory sessions, bool includeUsers, CancellationToken ct)
     {
         await using var read = await sessions.BeginAsync(ct);
-        var tables = await read.QueryManyAsync(new DbStatement("SELECT tablename::text FROM pg_tables WHERE schemaname='shop' AND tablename<>'bot_activity_events' AND ($1 OR tablename<>'users') ORDER BY tablename", DbValue.Boolean(includeUsers)), r => r.GetString(0), 28, ct);
+        var tables = await read.QueryManyAsync(new DbStatement("SELECT tablename::text FROM pg_tables WHERE schemaname='shop' AND tablename<>'bot_activity_events' AND tablename<>'__EFMigrationsHistory' AND ($1 OR tablename<>'users') ORDER BY tablename", DbValue.Boolean(includeUsers)), r => r.GetString(0), 28, ct);
         var hashes = new List<string>();
         foreach (string table in tables) hashes.Add(await read.QuerySingleAsync(new DbStatement($"SELECT md5(COALESCE(string_agg(t::text,'|' ORDER BY t::text),'')) FROM shop.{table} t"), r => r.GetString(0), ct));
         return string.Join(':', hashes);

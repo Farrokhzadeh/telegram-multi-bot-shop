@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Platform.Core;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

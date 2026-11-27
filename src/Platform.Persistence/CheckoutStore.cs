@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Platform.Core;
 using Platform.Persistence.Configurations;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

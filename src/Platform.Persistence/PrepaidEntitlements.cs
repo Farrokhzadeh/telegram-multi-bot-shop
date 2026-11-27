@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 using Platform.Persistence.Entities;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

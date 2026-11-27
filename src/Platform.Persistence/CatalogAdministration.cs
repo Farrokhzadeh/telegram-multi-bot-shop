@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Platform.Core;
+using Platform.Security;
 
 namespace Platform.Persistence;
 

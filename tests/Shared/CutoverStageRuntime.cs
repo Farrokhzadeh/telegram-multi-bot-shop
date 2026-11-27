@@ -200,7 +200,7 @@ public static class CutoverStageRuntime
                     try
                     {
                         var input = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment", id.ToString("N") + ".json"), 1, 8192), CutoverPaymentJson.Default.CutoverPaymentInput) ?? throw new InvalidOperationException();
-                        var files = new CutoverPaymentFiles(Path.Combine(root, "payment-archives"), secrets, context, key, input);
+                        var files = new CutoverPaymentFiles(Path.Combine(root, "payment-archives"), context, key, input);
                         outcome = await CutoverPaymentCapture.CaptureAsync(sessions, context, saved.User, run, key, input, files.SaveAsync, ct);
                     }
                     catch (Exception error) when (error is PaymentNoticeRejectedException or UnauthorizedAccessException or ArgumentException or JsonException) { outcome = "Rejected"; }

@@ -138,8 +138,8 @@ public static partial class EfSchemaCommand
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    private static SqliteAkantiDbContext Context(SqliteConnection connection) =>
-        new(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+    private static SqlitePlainTargetDbContext Context(SqliteConnection connection) =>
+        new(new DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options);
 
     private static async Task<SchemaState> ReadSchemaAsync(SqliteConnection connection, SqliteTransaction? transaction, CancellationToken ct)
     {

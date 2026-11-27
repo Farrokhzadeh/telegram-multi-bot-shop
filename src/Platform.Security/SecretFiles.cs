@@ -3,6 +3,7 @@ using System.Text.Json;
 namespace Platform.Security;
 
 public enum SecretService { Api, BotHost, JobHost }
+public delegate TResult SecretKeyOperation<TResult>(ReadOnlySpan<byte> key);
 public enum SecretConfigurationFailure { InvalidConfiguration, UnavailableFile, UnsafeFile, UnauthorizedScope, IdentityMismatch, ReusedKeyMaterial }
 
 public sealed class SecretConfigurationException : Exception
