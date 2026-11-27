@@ -15,8 +15,8 @@ public sealed class SqliteCouponAdministrationTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             using var adminToken = AdminToken.Create();
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
@@ -26,8 +26,8 @@ public sealed class SqliteCouponAdministrationTests
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
-                        bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_id,bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO admins(id,login,authentication_mode,external_subject)
                     VALUES ($admin,'coupon-admin','external','fixture');
                     INSERT INTO admin_sessions(id,admin_id,token_hash,auth_version_at_issue,expires_at)
@@ -37,10 +37,10 @@ public sealed class SqliteCouponAdministrationTests
                     INSERT INTO audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,
                         reason,correlation_id)
                     VALUES ($audit,'system',$brand,'coupon_issue','discount',$coupon,'synthetic',$audit);
-                    INSERT INTO discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,
+                    INSERT INTO discounts(id,brand_id,code_digest,code_content,
                         display_prefix,issuance_batch_id,kind,percent_off,product_id,max_total_uses,
                         max_uses_per_user)
-                    VALUES ($coupon,$brand,$digest,x'01','fixture','SAVE',$coupon,'promotion','20',
+                    VALUES ($coupon,$brand,$digest,x'01','SAVE',$coupon,'promotion','20',
                         $product,10,5);
                     INSERT INTO discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,
                         max_total_uses,max_uses_per_user,usage_adjustment_units,
@@ -60,7 +60,7 @@ public sealed class SqliteCouponAdministrationTests
             Guid command = Guid.NewGuid();
             Assert.Equal(1, await owner.EditAsync(brand, actor, coupon, 0, update,
                 AuditReason.OperatorReview, command, ct));
-            Assert.Equal(1, await new SqliteCouponAdministrationStore(new SqliteSessionFactory(path))
+            Assert.Equal(1, await new SqliteCouponAdministrationStore(SqliteSessionFactory.ForPlaintext(path))
                 .EditAsync(brand, actor, coupon, 0, update,
                     AuditReason.OperatorReview, command, ct));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>

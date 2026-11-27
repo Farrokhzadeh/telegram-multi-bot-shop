@@ -9,7 +9,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteOrderPaymentSettlementStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public async Task<PaymentSettlement> SettleAsync(BrandContext context, long expectedRevision, Guid payment,
         Func<InvoiceExpectation, CancellationToken, Task<ProviderPaymentSnapshot>> lookup, CancellationToken ct)

@@ -22,7 +22,7 @@ public sealed class ScopedAdministrationTests
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         var actor = await f.AdminAsync(Ct);
         var writers = new WriterRegistry(f.Sessions, f.Contexts.Select(c => new BrandWriterRegistration(c, 0)));
-        var services = f.Contexts.ToDictionary(c => c.BrandId, c => new BrandAdministrationServices(writers, c, f.Secrets,
+        var services = f.Contexts.ToDictionary(c => c.BrandId, c => new BrandAdministrationServices(writers, c,
             new CatalogStore(writers.ForBrand(c), [], (_, _) => throw new InvalidOperationException()), new byte[32]));
         try
         {
@@ -31,8 +31,8 @@ public sealed class ScopedAdministrationTests
             app.UseMiddleware<DiagnosticsMiddleware>((Action<string>)(_ => { }));
             app.UseMiddleware<AdminGuardMiddleware>((Func<AdminToken, CancellationToken, Task<AuthenticatedAdmin?>>)(async (token, ct) =>
             { await using var session = await f.Sessions.BeginAsync(ct); return await AdminSessionStore.AuthenticateAsync(session, token, ct); }));
-            app.MapScopedCatalogAdministration(writers, f.Secrets);
-            app.MapScopedOrderAdministration(writers, f.Secrets, c => services[c.BrandId]);
+            app.MapScopedCatalogAdministration(writers);
+            app.MapScopedOrderAdministration(writers, c => services[c.BrandId]);
             await app.StartAsync(Ct);
             using var client = new HttpClient { BaseAddress = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()) };
             await using var login = await f.Sessions.BeginAsync(Ct);

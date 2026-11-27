@@ -22,7 +22,7 @@ internal sealed partial class EfSession
         if (Integrity.RowLock != EfRowLock.None) throw Denied("Row locks cannot overlap.");
         try
         {
-            if (Data is PostgresAkantiDbContext) Integrity.RowLock = mode;
+            if (Data.Database.IsNpgsql()) Integrity.RowLock = mode;
             int count = (await query.Take(1001).ToArrayAsync(ct)).Length;
             if (count > 1000) throw Denied("The row lock batch exceeds its bound.");
             return count;

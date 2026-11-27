@@ -49,7 +49,7 @@ internal static class WalletOrderCopyQualification
             w.WriteEndArray();
         }));
         _ = LegacyOriginalReviewQualification.Verify(archive, read(Path.Combine(directory, reviewName)), Convert.ToHexStringLower(plan.Manifest.Digest.Span), plan.Set.Orders.Count);
-        await Platform.Persistence.SchemaRunner.ApplyAsync(data, destination, ct);
+        await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(data, ct);
         await using (var role = data.CreateCommand("DO $$ BEGIN CREATE ROLE shop_legacy_import NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$; GRANT shop_legacy_import TO shop_test_runner")) await role.ExecuteNonQueryAsync(ct);
         var sessions = new DbSessionFactory(data); if (shared) await WalletCopyQualification.SeedSharedAsync(sessions, context.BrandId, archive.SourceBrand, ct);
         else await WalletCopyQualification.SeedAsync(sessions, context.BrandId, archive.SourceBrand, ct);

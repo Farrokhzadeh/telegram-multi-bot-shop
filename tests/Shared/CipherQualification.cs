@@ -12,7 +12,7 @@ public static class CipherQualification
         using var files = new SyntheticSecretFiles();
         // Public all-zero AES key and nonce are used only to decrypt an independent Python AESGCM vector.
         files.Write("a-old", new byte[32]);
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var secrets = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var cipher = new BrandCipher(secrets);
         var inventory = new InventoryCipher(secrets);
         Guid row = Guid.Parse("11111111-1111-1111-1111-111111111111");
@@ -55,7 +55,7 @@ public static class CipherQualification
             Denied(() => cipher.Decrypt(a, "inventory_items", row, "credential_ciphertext", "current", stock));
             Denied(() => inventory.Decrypt(Guid.NewGuid(), "current", stock));
             files.WriteManifest(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]);
-            using var bot = SecretFiles.Load(files.Root, "service-config.json", files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]));
+            using var bot = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]));
             Denied(() => new InventoryCipher(bot).Decrypt(row, "current", stock));
             byte[] empty = cipher.Encrypt(a, "brands", row, "bot_token_ciphertext", []);
             Check(cipher.Decrypt(a, "brands", row, "bot_token_ciphertext", "current", empty).Length == 0);

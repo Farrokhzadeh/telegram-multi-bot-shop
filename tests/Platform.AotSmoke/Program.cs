@@ -131,7 +131,7 @@ using (var vectors = JsonDocument.Parse(File.ReadAllText(
 
 using (var files = new SyntheticSecretFiles())
 {
-    using var snapshot = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+    using var snapshot = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
     var registry = new BotBrandRegistry([new("native-bot", "a", SyntheticSecretFiles.BrandA, 101,
         SyntheticSecretFiles.Deployment, 7, true)]);
     var principal = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
@@ -149,11 +149,11 @@ using (var files = new SyntheticSecretFiles())
     }
     finally { CryptographicOperations.ZeroMemory(expected); }
     bool denied = false;
-    try { using var invalid = SecretFiles.Load(files.Root, "service-config.json", files.Grant(revision: 8)); }
+    try { using var invalid = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(revision: 8)); }
     catch (SecretConfigurationException error) when (error.InnerException is null) { denied = true; }
     if (!denied) throw new InvalidOperationException("Native configuration revision was not checked.");
     files.WriteManifest(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]);
-    using var bot = SecretFiles.Load(files.Root, "service-config.json",
+    using var bot = RecoverySecretFiles.Load(files.Root, "service-config.json",
         files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]));
     denied = false;
     try { bot.UseInventoryKey("current", value => value.Length); }
@@ -162,7 +162,7 @@ using (var files = new SyntheticSecretFiles())
     File.Delete(Path.Combine(files.Root, "a-current"));
     File.CreateSymbolicLink(Path.Combine(files.Root, "a-current"), Path.Combine(files.Root, "b-current"));
     denied = false;
-    try { using var invalid = SecretFiles.Load(files.Root, "service-config.json", files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA])); }
+    try { using var invalid = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA])); }
     catch (SecretConfigurationException error) when (error.InnerException is null) { denied = true; }
     if (!denied) throw new InvalidOperationException("Native secret symlink was accepted.");
 }
@@ -310,17 +310,12 @@ await using (var paymentFixture = await CheckoutFixture.CreateAsync(balance: 0, 
         throw new InvalidOperationException("Native signed payment evidence failed.");
     Console.WriteLine("PASS: native signed IPN verification, invoice-bound scalar evidence and replay without financial settlement.");
 }
-Console.WriteLine("PASS: native atomic local wallet purchase, encrypted allocation and durable replay without transport.");
+Console.WriteLine("PASS: native atomic local wallet purchase, direct allocation and durable replay without transport.");
 
 await using (var database = await DisposablePostgres.CreateAsync())
 {
     var manifest = SchemaManifest.ForQualification(database.Data.ConnectionString);
-    SchemaReceipt applied = await SchemaRunner.ApplyAsync(database.Data, manifest);
-    SchemaReceipt repeated = await SchemaRunner.ApplyAsync(database.Data, manifest);
-    if (!applied.Applied || repeated.Applied || applied.CatalogSha256 != repeated.CatalogSha256)
-    {
-        throw new InvalidOperationException("Native schema application/reapplication failed.");
-    }
+    await SchemaRunner.ApplyPlaintextAsync(database.Data);
 
     await NativeHostSmokeTests.VerifyDatabaseAsync(database.Data);
     Console.WriteLine("PASS: native foundation 28-table/zero-JSON metadata and independent inventory-key boundaries.");
@@ -339,8 +334,8 @@ await using (var database = await DisposablePostgres.CreateAsync())
     await using (var seed = await userSessions.BeginAsync())
     {
         await seed.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
-            VALUES ($1,'public-customer','public customer','public customer','international','en','public_customer',91001,$2,'public-key',true)
+            INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token,active)
+            VALUES ($1,'public-customer','public customer','public customer','international','en','public_customer',91001,$2,true)
             """, DbValue.Uuid(customerBrand), DbValue.Binary([1])));
         await seed.CommitAsync();
     }
@@ -403,66 +398,21 @@ await using (var database = await DisposablePostgres.CreateAsync())
         await enableSupport.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=true,customer_support_admin_id=$1,policy_version=policy_version+1 WHERE id=$2", DbValue.Uuid(contact), DbValue.Uuid(customerBrand)));
         await enableSupport.CommitAsync();
     }
-    using (var supportFiles = new SyntheticSecretFiles())
+    using (var verifier = new TelegramWebhookVerifier(customerContext!, webhookSecret))
     {
-        supportFiles.WriteManifest(SecretService.BotHost, false, brands: [customerBrand]);
-        using var supportSecrets = SecretFiles.Load(supportFiles.Root, "service-config.json", supportFiles.Grant(SecretService.BotHost, false, brands: [customerBrand]));
-        using var verifier = new TelegramWebhookVerifier(customerContext!, webhookSecret);
         var support = new HumanSupportRouter(userSessions);
         var opened = await support.RouteAsync(verifier.Verify([TelegramFixture.Header(webhookSecret)], TelegramFixture.Body("/support", updateId: 930002, actorId: 97001, chatId: 97001, messageId: 930002)));
         var text = verifier.Verify([TelegramFixture.Header(webhookSecret)], TelegramFixture.Body("public native support text", updateId: 930003, actorId: 97001, chatId: 97001, messageId: 930003));
         await support.RouteAsync(text);
         await new HumanSupportRouter(userSessions).RouteAsync(text);
         await using var read = await userSessions.BeginAsync();
-        var message = await read.QuerySingleAsync(new DbStatement("SELECT id,body_ciphertext,body_key_id FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=930003", DbValue.Uuid(opened.TicketId)),
-            row => (Id: row.GetGuid(0), Bytes: row.GetBinary(1), Key: row.GetString(2)));
-        byte[] plain = new BrandCipher(supportSecrets).Decrypt(customerContext!, "support_messages", message.Id, "body_ciphertext", message.Key, message.Bytes);
-        try { if (!plain.AsSpan().SequenceEqual("public native support text"u8)) throw new InvalidOperationException("Native support cipher failed."); }
-        finally { CryptographicOperations.ZeroMemory(plain); }
+        byte[] content = await read.QuerySingleAsync(new DbStatement("SELECT body_content FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=930003", DbValue.Uuid(opened.TicketId)), row => row.GetBinary(0));
+        try { if (!content.AsSpan().SequenceEqual("public native support text"u8)) throw new InvalidOperationException("Native support content failed."); }
+        finally { CryptographicOperations.ZeroMemory(content); }
         long work = await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='support_notice' AND brand_id=$1", DbValue.Uuid(customerBrand)), row => row.GetInt64(0));
         if (work != 2) throw new InvalidOperationException("Native support replay duplicated staff work.");
     }
-    Console.WriteLine("PASS: native encrypted human support and durable staff work survive router restart without AI or transport.");
-
-    string? operatorPath = Environment.GetEnvironmentVariable("SHOP_SCHEMA_RUNNER_PATH");
-    if (operatorPath is not null)
-    {
-        string directory = Path.Combine(Path.GetTempPath(), "shop-schema-probe-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        try
-        {
-            string manifestPath = Path.Combine(directory, "manifest");
-            string connectionPath = Path.Combine(directory, "connection");
-            string receiptPath = Path.Combine(directory, "receipt");
-            await File.WriteAllTextAsync(manifestPath, manifest.ToFileText());
-            var operatorConnection = new Npgsql.NpgsqlConnectionStringBuilder(
-                Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")
-                ?? throw new InvalidOperationException("Synthetic control identity is missing."))
-            { Database = manifest.Database };
-            await File.WriteAllTextAsync(connectionPath, operatorConnection.ConnectionString);
-            if (OperatingSystem.IsLinux())
-            {
-                File.SetUnixFileMode(manifestPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                File.SetUnixFileMode(connectionPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
-            var start = new System.Diagnostics.ProcessStartInfo(operatorPath) { UseShellExecute = false };
-            foreach (string argument in new[] { "--apply-schema", "--manifest", manifestPath, "--connection-file", connectionPath, "--receipt", receiptPath })
-            {
-                start.ArgumentList.Add(argument);
-            }
-            using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("Operator probe did not start.");
-            await process.WaitForExitAsync();
-            if (process.ExitCode != 0 || !File.Exists(receiptPath) ||
-                !(await File.ReadAllTextAsync(receiptPath)).Contains("catalog_sha256=" + applied.CatalogSha256, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException("Native operator receipt probe failed.");
-            }
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
-    }
+    Console.WriteLine("PASS: native plaintext human support and durable staff work survive router restart without AI or transport.");
 
     await using var command = database.Data.CreateCommand("SELECT @amount::numeric");
     const decimal amount = 123456789012.123456789012m;
@@ -504,7 +454,7 @@ await using (var database = await DisposablePostgres.CreateAsync())
     if (effects != 1) throw new InvalidOperationException("Native committed effect reconciliation failed.");
 }
 
-Console.WriteLine("PASS: native JSON, AES-GCM scope, legacy Fernet, schema/operator, exact money, sessions and lost-commit reconciliation.");
+Console.WriteLine("PASS: native JSON, recovery cipher scope, legacy Fernet, plaintext schema, exact money, sessions and lost-commit reconciliation.");
 
 await AiBoundaryQualification.RunAsync();
 await AiHttpQualification.RunAsync();

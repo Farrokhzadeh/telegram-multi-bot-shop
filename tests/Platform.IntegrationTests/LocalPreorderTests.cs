@@ -126,33 +126,22 @@ public sealed class LocalPreorderTests
         Assert.Equal(5L, await Units(f, order));
     }
     [Fact]
-    public async Task DecryptionFailureRollsBackAllUnitsOrderRevisionAndOutboxAndCanRetry()
+    public async Task DirectRestockContentIsAcquiredWithoutCipherRecovery()
     {
         await using var f = await Fixture();
         Guid order = await Purchase(f, 0, 5);
         await Restock(f, 5);
-        Guid item; byte[] content;
-        await using (var corrupt = await f.Sessions.BeginAsync(Ct))
+        await using (var edit = await f.Sessions.BeginAsync(Ct))
         {
-            var data = await corrupt.QuerySingleAsync(new DbStatement("SELECT id,credential_ciphertext FROM shop.inventory_items ORDER BY id DESC LIMIT 1"), r => (Id: r.GetGuid(0), Content: r.GetBinary(1)), Ct);
-            item = data.Id; content = data.Content;
-            await corrupt.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=$1 WHERE id=$2", DbValue.Binary([1]), DbValue.Uuid(item)), Ct);
-            await corrupt.CommitAsync(Ct);
+            Guid item = await edit.QuerySingleAsync(new DbStatement("SELECT id FROM shop.inventory_items ORDER BY id DESC LIMIT 1"), r => r.GetGuid(0), Ct);
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_content=$1 WHERE id=$2", DbValue.Binary([1]), DbValue.Uuid(item)), Ct);
+            await edit.CommitAsync(Ct);
         }
         JobLease lease = await Claim(f);
-        long revision = await Revision(f, order);
-        await Assert.ThrowsAsync<CipherRejectedException>(() => Worker(f).RunAsync(lease, Ct));
-        Assert.Equal(0L, await Units(f, order));
-        Assert.Equal(revision, await Revision(f, order));
-        Assert.Equal(5L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
-        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='prepare_manifest'", Ct));
-        await using (var repair = await f.Sessions.BeginAsync(Ct))
-        {
-            await repair.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=$1 WHERE id=$2", DbValue.Binary(content), DbValue.Uuid(item)), Ct);
-            await repair.CommitAsync(Ct);
-        }
         Assert.Equal(order, await Worker(f).RunAsync(lease, Ct));
         Assert.Equal(5L, await Units(f, order));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE order_id='" + order.ToString("D") + "' AND delivered_content=decode('01','hex')", Ct));
+        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.inventory_items WHERE state='available'", Ct));
     }
     [Fact]
     public async Task MissingTrustedHeadBrandFailsClosedAndNeverUsesTheNextBrandsStock()

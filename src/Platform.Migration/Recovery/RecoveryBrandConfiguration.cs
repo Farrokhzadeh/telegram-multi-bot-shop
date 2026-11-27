@@ -1,0 +1,218 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Platform.Persistence;
+using Platform.Persistence.Configurations;
+using Platform.Persistence.Entities;
+
+namespace Platform.Migration.Recovery;
+
+internal sealed class RecoveryBrandConfiguration(bool sqlite, bool plaintext = false) : IEntityTypeConfiguration<Brand>
+{
+    public void Configure(EntityTypeBuilder<Brand> row)
+    {
+        row.ToTable("brands", sqlite ? null : "shop", table =>
+        {
+            if (sqlite)
+            {
+                table.HasCheckConstraint("ck_brands_1", "id IS NULL OR akanti_uuid(id)");
+                table.HasCheckConstraint("ck_brands_2", "code IS NULL OR (length(code) BETWEEN 1 AND 160 AND trim(code)<>'')");
+                table.HasCheckConstraint("ck_brands_3", "internal_name IS NULL OR (length(internal_name) BETWEEN 1 AND 160 AND trim(internal_name)<>'')");
+                table.HasCheckConstraint("ck_brands_4", "public_name IS NULL OR (length(public_name) BETWEEN 1 AND 160 AND trim(public_name)<>'')");
+                table.HasCheckConstraint("ck_brands_5", "market IN ('iran','international')");
+                table.HasCheckConstraint("ck_brands_6", "default_language IS NULL OR (length(default_language) BETWEEN 1 AND 160 AND trim(default_language)<>'')");
+                table.HasCheckConstraint("ck_brands_7", "logo_asset_ref IS NULL OR (length(logo_asset_ref) BETWEEN 1 AND 1024)");
+                table.HasCheckConstraint("ck_brands_8", "bot_username IS NULL OR (length(bot_username) BETWEEN 1 AND 160 AND trim(bot_username)<>'')");
+                table.HasCheckConstraint("ck_brands_9", "bot_id > 0");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_10", "length(bot_token_ciphertext) > 0");
+                else table.HasCheckConstraint("ck_brands_10", "length(bot_token) > 0");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_11", "bot_token_key_id IS NULL OR (length(bot_token_key_id) BETWEEN 1 AND 160 AND trim(bot_token_key_id)<>'')");
+                table.HasCheckConstraint("ck_brands_12", "active IS NULL OR (active IN (0,1))");
+                table.HasCheckConstraint("ck_brands_13", "allow_wallet IS NULL OR (allow_wallet IN (0,1))");
+                table.HasCheckConstraint("ck_brands_14", "allow_crypto IS NULL OR (allow_crypto IN (0,1))");
+                table.HasCheckConstraint("ck_brands_15", "allow_bank IS NULL OR (allow_bank IN (0,1))");
+                table.HasCheckConstraint("ck_brands_16", "allow_wallet_topup IS NULL OR (allow_wallet_topup IN (0,1))");
+                table.HasCheckConstraint("ck_brands_17", "zero_balance_topup IS NULL OR (zero_balance_topup IN (0,1))");
+                table.HasCheckConstraint("ck_brands_18", "require_channel_join IS NULL OR (require_channel_join IN (0,1))");
+                table.HasCheckConstraint("ck_brands_19", "support_enabled IS NULL OR (support_enabled IN (0,1))");
+                table.HasCheckConstraint("ck_brands_20", "fx_enabled IS NULL OR (fx_enabled IN (0,1))");
+                table.HasCheckConstraint("ck_brands_21", "customer_support_admin_id IS NULL OR akanti_uuid(customer_support_admin_id)");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_22", "bank_key_id IS NULL OR (length(bank_key_id) BETWEEN 1 AND 160 AND trim(bank_key_id)<>'')");
+                table.HasCheckConstraint("ck_brands_23", "current_fx IS NULL OR (akanti_decimal(current_fx)=1)");
+                table.HasCheckConstraint("ck_brands_24", "akanti_decimal_compare(current_fx,'0') > 0");
+                table.HasCheckConstraint("ck_brands_25", "fx_source IS NULL OR (length(fx_source) BETWEEN 1 AND 160 AND trim(fx_source)<>'')");
+                table.HasCheckConstraint("ck_brands_26", "fx_error_code IS NULL OR (length(fx_error_code) BETWEEN 1 AND 160 AND trim(fx_error_code)<>'')");
+                table.HasCheckConstraint("ck_brands_27", "pricing_rounding_step IS NULL OR (akanti_decimal(pricing_rounding_step)=1)");
+                table.HasCheckConstraint("ck_brands_28", "akanti_decimal_compare(pricing_rounding_step,'0') > 0");
+                table.HasCheckConstraint("ck_brands_29", "max_exchange_rate_age_seconds > 0");
+                table.HasCheckConstraint("ck_brands_30", "telegram_update_highwater >= -1");
+                table.HasCheckConstraint("ck_brands_31", "length(telegram_update_window)=128");
+                table.HasCheckConstraint("ck_brands_32", "policy_version >= 0");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_33", "((bank_number_ciphertext IS NOT NULL) + (bank_holder_ciphertext IS NOT NULL) + (bank_key_id IS NOT NULL) + (bank_card_fingerprint IS NOT NULL) + (bank_changed_at IS NOT NULL)) IN (0,5)");
+                else table.HasCheckConstraint("ck_brands_33", "((bank_number IS NOT NULL) + (bank_holder IS NOT NULL) + (bank_card_fingerprint IS NOT NULL) + (bank_changed_at IS NOT NULL)) IN (0,4)");
+                table.HasCheckConstraint("ck_brands_34", "bank_card_fingerprint IS NULL OR length(bank_card_fingerprint)=32");
+                table.HasCheckConstraint("ck_brands_35", "NOT allow_bank OR (market='iran' AND bank_card_fingerprint IS NOT NULL)");
+                table.HasCheckConstraint("ck_brands_36", "((current_fx IS NOT NULL) + (fx_source IS NOT NULL) + (fx_fetched_at IS NOT NULL)) IN (0,3)");
+                table.HasCheckConstraint("ck_brands_37", "NOT (active AND support_enabled) OR customer_support_admin_id IS NOT NULL");
+                table.HasCheckConstraint("ck_brands_38", "bank_changed_at IS NULL OR akanti_utc_time(bank_changed_at)");
+                table.HasCheckConstraint("ck_brands_39", "fx_fetched_at IS NULL OR akanti_utc_time(fx_fetched_at)");
+                table.HasCheckConstraint("ck_brands_40", "created_at IS NULL OR akanti_utc_time(created_at)");
+                table.HasCheckConstraint("ck_brands_41", "updated_at IS NULL OR akanti_utc_time(updated_at)");
+            }
+            else
+            {
+                table.HasCheckConstraint("ck_brands_1", "market IN ('iran','international')");
+                table.HasCheckConstraint("ck_brands_2", "bot_id > 0");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_3", "octet_length(bot_token_ciphertext) > 0");
+                else table.HasCheckConstraint("ck_brands_3", "octet_length(bot_token) > 0");
+                table.HasCheckConstraint("ck_brands_4", "current_fx > 0");
+                table.HasCheckConstraint("ck_brands_5", "pricing_rounding_step > 0");
+                table.HasCheckConstraint("ck_brands_6", "max_exchange_rate_age_seconds > 0");
+                table.HasCheckConstraint("ck_brands_7", "telegram_update_highwater >= -1");
+                table.HasCheckConstraint("ck_brands_8", "octet_length(telegram_update_window)=128");
+                table.HasCheckConstraint("ck_brands_9", "policy_version >= 0");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_10", "num_nonnulls(bank_number_ciphertext,bank_holder_ciphertext,bank_key_id,bank_card_fingerprint,bank_changed_at) IN (0,5)");
+                else table.HasCheckConstraint("ck_brands_10", "num_nonnulls(bank_number,bank_holder,bank_card_fingerprint,bank_changed_at) IN (0,4)");
+                table.HasCheckConstraint("ck_brands_11", "bank_card_fingerprint IS NULL OR octet_length(bank_card_fingerprint)=32");
+                table.HasCheckConstraint("ck_brands_12", "NOT allow_bank OR (market='iran' AND bank_card_fingerprint IS NOT NULL)");
+                table.HasCheckConstraint("ck_brands_13", "num_nonnulls(current_fx,fx_source,fx_fetched_at) IN (0,3)");
+                table.HasCheckConstraint("ck_brands_14", "NOT (active AND support_enabled) OR customer_support_admin_id IS NOT NULL");
+                table.HasCheckConstraint("ck_brands_15", "isfinite(bank_changed_at)");
+                table.HasCheckConstraint("ck_brands_16", "isfinite(fx_fetched_at)");
+                table.HasCheckConstraint("ck_brands_17", "isfinite(created_at)");
+                table.HasCheckConstraint("ck_brands_18", "isfinite(updated_at)");
+                table.HasCheckConstraint("ck_brands_19", "length(code) BETWEEN 1 AND 160 AND btrim(code)<>''");
+                table.HasCheckConstraint("ck_brands_20", "length(internal_name) BETWEEN 1 AND 160 AND btrim(internal_name)<>''");
+                table.HasCheckConstraint("ck_brands_21", "length(public_name) BETWEEN 1 AND 160 AND btrim(public_name)<>''");
+                table.HasCheckConstraint("ck_brands_22", "length(default_language) BETWEEN 1 AND 160 AND btrim(default_language)<>''");
+                table.HasCheckConstraint("ck_brands_23", "length(logo_asset_ref) BETWEEN 1 AND 1024 AND btrim(logo_asset_ref)<>''");
+                table.HasCheckConstraint("ck_brands_24", "length(bot_username) BETWEEN 1 AND 160 AND btrim(bot_username)<>''");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_25", "length(bot_token_key_id) BETWEEN 1 AND 160 AND btrim(bot_token_key_id)<>''");
+                if (!plaintext) table.HasCheckConstraint("ck_brands_26", "length(bank_key_id) BETWEEN 1 AND 160 AND btrim(bank_key_id)<>''");
+                table.HasCheckConstraint("ck_brands_27", "current_fx NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)");
+                table.HasCheckConstraint("ck_brands_28", "length(fx_source) BETWEEN 1 AND 160 AND btrim(fx_source)<>''");
+                table.HasCheckConstraint("ck_brands_29", "length(fx_error_code) BETWEEN 1 AND 160 AND btrim(fx_error_code)<>''");
+                table.HasCheckConstraint("ck_brands_30", "pricing_rounding_step NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)");
+            }
+        });
+        row.HasKey(v => v.Id);
+        var id = row.Property(v => v.Id).HasColumnName("id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        id.IsRequired();
+        id.ValueGeneratedNever();
+        if (sqlite) id.UseCollation("NOCASE");
+        var code = row.Property(v => v.Code).HasColumnName("code").HasColumnType(sqlite ? "TEXT" : "text");
+        code.IsRequired();
+        code.HasMaxLength(160);
+        var internal_name = row.Property(v => v.InternalName).HasColumnName("internal_name").HasColumnType(sqlite ? "TEXT" : "text");
+        internal_name.IsRequired();
+        internal_name.HasMaxLength(160);
+        var public_name = row.Property(v => v.PublicName).HasColumnName("public_name").HasColumnType(sqlite ? "TEXT" : "text");
+        public_name.IsRequired();
+        public_name.HasMaxLength(160);
+        var market = row.Property(v => v.Market).HasColumnName("market").HasColumnType(sqlite ? "TEXT" : "text");
+        market.IsRequired();
+        var default_language = row.Property(v => v.DefaultLanguage).HasColumnName("default_language").HasColumnType(sqlite ? "TEXT" : "text");
+        default_language.IsRequired();
+        default_language.HasMaxLength(160);
+        var logo_asset_ref = row.Property(v => v.LogoAssetRef).HasColumnName("logo_asset_ref").HasColumnType(sqlite ? "TEXT" : "text");
+        logo_asset_ref.HasMaxLength(1024);
+        var bot_username = row.Property(v => v.BotUsername).HasColumnName("bot_username").HasColumnType(sqlite ? "TEXT" : "text");
+        bot_username.IsRequired();
+        bot_username.HasMaxLength(160);
+        var bot_id = row.Property(v => v.BotId).HasColumnName("bot_id").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        bot_id.IsRequired();
+        if (plaintext) row.Ignore(v => v.BotTokenCiphertext); else row.Ignore(v => v.BotToken);
+        var bot_token_ciphertext = (plaintext ? row.Property(v => v.BotToken) : row.Property(v => v.BotTokenCiphertext)).HasColumnName(plaintext ? "bot_token" : "bot_token_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
+        bot_token_ciphertext.IsRequired();
+        if (plaintext) row.Ignore(v => v.BotTokenKeyId);
+        else
+        {
+            var bot_token_key_id = row.Property(v => v.BotTokenKeyId).HasColumnName("bot_token_key_id").HasColumnType(sqlite ? "TEXT" : "text");
+            bot_token_key_id.IsRequired();
+            bot_token_key_id.HasMaxLength(160);
+        }
+        var active = row.Property(v => v.Active).HasColumnName("active").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        active.IsRequired();
+        active.HasDefaultValueSql(sqlite ? "false" : "false");
+        var allow_wallet = row.Property(v => v.AllowWallet).HasColumnName("allow_wallet").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        allow_wallet.IsRequired();
+        allow_wallet.HasDefaultValueSql(sqlite ? "true" : "true");
+        allow_wallet.HasSentinel(true);
+        var allow_crypto = row.Property(v => v.AllowCrypto).HasColumnName("allow_crypto").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        allow_crypto.IsRequired();
+        allow_crypto.HasDefaultValueSql(sqlite ? "false" : "false");
+        var allow_bank = row.Property(v => v.AllowBank).HasColumnName("allow_bank").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        allow_bank.IsRequired();
+        allow_bank.HasDefaultValueSql(sqlite ? "false" : "false");
+        var allow_wallet_topup = row.Property(v => v.AllowWalletTopup).HasColumnName("allow_wallet_topup").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        allow_wallet_topup.IsRequired();
+        allow_wallet_topup.HasDefaultValueSql(sqlite ? "false" : "false");
+        var zero_balance_topup = row.Property(v => v.ZeroBalanceTopup).HasColumnName("zero_balance_topup").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        zero_balance_topup.IsRequired();
+        zero_balance_topup.HasDefaultValueSql(sqlite ? "false" : "false");
+        var require_channel_join = row.Property(v => v.RequireChannelJoin).HasColumnName("require_channel_join").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        require_channel_join.IsRequired();
+        require_channel_join.HasDefaultValueSql(sqlite ? "false" : "false");
+        var support_enabled = row.Property(v => v.SupportEnabled).HasColumnName("support_enabled").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        support_enabled.IsRequired();
+        support_enabled.HasDefaultValueSql(sqlite ? "false" : "false");
+        var fx_enabled = row.Property(v => v.FxEnabled).HasColumnName("fx_enabled").HasColumnType(sqlite ? "INTEGER" : "boolean");
+        fx_enabled.IsRequired();
+        fx_enabled.HasDefaultValueSql(sqlite ? "false" : "false");
+        var customer_support_admin_id = row.Property(v => v.CustomerSupportAdminId).HasColumnName("customer_support_admin_id").HasColumnType(sqlite ? "TEXT" : "uuid");
+        customer_support_admin_id.ValueGeneratedNever();
+        if (sqlite) customer_support_admin_id.UseCollation("NOCASE");
+        if (plaintext) row.Ignore(v => v.BankNumberCiphertext); else row.Ignore(v => v.BankNumber);
+        var bank_number_ciphertext = (plaintext ? row.Property(v => v.BankNumber) : row.Property(v => v.BankNumberCiphertext)).HasColumnName(plaintext ? "bank_number" : "bank_number_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
+        if (plaintext) row.Ignore(v => v.BankHolderCiphertext); else row.Ignore(v => v.BankHolder);
+        var bank_holder_ciphertext = (plaintext ? row.Property(v => v.BankHolder) : row.Property(v => v.BankHolderCiphertext)).HasColumnName(plaintext ? "bank_holder" : "bank_holder_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
+        if (plaintext) row.Ignore(v => v.BankKeyId);
+        else
+        {
+            var bank_key_id = row.Property(v => v.BankKeyId).HasColumnName("bank_key_id").HasColumnType(sqlite ? "TEXT" : "text");
+            bank_key_id.HasMaxLength(160);
+        }
+        var bank_card_fingerprint = row.Property(v => v.BankCardFingerprint).HasColumnName("bank_card_fingerprint").HasColumnType(sqlite ? "BLOB" : "bytea");
+        var bank_changed_at = row.Property(v => v.BankChangedAt).HasColumnName("bank_changed_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        if (sqlite) bank_changed_at.HasConversion(EfValues.UtcTime);
+        var current_fx = row.Property(v => v.CurrentFx).HasColumnName("current_fx").HasColumnType(sqlite ? "TEXT" : "numeric");
+        if (sqlite) current_fx.Metadata.SetTypeMapping(ExactSqliteDecimalMapping.Instance);
+        var fx_source = row.Property(v => v.FxSource).HasColumnName("fx_source").HasColumnType(sqlite ? "TEXT" : "text");
+        fx_source.HasMaxLength(160);
+        var fx_fetched_at = row.Property(v => v.FxFetchedAt).HasColumnName("fx_fetched_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        if (sqlite) fx_fetched_at.HasConversion(EfValues.UtcTime);
+        var fx_error_code = row.Property(v => v.FxErrorCode).HasColumnName("fx_error_code").HasColumnType(sqlite ? "TEXT" : "text");
+        fx_error_code.HasMaxLength(160);
+        var pricing_rounding_step = row.Property(v => v.PricingRoundingStep).HasColumnName("pricing_rounding_step").HasColumnType(sqlite ? "TEXT" : "numeric");
+        pricing_rounding_step.IsRequired();
+        pricing_rounding_step.HasDefaultValueSql(sqlite ? "5000" : "5000");
+        pricing_rounding_step.HasSentinel(5000m);
+        if (sqlite) pricing_rounding_step.Metadata.SetTypeMapping(ExactSqliteDecimalMapping.Instance);
+        var max_exchange_rate_age_seconds = row.Property(v => v.MaxExchangeRateAgeSeconds).HasColumnName("max_exchange_rate_age_seconds").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        max_exchange_rate_age_seconds.IsRequired();
+        max_exchange_rate_age_seconds.HasDefaultValueSql(sqlite ? "3600" : "3600");
+        max_exchange_rate_age_seconds.HasSentinel(3600L);
+        var telegram_update_highwater = row.Property(v => v.TelegramUpdateHighwater).HasColumnName("telegram_update_highwater").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        telegram_update_highwater.IsRequired();
+        telegram_update_highwater.HasDefaultValueSql(sqlite ? "-1" : "-1");
+        telegram_update_highwater.HasSentinel(-1L);
+        var telegram_update_window = row.Property(v => v.TelegramUpdateWindow).HasColumnName("telegram_update_window").HasColumnType(sqlite ? "BLOB" : "bytea");
+        telegram_update_window.IsRequired();
+        telegram_update_window.HasDefaultValueSql(sqlite ? "(zeroblob(128))" : "decode(repeat('00',128),'hex')");
+        var policy_version = row.Property(v => v.PolicyVersion).HasColumnName("policy_version").HasColumnType(sqlite ? "INTEGER" : "bigint");
+        policy_version.IsRequired();
+        policy_version.IsConcurrencyToken();
+        policy_version.HasDefaultValueSql(sqlite ? "0" : "0");
+        var created_at = row.Property(v => v.CreatedAt).HasColumnName("created_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        created_at.IsRequired();
+        created_at.HasDefaultValueSql(sqlite ? "(strftime('%Y-%m-%dT%H:%M:%f','now') || '0000Z')" : "CURRENT_TIMESTAMP");
+        if (sqlite) created_at.HasConversion(EfValues.UtcTime);
+        var updated_at = row.Property(v => v.UpdatedAt).HasColumnName("updated_at").HasColumnType(sqlite ? "TEXT" : "timestamptz");
+        updated_at.IsRequired();
+        updated_at.HasDefaultValueSql(sqlite ? "(strftime('%Y-%m-%dT%H:%M:%f','now') || '0000Z')" : "CURRENT_TIMESTAMP");
+        if (sqlite) updated_at.HasConversion(EfValues.UtcTime);
+        row.HasIndex(v => v.Code).IsUnique();
+        row.HasIndex(v => v.BotId).IsUnique();
+        row.HasOne<Admin>().WithMany().HasForeignKey(v => v.CustomerSupportAdminId).HasPrincipalKey(v => v.Id).OnDelete(DeleteBehavior.Restrict).HasConstraintName("brands_customer_support_admin_id_fk").HasAnnotation("Akanti:Deferrability", "DEFERRABLE INITIALLY IMMEDIATE");
+        row.HasIndex(v => v.BankCardFingerprint).HasDatabaseName("brands_distinct_iran_card").IsUnique().HasFilter(sqlite ? "market='iran' AND allow_bank" : "market='iran' AND allow_bank");
+    }
+}

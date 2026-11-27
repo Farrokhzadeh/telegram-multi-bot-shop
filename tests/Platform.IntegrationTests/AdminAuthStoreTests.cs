@@ -203,7 +203,7 @@ public sealed class AdminAuthStoreTests
     private static async Task<DisposablePostgres> CreateAsync()
     {
         var database = await DisposablePostgres.CreateAsync(Ct);
-        try { await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct); return database; }
+        try { await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, Ct); return database; }
         catch { await database.DisposeAsync(); throw; }
     }
 }

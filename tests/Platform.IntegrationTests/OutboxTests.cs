@@ -138,12 +138,12 @@ public sealed class OutboxTests
         await using (var seed = await sessions.BeginAsync(Ct))
         {
             await seed.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                VALUES ($1,'public-outbox','public outbox','public outbox','international','en','public_bot',1001,$2,'public-key')
+                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token)
+                VALUES ($1,'public-outbox','public outbox','public outbox','international','en','public_bot',1001,$2)
                 """, DbValue.Uuid(brand), DbValue.Binary([1])), Ct);
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES ($1,$2,1001,'en')", DbValue.Uuid(user), DbValue.Uuid(brand)), Ct);
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.support_tickets(id,user_id,category,source) VALUES ($1,$2,'general','system')", DbValue.Uuid(ticket), DbValue.Uuid(user)), Ct);
-            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.support_messages(id,ticket_id,sender_kind,body_ciphertext,body_key_id) VALUES ($1,$2,'system',$3,'public-key')", DbValue.Uuid(message), DbValue.Uuid(ticket), DbValue.Binary([1])), Ct);
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.support_messages(id,ticket_id,sender_kind,body_content) VALUES ($1,$2,'system',$3)", DbValue.Uuid(message), DbValue.Uuid(ticket), DbValue.Binary([1])), Ct);
             await seed.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.telegram_deliveries(id,brand_id,recipient_kind,user_id,purpose,action,dedupe_key,support_message_id)
                 VALUES ($1,$2,'customer_dm',$3,'support_notice','send','public-outbox-delivery',$4)
@@ -186,7 +186,7 @@ public sealed class OutboxTests
     private static async Task<DisposablePostgres> CreateAsync()
     {
         var database = await DisposablePostgres.CreateAsync(Ct);
-        try { await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct); return database; }
+        try { await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, Ct); return database; }
         catch { await database.DisposeAsync(); throw; }
     }
 }

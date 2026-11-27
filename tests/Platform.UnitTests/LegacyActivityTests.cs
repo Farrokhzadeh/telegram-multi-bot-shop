@@ -18,7 +18,7 @@ public sealed class LegacyActivityTests
     public async Task OriginalActivityIsPreservedWithoutInventingOperationalAuthority(string action, bool bound, LegacyActivityException reason)
     {
         if (!OperatingSystem.IsLinux()) throw new InvalidOperationException("Protected activity requires Linux.");
-        using var keys = new SyntheticSecretFiles(); using var secrets = Platform.Security.SecretFiles.Load(keys.Root, "service-config.json", keys.Grant());
+        using var keys = new SyntheticSecretFiles(); using var secrets = Platform.Security.RecoverySecretFiles.Load(keys.Root, "service-config.json", keys.Grant());
         var context = CipherQualification.Context(SyntheticSecretFiles.BrandA); Guid record = Guid.NewGuid(), member = Guid.NewGuid();
         string body = "{\"id\":7,\"actor_id\":999,\"user_id\":9,\"event_type\":\"" + action + "\",\"ref_type\":\"command\",\"ref_id\":\"RAW-CALLBACK\",\"details\":\"PRIVATE-DM-COUPON-RECEIPT-SECRET\",\"created_at\":\"2024-02-01T00:00:01+00:00\"}";
         Assert.Null(LegacySourceRecord.CopyCandidate("user_activity", "7", body));

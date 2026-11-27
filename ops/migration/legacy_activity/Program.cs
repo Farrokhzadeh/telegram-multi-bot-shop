@@ -20,7 +20,7 @@ try
     stage = 2;
     using var secretDocument = JsonDocument.Parse(ArchivePrivateFile.Read(Path.Combine(input, "keys", "service-config.json"))); var configuration = secretDocument.RootElement;
     Guid deployment = configuration.GetProperty("deploymentId").GetGuid(); long revision = configuration.GetProperty("revision").GetInt64();
-    using var secrets = SecretFiles.Load(Path.Combine(input, "keys"), "service-config.json", new(SecretService.JobHost, deployment, revision, [original.TargetBrand], false));
+    using var secrets = RecoverySecretFiles.Load(Path.Combine(input, "keys"), "service-config.json", new(SecretService.JobHost, deployment, revision, [original.TargetBrand], false));
     stage = 3;
     var registry = new BotBrandRegistry([new("protected-activity", "qualification", original.TargetBrand, 101, deployment, revision, true)]);
     if (!registry.TryResolveAuthenticated("protected-activity", new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "qualification")], "protected-activity")), out var context)) throw new MigrationRejectedException();

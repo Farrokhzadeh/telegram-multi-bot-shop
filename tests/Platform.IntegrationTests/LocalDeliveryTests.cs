@@ -262,7 +262,7 @@ public sealed class LocalDeliveryTests
             await new SupplierFulfillmentWorker(new(f.Sessions), port, port).RunAsync(f.Context(0), await SupplierFixture.ClaimAsync(f, kind, Ct), Ct);
         }
 
-        Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE kind='supplier' AND status='acquired' AND delivered_content_key_id IS NOT NULL AND delivered_content <> convert_to('" + credential + "','UTF8') AND manifest_generation IS NULL", Ct));
+        Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE kind='supplier' AND status='acquired' AND delivered_content = convert_to('" + credential + "','UTF8') AND manifest_generation IS NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.supplier_requests WHERE requested_quantity=5 AND status='partial_pending_admin'", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE quantity=5 AND payment_status='paid' AND fulfillment_status='requires_admin' AND review_code='partial_acquisition' AND manifest_asset_ref IS NULL AND release_authorized_at IS NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='held' AND units_covered=5", Ct));
@@ -360,8 +360,8 @@ public sealed class LocalDeliveryTests
         await using (var content = await f.Sessions.BeginAsync(Ct))
         {
             Guid id = await content.QuerySingleAsync(new DbStatement("SELECT id FROM shop.inventory_items"), r => r.GetGuid(0), Ct);
-            byte[] encrypted = new InventoryCipher(f.Secrets).Encrypt(id, Encoding.UTF8.GetBytes(new string('x', 5000)));
-            await content.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=$1 WHERE id=$2", DbValue.Binary(encrypted), DbValue.Uuid(id)), Ct);
+            byte[] oversized = Encoding.UTF8.GetBytes(new string('x', 5000));
+            await content.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_content=$1 WHERE id=$2", DbValue.Binary(oversized), DbValue.Uuid(id)), Ct);
             await content.CommitAsync(Ct);
         }
         Guid order = await Purchase(f);
@@ -385,7 +385,7 @@ public sealed class LocalDeliveryTests
         {
             var ids = await content.QueryManyAsync(new DbStatement("SELECT id FROM shop.inventory_items"), r => r.GetGuid(0), 1000, Ct);
             foreach (Guid id in ids)
-                await content.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=$1 WHERE id=$2", DbValue.Binary(new InventoryCipher(f.Secrets).Encrypt(id, plain)), DbValue.Uuid(id)), Ct);
+                await content.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_content=$1 WHERE id=$2", DbValue.Binary(plain), DbValue.Uuid(id)), Ct);
             await content.CommitAsync(Ct);
         }
         Guid order = await Purchase(f, 17);

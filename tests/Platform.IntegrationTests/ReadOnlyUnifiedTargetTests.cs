@@ -30,7 +30,7 @@ public sealed class ReadOnlyUnifiedTargetTests
     {
         if (!OperatingSystem.IsLinux()) return;
         await using var world = await LegacyWalletRetentionFixture.CreateAsync(Ct, false); var f = world.Fixture; var context = f.Context(0);
-        await using (var setup = f.Database.Data.CreateCommand("UPDATE shop.brands SET active=false,bot_token_key_id='qualification-unusable'; CREATE TABLE public.orders(id text PRIMARY KEY,user_id bigint,product_id bigint,qty integer,total numeric,currency text,created_at timestamptz,checkout_snapshot jsonb); INSERT INTO public.orders VALUES('SYNTHETIC-HELD',99001234,456,1,20,'USD','2024-02-01 00:00Z','{}')")) await setup.ExecuteNonQueryAsync(Ct);
+        await using (var setup = f.Database.Data.CreateCommand("UPDATE shop.brands SET active=false,bot_token=decode('00','hex'); CREATE TABLE public.orders(id text PRIMARY KEY,user_id bigint,product_id bigint,qty integer,total numeric,currency text,created_at timestamptz,checkout_snapshot jsonb); INSERT INTO public.orders VALUES('SYNTHETIC-HELD',99001234,456,1,20,'USD','2024-02-01 00:00Z','{}')")) await setup.ExecuteNonQueryAsync(Ct);
         string directory = Path.Combine(Path.GetTempPath(), "teleg-history-archive-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {

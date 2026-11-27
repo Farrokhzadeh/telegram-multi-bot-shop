@@ -45,10 +45,9 @@ public sealed class AdminCatalogAndResolutionTests
         Assert.Null(inventory.Next);
         await using (var read = await f.Sessions.BeginAsync(Ct))
         {
-            var encrypted = await read.QuerySingleAsync(new DbStatement("SELECT credential_ciphertext,credential_key_id FROM shop.inventory_items WHERE id=$1", DbValue.Uuid(item)), r => (Value: r.GetBinary(0), Key: r.GetString(1)), Ct);
-            byte[] plain = new InventoryCipher(f.Secrets).Decrypt(item, encrypted.Key, encrypted.Value);
-            try { Assert.Equal(items[0].Credential, Encoding.UTF8.GetString(plain)); }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            byte[] content = await read.QuerySingleAsync(new DbStatement("SELECT credential_content FROM shop.inventory_items WHERE id=$1", DbValue.Uuid(item)), r => r.GetBinary(0), Ct);
+            try { Assert.Equal(items[0].Credential, Encoding.UTF8.GetString(content)); }
+            finally { CryptographicOperations.ZeroMemory(content); }
         }
         Guid low = Guid.Parse("7fffffff-ffff-ffff-ffff-ffffffffffff"), high = Guid.Parse("80000000-0000-0000-0000-000000000000");
         await store.ImportAsync(admin, f.Product, [new(low, "Synthetic lower boundary stock"), new(high, "Synthetic upper boundary stock")], Guid.NewGuid(), Ct);

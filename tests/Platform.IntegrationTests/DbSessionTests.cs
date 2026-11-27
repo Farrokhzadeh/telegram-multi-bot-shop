@@ -119,7 +119,7 @@ public sealed class DbSessionTests
         var factory = new DbSessionFactory(database.Data);
         await using (var seed = await factory.BeginAsync(Ct))
         {
-            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id) VALUES ($1,'public-test','public test','public test','international','en','public_test',7001,$2,'public-test-key')",
+            await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token) VALUES ($1,'public-test','public test','public test','international','en','public_test',7001,$2)",
                 DbValue.Uuid(brand), DbValue.Binary([1])), Ct);
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES ($1,$2,7001,'en')", DbValue.Uuid(user), DbValue.Uuid(brand)), Ct);
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.wallets(user_id) VALUES ($1)", DbValue.Uuid(user)), Ct);
@@ -312,7 +312,7 @@ public sealed class DbSessionTests
     private static async Task<DisposablePostgres> CreateAsync()
     {
         var database = await DisposablePostgres.CreateAsync(Ct);
-        try { await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct); return database; }
+        try { await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, Ct); return database; }
         catch { await database.DisposeAsync(); throw; }
     }
 

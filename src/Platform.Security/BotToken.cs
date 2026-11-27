@@ -29,31 +29,4 @@ public sealed class BotToken : IDisposable
     public override string ToString() => "BotToken [redacted]";
 }
 
-public sealed record ProtectedBotToken(byte[] Ciphertext, string KeyId)
-{
-    public override string ToString() => "ProtectedBotToken [redacted]";
-}
 public sealed record VerifiedBotProfile(long Id, string Username);
-public sealed class BotTokenVault(SecretSnapshot secrets)
-{
-    public ProtectedBotToken Protect(BrandContext context, BotToken token)
-    {
-        if (token.BotId != context.BotId) throw new UnauthorizedAccessException("Bot identity mismatch.");
-        return new(new BrandCipher(secrets).Encrypt(context, "brands", context.BrandId, "bot_token_ciphertext", token.ForTrustedTransport().Span), secrets.CurrentBrandKeyId(context));
-    }
-    public BotToken OpenForTrustedTransport(BrandContext context, string keyId, ReadOnlySpan<byte> ciphertext)
-    {
-        byte[] plain = new BrandCipher(secrets).Decrypt(context, "brands", context.BrandId, "bot_token_ciphertext", keyId, ciphertext);
-        try
-        {
-            char[] chars = Encoding.UTF8.GetChars(plain);
-            BotToken token;
-            try { token = BotToken.Parse(chars); }
-            finally { Array.Clear(chars); }
-            if (token.BotId == context.BotId) return token;
-            token.Dispose();
-            throw new UnauthorizedAccessException("Bot identity mismatch.");
-        }
-        finally { CryptographicOperations.ZeroMemory(plain); }
-    }
-}

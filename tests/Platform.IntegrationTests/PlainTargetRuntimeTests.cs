@@ -85,9 +85,6 @@ public sealed class PlainTargetRuntimeTests
                 await writer.SaveChangesAsync(ct);
             }
             await connection.CloseAsync();
-            var legacy = new SqliteSessionFactory(path);
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => legacy.RunAsync(false, (_, _, _) => Task.FromResult(true), ct));
-            Assert.Contains("cannot open a plaintext target", error.Message);
             var runtime = SqliteSessionFactory.ForPlaintext(path);
             await runtime.RunEfAsync(false, null, async (data, token) =>
             {

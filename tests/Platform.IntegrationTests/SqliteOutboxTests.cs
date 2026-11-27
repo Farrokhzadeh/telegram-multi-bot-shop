@@ -12,14 +12,14 @@ public sealed class SqliteOutboxTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var factory = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var factory = SqliteSessionFactory.ForPlaintext(path);
             Guid dedupe = Guid.NewGuid();
             var intent = JobIntent.Maintenance(JobKind.ActivityCleanup);
             var first = await Enqueue(factory);
-            Assert.Equal(first, await Enqueue(new(path)));
+            Assert.Equal(first, await Enqueue(SqliteSessionFactory.ForPlaintext(path)));
 
-            var leases = await Task.WhenAll(ClaimAsync(new(path)), ClaimAsync(new(path)));
+            var leases = await Task.WhenAll(ClaimAsync(SqliteSessionFactory.ForPlaintext(path)), ClaimAsync(SqliteSessionFactory.ForPlaintext(path)));
             var oldLease = Assert.Single(leases.OfType<JobLease>());
             Assert.Equal(first, oldLease.Id);
             Assert.Equal(1, oldLease.Attempt);
@@ -33,7 +33,7 @@ public sealed class SqliteOutboxTests
                 return await command.ExecuteNonQueryAsync(token);
             }, ct);
 
-            var reopened = new SqliteSessionFactory(path);
+            var reopened = SqliteSessionFactory.ForPlaintext(path);
             var current = Assert.IsType<JobLease>(await ClaimAsync(reopened));
             Assert.Equal(2, current.Attempt);
             var rejected = await Assert.ThrowsAsync<DbOperationException>(() => CompleteAsync(reopened, oldLease));
@@ -57,8 +57,8 @@ public sealed class SqliteOutboxTests
             var retried = Assert.IsType<JobLease>(await ClaimAsync(reopened));
             Assert.Equal(3, retried.Attempt);
             await CompleteAsync(reopened, retried);
-            Assert.Null(await ClaimAsync(new(path)));
-            Assert.Equal(first, await Enqueue(new(path)));
+            Assert.Null(await ClaimAsync(SqliteSessionFactory.ForPlaintext(path)));
+            Assert.Equal(first, await Enqueue(SqliteSessionFactory.ForPlaintext(path)));
 
             Task<Guid> Enqueue(SqliteSessionFactory session) => session.RunAsync(true, (_, tx, token) =>
                 OutboxStore.EnqueueSqliteAsync(tx, intent, dedupe, DateTime.UtcNow, token), ct);

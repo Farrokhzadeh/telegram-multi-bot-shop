@@ -9,7 +9,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteSupplierRequestStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<JobLease?> ClaimAsync(BrandContext context, JobKind kind, Guid worker, CancellationToken ct = default)
     {

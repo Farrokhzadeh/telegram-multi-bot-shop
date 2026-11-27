@@ -15,8 +15,8 @@ public sealed class SqliteAdminCatalogTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             using var token = AdminToken.Create();
             Guid actorId = Guid.NewGuid(), sessionId = Guid.NewGuid();
@@ -25,8 +25,8 @@ public sealed class SqliteAdminCatalogTests
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active,policy_version)
-                    VALUES ($brand,'admin','Admin','Admin','international','en','admin_bot',1001,x'01','fixture',1,1);
+                        bot_token,active,policy_version)
+                    VALUES ($brand,'admin','Admin','Admin','international','en','admin_bot',1001,x'01',1,1);
                     INSERT INTO admins(id,login,authentication_mode,external_subject) VALUES ($admin,'admin','external','fixture');
                     INSERT INTO admin_sessions(id,admin_id,token_hash,auth_version_at_issue,expires_at)
                     VALUES ($session,$admin,$hash,0,$expires);
@@ -43,7 +43,7 @@ public sealed class SqliteAdminCatalogTests
                 }
                 return 0;
             }, ct);
-            var restarted = new SqliteSessionFactory(path);
+            var restarted = SqliteSessionFactory.ForPlaintext(path);
             var actor = await SqliteAdminSessionStore.AuthenticateAsync(restarted, token, ct);
             Assert.Equal(actorId, actor.AdminId);
             var catalog = new SqliteAdminCatalogStore(restarted);

@@ -18,7 +18,7 @@ public sealed class SqliteStagingCopyTests
             Assert.Equal(28, result.Tables);
             Assert.True(result.Rows > 0);
             Assert.True(File.Exists(path));
-            var sessions = new SqliteSessionFactory(path);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             await sessions.RunAsync(false, async (_, tx, token) =>
             {
                 using var query = SqliteWallet.Command(tx, """
@@ -37,7 +37,7 @@ public sealed class SqliteStagingCopyTests
             }, ct);
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 SqliteStagingCopy.CopyAsync(fixture.Database.Data, path, ct));
-            var again = new SqliteSessionFactory(path);
+            var again = SqliteSessionFactory.ForPlaintext(path);
             await again.RunAsync(false, async (_, tx, token) =>
             {
                 using var query = SqliteWallet.Command(tx, "SELECT count(*) FROM wallet_entries WHERE is_posting=1");

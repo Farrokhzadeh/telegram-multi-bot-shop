@@ -64,7 +64,7 @@ public static partial class EfSchemaCommand
             var contexts = brands.Values.ToDictionary(brand => brand.BrandId, brand =>
                 registry.TryResolveAuthenticated(brand.Scheme, new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, brand.Subject)], brand.Scheme)), out var scope)
                     ? scope! : throw new MigrationRejectedException());
-            using var keys = SecretFiles.Load(keyDirectory, Leaf(keySpec, "manifest"), new(SecretService.JobHost, deployment, revision, brands.Keys, true));
+            using var keys = RecoverySecretFiles.Load(keyDirectory, Leaf(keySpec, "manifest"), new(SecretService.JobHost, deployment, revision, brands.Keys, true));
 
             var manifest = new TargetConversionManifest(Value(root, "snapshot_sha256"), root.GetProperty("assets").EnumerateArray().Select(ReadAsset));
             byte[] schema = Convert.FromHexString(Value(root, "target_schema_sha256"));
@@ -154,7 +154,7 @@ public static partial class EfSchemaCommand
     private static async Task ValidateAssetScopesAsync(SqliteConnection source, IEnumerable<BrandContext> contexts, TargetConversionManifest manifest, CancellationToken ct)
     {
         await using var transaction = source.BeginTransaction(deferred: true);
-        await using var data = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(source).Options);
+        await using var data = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite(source).Options);
         await data.Database.UseTransactionAsync(transaction, ct);
         var configured = contexts.ToDictionary(context => context.BrandId, context => context.BotId);
         var stored = await data.Set<Brand>().Select(brand => new { brand.Id, brand.BotId }).Take(33).ToListAsync(ct);

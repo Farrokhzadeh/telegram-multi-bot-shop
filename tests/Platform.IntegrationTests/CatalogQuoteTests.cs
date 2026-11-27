@@ -342,8 +342,8 @@ public sealed class CatalogQuoteTests
     {
         await using var session = await f.Sessions.BeginAsync(Ct);
         await session.ExecuteAsync(new DbStatement("""
-            UPDATE shop.brands SET market='iran',allow_bank=true,allow_crypto=true,policy_version=policy_version+1,bank_number_ciphertext=decode('01','hex'),
-                bank_holder_ciphertext=decode('02','hex'),bank_key_id='current',bank_card_fingerprint=decode(repeat('55',32),'hex'),bank_changed_at=CURRENT_TIMESTAMP WHERE id=$1
+            UPDATE shop.brands SET market='iran',allow_bank=true,allow_crypto=true,policy_version=policy_version+1,bank_number=convert_to('public number','UTF8'),
+                bank_holder=convert_to('public holder','UTF8'),bank_card_fingerprint=decode(repeat('55',32),'hex'),bank_changed_at=CURRENT_TIMESTAMP WHERE id=$1
             """, DbValue.Uuid(f.Brands[0])), Ct);
         await session.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET allow_bank=true,allow_crypto=true,auto_price_toman=false,price_toman=1000000,revision=revision+1 WHERE brand_id=$1", DbValue.Uuid(f.Brands[0])), Ct);
         await session.CommitAsync(Ct);

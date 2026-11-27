@@ -18,8 +18,8 @@ public sealed class EfAdminSessionTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid admin = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, cancel) =>
             {
@@ -63,8 +63,8 @@ public sealed class EfAdminSessionTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid admin = Guid.NewGuid(), ticket = Guid.NewGuid();
             using var token = AdminToken.Create();
             await sessions.RunAsync(true, async (_, tx, cancel) =>
@@ -100,8 +100,8 @@ public sealed class EfAdminSessionTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid admin = Guid.NewGuid(), command = Guid.NewGuid();
             using var nonce = AdminToken.Create();
             byte[] expected = AdminAuth.BindingHash(nonce, admin, 0, 7001, true);

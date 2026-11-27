@@ -1,4 +1,5 @@
 using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Platform.Persistence;
@@ -42,7 +43,7 @@ internal sealed class EfMutationInterceptor : DbCommandInterceptor
         Verify(eventData);
         if (eventData.Context is AkantiDbContext { Integrity: { RowLock: not EfRowLock.None } integrity })
         {
-            if (eventData.CommandSource != CommandSource.LinqQuery || eventData.Context is not PostgresAkantiDbContext)
+            if (eventData.CommandSource != CommandSource.LinqQuery || !eventData.Context.Database.IsNpgsql())
             {
                 integrity.Reject();
                 throw new InvalidOperationException("Row locks require a generated PostgreSQL query.");

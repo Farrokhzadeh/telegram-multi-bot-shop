@@ -11,14 +11,14 @@ public static class FoundationQualification
     public static void VerifyIndependentInventoryKeys()
     {
         using var files = new SyntheticSecretFiles();
-        using var original = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var original = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         Guid item = Guid.NewGuid();
         var inventory = new InventoryCipher(original);
         byte[] protectedValue = inventory.Encrypt(item, "public synthetic inventory"u8);
         byte[] replacement = RandomNumberGenerator.GetBytes(32);
         try { files.Write("inventory-current", replacement); }
         finally { CryptographicOperations.ZeroMemory(replacement); }
-        using var wrongKeys = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var wrongKeys = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         Denied(() => new InventoryCipher(wrongKeys).Decrypt(item, "current", protectedValue));
         var registry = new BotBrandRegistry([new("test-bot", "a", SyntheticSecretFiles.BrandA, 101, SyntheticSecretFiles.Deployment, 7, true)]);
         if (!registry.TryResolveAuthenticated("test-bot", new ClaimsPrincipal(new ClaimsIdentity(
@@ -26,7 +26,7 @@ public static class FoundationQualification
         byte[] brandValue = new BrandCipher(original).Encrypt(context!, "inventory_items", item, "credential_ciphertext", "public brand value"u8);
         Denied(() => inventory.Decrypt(item, "current", brandValue));
         files.WriteManifest(SecretService.Api, false);
-        using var api = SecretFiles.Load(files.Root, "service-config.json", files.Grant(SecretService.Api, false));
+        using var api = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(SecretService.Api, false));
         Denied(() => new InventoryCipher(api).Decrypt(item, "current", protectedValue));
     }
 
@@ -35,7 +35,7 @@ public static class FoundationQualification
         await using var session = await new DbSessionFactory(data).BeginAsync(cancellationToken);
         long tables = await session.QuerySingleAsync(new DbStatement("""
             SELECT count(*) FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
-            WHERE n.nspname='shop' AND c.relkind IN ('r','p')
+            WHERE n.nspname='shop' AND c.relkind IN ('r','p') AND c.relname<>'__EFMigrationsHistory'
             """), row => row.GetInt64(0), cancellationToken);
         long untyped = await session.QuerySingleAsync(new DbStatement("""
             SELECT count(*) FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid=a.attrelid

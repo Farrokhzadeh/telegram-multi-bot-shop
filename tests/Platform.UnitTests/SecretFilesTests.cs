@@ -11,7 +11,7 @@ public sealed class SecretFilesTests
     public void LoadsCurrentAndHistoricalKeysWithoutExposingThemAsProperties()
     {
         using var files = new SyntheticSecretFiles();
-        using var snapshot = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var snapshot = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var context = Context(SyntheticSecretFiles.BrandA);
         Assert.Equal(7, snapshot.Revision);
         Assert.Equal("current", snapshot.CurrentBrandKeyId(context));
@@ -37,7 +37,7 @@ public sealed class SecretFilesTests
     {
         using var files = new SyntheticSecretFiles();
         files.WriteManifest(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]);
-        using var snapshot = SecretFiles.Load(files.Root, "service-config.json",
+        using var snapshot = RecoverySecretFiles.Load(files.Root, "service-config.json",
             files.Grant(SecretService.BotHost, false, brands: [SyntheticSecretFiles.BrandA]));
         Assert.Equal(32, snapshot.UseBrandKey(Context(SyntheticSecretFiles.BrandA), "current", key => key.Length));
         Assert.Throws<SecretConfigurationException>(() => snapshot.UseBrandKey(Context(SyntheticSecretFiles.BrandB), "current", key => key.Length));
@@ -51,11 +51,11 @@ public sealed class SecretFilesTests
     public void ManifestCannotGrantItselfExtraScopeOrAnotherServiceIdentity()
     {
         using var files = new SyntheticSecretFiles();
-        Assert.Throws<SecretConfigurationException>(() => SecretFiles.Load(files.Root, "service-config.json",
+        Assert.Throws<SecretConfigurationException>(() => RecoverySecretFiles.Load(files.Root, "service-config.json",
             files.Grant(inventory: false)));
-        Assert.Throws<SecretConfigurationException>(() => SecretFiles.Load(files.Root, "service-config.json",
+        Assert.Throws<SecretConfigurationException>(() => RecoverySecretFiles.Load(files.Root, "service-config.json",
             files.Grant(brands: [SyntheticSecretFiles.BrandA])));
-        Assert.Throws<SecretConfigurationException>(() => SecretFiles.Load(files.Root, "service-config.json",
+        Assert.Throws<SecretConfigurationException>(() => RecoverySecretFiles.Load(files.Root, "service-config.json",
             files.Grant(SecretService.Api, false)));
     }
 
@@ -63,9 +63,9 @@ public sealed class SecretFilesTests
     public void DeploymentRevisionAndContextMustMatchExactly()
     {
         using var files = new SyntheticSecretFiles();
-        Assert.Throws<SecretConfigurationException>(() => SecretFiles.Load(files.Root, "service-config.json", files.Grant(revision: 8)));
-        Assert.Throws<SecretConfigurationException>(() => SecretFiles.Load(files.Root, "service-config.json", files.Grant(deployment: Guid.NewGuid())));
-        using var snapshot = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        Assert.Throws<SecretConfigurationException>(() => RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(revision: 8)));
+        Assert.Throws<SecretConfigurationException>(() => RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(deployment: Guid.NewGuid())));
+        using var snapshot = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         Assert.Throws<SecretConfigurationException>(() => snapshot.CurrentBrandKeyId(Context(SyntheticSecretFiles.BrandA, revision: 6)));
         Assert.Throws<SecretConfigurationException>(() => snapshot.CurrentBrandKeyId(Context(SyntheticSecretFiles.BrandA, deployment: Guid.NewGuid())));
     }
@@ -157,7 +157,7 @@ public sealed class SecretFilesTests
         SafeReject(files);
         string alias = files.Root + "-alias";
         Directory.CreateSymbolicLink(alias, files.Root);
-        try { Assert.Throws<SecretConfigurationException>(() => SecretFiles.Load(alias, "service-config.json", files.Grant())); }
+        try { Assert.Throws<SecretConfigurationException>(() => RecoverySecretFiles.Load(alias, "service-config.json", files.Grant())); }
         finally { Directory.Delete(alias); }
     }
 
@@ -165,12 +165,12 @@ public sealed class SecretFilesTests
     public void ExistingSnapshotRemainsStableUntilExplicitNewRevisionLoad()
     {
         using var files = new SyntheticSecretFiles();
-        using var previous = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var previous = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var fingerprint = previous.UseBrandKey(Context(SyntheticSecretFiles.BrandA), "current", key => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(key)));
         files.Write("a-current", System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
         files.WriteManifest(revision: 8);
         Assert.Equal(fingerprint, previous.UseBrandKey(Context(SyntheticSecretFiles.BrandA), "current", key => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(key))));
-        using var next = SecretFiles.Load(files.Root, "service-config.json", files.Grant(revision: 8));
+        using var next = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(revision: 8));
         Assert.NotEqual(fingerprint, next.UseBrandKey(Context(SyntheticSecretFiles.BrandA, revision: 8), "current", key => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(key))));
     }
 
@@ -213,7 +213,7 @@ public sealed class SecretFilesTests
 
     private static void SafeReject(SyntheticSecretFiles files)
     {
-        var error = Assert.Throws<SecretConfigurationException>(() => SecretFiles.Load(files.Root, "service-config.json", files.Grant()));
+        var error = Assert.Throws<SecretConfigurationException>(() => RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant()));
         Assert.Null(error.InnerException);
         Assert.DoesNotContain(files.Root, error.ToString());
         Assert.DoesNotContain("private-payload", error.ToString());

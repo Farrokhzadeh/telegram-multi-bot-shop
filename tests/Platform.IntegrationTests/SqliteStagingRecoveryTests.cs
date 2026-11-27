@@ -16,17 +16,17 @@ public sealed class SqliteStagingRecoveryTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
             var first = CheckoutFixture.ResolveContexts()[0];
             var second = CheckoutFixture.ResolveContexts()[1];
             Guid customer = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid(), delivery = Guid.NewGuid();
-            var sessions = new SqliteSessionFactory(path);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var command = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',1001,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',1001,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,title,fulfillment_kind,availability_policy)
                     VALUES ($product,'Fixture','local','immediate');
@@ -49,8 +49,8 @@ public sealed class SqliteStagingRecoveryTests
                         order, DateTime.UtcNow, token);
                 return true;
             }, ct);
-            var jobs = new SqliteStagingJobs(new SqliteSessionFactory(path));
-            var statuses = new SqliteStatusDeliveryStore(new SqliteSessionFactory(path));
+            var jobs = new SqliteStagingJobs(SqliteSessionFactory.ForPlaintext(path));
+            var statuses = new SqliteStatusDeliveryStore(SqliteSessionFactory.ForPlaintext(path));
             Assert.Null(await jobs.ClaimAsync(second, JobKind.SendTelegram, Guid.NewGuid(), ct));
             JobLease? lease = await jobs.ClaimAsync(first, JobKind.SendTelegram, Guid.NewGuid(), ct);
             Assert.NotNull(lease);
@@ -61,7 +61,7 @@ public sealed class SqliteStagingRecoveryTests
             Assert.Null(dispatch.TargetMessageId);
             await statuses.RecordOutcomeAsync(first, lease, new(DeliveryOutcomeKind.Succeeded, 901), ct);
             await statuses.RecordOutcomeAsync(first, lease, new(DeliveryOutcomeKind.Succeeded, 901), ct);
-            var restored = new SqliteStagingJobs(new SqliteSessionFactory(path));
+            var restored = new SqliteStagingJobs(SqliteSessionFactory.ForPlaintext(path));
             JobLease? manifest = await restored.ClaimAsync(first, JobKind.PrepareManifest, Guid.NewGuid(), ct);
             if (fulfillment == "acquiring")
             {
@@ -97,17 +97,17 @@ public sealed class SqliteStagingRecoveryTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
             var first = CheckoutFixture.ResolveContexts()[0];
             var second = CheckoutFixture.ResolveContexts()[1];
             Guid user = Guid.NewGuid(), product = Guid.NewGuid();
-            var sessions = new SqliteSessionFactory(path);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var command = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',1001,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',1001,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($user,$brand,7001,'en');
                     INSERT INTO products(id,title,fulfillment_kind,availability_policy)
                     VALUES ($product,'Fixture','local','immediate');
@@ -125,7 +125,7 @@ public sealed class SqliteStagingRecoveryTests
             Assert.Equal(before.Revision + 1, after.Revision);
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 ingress.UpdateFlowAsync(first, 7001, "quantity", product, null, 901, before.Revision, ct));
-            var reopened = new SqliteStagingIngress(new SqliteSessionFactory(path));
+            var reopened = new SqliteStagingIngress(SqliteSessionFactory.ForPlaintext(path));
             Assert.Equal(101, await reopened.NextOffsetAsync(first, ct));
             Assert.False(await reopened.AdmitAsync(first, 100, ct));
             var saved = await reopened.ReadFlowAsync(first, 7001, ct);

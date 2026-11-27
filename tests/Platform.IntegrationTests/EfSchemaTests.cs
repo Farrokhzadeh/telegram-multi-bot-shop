@@ -14,13 +14,13 @@ public sealed class EfSchemaTests
     {
         var ct = TestContext.Current.CancellationToken;
         await using var database = await DisposablePostgres.CreateAsync(ct);
-        await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
+        await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, ct);
         await using var connection = await database.Data.OpenConnectionAsync(ct);
-        var options = new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql(connection).Options;
-        await using var context = new PostgresAkantiDbContext(options);
+        var options = new DbContextOptionsBuilder<PostgresPlainTargetDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PostgresPlainTargetDbContext(options);
         var entities = context.Model.GetEntityTypes().ToArray();
         Assert.Equal(28, entities.Length);
-        Assert.Equal(501, entities.Sum(entity => entity.GetProperties().Count()));
+        Assert.Equal(493, entities.Sum(entity => entity.GetProperties().Count()));
         foreach (var entity in entities)
         {
             string table = entity.GetTableName()!;
@@ -49,7 +49,7 @@ public sealed class EfSchemaTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
             await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
             {
                 DataSource = path,
@@ -59,11 +59,11 @@ public sealed class EfSchemaTests
             }.ToString());
             await connection.OpenAsync(ct);
             SqliteSchema.Configure(connection);
-            var options = new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options;
-            await using var context = new SqliteAkantiDbContext(options);
+            var options = new DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options;
+            await using var context = new SqlitePlainTargetDbContext(options);
             var entities = context.Model.GetEntityTypes().ToArray();
             Assert.Equal(28, entities.Length);
-            Assert.Equal(501, entities.Sum(entity => entity.GetProperties().Count()));
+            Assert.Equal(493, entities.Sum(entity => entity.GetProperties().Count()));
             foreach (var entity in entities)
             {
                 Assert.DoesNotContain(entity.GetProperties(), property => property.IsShadowProperty());
@@ -111,8 +111,8 @@ public sealed class EfSchemaTests
         var ct = TestContext.Current.CancellationToken;
         await using var database = await DisposablePostgres.CreateAsync(ct);
         await using var connection = await database.Data.OpenConnectionAsync(ct);
-        var options = new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql(connection).Options;
-        await using var context = new PostgresAkantiDbContext(options);
+        var options = new DbContextOptionsBuilder<PostgresPlainTargetDbContext>().UseNpgsql(connection).Options;
+        await using var context = new PostgresPlainTargetDbContext(options);
         Assert.False(context.Database.HasPendingModelChanges());
         await context.Database.MigrateAsync(ct);
         Assert.Single(await context.Database.GetAppliedMigrationsAsync(ct));
@@ -133,8 +133,8 @@ public sealed class EfSchemaTests
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync(ct);
         SqliteSchema.Configure(connection);
-        var options = new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options;
-        await using var context = new SqliteAkantiDbContext(options);
+        var options = new DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options;
+        await using var context = new SqlitePlainTargetDbContext(options);
         Assert.False(context.Database.HasPendingModelChanges());
         await context.Database.MigrateAsync(ct);
         Assert.Single(await context.Database.GetAppliedMigrationsAsync(ct));
@@ -176,7 +176,7 @@ public sealed class EfSchemaTests
         await using var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
         await connection.OpenAsync(ct);
         SqliteSchema.Configure(connection);
-        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+        await using var context = new SqlitePlainTargetDbContext(new DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options);
         await context.Database.MigrateAsync(ct);
         Guid brand = Guid.NewGuid(), member = Guid.NewGuid(), entry = Guid.NewGuid();
         context.Add(SchemaBrand(brand));
@@ -261,7 +261,7 @@ public sealed class EfSchemaTests
         await using var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
         await connection.OpenAsync(ct);
         SqliteSchema.Configure(connection);
-        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+        await using var context = new SqlitePlainTargetDbContext(new DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options);
         await context.Database.MigrateAsync(ct);
         Guid brand = Guid.NewGuid(), product = Guid.NewGuid(), member = Guid.NewGuid(), order = Guid.NewGuid();
         context.Add(new Platform.Persistence.Entities.Brand

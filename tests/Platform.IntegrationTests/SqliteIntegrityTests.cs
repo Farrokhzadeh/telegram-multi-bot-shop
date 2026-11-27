@@ -13,14 +13,14 @@ public sealed class SqliteIntegrityTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid brand = Guid.NewGuid(), member = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 await ExecuteAsync(tx, """
-                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                    VALUES ($brand,'integrity','Integrity','Integrity','international','en','integrity_bot',81,x'01','fixture');
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token)
+                    VALUES ($brand,'integrity','Integrity','Integrity','international','en','integrity_bot',81,x'01');
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,8001,'en');
                     INSERT INTO wallets(user_id) VALUES ($member);
                     """, token, ("$brand", brand), ("$member", member));
@@ -68,16 +68,16 @@ public sealed class SqliteIntegrityTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid first = Guid.NewGuid(), second = Guid.NewGuid(), member = Guid.NewGuid(), product = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 await ExecuteAsync(tx, """
-                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                    VALUES ($first,'first','First','First','international','en','first_bot',91,x'01','fixture');
-                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                    VALUES ($second,'second','Second','Second','international','en','second_bot',92,x'01','fixture');
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token)
+                    VALUES ($first,'first','First','First','international','en','first_bot',91,x'01');
+                    INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token)
+                    VALUES ($second,'second','Second','Second','international','en','second_bot',92,x'01');
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$first,9001,'en');
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title) VALUES ($product,'local','immediate','Fixture');
                     """, token, ("$first", first), ("$second", second), ("$member", member), ("$product", product));

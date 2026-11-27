@@ -9,7 +9,7 @@ public sealed record SqliteCouponDispatch(long ChatId, string Text);
 
 public sealed class SqliteCouponDeliveryStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<JobLease?> ClaimNoticeAsync(BrandContext context, Guid worker, CancellationToken ct = default) => sessions.RunAsync(true, (_, tx, token) => OutboxStore.ClaimSqliteAsync(tx, context.BrandId, JobKind.CouponNotice, worker, TimeSpan.FromSeconds(90), token), ct);
     public Task PrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)

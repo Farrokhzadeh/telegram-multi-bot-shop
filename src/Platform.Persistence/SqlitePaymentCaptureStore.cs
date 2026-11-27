@@ -8,7 +8,7 @@ namespace Platform.Persistence;
 
 public sealed class SqlitePaymentCaptureStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public async Task<PaymentCapture> CaptureAsync(BrandContext context, long revision, VerifiedPaymentNotice notice,
         Func<PaymentEvidenceContent, CancellationToken, Task<string>> archive, CancellationToken ct = default)

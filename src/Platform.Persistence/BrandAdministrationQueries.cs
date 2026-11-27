@@ -16,7 +16,7 @@ internal static class BrandAdministrationQueries
     internal static async Task<BrandPolicyDetail> ReadAsync(EfSession data, AuthenticatedAdmin actor, BrandContext context, CancellationToken ct)
     {
         await AdminSessionStore.RequireActiveAsync(data, actor, null, ct);
-        if (data.Data is PostgresAkantiDbContext) await data.LockBrandAsync(context.BrandId, ct, true);
+        if (data.Data.Database.IsNpgsql()) await data.LockBrandAsync(context.BrandId, ct, true);
         var brand = await data.Data.Set<Entities.Brand>().AsNoTracking().SingleOrDefaultAsync(value => value.Id == context.BrandId && value.BotId == context.BotId, ct);
         if (brand is null) data.RejectScope("The brand policy scope is unavailable.");
         var channels = await data.Data.Set<Entities.BrandChannel>().Where(value => value.BrandId == context.BrandId && value.Active && value.Required).OrderBy(value => value.ChatId)

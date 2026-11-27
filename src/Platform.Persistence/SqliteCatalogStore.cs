@@ -8,7 +8,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteCatalogStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<Guid[]> VisibleProductsAsync(BrandContext context, long actor, CancellationToken ct = default) =>
         sessions.RunEfAsync(false, null, async (data, token) => await (from listing in data.Data.Set<Entities.BrandProduct>()

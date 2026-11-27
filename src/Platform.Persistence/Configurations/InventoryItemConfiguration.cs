@@ -4,7 +4,7 @@ using Platform.Persistence.Entities;
 
 namespace Platform.Persistence.Configurations;
 
-internal sealed class InventoryItemConfiguration(bool sqlite, bool plaintext = false) : IEntityTypeConfiguration<InventoryItem>
+internal sealed class InventoryItemConfiguration(bool sqlite) : IEntityTypeConfiguration<InventoryItem>
 {
     public void Configure(EntityTypeBuilder<InventoryItem> row)
     {
@@ -14,9 +14,7 @@ internal sealed class InventoryItemConfiguration(bool sqlite, bool plaintext = f
             {
                 table.HasCheckConstraint("ck_inventory_items_1", "id IS NULL OR akanti_uuid(id)");
                 table.HasCheckConstraint("ck_inventory_items_2", "product_id IS NULL OR akanti_uuid(product_id)");
-                if (!plaintext) table.HasCheckConstraint("ck_inventory_items_3", "length(credential_ciphertext)>0");
-                else table.HasCheckConstraint("ck_inventory_items_3", "length(credential_content)>0");
-                if (!plaintext) table.HasCheckConstraint("ck_inventory_items_4", "credential_key_id IS NULL OR (length(credential_key_id) BETWEEN 1 AND 160 AND trim(credential_key_id)<>'')");
+                table.HasCheckConstraint("ck_inventory_items_3", "length(credential_content)>0");
                 table.HasCheckConstraint("ck_inventory_items_5", "length(source_fingerprint)=32");
                 table.HasCheckConstraint("ck_inventory_items_6", "origin_kind IN ('local_import','supplier_bonus')");
                 table.HasCheckConstraint("ck_inventory_items_7", "supplier_request_id IS NULL OR akanti_uuid(supplier_request_id)");
@@ -32,8 +30,7 @@ internal sealed class InventoryItemConfiguration(bool sqlite, bool plaintext = f
             }
             else
             {
-                if (!plaintext) table.HasCheckConstraint("ck_inventory_items_1", "octet_length(credential_ciphertext)>0");
-                else table.HasCheckConstraint("ck_inventory_items_1", "octet_length(credential_content)>0");
+                table.HasCheckConstraint("ck_inventory_items_1", "octet_length(credential_content)>0");
                 table.HasCheckConstraint("ck_inventory_items_2", "octet_length(source_fingerprint)=32");
                 table.HasCheckConstraint("ck_inventory_items_3", "origin_kind IN ('local_import','supplier_bonus')");
                 table.HasCheckConstraint("ck_inventory_items_4", "octet_length(supplier_item_key)=32");
@@ -43,7 +40,6 @@ internal sealed class InventoryItemConfiguration(bool sqlite, bool plaintext = f
                 table.HasCheckConstraint("ck_inventory_items_8", "(origin_kind='supplier_bonus' AND supplier_request_id IS NOT NULL AND state='admin_held' AND assigned_fulfillment_id IS NULL) OR\n           (origin_kind='local_import' AND supplier_request_id IS NULL AND state <> 'admin_held')");
                 table.HasCheckConstraint("ck_inventory_items_9", "isfinite(allocated_at)");
                 table.HasCheckConstraint("ck_inventory_items_10", "isfinite(created_at)");
-                if (!plaintext) table.HasCheckConstraint("ck_inventory_items_11", "length(credential_key_id) BETWEEN 1 AND 160 AND btrim(credential_key_id)<>''");
                 table.HasCheckConstraint("ck_inventory_items_12", "length(remote_item_ref) BETWEEN 1 AND 160 AND btrim(remote_item_ref)<>''");
             }
         });
@@ -56,16 +52,10 @@ internal sealed class InventoryItemConfiguration(bool sqlite, bool plaintext = f
         product_id.IsRequired();
         product_id.ValueGeneratedNever();
         if (sqlite) product_id.UseCollation("NOCASE");
-        if (plaintext) row.Ignore(v => v.CredentialCiphertext); else row.Ignore(v => v.CredentialContent);
-        var credential_ciphertext = (plaintext ? row.Property(v => v.CredentialContent) : row.Property(v => v.CredentialCiphertext)).HasColumnName(plaintext ? "credential_content" : "credential_ciphertext").HasColumnType(sqlite ? "BLOB" : "bytea");
-        credential_ciphertext.IsRequired();
-        if (plaintext) row.Ignore(v => v.CredentialKeyId);
-        else
-        {
-            var credential_key_id = row.Property(v => v.CredentialKeyId).HasColumnName("credential_key_id").HasColumnType(sqlite ? "TEXT" : "text");
-            credential_key_id.IsRequired();
-            credential_key_id.HasMaxLength(160);
-        }
+        row.Ignore(v => v.CredentialCiphertext);
+        var credential_content = row.Property(v => v.CredentialContent).HasColumnName("credential_content").HasColumnType(sqlite ? "BLOB" : "bytea");
+        credential_content.IsRequired();
+        row.Ignore(v => v.CredentialKeyId);
         var source_fingerprint = row.Property(v => v.SourceFingerprint).HasColumnName("source_fingerprint").HasColumnType(sqlite ? "BLOB" : "bytea");
         source_fingerprint.IsRequired();
         var origin_kind = row.Property(v => v.OriginKind).HasColumnName("origin_kind").HasColumnType(sqlite ? "TEXT" : "text");

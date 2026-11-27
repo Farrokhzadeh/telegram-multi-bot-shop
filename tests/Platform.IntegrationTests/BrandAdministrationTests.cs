@@ -8,7 +8,7 @@ public sealed class BrandAdministrationTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
     [Fact]
-    public async Task EncryptedTokenAndChannelLifecycleQualifiesNativeCompatibleServices() => await BrandAdministrationQualification.RunAsync(Ct);
+    public async Task PlaintextTokenAndChannelLifecycleQualifiesNativeCompatibleServices() => await BrandAdministrationQualification.RunAsync(Ct);
     [Fact]
     public async Task StaleChangedAndUnverifiedChannelConfigurationCannotReplaceTheCommittedList()
     {
@@ -48,18 +48,12 @@ public sealed class BrandAdministrationTests
             return new(1001, "public_test_bot");
         }, Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE reason='credential_rotation'", Ct));
-        Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.brands WHERE octet_length(bot_token_ciphertext)=1", Ct));
+        Assert.Equal(3L, await f.CountAsync("SELECT count(*) FROM shop.brands WHERE octet_length(bot_token)=1", Ct));
     }
     [Fact]
-    public async Task VaultRejectsForeignScopeTamperingAndDisposedPlaintext()
+    public void BotTokenDisposalZeroesTrustedTransportAndRejectsReuse()
     {
-        await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
-        using var token = BotToken.Parse("1001:" + new string('s', 35));
-        var vault = new BotTokenVault(f.Secrets);
-        var encrypted = vault.Protect(f.Context(0), token);
-        Assert.Throws<CipherRejectedException>(() => vault.OpenForTrustedTransport(f.Context(1), encrypted.KeyId, encrypted.Ciphertext));
-        encrypted.Ciphertext[^1] ^= 1;
-        Assert.Throws<CipherRejectedException>(() => vault.OpenForTrustedTransport(f.Context(0), encrypted.KeyId, encrypted.Ciphertext));
+        var token = BotToken.Parse("1001:" + new string('s', 35));
         var previous = token.ForTrustedTransport();
         token.Dispose();
         Assert.True(previous.Span.IndexOfAnyExcept((byte)0) < 0);

@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using Npgsql;
+using Microsoft.EntityFrameworkCore;
 
 namespace Platform.Persistence;
 
@@ -22,6 +23,18 @@ public static class SchemaRunner
 
     public static string BaselineSql { get; } = ReadBaseline();
     public static string BaselineSqlSha256 { get; } = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(BaselineSql)));
+
+    public static async Task ApplyPlaintextAsync(NpgsqlDataSource data, CancellationToken cancellationToken = default)
+    {
+        if (Environment.GetEnvironmentVariable("SHOP_TEST_ALLOW_DATABASE_CREATION") != "1") throw new InvalidOperationException("Plaintext schema creation is qualification-only.");
+        var identity = SchemaManifest.ForQualification(data.ConnectionString);
+        identity.Validate();
+        var options = new NpgsqlConnectionStringBuilder(data.ConnectionString);
+        if (options.Host != identity.Host || options.Port != identity.Port || options.Database != identity.Database || options.Username != identity.Username) throw new InvalidOperationException("Schema identity mismatch.");
+        await using var connection = await data.OpenConnectionAsync(cancellationToken);
+        await using var context = new PostgresPlainTargetDbContext(new DbContextOptionsBuilder<PostgresPlainTargetDbContext>().UseNpgsql(connection, provider => provider.CommandTimeout(30)).Options);
+        await Migrations.PlainTargetSchema.CreateAsync(context, cancellationToken);
+    }
 
     public static async Task<SchemaReceipt> ApplyAsync(NpgsqlDataSource data, SchemaManifest manifest,
         CancellationToken cancellationToken = default)

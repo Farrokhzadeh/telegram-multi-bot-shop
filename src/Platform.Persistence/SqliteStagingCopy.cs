@@ -2,7 +2,6 @@ using System.Data;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -39,7 +38,7 @@ public static class SqliteStagingCopy
         string temporary = Path.Combine(parent, "." + Path.GetFileName(target) + ".pending-" + Guid.NewGuid().ToString("N") + ".db");
         try
         {
-            await SqliteSchema.InitializeAsync(temporary, ct);
+            await SqliteSchema.InitializePlaintextAsync(temporary, ct);
             var sqlite = new SqliteConnection(new SqliteConnectionStringBuilder
             {
                 DataSource = temporary,
@@ -56,13 +55,14 @@ public static class SqliteStagingCopy
                 await using var snapshot = await postgres.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct);
                 await using (var readonlyCommand = new NpgsqlCommand("SET TRANSACTION READ ONLY", postgres, snapshot))
                     await readonlyCommand.ExecuteNonQueryAsync(ct);
-                string[] tables = await TablesAsync(postgres, snapshot, ct);
+                await using var sourceModel = new PostgresPlainTargetDbContext(new DbContextOptionsBuilder<PostgresPlainTargetDbContext>().UseNpgsql(postgres).Options);
+                await sourceModel.Database.UseTransactionAsync(snapshot, ct);
+                string[] expected = sourceModel.Model.GetEntityTypes().Select(value => value.GetTableName()).Where(value => value is not null).Select(value => value!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+                string[] tables = await TablesAsync(postgres, snapshot, expected, ct);
                 await using var write = sqlite.BeginTransaction(deferred: false);
                 await using (var defer = SqliteCommand(write, "PRAGMA defer_foreign_keys=ON"))
                     await defer.ExecuteNonQueryAsync(ct);
-                await using var sourceModel = new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql(postgres).Options);
-                await sourceModel.Database.UseTransactionAsync(snapshot, ct);
-                await using var targetModel = new SqliteSnapshotDbContext(new DbContextOptionsBuilder<SqliteSnapshotDbContext>().UseSqlite(sqlite).Options);
+                await using var targetModel = new PlainTargetCopyDbContext(new DbContextOptionsBuilder<PlainTargetCopyDbContext>().UseSqlite(sqlite).Options);
                 await targetModel.Database.UseTransactionAsync(write, ct);
                 long rows = 0;
                 foreach (string table in tables)
@@ -106,24 +106,15 @@ public static class SqliteStagingCopy
         }
     }
 
-    private static async Task<string[]> TablesAsync(NpgsqlConnection connection, NpgsqlTransaction snapshot, CancellationToken ct)
+    private static async Task<string[]> TablesAsync(NpgsqlConnection connection, NpgsqlTransaction snapshot, string[] expected, CancellationToken ct)
     {
-        using var resource = typeof(SqliteSchema).Assembly.GetManifestResourceStream("Platform.Persistence.Migrations.Sqlite.0001_core.sql")
-            ?? throw new InvalidOperationException("Canonical SQLite schema is missing.");
-        using var reader = new StreamReader(resource);
-        string schema = await reader.ReadToEndAsync(ct);
-        string[] tables = Regex.Matches(schema, @"(?m)^CREATE TABLE ([a-z_]+) \(")
-            .Select(match => match.Groups[1].Value).ToArray();
-        if (tables.Length == 0 || tables.Distinct(StringComparer.Ordinal).Count() != tables.Length)
-            throw new InvalidOperationException("SQLite schema table inventory is unavailable.");
-        using var command = new NpgsqlCommand("""
-            SELECT table_name FROM information_schema.tables WHERE table_schema='shop' AND table_type='BASE TABLE'
-            """, connection, snapshot);
+        if (expected.Length != 28 || expected.Distinct(StringComparer.Ordinal).Count() != expected.Length) throw new InvalidOperationException("Plaintext model table inventory is unavailable.");
+        using var command = new NpgsqlCommand("SELECT table_name FROM information_schema.tables WHERE table_schema='shop' AND table_type='BASE TABLE' AND table_name<>'__EFMigrationsHistory'", connection, snapshot);
         await using var rows = await command.ExecuteReaderAsync(ct);
         var source = new HashSet<string>(StringComparer.Ordinal);
         while (await rows.ReadAsync(ct)) source.Add(rows.GetString(0));
-        if (!source.SetEquals(tables)) throw new InvalidOperationException("Staging source and SQLite table inventories differ.");
-        return tables;
+        if (!source.SetEquals(expected)) throw new InvalidOperationException("Staging source and plaintext model table inventories differ.");
+        return expected;
     }
 
     private static async Task<string[]> ColumnsAsync(NpgsqlConnection connection, NpgsqlTransaction snapshot, string table,

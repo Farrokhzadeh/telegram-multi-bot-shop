@@ -8,7 +8,6 @@ public sealed partial class SqliteSessionFactory
     private readonly string connectionString;
     private readonly int timeoutSeconds;
 
-    internal SqliteSessionFactory RequirePlaintext() => this;
     public static SqliteSessionFactory ForPlaintext(string path, int timeoutSeconds = 5) => new(path, timeoutSeconds);
 
     internal SqliteSessionFactory(string path, int timeoutSeconds = 5)
@@ -48,7 +47,7 @@ public sealed partial class SqliteSessionFactory
         }
         ct.ThrowIfCancellationRequested();
         await using var transaction = connection.BeginTransaction(deferred: !write);
-        efTransactions.Add(transaction, new EfTransaction(write, timeoutSeconds, true));
+        efTransactions.Add(transaction, new EfTransaction(write, timeoutSeconds));
         try
         {
             var result = await operation(connection, transaction, ct);

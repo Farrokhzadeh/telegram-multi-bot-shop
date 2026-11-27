@@ -210,10 +210,9 @@ public sealed class ManualDepositTests
         await bank.SaveAsync(f.Context(0), admin, "5555666677778888", "Public next holder", revision, command, Ct);
         await Assert.ThrowsAsync<InvalidOperationException>(() => bank.SaveAsync(f.Context(0), admin, "9999000011112222", "Public stale holder", revision, Guid.NewGuid(), Ct));
         await using var readOld = await f.Sessions.BeginAsync(Ct);
-        var value = await readOld.QuerySingleAsync(new DbStatement("SELECT bank_destination_ciphertext,bank_destination_key_id FROM shop.payments WHERE id=$1", DbValue.Uuid(order.Payment)), r => (Bytes: r.GetBinary(0), Key: r.GetString(1)), Ct);
-        byte[] plain = new Platform.Security.BrandCipher(f.Secrets).Decrypt(f.Context(0), "payments", order.Payment, "bank_destination_ciphertext", value.Key, value.Bytes);
-        try { Assert.Contains("1111222233334444", Encoding.UTF8.GetString(plain), StringComparison.Ordinal); Assert.DoesNotContain("5555666677778888", Encoding.UTF8.GetString(plain), StringComparison.Ordinal); }
-        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain); }
+        byte[] value = await readOld.QuerySingleAsync(new DbStatement("SELECT bank_destination FROM shop.payments WHERE id=$1", DbValue.Uuid(order.Payment)), r => r.GetBinary(0), Ct);
+        try { Assert.Contains("1111222233334444", Encoding.UTF8.GetString(value), StringComparison.Ordinal); Assert.DoesNotContain("5555666677778888", Encoding.UTF8.GetString(value), StringComparison.Ordinal); }
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(value); }
     }
 
     [Fact]

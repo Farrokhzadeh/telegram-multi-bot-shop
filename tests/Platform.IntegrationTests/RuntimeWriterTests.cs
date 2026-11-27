@@ -33,7 +33,7 @@ public sealed class RuntimeWriterTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request(), Ct));
         await registry.Controls.SetActiveAsync(actor, f.Context(0), 1, true, Guid.NewGuid(), Ct);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request(), Ct));
-        var fresh = new CheckoutStore(f.Sessions.ForBrandWriter(f.Context(0)), f.Secrets);
+        var fresh = new CheckoutStore(f.Sessions.ForBrandWriter(f.Context(0)));
         Assert.Equal(CheckoutOutcome.Purchased, (await fresh.PurchaseLocalAsync(f.Context(0), CheckoutFixture.Actor(0), f.Request() with { PolicyRevision = 2 }, Ct)).Outcome);
         Assert.Equal(2L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
     }

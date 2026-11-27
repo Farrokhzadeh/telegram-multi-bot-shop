@@ -15,7 +15,7 @@ public static class LegacyArchiveFilesQualification
         string root = Path.Combine(Path.GetTempPath(), "teleg-history-archive-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
-            using var files = new SyntheticSecretFiles(); using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+            using var files = new SyntheticSecretFiles(); using var secrets = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
             var context = CipherQualification.Context(SyntheticSecretFiles.BrandA); Guid target = Guid.NewGuid(), member = Guid.NewGuid();
             using var vectors = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixtures", "legacy-fernet-synthetic.json")));
             var vector = vectors.RootElement.GetProperty("vectors").EnumerateArray().First(v => v.GetProperty("kind").GetString() == "Text");

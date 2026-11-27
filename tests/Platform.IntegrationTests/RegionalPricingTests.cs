@@ -112,13 +112,11 @@ public sealed class RegionalPricingTests
 
     private static async Task Regional(CheckoutFixture f)
     {
-        var cipher = new BrandCipher(f.Secrets);
-        byte[] number = cipher.Encrypt(f.Context(0), "brands", f.Brands[0], "bank_number_ciphertext", Encoding.UTF8.GetBytes("public synthetic number"));
-        byte[] holder = cipher.Encrypt(f.Context(0), "brands", f.Brands[0], "bank_holder_ciphertext", Encoding.UTF8.GetBytes("public synthetic holder"));
+        byte[] number = Encoding.UTF8.GetBytes("public synthetic number");
+        byte[] holder = Encoding.UTF8.GetBytes("public synthetic holder");
         await using var edit = await f.Sessions.BeginAsync(Ct);
         await edit.ExecuteAsync(new DbStatement("""
-            UPDATE shop.brands SET market='iran',allow_bank=true,allow_crypto=true,policy_version=policy_version+1,bank_number_ciphertext=$1,bank_holder_ciphertext=$2,
-                bank_key_id='current',bank_card_fingerprint=decode(repeat('77',32),'hex'),bank_changed_at=clock_timestamp() WHERE id=$3
+            UPDATE shop.brands SET market='iran',allow_bank=true,allow_crypto=true,policy_version=policy_version+1,bank_number=$1,bank_holder=$2,bank_card_fingerprint=decode(repeat('77',32),'hex'),bank_changed_at=clock_timestamp() WHERE id=$3
             """, DbValue.Binary(number), DbValue.Binary(holder), DbValue.Uuid(f.Brands[0])), Ct);
         await edit.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET allow_bank=true,allow_crypto=true,auto_price_toman=false,price_toman=1000000,revision=revision+1 WHERE brand_id=$1", DbValue.Uuid(f.Brands[0])), Ct);
         await edit.CommitAsync(Ct);

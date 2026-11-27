@@ -20,11 +20,11 @@ using Platform.Telegram;
 using Platform.Core;
 namespace Platform.Testing;
 
-public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, string Secrets, long WriterRevision = 0);
+public sealed record CutoverStageState(Guid Run, string Database, Guid Product, Guid User, long WriterRevision = 0);
 public sealed record CutoverDeliveryAttempt(Guid Run, Guid Delivery, Guid Order, Guid Generation, Guid Job, long Attempt, long? Target, bool File, string PayloadSha256);
 public sealed record CutoverStageApi(Guid Run, string Address);
 public sealed record CutoverStockPlan(Guid Run, Guid Product, Guid Unit, string Credential);
-public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Cipher, string Plain);
+public sealed record CutoverStockBinding(Guid Product, Guid Unit, string Content);
 public sealed record CutoverStageResult(string Operation, string Outcome, long Orders, long Allocated, long Debits, bool Synthetic = true, bool ReleaseReady = false);
 public sealed record CutoverPilotResult(Guid Run, Guid Product, string Outcome, string? Title = null, int? Minimum = null, int? Maximum = null,
     int? Quantity = null, decimal? Amount = null, string? Currency = null, Guid? Order = null,
@@ -63,25 +63,23 @@ public static class CutoverStageRuntime
         if (mode == "init")
         {
             if (File.Exists(path) || Directory.EnumerateFileSystemEntries(Path.Combine(root, "requests")).Any() || Directory.EnumerateFileSystemEntries(Path.Combine(root, "results")).Any()) throw new InvalidOperationException();
-            var f = await CheckoutFixture.CreateAsync(users: 1, stock: 3, ct: ct, secretDirectory: Path.Combine(root, "tmp"));
-            if (!f.SecretRoot.StartsWith(root + "/tmp/shop-secret-qualification-", StringComparison.Ordinal)) throw new InvalidOperationException();
+            var f = await CheckoutFixture.CreateAsync(users: 1, stock: 3, ct: ct);
             await using (var edit = await f.Sessions.BeginAsync(ct))
             {
                 await edit.ExecuteAsync(new DbStatement("UPDATE shop.brands SET active=false,policy_version=policy_version+1 WHERE id<>$1", DbValue.Uuid(SyntheticSecretFiles.BrandA)), ct);
                 await edit.CommitAsync(ct);
             }
-            var state = new CutoverStageState(run, new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database!, f.Product, f.Users[0], f.SecretRoot);
+            var state = new CutoverStageState(run, new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database!, f.Product, f.Users[0]);
             Write(path, JsonSerializer.Serialize(state, CutoverStageJson.Default.CutoverStageState));
             f.Secrets.Dispose();
             return;
         }
         var saved = JsonSerializer.Deserialize(ArchivePrivateFile.Read(path, 1, 4096), CutoverStageJson.Default.CutoverStageState) ?? throw new InvalidOperationException();
-        if (saved.WriterRevision < 0 || saved.Run != run || saved.Database.Length != 51 || !saved.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) || !Guid.TryParseExact(saved.Database[19..], "N", out _) || !saved.Secrets.StartsWith(root + "/tmp/shop-secret-qualification-", StringComparison.Ordinal)) throw new InvalidOperationException();
+        if (saved.WriterRevision < 0 || saved.Run != run || saved.Database.Length != 51 || !saved.Database.StartsWith("shop_qualification_", StringComparison.Ordinal) || !Guid.TryParseExact(saved.Database[19..], "N", out _)) throw new InvalidOperationException();
         if (mode == "payment-audit")
         {
-            using var keys = SecretFiles.Load(saved.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
             var key = JsonSerializer.Deserialize(ArchivePrivateFile.Read(Path.Combine(root, "payment-key.json"), 1, 1024), CutoverPaymentJson.Default.CutoverPaymentKey) ?? throw new InvalidOperationException();
-            var files = new CutoverPaymentFiles(Path.Combine(root, "payment-archives"), keys, CheckoutFixture.ResolveContexts()[0], key, new(run, Guid.NewGuid(), "", "", ""));
+            var files = new CutoverPaymentFiles(Path.Combine(root, "payment-archives"), CheckoutFixture.ResolveContexts()[0], key, new(run, Guid.NewGuid(), "", "", ""));
             if (key.Run != run || key.Member != saved.User) throw new InvalidOperationException();
             var paths = Directory.GetFiles(Path.Combine(root, "payment-archives"), "*.json").Order(StringComparer.Ordinal).ToArray();
             if (paths.Length is < 1 or > 64) throw new InvalidOperationException();
@@ -100,7 +98,6 @@ public static class CutoverStageRuntime
         options.ApplicationName = "t068-cutover-stage"; options.Database = saved.Database; options.IncludeErrorDetail = false; options.MaxPoolSize = 4;
         await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         await FoundationQualification.VerifySchemaAsync(data);
-        using var secrets = SecretFiles.Load(saved.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
         var sessions = new DbSessionFactory(data);
         var context = CheckoutFixture.ResolveContexts()[0];
         if (mode == "payment-init")
@@ -129,25 +126,19 @@ public static class CutoverStageRuntime
             await using var seed = await sessions.BeginAsync(ct);
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.products(id,fulfillment_kind,availability_policy,title) VALUES ($1,'local','immediate','SYNTHETIC COMMON CUTOVER') ON CONFLICT DO NOTHING", DbValue.Uuid(plan.Product)), ct);
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_products(brand_id,product_id,visible,price_usdt) VALUES ($1,$2,true,10) ON CONFLICT DO NOTHING", DbValue.Uuid(context.BrandId), DbValue.Uuid(plan.Product)), ct);
-            var inventory = new InventoryCipher(secrets); byte[] plain = Encoding.UTF8.GetBytes(plan.Credential);
+            byte[] content = Encoding.UTF8.GetBytes(plan.Credential);
             try
             {
-                var rows = await seed.QueryManyAsync(new DbStatement("SELECT credential_ciphertext,credential_key_id,product_id,state FROM shop.inventory_items WHERE id=$1", DbValue.Uuid(plan.Unit)), r => (Bytes: r.GetBinary(0), Key: r.GetString(1), Product: r.GetGuid(2), State: r.GetString(3)), 1, ct);
-                byte[] encrypted;
+                var rows = await seed.QueryManyAsync(new DbStatement("SELECT credential_content,product_id,state FROM shop.inventory_items WHERE id=$1", DbValue.Uuid(plan.Unit)), r => (Bytes: r.GetBinary(0), Product: r.GetGuid(1), State: r.GetString(2)), 1, ct);
                 if (rows.Count == 0)
-                {
-                    encrypted = inventory.Encrypt(plan.Unit, plain);
-                    await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind) VALUES ($1,$2,$3,'current',$4,'local_import')", DbValue.Uuid(plan.Unit), DbValue.Uuid(plan.Product), DbValue.Binary(encrypted), DbValue.Binary(SHA256.HashData(plain))), ct);
-                }
-                else { if (rows[0].Product != plan.Product || rows[0].State != "available") throw new InvalidOperationException(); encrypted = rows[0].Bytes; }
-                byte[] check = inventory.Decrypt(plan.Unit, "current", encrypted);
-                try { if (!CryptographicOperations.FixedTimeEquals(plain, check)) throw new InvalidOperationException(); } finally { CryptographicOperations.ZeroMemory(check); }
+                    await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind) VALUES ($1,$2,$3,$4,'local_import')", DbValue.Uuid(plan.Unit), DbValue.Uuid(plan.Product), DbValue.Binary(content), DbValue.Binary(SHA256.HashData(content))), ct);
+                else if (rows[0].Product != plan.Product || rows[0].State != "available" || !CryptographicOperations.FixedTimeEquals(rows[0].Bytes, content)) throw new InvalidOperationException();
                 await seed.CommitAsync(ct);
-                Write(Path.Combine(root, "stock-binding.json"), JsonSerializer.Serialize(new CutoverStockBinding(plan.Product, plan.Unit, Convert.ToHexString(SHA256.HashData(encrypted)).ToLowerInvariant(), Convert.ToHexString(SHA256.HashData(plain)).ToLowerInvariant()), CutoverStageJson.Default.CutoverStockBinding), true);
+                Write(Path.Combine(root, "stock-binding.json"), JsonSerializer.Serialize(new CutoverStockBinding(plan.Product, plan.Unit, Convert.ToHexStringLower(SHA256.HashData(content))), CutoverStageJson.Default.CutoverStockBinding), true);
                 Write(path, JsonSerializer.Serialize(saved with { Product = plan.Product }, CutoverStageJson.Default.CutoverStageState), true);
                 return;
             }
-            finally { CryptographicOperations.ZeroMemory(plain); }
+            finally { CryptographicOperations.ZeroMemory(content); }
         }
         if (mode == "telegram-init")
         {
@@ -177,8 +168,8 @@ public static class CutoverStageRuntime
             if (active != 1 || member.Id != saved.User) throw new InvalidOperationException();
         }
         var catalog = new CatalogStore(sessions, [], (_, _) => throw new InvalidOperationException("Only synthetic local catalog operations are configured."));
-        using var administration = new BrandAdministrationServices(writers, context, secrets, catalog, new byte[32]);
-        await using var api = await StartApiAsync(writers, administration, sessions, secrets, ct);
+        using var administration = new BrandAdministrationServices(writers, context, catalog, new byte[32]);
+        await using var api = await StartApiAsync(writers, administration, sessions, ct);
         Write(Path.Combine(root, "api.json"), JsonSerializer.Serialize(new CutoverStageApi(run, api.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single()), CutoverStageJson.Default.CutoverStageApi), true);
         Write(Path.Combine(root, "ready.json"), JsonSerializer.Serialize(await Result("ready", "ready"), CutoverStageJson.Default.CutoverStageResult), true);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(TimeSpan.FromMinutes(20));
@@ -438,7 +429,7 @@ public static class CutoverStageRuntime
         }
     }
 
-    private static async Task<WebApplication> StartApiAsync(WriterRegistry writers, BrandAdministrationServices services, DbSessionFactory sessions, SecretSnapshot secrets, CancellationToken ct)
+    private static async Task<WebApplication> StartApiAsync(WriterRegistry writers, BrandAdministrationServices services, DbSessionFactory sessions, CancellationToken ct)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { Args = [] }); builder.WebHost.UseUrls("http://127.0.0.1:0"); builder.Logging.ClearProviders();
         var app = builder.Build();
@@ -447,7 +438,7 @@ public static class CutoverStageRuntime
             app.UseRouting(); app.UseMiddleware<DiagnosticsMiddleware>((Action<string>)(_ => { }));
             app.UseMiddleware<AdminGuardMiddleware>((Func<AdminToken, CancellationToken, Task<AuthenticatedAdmin?>>)(async (token, cancellation) =>
             { await using var read = await sessions.BeginReadOnlyAsync(cancellation); return await AdminSessionStore.AuthenticateAsync(read, token, cancellation); }));
-            app.MapScopedCatalogAdministration(writers, secrets); app.MapScopedOrderAdministration(writers, secrets, _ => services); await app.StartAsync(ct); return app;
+            app.MapScopedCatalogAdministration(writers); app.MapScopedOrderAdministration(writers, _ => services); await app.StartAsync(ct); return app;
         }
         catch { await app.DisposeAsync(); throw; }
     }

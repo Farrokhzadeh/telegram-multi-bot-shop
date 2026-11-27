@@ -5,7 +5,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteLocalPreorderStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<JobLease?> ClaimAsync(Guid worker, CancellationToken ct = default) => sessions.RunAsync(true, (_, tx, token) => OutboxStore.ClaimSqliteAsync(tx, null, JobKind.DrainLocalPreorders, worker, TimeSpan.FromSeconds(30), token), ct);
     public Task<Guid?> DrainAsync(JobLease lease, IReadOnlyList<BrandContext> contexts, CancellationToken ct = default)

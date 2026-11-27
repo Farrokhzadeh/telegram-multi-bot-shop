@@ -11,7 +11,7 @@ public sealed class PricingStoreTests
     private static readonly byte[] Market = "{\"status\":\"ok\",\"stats\":{\"usdt-rls\":{\"isClosed\":false,\"latest\":\"1234567\"}}}"u8.ToArray();
 
     [Fact]
-    public async Task CouponCodeIsKeyedEncryptedScopedAndAuditedWithChangedInputReplayRejection()
+    public async Task CouponCodeIsDirectScopedAndAuditedWithChangedInputReplayRejection()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(users: 6, ct: Ct);
         var store = new PricingStore(fixture.Sessions);
@@ -34,9 +34,9 @@ public sealed class PricingStoreTests
         Assert.Equal(CouponLookupOutcome.NotFound, (await store.LookupAsync(fixture.Context(3), CheckoutFixture.Actor(3), "public-coupon", Ct)).Outcome);
         await using var read = await fixture.Sessions.BeginAsync(Ct);
         Assert.Equal("PUBLIC-COUPON", await store.ReadCodeAsync(read, fixture.Context(0), CheckoutFixture.Actor(0), terms.Id, Ct));
-        var code = await read.QuerySingleAsync(new DbStatement("SELECT code_digest,code_ciphertext FROM shop.discounts WHERE id=$1", DbValue.Uuid(terms.Id)), row => (Digest: row.GetBinary(0), Cipher: row.GetBinary(1)), Ct);
+        var code = await read.QuerySingleAsync(new DbStatement("SELECT code_digest,code_content FROM shop.discounts WHERE id=$1", DbValue.Uuid(terms.Id)), row => (Digest: row.GetBinary(0), Content: row.GetBinary(1)), Ct);
         Assert.Equal(32, code.Digest.Length);
-        Assert.False(code.Cipher.AsSpan().SequenceEqual("PUBLIC-COUPON"u8));
+        Assert.True(code.Content.AsSpan().SequenceEqual("PUBLIC-COUPON"u8));
         Assert.DoesNotContain("PUBLIC-COUPON", terms.ToString(), StringComparison.Ordinal);
         await using var foreign = await fixture.Sessions.BeginAsync(Ct);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.ReadCodeAsync(foreign, fixture.Context(1), CheckoutFixture.Actor(1), terms.Id, Ct));
@@ -207,14 +207,11 @@ public sealed class PricingStoreTests
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => store.TransitionClaimAsync(early, fixture.Context(0), terms.Id, order, true, Ct));
         await using (var complete = await fixture.Sessions.BeginAsync(Ct))
         {
-            var stock = await complete.QuerySingleAsync(new DbStatement("SELECT id,credential_ciphertext,credential_key_id FROM shop.inventory_items"), row => (Id: row.GetGuid(0), Cipher: row.GetBinary(1), Key: row.GetString(2)), Ct);
+            var stock = await complete.QuerySingleAsync(new DbStatement("SELECT id,credential_content FROM shop.inventory_items"), row => (Id: row.GetGuid(0), Content: row.GetBinary(1)), Ct);
             Guid unit = Guid.NewGuid(), generation = Guid.NewGuid();
-            byte[] plain = new InventoryCipher(fixture.Secrets).Decrypt(stock.Id, stock.Key, stock.Cipher);
-            byte[] content;
-            try { content = new BrandCipher(fixture.Secrets).Encrypt(fixture.Context(0), "fulfillments", unit, "delivered_content", plain); }
-            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain); }
+            byte[] content = stock.Content;
             await complete.ExecuteAsync(new DbStatement("UPDATE shop.orders SET payment_status='paid',payment_confirmed_at=CURRENT_TIMESTAMP,delivery_generation=$1,manifest_asset_ref='public-synthetic-manifest',manifest_digest=decode(repeat('55',32),'hex'),manifest_prepared_at=CURRENT_TIMESTAMP WHERE id=$2", DbValue.Uuid(generation), DbValue.Uuid(order)), Ct);
-            await complete.ExecuteAsync(new DbStatement("INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,status,delivered_content,delivered_content_key_id,content_kind,manifest_generation) VALUES ($1,$2,1,'local','ready',$3,'current','text',$4)", DbValue.Uuid(unit), DbValue.Uuid(order), DbValue.Binary(content), DbValue.Uuid(generation)), Ct);
+            await complete.ExecuteAsync(new DbStatement("INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,status,delivered_content,content_kind,manifest_generation) VALUES ($1,$2,1,'local','ready',$3,'text',$4)", DbValue.Uuid(unit), DbValue.Uuid(order), DbValue.Binary(content), DbValue.Uuid(generation)), Ct);
             await complete.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET state='allocated',assigned_fulfillment_id=$1,allocated_at=CURRENT_TIMESTAMP WHERE id=$2", DbValue.Uuid(unit), DbValue.Uuid(stock.Id)), Ct);
             await complete.ExecuteAsync(new DbStatement("UPDATE shop.orders SET fulfillment_status='ready',release_authorized_at=CURRENT_TIMESTAMP WHERE id=$1", DbValue.Uuid(order)), Ct);
             Assert.True(await store.TransitionClaimAsync(complete, fixture.Context(0), terms.Id, order, true, Ct));

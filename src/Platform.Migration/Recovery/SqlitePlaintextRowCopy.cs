@@ -28,7 +28,7 @@ internal sealed class SqlitePlaintextRowCopy(SecretSnapshot keys, Func<Guid, Bra
 
         await using var snapshot = source.BeginTransaction(deferred: true);
         await using var write = destination.BeginTransaction(deferred: verifyOnly);
-        await using var old = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(source).Options);
+        await using var old = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite(source).Options);
         await using var next = new PlainTargetCopyDbContext(new DbContextOptionsBuilder<PlainTargetCopyDbContext>().UseSqlite(destination).Options);
         await old.Database.UseTransactionAsync(snapshot, ct);
         await next.Database.UseTransactionAsync(write, ct);
@@ -83,7 +83,7 @@ internal sealed class SqlitePlaintextRowCopy(SecretSnapshot keys, Func<Guid, Bra
         ReadOnlyMemory<byte> expectedSnapshot, ReadOnlyMemory<byte> binding, ReadOnlyMemory<byte> expectedSchema, CancellationToken ct)
     {
         await using var snapshot = source.BeginTransaction(deferred: true);
-        await using var old = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(source).Options);
+        await using var old = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite(source).Options);
         await using var next = new PlainTargetCopyDbContext(new DbContextOptionsBuilder<PlainTargetCopyDbContext>().UseSqlite(destination).Options);
         await old.Database.UseTransactionAsync(snapshot, ct);
         await RequireSchemaAsync(old, snapshot, 1, ct);
@@ -197,13 +197,13 @@ internal sealed class SqlitePlaintextRowCopy(SecretSnapshot keys, Func<Guid, Bra
         if (settings.Mode != SqliteOpenMode.ReadOnly || settings.Pooling || source.State != ConnectionState.Open ||
             !Path.IsPathFullyQualified(settings.DataSource)) throw new MigrationRejectedException();
         await using var snapshot = source.BeginTransaction(deferred: true);
-        await using var data = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(source).Options);
+        await using var data = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite(source).Options);
         await data.Database.UseTransactionAsync(snapshot, ct);
         await RequireSchemaAsync(data, snapshot, 1, ct);
         return await SnapshotAsync(data, snapshot, ct, visit);
     }
 
-    private static async Task<byte[]> SnapshotAsync(AkantiDbContext data, SqliteTransaction snapshot, CancellationToken ct, Action<TargetAssetReference>? visit = null)
+    private static async Task<byte[]> SnapshotAsync(DbContext data, SqliteTransaction snapshot, CancellationToken ct, Action<TargetAssetReference>? visit = null)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         SqliteStagingCopy.HashValue(hash, "akanti-sqlite-encrypted-snapshot-v1");
@@ -230,7 +230,7 @@ internal sealed class SqlitePlaintextRowCopy(SecretSnapshot keys, Func<Guid, Bra
         await command.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task RequireSchemaAsync(AkantiDbContext data, SqliteTransaction transaction, int version, CancellationToken ct)
+    private static async Task RequireSchemaAsync(DbContext data, SqliteTransaction transaction, int version, CancellationToken ct)
     {
         await using var command = transaction.Connection!.CreateCommand();
         command.Transaction = transaction;

@@ -80,29 +80,25 @@ public sealed class CheckoutDispatchTests
     }
 
     [Fact]
-    public async Task BankDestinationIsEncryptedForTheOriginalPaymentAndSurvivesCardReplacement()
+    public async Task BankDestinationIsFrozenForTheOriginalPaymentAndSurvivesCardReplacement()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 2, ct: Ct);
         await Card(f, "public original number", "public original holder");
         var service = Service(f);
         var request = Request(f, CheckoutPayment.Bank);
         Assert.Equal(CheckoutOutcome.AwaitingPayment, (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct)).Outcome);
-        Guid payment;
         byte[] content;
-        string key;
         await using (var read = await f.Sessions.BeginAsync(Ct))
-            (payment, content, key) = await read.QuerySingleAsync(new DbStatement("SELECT id,bank_destination_ciphertext,bank_destination_key_id FROM shop.payments WHERE order_id=$1", DbValue.Uuid(request.OrderId)), row => (row.GetGuid(0), row.GetBinary(1), row.GetString(2)), Ct);
+            content = await read.QuerySingleAsync(new DbStatement("SELECT bank_destination FROM shop.payments WHERE order_id=$1", DbValue.Uuid(request.OrderId)), row => row.GetBinary(0), Ct);
         await Card(f, "public next number", "public next holder");
-        byte[] plain = new BrandCipher(f.Secrets).Decrypt(f.Context(0), "payments", payment, "bank_destination_ciphertext", key, content);
         try
         {
-            using var reader = new BinaryReader(new MemoryStream(plain), Encoding.UTF8);
+            using var reader = new BinaryReader(new MemoryStream(content), Encoding.UTF8);
             Assert.Equal(1, reader.ReadInt32());
             Assert.Equal("public original number", Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32())));
             Assert.Equal("public original holder", Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32())));
         }
-        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain); }
-        Assert.Throws<CipherRejectedException>(() => new BrandCipher(f.Secrets).Decrypt(f.Context(1), "payments", payment, "bank_destination_ciphertext", key, content));
+        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(content); }
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE quote_currency='TOMAN' AND amount_due=1000000", Ct));
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }
@@ -180,12 +176,11 @@ public sealed class CheckoutDispatchTests
     }
     private static async Task Card(CheckoutFixture f, string number, string holder)
     {
-        var cipher = new BrandCipher(f.Secrets);
-        byte[] n = cipher.Encrypt(f.Context(0), "brands", f.Brands[0], "bank_number_ciphertext", Encoding.UTF8.GetBytes(number));
-        byte[] h = cipher.Encrypt(f.Context(0), "brands", f.Brands[0], "bank_holder_ciphertext", Encoding.UTF8.GetBytes(holder));
+        byte[] n = Encoding.UTF8.GetBytes(number);
+        byte[] h = Encoding.UTF8.GetBytes(holder);
         await using var edit = await f.Sessions.BeginAsync(Ct);
         await edit.ExecuteAsync(new DbStatement("""
-            UPDATE shop.brands SET market='iran',allow_bank=true,policy_version=policy_version+1,bank_number_ciphertext=$1,bank_holder_ciphertext=$2,bank_key_id='current',
+            UPDATE shop.brands SET market='iran',allow_bank=true,policy_version=policy_version+1,bank_number=$1,bank_holder=$2,
                 bank_card_fingerprint=$3,bank_changed_at=clock_timestamp() WHERE id=$4
             """, DbValue.Binary(n), DbValue.Binary(h), DbValue.Binary(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(number))), DbValue.Uuid(f.Brands[0])), Ct);
         await edit.ExecuteAsync(new DbStatement("UPDATE shop.brand_products SET allow_bank=true,price_toman=1000000,auto_price_toman=false,revision=revision+1 WHERE brand_id=$1", DbValue.Uuid(f.Brands[0])), Ct);

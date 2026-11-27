@@ -10,7 +10,7 @@ public enum SqliteBankDecisionOutcome { ConfirmedPaid, DeniedUnverified, Replaye
 
 public sealed class SqliteBankReviewStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<SqliteBankDecisionOutcome> DecideAsync(BrandContext context, AuthenticatedAdmin actor, Guid payment,
         bool approve, long expectedOrderRevision, Guid command, string reason, CancellationToken ct = default)

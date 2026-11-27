@@ -53,24 +53,20 @@ public sealed class SupportSchemaTests
         const string ticket = "INSERT INTO shop.support_tickets(id,user_id,order_id,category,source) VALUES ('00000000-0000-0000-0000-000000000602','" + UserA2 + "','" + OrderA2 + "','preorder_cancellation','customer')";
         await ExecuteAsync(database, ticket);
         await ExecuteAsync(database, """
-            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_telegram_id,body_ciphertext,body_key_id)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','customer',7002,decode('01','hex'),'public-synthetic-key')
+            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_telegram_id,body_content)
+            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','customer',7002,decode('01','hex'))
             """);
         await RejectAsync(database, """
-            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_telegram_id,body_ciphertext,body_key_id)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','customer',7099,decode('02','hex'),'public-synthetic-key')
+            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_telegram_id,body_content)
+            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','customer',7099,decode('02','hex'))
             """);
         await ExecuteAsync(database, $$"""
-            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_admin_id,body_ciphertext,body_key_id)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','admin','{{AdminA}}',decode('03','hex'),'public-synthetic-key')
+            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,sender_admin_id,body_content)
+            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','admin','{{AdminA}}',decode('03','hex'))
             """);
         await RejectAsync(database, """
-            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,body_ciphertext,body_key_id)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','admin',decode('04','hex'),'public-synthetic-key')
-            """);
-        await RejectAsync(database, """
-            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,body_key_id)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','system','public-synthetic-key')
+            INSERT INTO shop.support_messages(id,ticket_id,sender_kind,body_content)
+            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000602','admin',decode('04','hex'))
             """);
         await RejectAsync(database, """
             INSERT INTO shop.support_messages(id,ticket_id,sender_kind)
@@ -105,11 +101,11 @@ public sealed class SupportSchemaTests
         var database = await DisposablePostgres.CreateAsync(Ct);
         try
         {
-            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
+            await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, Ct);
             await ExecuteTransactionAsync(database, $$"""
-                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                VALUES ('00000000-0000-0000-0000-000000000001','sa','public-sa','public sa','iran','fa','public_sa',1001,decode('01','hex'),'public-key-a'),
-                       ('00000000-0000-0000-0000-000000000002','sb','public-sb','public sb','international','en','public_sb',1002,decode('02','hex'),'public-key-b');
+                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token)
+                VALUES ('00000000-0000-0000-0000-000000000001','sa','public-sa','public sa','iran','fa','public_sa',1001,decode('01','hex')),
+                       ('00000000-0000-0000-0000-000000000002','sb','public-sb','public sb','international','en','public_sb',1002,decode('02','hex'));
                 INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES
                     ('{{UserA}}','00000000-0000-0000-0000-000000000001',7001,'fa'),
                     ('{{UserB}}','00000000-0000-0000-0000-000000000002',7001,'en'),

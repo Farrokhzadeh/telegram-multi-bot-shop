@@ -8,7 +8,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteDeliveryStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<Guid?> PrepareAsync(BrandContext context, JobLease lease, CancellationToken ct = default)
     {

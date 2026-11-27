@@ -14,7 +14,7 @@ public static class PreorderProcessQualification
     public static async Task ChildAsync()
     {
         if (!OperatingSystem.IsLinux() || Environment.GetEnvironmentVariable("SHOP_TEST_ALLOW_DATABASE_CREATION") != "1") throw new InvalidOperationException("Synthetic qualification is required.");
-        string root = DirectoryValue("SHOP_TEST_PREORDER_SECRET_ROOT", "shop-secret-qualification-"), sync = DirectoryValue("SHOP_TEST_PREORDER_SYNC", "shop-preorder-process-");
+        string sync = DirectoryValue("SHOP_TEST_PREORDER_SYNC", "shop-preorder-process-");
         string phase = Environment.GetEnvironmentVariable("SHOP_TEST_PREORDER_PHASE") ?? "";
         if (phase is not ("before" or "after" or "complete")) throw new InvalidOperationException("Unknown qualification phase.");
         var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN") ?? throw new InvalidOperationException("Synthetic control identity is missing."))
@@ -22,7 +22,6 @@ public static class PreorderProcessQualification
         _ = SchemaManifest.ForQualification(options.ConnectionString);
         await using var data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build();
         await FoundationQualification.VerifySchemaAsync(data);
-        using var secrets = SecretFiles.Load(root, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
         var sessions = new DbSessionFactory(data);
         var worker = new LocalPreorderWorker(new(sessions), CheckoutFixture.ResolveContexts());
         for (int i = 0; i < 30; i++)
@@ -123,7 +122,7 @@ public static class PreorderProcessQualification
             if (executable.EndsWith(".dll", StringComparison.Ordinal)) start.ArgumentList.Add(executable);
             start.ArgumentList.Add("--preorder-worker-probe");
             start.Environment["SHOP_TEST_PREORDER_DATABASE"] = new NpgsqlConnectionStringBuilder(f.Database.Data.ConnectionString).Database;
-            start.Environment["SHOP_TEST_PREORDER_SECRET_ROOT"] = f.SecretRoot; start.Environment["SHOP_TEST_PREORDER_SYNC"] = sync; start.Environment["SHOP_TEST_PREORDER_PHASE"] = phase;
+            start.Environment["SHOP_TEST_PREORDER_SYNC"] = sync; start.Environment["SHOP_TEST_PREORDER_PHASE"] = phase;
             return Process.Start(start) ?? throw new InvalidOperationException("Qualification worker did not start.");
         }
         Task<long> ActiveAsync(bool waiting = false) => f.CountAsync("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND application_name='" + Application + "'" + (waiting ? " AND wait_event_type='Lock'" : ""), ct);

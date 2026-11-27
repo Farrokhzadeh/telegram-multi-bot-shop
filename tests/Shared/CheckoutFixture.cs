@@ -50,8 +50,8 @@ public sealed class CheckoutFixture : IAsyncDisposable
         {
             Guid[] brands = BrandIds;
             files.WriteManifest(brands: brands);
-            secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: brands));
-            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
+            secrets = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: brands));
+            await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, ct);
             var fixture = new CheckoutFixture(database, files, secrets, users);
             await using (var seed = await fixture.Sessions.BeginAsync(ct))
             {
@@ -60,8 +60,8 @@ public sealed class CheckoutFixture : IAsyncDisposable
                 for (int i = 0; i < 3; i++)
                 {
                     await seed.ExecuteAsync(new DbStatement("""
-                        INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                        VALUES ($1,$2,$2,$2,'international','en',$2,$3,$4,'current',true)
+                        INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token,active)
+                        VALUES ($1,$2,$2,$2,'international','en',$2,$3,$4,true)
                         """, DbValue.Uuid(brands[i]), DbValue.Text("public-checkout-" + i), DbValue.Bigint(1001 + i), DbValue.Binary([1])), ct);
                     if (seedCatalog) await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.brand_products(brand_id,product_id,visible,price_usdt) VALUES ($1,$2,true,10)", DbValue.Uuid(brands[i]), DbValue.Uuid(fixture.Product)), ct);
                 }
@@ -102,18 +102,15 @@ public sealed class CheckoutFixture : IAsyncDisposable
 
     public async Task AddStockAsync(int count, CancellationToken ct = default)
     {
-        var cipher = new InventoryCipher(Secrets);
         await using var session = await Sessions.BeginAsync(ct);
         for (int i = 0; i < count; i++)
         {
             Guid id = Guid.NewGuid();
-            byte[] plain = Encoding.UTF8.GetBytes("public synthetic credential " + id.ToString("D"));
-            byte[] encrypted = cipher.Encrypt(id, plain);
-            CryptographicOperations.ZeroMemory(plain);
+            byte[] content = Encoding.UTF8.GetBytes("public synthetic credential " + id.ToString("D"));
             await session.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind)
-                VALUES ($1,$2,$3,'current',$4,'local_import')
-                """, DbValue.Uuid(id), DbValue.Uuid(Product), DbValue.Binary(encrypted), DbValue.Binary(SHA256.HashData(id.ToByteArray()))), ct);
+                INSERT INTO shop.inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind)
+                VALUES ($1,$2,$3,$4,'local_import')
+                """, DbValue.Uuid(id), DbValue.Uuid(Product), DbValue.Binary(content), DbValue.Binary(SHA256.HashData(id.ToByteArray()))), ct);
         }
         await session.CommitAsync(ct);
     }

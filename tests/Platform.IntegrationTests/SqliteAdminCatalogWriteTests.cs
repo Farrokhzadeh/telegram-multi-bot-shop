@@ -14,8 +14,8 @@ public sealed class SqliteAdminCatalogWriteTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
             using var adminToken = AdminToken.Create();
@@ -24,8 +24,8 @@ public sealed class SqliteAdminCatalogWriteTests
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
-                        bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_id,bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO admins(id,login,authentication_mode,external_subject)
                     VALUES ($admin,'synthetic-catalog-admin','external','fixture');
                     INSERT INTO admin_sessions(id,admin_id,token_hash,auth_version_at_issue,expires_at)
@@ -53,7 +53,7 @@ public sealed class SqliteAdminCatalogWriteTests
             var listing = new ListingEdit(true, "inherit", null, "inherit", null, "inherit", null,
                 "inherit", null, "10", null, false, true, true, false, 1, 5);
             Assert.Equal(1, await writer.ListingAsync(actor, brand, product, listing, 0, listingId, ct));
-            Assert.Equal(1, await new SqliteAdminCatalogWriteStore(new SqliteSessionFactory(path))
+            Assert.Equal(1, await new SqliteAdminCatalogWriteStore(SqliteSessionFactory.ForPlaintext(path))
                 .ListingAsync(actor, brand, product, listing, 0, listingId, ct));
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 writer.ProductAsync(actor, product, productEdit, 0, Guid.NewGuid(), ct));

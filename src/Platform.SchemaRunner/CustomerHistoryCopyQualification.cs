@@ -51,7 +51,7 @@ internal static class CustomerHistoryCopyQualification
             if (originals.Length != expectedOrders) throw new MigrationRejectedException();
             using var secretDoc = JsonDocument.Parse(read(Path.Combine(keys, secretFile)));
             Guid deployment = secretDoc.RootElement.GetProperty("deploymentId").GetGuid();
-            using var secrets = SecretFiles.Load(keys, secretFile, new SecretLoadGrant(SecretService.JobHost, deployment, 1, [manifest.TargetBrand], false));
+            using var secrets = RecoverySecretFiles.Load(keys, secretFile, new SecretLoadGrant(SecretService.JobHost, deployment, 1, [manifest.TargetBrand], false));
             var registry = new BotBrandRegistry([new("protected-customer-history", "qualification", manifest.TargetBrand, 101, deployment, 1, true)]);
             if (!registry.TryResolveAuthenticated("protected-customer-history",
                 new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "qualification")], "protected-customer-history")), out var context))

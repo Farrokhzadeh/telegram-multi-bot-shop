@@ -6,7 +6,7 @@ namespace Platform.Persistence;
 
 public sealed class SqlitePrepaidSourceStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<Guid> IssueAsync(BrandContext context, Guid source, CancellationToken ct = default) => sessions.RunAsync(true, (_, tx, token) => IssueAsync(tx, context, source, token), ct);
     internal async Task<Guid> IssueAsync(SqliteTransaction tx, BrandContext context, Guid source, CancellationToken ct)

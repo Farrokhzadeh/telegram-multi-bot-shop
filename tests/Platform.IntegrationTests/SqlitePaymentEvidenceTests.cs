@@ -14,17 +14,17 @@ public sealed class SqlitePaymentEvidenceTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
             Guid member = Guid.NewGuid(), payment = Guid.NewGuid();
-            var sessions = new SqliteSessionFactory(path);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var command = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active,allow_crypto,allow_wallet_topup,zero_balance_topup)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1,1,1,1);
+                        bot_token,active,allow_crypto,allow_wallet_topup,zero_balance_topup)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1,1,1,1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$member", member));
                 await command.ExecuteNonQueryAsync(token);
@@ -64,7 +64,7 @@ public sealed class SqlitePaymentEvidenceTests
                 Assert.Equal(1, await command.ExecuteNonQueryAsync(token));
                 return 0;
             }, ct);
-            var settlement = new SqliteTopupSettlementStore(new SqliteSessionFactory(path));
+            var settlement = new SqliteTopupSettlementStore(SqliteSessionFactory.ForPlaintext(path));
             PaymentSettlement[] results = await Task.WhenAll(
                 settlement.SettleAsync(brand, 0, payment, PaymentSettlementFixture.Lookup, ct),
                 settlement.SettleAsync(brand, 0, payment, PaymentSettlementFixture.Lookup, ct));

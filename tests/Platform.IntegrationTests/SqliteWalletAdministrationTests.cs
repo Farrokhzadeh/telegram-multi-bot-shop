@@ -14,8 +14,8 @@ public sealed class SqliteWalletAdministrationTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
             using var adminToken = AdminToken.Create();
@@ -24,8 +24,8 @@ public sealed class SqliteWalletAdministrationTests
             {
                 using var seed = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
-                        bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_id,bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language)
                     VALUES ($member,$brand,7001,'en');
                     INSERT INTO admins(id,login,authentication_mode,external_subject)
@@ -46,7 +46,7 @@ public sealed class SqliteWalletAdministrationTests
             await Assert.ThrowsAsync<InvalidOperationException>(() => store.AdjustAsync(actor, brand,
                 add with { ExpectedVersion = 9, CommandId = Guid.NewGuid() }, ct));
             Assert.Equal(add.CommandId, await store.AdjustAsync(actor, brand, add, ct));
-            Assert.Equal(add.CommandId, await new SqliteWalletAdministrationStore(new SqliteSessionFactory(path))
+            Assert.Equal(add.CommandId, await new SqliteWalletAdministrationStore(SqliteSessionFactory.ForPlaintext(path))
                 .AdjustAsync(actor, brand, add, ct));
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
                 store.AdjustAsync(actor, brand, add with { AmountUsd = "11" }, ct));
@@ -61,7 +61,7 @@ public sealed class SqliteWalletAdministrationTests
                     ExpectedVersion = 2,
                     CommandId = Guid.NewGuid()
                 }, ct));
-            await new SqliteSessionFactory(path).RunAsync(false, async (_, tx, token) =>
+            await SqliteSessionFactory.ForPlaintext(path).RunAsync(false, async (_, tx, token) =>
             {
                 var wallet = await SqliteWallet.ReadAsync(tx, member, token);
                 Assert.Equal(7m, wallet.Balance.Amount);

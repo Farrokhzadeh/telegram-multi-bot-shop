@@ -9,7 +9,7 @@ namespace Platform.Persistence;
 
 public sealed class SqlitePreparedCheckoutStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<CheckoutResult> PurchaseAsync(BrandContext context, long actor, CheckoutRequest request,
         PreparedCheckout prepared, SqliteCatalogStore catalog, CancellationToken ct = default)

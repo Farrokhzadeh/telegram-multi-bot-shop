@@ -15,7 +15,7 @@ public sealed class EfDefaultValueTests
         await using var connection = new SqliteConnection("Data Source=:memory:;Foreign Keys=True");
         await connection.OpenAsync(ct);
         SqliteSchema.Configure(connection);
-        await using var context = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(connection).Options);
+        await using var context = new SqlitePlainTargetDbContext(new DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options);
         await VerifyAsync(context, ct);
     }
 
@@ -25,7 +25,7 @@ public sealed class EfDefaultValueTests
         var ct = TestContext.Current.CancellationToken;
         await using var database = await DisposablePostgres.CreateAsync(ct);
         await using var connection = await database.Data.OpenConnectionAsync(ct);
-        await using var context = new PostgresAkantiDbContext(new DbContextOptionsBuilder<PostgresAkantiDbContext>().UseNpgsql(connection).Options);
+        await using var context = new PostgresPlainTargetDbContext(new DbContextOptionsBuilder<PostgresPlainTargetDbContext>().UseNpgsql(connection).Options);
         await VerifyAsync(context, ct);
     }
 

@@ -328,15 +328,15 @@ public sealed class EfIntegrityTests
             try
             {
                 string path = Path.Combine(directory.FullName, "shop.db");
-                await SqliteSchema.InitializeAsync(path, ct);
-                var sessions = new SqliteSessionFactory(path);
+                await SqliteSchema.InitializePlaintextAsync(path, ct);
+                var sessions = SqliteSessionFactory.ForPlaintext(path);
                 var brand = CheckoutFixture.ResolveContexts()[0];
                 Guid member = Guid.NewGuid();
                 await sessions.RunAsync(true, async (_, tx, token) =>
                 {
                     using var seed = SqliteWallet.Command(tx, """
-                        INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                        VALUES($brand,'ef-integrity','EF','EF','international','en','ef_integrity_bot',$bot,x'01','fixture',1);
+                        INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token,active)
+                        VALUES($brand,'ef-integrity','EF','EF','international','en','ef_integrity_bot',$bot,x'01',1);
                         INSERT INTO users(id,brand_id,telegram_id,language) VALUES($member,$brand,7001,'en');
                         INSERT INTO wallets(user_id) VALUES($member);
                         """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$member", member));

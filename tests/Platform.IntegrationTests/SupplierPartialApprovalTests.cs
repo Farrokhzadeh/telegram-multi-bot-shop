@@ -39,10 +39,9 @@ public sealed class SupplierPartialApprovalTests
     [InlineData("partial")]
     [InlineData("foreign")]
     [InlineData("stale")]
-    [InlineData("cipher")]
     [InlineData("revoked")]
     [InlineData("commit")]
-    public async Task ApprovalRejectsIncompleteForeignStaleUnreadableOrRevokedEvidenceWithoutClearingReview(string invalid)
+    public async Task ApprovalRejectsIncompleteForeignStaleOrRevokedEvidenceWithoutClearingReview(string invalid)
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 0, ct: Ct);
         await SupplierFixture.ConfigureAsync(f, Ct);
@@ -59,9 +58,7 @@ public sealed class SupplierPartialApprovalTests
         }
         long revision = await SupplierPartialQualification.RevisionAsync(f, order, Ct);
         var actor = await f.AdminAsync(Ct);
-        using var wrongFiles = invalid == "cipher" ? new SyntheticSecretFiles() : null;
-        using var wrongKeys = wrongFiles is null ? null : SecretFiles.Load(wrongFiles.Root, "service-config.json", wrongFiles.Grant());
-        var reviewer = wrongKeys is null ? store : new SupplierRequestStore(f.Sessions);
+        var reviewer = store;
         if (invalid == "revoked")
         {
             await using var logout = await f.Sessions.BeginAsync(Ct);
@@ -77,7 +74,6 @@ public sealed class SupplierPartialApprovalTests
         Assert.NotNull(error);
         if (invalid == "foreign") Assert.IsType<UnauthorizedAccessException>(error);
         else if (invalid == "revoked") Assert.IsType<AdminAuthenticationException>(error);
-        else if (invalid == "cipher") Assert.IsType<CipherRejectedException>(error);
         else if (invalid == "commit") Assert.Equal(DbFailureKind.Constraint, Assert.IsType<DbOperationException>(error).Failure.Kind);
         else Assert.IsType<InvalidOperationException>(error);
         Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.audit_events WHERE action='manual_fulfillment'", Ct));

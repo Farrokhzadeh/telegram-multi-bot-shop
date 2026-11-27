@@ -140,32 +140,23 @@ public sealed class PreparedCheckoutTests
     }
 
     [Fact]
-    public async Task CipherFailureAfterHoldAndDebitRollsBackTheWholeAcceptanceAndAllowsCleanRetry()
+    public async Task DirectStockContentHasNoCipherRollbackPath()
     {
         await using var f = await CheckoutFixture.CreateAsync(stock: 2, ct: Ct);
         await Coupon(f, 50, 10);
-        byte[] content;
-        Guid item;
-        await using (var breakCipher = await f.Sessions.BeginAsync(Ct))
+        await using (var edit = await f.Sessions.BeginAsync(Ct))
         {
-            (item, content) = await breakCipher.QuerySingleAsync(new DbStatement("SELECT id,credential_ciphertext FROM shop.inventory_items ORDER BY id LIMIT 1"), r => (r.GetGuid(0), r.GetBinary(1)), Ct);
-            await breakCipher.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=decode('01','hex') WHERE id=$1", DbValue.Uuid(item)), Ct);
-            await breakCipher.CommitAsync(Ct);
+            Guid item = await edit.QuerySingleAsync(new DbStatement("SELECT id FROM shop.inventory_items ORDER BY id LIMIT 1"), r => r.GetGuid(0), Ct);
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_content=decode('01','hex') WHERE id=$1", DbValue.Uuid(item)), Ct);
+            await edit.CommitAsync(Ct);
         }
         var service = Service(f);
         var request = Request(f, 2);
-        await Assert.ThrowsAsync<CipherRejectedException>(() => service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct));
-        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.orders", Ct));
-        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses", Ct));
-        Assert.Equal(0L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
-        await using (var repair = await f.Sessions.BeginAsync(Ct))
-        {
-            await repair.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=$1 WHERE id=$2", DbValue.Binary(content), DbValue.Uuid(item)), Ct);
-            await repair.CommitAsync(Ct);
-        }
         Assert.Equal(CheckoutOutcome.Purchased, (await service.PurchaseAsync(f.Context(0), CheckoutFixture.Actor(0), request, Member, Ct)).Outcome);
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.fulfillments WHERE order_id='" + request.OrderId.ToString("D") + "' AND delivered_content=decode('01','hex')", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.discount_uses WHERE status='redeemed'", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries WHERE movement_kind='purchase_debit'", Ct));
     }
-
     [Fact]
     public async Task DeferredRedemptionFailureRollsBackLocalAllocationCouponAndDebit()
     {

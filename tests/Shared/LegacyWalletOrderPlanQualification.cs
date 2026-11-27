@@ -10,7 +10,7 @@ public static class LegacyWalletOrderPlanQualification
 {
     public static async Task RunAsync(string fault = "valid", CancellationToken ct = default, Action<LegacyWalletOrderPlan>? inspect = null)
     {
-        using var files = new SyntheticSecretFiles(); using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var files = new SyntheticSecretFiles(); using var secrets = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var context = CipherQualification.Context(SyntheticSecretFiles.BrandA); Guid batch = Guid.NewGuid(); const string orderId = "ORD-ABC123ABC123", archiveHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         bool zeroCase = fault.StartsWith("zero_", StringComparison.Ordinal);
         byte[] register = Encoding.UTF8.GetBytes("""{"version":2,"policy":"manual_irr_and_original_nonposting_history_v2","sources":[{"source":"prod1","brand":"acc-abad","archive_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","source_users":1,"wallets":[{"legacy_user_id":"101","original_irr_amount":"0"}],"history":[{"id":"ORD-ABC123ABC123","user_id":"101","amount":"-20","currency":"USD","created_at":"2024-02-01T00:00:01Z"}]},{"source":"prod2","brand":"kuala"},{"source":"prod3","brand":"zikotech"}]}""");

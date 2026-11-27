@@ -23,7 +23,7 @@ internal sealed class BrandFixture : IAsyncDisposable
         var database = await DisposablePostgres.CreateAsync(ct);
         try
         {
-            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), ct);
+            await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, ct);
             var fixture = new BrandFixture(database);
             if (brands is not null) Array.Copy(brands, fixture.Brands, 3);
             var deployment = deploymentId ?? Guid.NewGuid();
@@ -40,8 +40,8 @@ internal sealed class BrandFixture : IAsyncDisposable
             for (int i = 0; i < 3; i++)
             {
                 await seed.ExecuteAsync(new DbStatement("""
-                    INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($1,$2,$2,$2,'international',$3,$2,$4,$5,'public-key',true)
+                    INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token,active)
+                    VALUES ($1,$2,$2,$2,'international',$3,$2,$4,$5,true)
                     """, DbValue.Uuid(fixture.Brands[i]), DbValue.Text("public-brand-" + i), DbValue.Text(i == 0 ? "fa" : "en"), DbValue.Bigint(1001 + i), DbValue.Binary([1])), ct);
                 await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES ($1,$2,7001,$3)",
                     DbValue.Uuid(fixture.Users[i]), DbValue.Uuid(fixture.Brands[i]), DbValue.Text(i == 0 ? "fa" : "en")), ct);

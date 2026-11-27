@@ -13,9 +13,9 @@ public sealed class SqlitePaymentExpiryTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
             var brand = CheckoutFixture.ResolveContexts()[0];
-            var sessions = new SqliteSessionFactory(path);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Guid product = Guid.NewGuid();
             Guid[] members = [Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()];
             Guid[] orders = [Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid()];
@@ -26,8 +26,8 @@ public sealed class SqlitePaymentExpiryTests
             {
                 using var foundation = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title)
                     VALUES ($product,'manual','immediate','Synthetic goods');
                     """, ("$brand", brand.BrandId), ("$bot", brand.BotId), ("$product", product));

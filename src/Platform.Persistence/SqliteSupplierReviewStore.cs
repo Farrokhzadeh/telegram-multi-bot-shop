@@ -8,7 +8,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteSupplierReviewStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task ApproveCostAsync(AuthenticatedAdmin actor, BrandContext context, Guid request,
         long expectedRevision, decimal maximumUnitCost, string currency, Guid command, CancellationToken ct = default)

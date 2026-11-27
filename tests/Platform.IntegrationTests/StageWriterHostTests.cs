@@ -341,7 +341,7 @@ public sealed class StageWriterHostTests
         {
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
-            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions); using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true)); var store = new DeliveryStore(sessions);
+            data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data); var context = CheckoutFixture.ResolveContexts()[0]; var owner = await Admin(sessions); var controls = new BrandWriterStore(sessions); var store = new DeliveryStore(sessions);
             actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);
             if (savedAnchor)
             {
@@ -396,7 +396,7 @@ public sealed class StageWriterHostTests
     [Theory]
     [InlineData("database")]
     [InlineData("run")]
-    [InlineData("keys")]
+    [InlineData("user")]
     public async Task StagingWriterRejectsHistoricalOrForeignBindingsBeforeReadiness(string mismatch)
     {
         CutoverStageState? state = null; NpgsqlDataSource? data = null;
@@ -406,7 +406,7 @@ public sealed class StageWriterHostTests
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
             data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data);
             string before = await WorkflowActivityQualification.DomainAsync(sessions, true, Ct);
-            var invalid = mismatch switch { "database" => state with { Database = "historical_read_only_copy" }, "run" => state with { Run = Guid.NewGuid() }, "keys" => state with { Secrets = "/outside-stage/original-keys" }, _ => throw new ArgumentException() };
+            var invalid = mismatch switch { "database" => state with { Database = "historical_read_only_copy" }, "run" => state with { Run = Guid.NewGuid() }, "user" => state with { User = Guid.NewGuid() }, _ => throw new ArgumentException() };
             CutoverStageRuntime.Write(Path.Combine(Root, "state.json"), JsonSerializer.Serialize(invalid, CutoverStageJson.Default.CutoverStageState), true);
             using var limit = CancellationTokenSource.CreateLinkedTokenSource(Ct); limit.CancelAfter(TimeSpan.FromSeconds(5));
             await Assert.ThrowsAsync<InvalidOperationException>(() => CutoverStageRuntime.RunAsync(Root, "serve", limit.Token));
@@ -425,7 +425,6 @@ public sealed class StageWriterHostTests
             Prepare(); await CutoverStageRuntime.RunAsync(Root, "init", Ct); state = State();
             var options = new NpgsqlConnectionStringBuilder(Environment.GetEnvironmentVariable("SHOP_TEST_POSTGRES_ADMIN")) { Database = state.Database };
             data = new NpgsqlSlimDataSourceBuilder(options.ConnectionString).EnableArrays().Build(); var sessions = new DbSessionFactory(data);
-            using var secrets = SecretFiles.Load(state.Secrets, "service-config.json", new(SecretService.JobHost, SyntheticSecretFiles.Deployment, 7, CheckoutFixture.BrandIds, true));
             var store = new DeliveryStore(sessions); var context = CheckoutFixture.ResolveContexts()[0];
             actor = Start(); await Ready(actor); Guid order = Guid.NewGuid(); Request(order, "wallet"); Assert.Equal("Purchased", (await Result(order, actor)).Outcome);
             Guid prepare = Guid.NewGuid(); Request(prepare, "manifest-worker"); Assert.Equal("PreparedWithoutSend", (await Result(prepare, actor)).Outcome);

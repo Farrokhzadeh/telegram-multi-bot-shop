@@ -17,9 +17,9 @@ public static class BrandAdministrationQualification
             await store.RotateTokenAsync(admin, f.Context(0), token, 0, rotation, Verify, ct) != 1 || checks != 1) throw new InvalidOperationException("Token lifecycle replay failed.");
         await using (var read = await f.Sessions.BeginAsync(ct))
         {
-            var saved = await read.QuerySingleAsync(new DbStatement("SELECT bot_token_ciphertext,bot_token_key_id FROM shop.brands WHERE id=$1", DbValue.Uuid(f.Brands[0])), r => (Bytes: r.GetBinary(0), Key: r.GetString(1)), ct);
-            using var opened = new BotTokenVault(f.Secrets).OpenForTrustedTransport(f.Context(0), saved.Key, saved.Bytes);
-            if (!opened.ForTrustedTransport().Span.SequenceEqual(token.ForTrustedTransport().Span) || opened.ToString().Contains(new string('s', 35), StringComparison.Ordinal)) throw new InvalidOperationException("Token protection failed.");
+            byte[] saved = await read.QuerySingleAsync(new DbStatement("SELECT bot_token FROM shop.brands WHERE id=$1", DbValue.Uuid(f.Brands[0])), r => r.GetBinary(0), ct);
+            try { if (!saved.AsSpan().SequenceEqual(token.ForTrustedTransport().Span) || token.ToString().Contains(new string('s', 35), StringComparison.Ordinal)) throw new InvalidOperationException("Token persistence failed."); }
+            finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(saved); }
         }
         var channels = new[] { new RequiredChannel(-10001, "Public required channel", "https://t.me/public_channel") };
         Guid update = Guid.NewGuid();

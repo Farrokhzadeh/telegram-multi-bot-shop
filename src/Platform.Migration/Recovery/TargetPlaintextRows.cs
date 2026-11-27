@@ -8,7 +8,7 @@ namespace Platform.Migration.Recovery;
 
 internal sealed class TargetPlaintextRows(SecretSnapshot keys, Func<Guid, BrandContext> contextFor)
 {
-    internal async Task CopyAsync<T>(AkantiDbContext source, PlainTargetCopyDbContext target, T original, T destination, CancellationToken ct, bool track = true) where T : class
+    internal async Task CopyAsync<T>(DbContext source, PlainTargetCopyDbContext target, T original, T destination, CancellationToken ct, bool track = true) where T : class
     {
         if (source is PlainTargetDbContext || source.Entry(original).Metadata.ClrType != target.Entry(destination).Metadata.ClrType ||
             ReferenceEquals(original, destination) || target.Entry(destination).State != EntityState.Detached)

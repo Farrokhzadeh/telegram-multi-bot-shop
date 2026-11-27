@@ -55,7 +55,7 @@ internal static class ArchiveCopyQualification
             await WalletCopyQualification.WriteAsync(statePath, WalletCopyQualification.JsonBody(w => { w.WriteNumber("version", 1); w.WriteString("input_sha256", Convert.ToHexStringLower(inputHash)); w.WriteString("batch", batch); }), ct);
         }
         if (batch == Guid.Empty) throw new MigrationRejectedException();
-        using var secrets = SecretFiles.Load(Value("secrets_directory"), Value("secrets_manifest"), new SecretLoadGrant(SecretService.JobHost, batch, 1, [brand], false));
+        using var secrets = RecoverySecretFiles.Load(Value("secrets_directory"), Value("secrets_manifest"), new SecretLoadGrant(SecretService.JobHost, batch, 1, [brand], false));
         var registry = new BotBrandRegistry([new("protected-archive-copy", "qualification", brand, shared ? WalletOrderCopyQualification.SharedBotId(brandName) : 101, batch, 1, true)]);
         if (!registry.TryResolveAuthenticated("protected-archive-copy", new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "qualification")], "protected-archive-copy")), out var context)) throw new MigrationRejectedException();
         string keyState = Path.Combine(directory, "target-keys.sha256");

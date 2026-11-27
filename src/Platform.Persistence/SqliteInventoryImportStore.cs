@@ -6,7 +6,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteInventoryImportStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public static void RequireSynthetic(InventoryImportItem[] items)
     {

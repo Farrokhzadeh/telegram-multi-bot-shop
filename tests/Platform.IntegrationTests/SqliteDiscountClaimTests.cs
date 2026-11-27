@@ -17,8 +17,8 @@ public sealed class SqliteDiscountClaimTests
         try
         {
             string path = Path.Combine(dir.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             Guid member = Guid.NewGuid(), product = Guid.NewGuid(), order = Guid.NewGuid(),
                 payment = Guid.NewGuid(), coupon = Guid.NewGuid(), audit = Guid.NewGuid(),
@@ -28,8 +28,8 @@ public sealed class SqliteDiscountClaimTests
             {
                 using var setup = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,
-                        bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01','fixture',1);
+                        bot_id,bot_token,active)
+                    VALUES ($brand,'stage','Stage','Stage','international','en','stage_bot',$bot,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     INSERT INTO products(id,fulfillment_kind,availability_policy,title)
                     VALUES ($product,'manual','immediate','Synthetic goods');
@@ -45,9 +45,9 @@ public sealed class SqliteDiscountClaimTests
                     INSERT INTO audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,
                         reason,correlation_id)
                     VALUES ($audit,'system',$brand,'coupon_issue','discount',$coupon,'synthetic',$audit);
-                    INSERT INTO discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,display_prefix,
+                    INSERT INTO discounts(id,brand_id,code_digest,code_content,display_prefix,
                         issuance_batch_id,kind,percent_off,product_id,max_total_uses)
-                    VALUES ($coupon,$brand,zeroblob(32),x'01','fixture','SAVE',$batch,'promotion',
+                    VALUES ($coupon,$brand,zeroblob(32),x'01','SAVE',$batch,'promotion',
                         '20',$product,10);
                     INSERT INTO discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,
                         max_total_uses,usage_adjustment_units,redeemed_count_at_revision,

@@ -195,13 +195,13 @@ Raw-command and encryption flags are lexical discovery signals, not assertions t
 | `src/Platform.SchemaRunner/SourceCopyInspection.cs` | yes | — | Explicit schema/recovery tooling only; reviewed DDL/source-read exceptions; target writes use EF |
 | `src/Platform.SchemaRunner/WalletCopyQualification.cs` | yes | yes | Explicit schema/recovery tooling only; reviewed DDL/source-read exceptions; target writes use EF |
 | `src/Platform.SchemaRunner/WalletOrderCopyQualification.cs` | yes | yes | Explicit schema/recovery tooling only; reviewed DDL/source-read exceptions; target writes use EF |
-| `src/Platform.Security/BotTokenVault.cs` | — | yes | Remove target encryption/keyring coupling; retain non-encryption authentication and access protections |
-| `src/Platform.Security/BrandCipher.cs` | — | yes | Remove from target runtime; isolate required old-target decoder in recovery tooling |
-| `src/Platform.Security/CipherEnvelope.cs` | — | yes | Remove from target runtime; isolate required old-target decoder in recovery tooling |
-| `src/Platform.Security/CustomerHistoryArchive.cs` | — | yes | Remove target encryption/keyring coupling; retain non-encryption authentication and access protections |
-| `src/Platform.Security/CustomerHistoryFiles.cs` | — | yes | Remove target encryption/keyring coupling; retain non-encryption authentication and access protections |
-| `src/Platform.Security/InventoryCipher.cs` | — | yes | Remove from target runtime; isolate required old-target decoder in recovery tooling |
-| `src/Platform.Security/SecretFiles.cs` | — | yes | Remove target encryption/keyring coupling; retain non-encryption authentication and access protections |
+| `src/Platform.Security/BotToken.cs` | — | — | Final runtime bot-token type; direct bytes remain redacted/disposable and scoped by existing brand authorization |
+| `src/Platform.Migration/Recovery/BrandCipher.cs` | — | yes | Recovery-only old-target decoder; no runtime project references it |
+| `src/Platform.Migration/Recovery/CipherEnvelope.cs` | — | yes | Recovery-only authenticated-envelope codec; no runtime project references it |
+| `src/Platform.Migration/Recovery/CustomerHistoryArchive.cs` | — | yes | Recovery-only v1 history decoder; runtime history uses direct v2 files |
+| `src/Platform.Security/CustomerHistoryFiles.cs` | — | — | Final v2 direct-history files with private path/mode and content validation |
+| `src/Platform.Migration/Recovery/InventoryCipher.cs` | — | yes | Recovery-only old inventory decoder; no runtime project references it |
+| `src/Platform.Security/SecretFiles.cs`, `src/Platform.Migration/Recovery/RecoverySecretFiles.cs` | — | yes | Runtime keeps shared safe-file validation only; content-key grant/snapshot loading is recovery-only |
 | `src/Platform.Telegram/CustomerHistoricalTypedAliasReader.cs` | yes | — | Convert target queries/writes to EF and keep existing caller contracts |
 | `src/Platform.Telegram/HumanSupportRouter.cs` | yes | yes | Convert target queries/writes to EF and keep existing caller contracts |
 | `src/Platform.Telegram/UpdateRouter.cs` | yes | — | Convert target queries/writes to EF and keep existing caller contracts |
@@ -295,12 +295,12 @@ Static caller references below were resolved across all current src C# files (ex
 ## Operational asset and authentication distinctions
 | Surface | Source anchor and disposition |
 | --- | --- |
-| Customer historical-order binary archive | `src/Platform.Security/CustomerHistoryArchive.cs`, Seal/Open; new target bytes become direct; existing SHOP-CUSTOMER-HISTORY-1 payload/member binding retained; old envelope decoder isolated |
-| Preview bot inbox | `src/Platform.BotHost/StagingPreviewBot.cs`, PollAsync uses direct AES-GCM; remove new target inbox encryption and update paired readers, not only BrandCipher calls |
+| Customer historical-order binary archive | `src/Platform.Security/CustomerHistoryFiles.cs` publishes/reads direct v2 content; `src/Platform.Migration/Recovery/CustomerHistoryArchive.cs` retains the old envelope decoder only for conversion |
+| Preview bot inbox | `src/Platform.BotHost/StagingPreviewBot.cs` uses direct versioned preview content; old wrapped capture decoding is conversion-only |
 | Legacy protected archive | `src/Platform.Migration/LegacyArchiveFiles.cs`, WriteCoreAsync/ReadCoreAsync; source/historical originals stay preserved; any new target archive writer follows final target format through explicit conversion |
 | Synthetic supplier evidence | `src/Platform.JobHost/SqliteSyntheticSupplierEvidenceArchive.cs`, WriteAsync already writes direct bytes to private files; preserve permissions/digests, do not invent a decrypt step |
-| Shared inventory key-only bridge | `src/Platform.Persistence/SqliteStageInventoryBridge.cs` and host listener; remove encryption-only grant split, retain authenticated administrator/peer checks |
-| Required authentication secrets | `SecretFiles.cs`, `SupplierCredentialFiles.cs`, `SqliteStagingConfiguration.cs` and host entrypoints mix encryption material with operational credentials; separate responsibilities, never remove bot/API/provider credentials or verification/fingerprint keys blindly |
+| Shared inventory key-only bridge | Retired; `SqliteStageInventoryBridge` and its host listener are absent from the final runtime |
+| Required authentication secrets | `SupplierCredentialFiles.cs`, bot/API identity files and verification/fingerprint keys remain scoped operational credentials; target content-key manifests/keyrings are absent from runtime and staging |
 | Signature key metadata | `payments.ipn_key_id` identifies verified payment-signature binding; preserve with ipn_signature/ipn_payload_sha256/ipn_verified_at |
 | Manifest/payment/supplier/support referenced assets | Follow each evidence_ref, asset_ref, manifest_asset_ref and receipt_asset_ref writer/reader; preserve payload hash and exact access scope, enumerate conversion receipts for every referenced asset |
 All28 field/relationship inventories are in data-model.md with immutable exact source declarations. Remaining conversion evidence/disposition stays open for T038. Runtime source/class caller coverage and source-only vs target-write separation are explicit in this inventory; no protected records were accessed.
@@ -310,11 +310,18 @@ All28 baseline entity mappings and18 original SQLite assertion codes have curren
 
 ## Local v2 source audit checkpoint
 
-| Surface | Observed path and disposition |
+| Surface | Final source disposition |
 | --- | --- |
-| SQLite daemon configuration and inventory IPC | `SqliteStagingConfiguration` requires v2 and rejects a legacy key mount. API inventory import uses the authenticated API transaction. The legacy bridge is only built into integration fixtures. |
-| Customer history and preview | Current writers use `CustomerHistoryContent` and direct preview files. `PlainSqliteConversionCommand` and the asset readers verify and recover historical envelopes. |
-| Supplier and payment evidence | `SqliteSyntheticSupplierEvidenceArchive` writes original bytes. `PaymentEvidenceArchive` selects the v2 or legacy contract from the session format. `payments.ipn_key_id` remains signature metadata. |
-| Configuration and credentials | `backend.compose.yaml` has no key grants. V2 staging keeps API and Telegram identity files and PostgreSQL database, TLS and webhook credentials. Legacy `SecretFiles` and cipher branches still exist in shared adapters and recovery tools. |
-| Provider SQL | The direct `DbStatement` scan of the converted persistence stores found existing PostgreSQL advisory locks for admin, checkout, support, campaign, payments and jobs. SQLite format and migration-history checks use provider metadata. Full transitive caller and SQL exception review remains open. |
-| PostgreSQL staging | The v2 canary and schema export are separate from the historical staging deployment path. The latter still needs an explicit retirement decision or a compatible accepted-state conversion. |
+| SQLite daemon configuration and inventory IPC | All active SQLite roles require v2. The encryption-only inventory bridge/listener is retired; authenticated API inventory import remains. |
+| Customer history and preview | Runtime writers/readers use direct versioned v2 content. Historical wrapped history/preview decoding is recovery-only. |
+| Supplier and payment evidence | Runtime supplier/payment evidence archives use original direct bytes and digests. `payments.ipn_key_id` remains signature metadata, not content encryption. |
+| Configuration and credentials | Runtime/staging request no target content-key manifests or keyrings. Bot/API/provider credentials and verification/fingerprint keys remain under their existing restricted boundaries. |
+| Provider SQL | Reviewed raw SQL exceptions remain provider metadata, advisory locks and low-level failure fixtures recorded above; target business data uses EF. Exact-candidate execution evidence remains T038/T039. |
+| PostgreSQL target | Active PostgreSQL sessions, fixture provisioning, staging-copy source and qualification target use the v2 plaintext EF model. Historical v1 schema access is recovery/baseline-only. |
+
+## Final source implementation audit at `682fe29e` working copy
+Runtime EF configuration is plaintext-only:28 tables/493 mapped fields, with the eight removed key columns absent and `payments.ipn_key_id` retained as signature-verification metadata. The legacy encrypted CLR compatibility properties are ignored by runtime EF and mapped only by `Platform.Migration/Recovery/RecoveryTargetDbContext`. Runtime API/BotHost/JobHost/Payments/Telegram/Fulfillment/Campaigns/Persistence source has no `BrandCipher`, `InventoryCipher`, `CipherEnvelope`, `SecretSnapshot`, `SecretLoadGrant`, `RecoverySecretFiles`, `UsesPlaintext`, `ProtectedPaymentEvidence`, or encrypted-column branching. Historical generated baseline migrations and explicit recovery/conversion fixtures retain old column names by design.
+
+Payment evidence, checkout/catalog/pricing, delivery/preorder, supplier, support, bank destination, bot token, coupon, customer history and staging fixtures now use final direct content. PostgreSQL and SQLite active fixture provisioning uses the plaintext schema; `SqliteStagingCopy` copies the plaintext EF model. Staging provisioning accepts plaintext mode only and does not create target content-key manifests. Recovery ciphers/keyrings and the v1 customer-history reader live under `src/Platform.Migration/Recovery/`; no protected conversion was executed.
+
+Implementation review is source-only. T025/T037/T039/T040 and the evidence-dependent part of T038 remain open until the exact candidate is built/tested/formatted and SQLite/PostgreSQL/schema/runtime/recovery/performance gates are executed.

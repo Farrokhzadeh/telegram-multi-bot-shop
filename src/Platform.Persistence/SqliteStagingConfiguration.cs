@@ -38,9 +38,6 @@ public sealed class SqliteStagingConfiguration
             (File.GetUnixFileMode(Database) & (UnixFileMode)63) != 0)
             throw new UnauthorizedAccessException("The persistent SQLite staging database is unavailable.");
 
-        if (Environment.GetEnvironmentVariable("SHOP_STAGING_SECRET_ROOT") is not null)
-            throw new UnauthorizedAccessException("Plaintext SQLite staging cannot use a legacy key mount.");
-
         long botId = ReadNumber("/stage/tester/bot-id");
         long recipient = ReadNumber("/stage/tester/tester-id");
         var binding = new BotBrandBinding("sqlite-stage", "authenticated-runtime", StageBrand, 1001,

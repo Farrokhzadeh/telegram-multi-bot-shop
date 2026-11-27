@@ -13,10 +13,10 @@ public sealed class SqliteSessionTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            await Assert.ThrowsAsync<IOException>(() => SqliteSchema.InitializeAsync(path, ct));
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            await Assert.ThrowsAsync<IOException>(() => SqliteSchema.InitializePlaintextAsync(path, ct));
 
-            var sessions = new SqliteSessionFactory(path);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             Assert.Empty(await sessions.ListAdminProductsAsync(null, 10, ct));
             await sessions.RunAsync(false, async (connection, transaction, token) =>
             {
@@ -38,9 +38,9 @@ public sealed class SqliteSessionTests
                 command.Transaction = transaction;
                 command.CommandText = """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,current_fx,fx_source,fx_fetched_at)
+                        bot_token,current_fx,fx_source,fx_fetched_at)
                     VALUES ('00000000-0000-0000-0000-000000000001','fixture','Fixture','Fixture','international','en',
-                        'fixture_bot',1,x'00','fixture',$amount,'fixture','2026-11-21T00:00:00.0000000Z');
+                        'fixture_bot',1,x'00',$amount,'fixture','2026-11-21T00:00:00.0000000Z');
                     """;
                 command.Parameters.AddWithValue("$amount", exact);
                 Assert.Equal(1, await command.ExecuteNonQueryAsync(token));
@@ -63,7 +63,7 @@ public sealed class SqliteSessionTests
         try
         {
             var path = Path.Combine(directory.FullName, "shop.db");
-            var sessions = new SqliteSessionFactory(path);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             await Assert.ThrowsAsync<SqliteException>(() => sessions.ListAdminProductsAsync(null, 1, ct));
             Assert.False(File.Exists(path));
 
@@ -117,8 +117,8 @@ public sealed class SqliteSessionTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path, timeoutSeconds: 1);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path, timeoutSeconds: 1);
             using (var cancelled = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
@@ -127,9 +127,9 @@ public sealed class SqliteSessionTests
                     {
                         using var insert = SqliteWallet.Command(tx, """
                             INSERT INTO brands(id,code,internal_name,public_name,market,default_language,
-                                bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
+                                bot_username,bot_id,bot_token)
                             VALUES ($id,'cancelled','Cancelled','Cancelled','international','en',
-                                'cancelled_bot',1234,x'01','fixture')
+                                'cancelled_bot',1234,x'01')
                             """, ("$id", Guid.NewGuid()));
                         Assert.Equal(1, await insert.ExecuteNonQueryAsync(token));
                         cancelled.Cancel();
@@ -164,9 +164,9 @@ public sealed class SqliteSessionTests
             {
                 using var insert = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,
-                        bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
+                        bot_username,bot_id,bot_token)
                     VALUES ($id,'recovered','Recovered','Recovered','international','en',
-                        'recovered_bot',1234,x'01','fixture')
+                        'recovered_bot',1234,x'01')
                     """, ("$id", Guid.NewGuid()));
                 return await insert.ExecuteNonQueryAsync(token);
             }, ct);
@@ -189,16 +189,16 @@ public sealed class SqliteSessionTests
         {
             string path = Path.Combine(directory.FullName, "shop.db");
             string backup = Path.Combine(directory.FullName, "restored.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             async Task InsertAsync(string code, long bot)
             {
                 await sessions.RunAsync(true, async (_, tx, token) =>
                 {
                     using var insert = SqliteWallet.Command(tx, """
                         INSERT INTO brands(id,code,internal_name,public_name,market,default_language,
-                            bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                        VALUES ($id,$code,$code,$code,'international','en',$username,$bot,x'01','fixture')
+                            bot_username,bot_id,bot_token)
+                        VALUES ($id,$code,$code,$code,'international','en',$username,$bot,x'01')
                         """, ("$id", Guid.NewGuid()), ("$code", code),
                         ("$username", code + "_bot"), ("$bot", bot));
                     return await insert.ExecuteNonQueryAsync(token);
@@ -239,7 +239,7 @@ public sealed class SqliteSessionTests
                 await reader.RollbackAsync(ct);
             }
             foreach (string database in new[] { path, backup })
-                await new SqliteSessionFactory(database).RunAsync(false, async (_, tx, token) =>
+                await SqliteSessionFactory.ForPlaintext(database).RunAsync(false, async (_, tx, token) =>
                 {
                     using var check = SqliteWallet.Command(tx, """
                         SELECT count(*),sum(bot_id) FROM brands

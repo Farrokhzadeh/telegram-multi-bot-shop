@@ -72,7 +72,7 @@ internal static class WalletCopyQualification
             if (File.Exists(manifestPath)) { if (new FileInfo(manifestPath).LinkTarget is not null || (File.GetUnixFileMode(manifestPath) & (UnixFileMode)63) != 0 || !CryptographicOperations.FixedTimeEquals(SHA256.HashData(await File.ReadAllBytesAsync(manifestPath, ct)), SHA256.HashData(body))) throw new MigrationRejectedException(); }
             else await WriteAsync(manifestPath, body, ct);
             var manifest = VerifiedImportManifest.Open("protected:wallet-copy/" + batch.ToString("N"), SHA256.HashData(body), body);
-            await Platform.Persistence.SchemaRunner.ApplyAsync(targetData, destination, ct);
+            await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(targetData, ct);
             await using (var role = targetData.CreateCommand("DO $$ BEGIN CREATE ROLE shop_legacy_import NOLOGIN; EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL; END $$; GRANT shop_legacy_import TO shop_test_runner")) await role.ExecuteNonQueryAsync(ct);
             var sessions = new DbSessionFactory(targetData);
             await SeedAsync(sessions, brand, identity.Brand, ct);
@@ -134,9 +134,9 @@ internal static class WalletCopyQualification
     private static Task<bool> MatchesBrandAsync(DbSession session, Guid brand, string name, long bot, CancellationToken ct)
     {
         byte[] tokenBytes = [1]; string code = "qual-" + name;
-        return session.RunEfStepAsync(false, (data, token) => data.Data.Set<Brand>().AnyAsync(row => row.Id == brand && row.Code == code && row.BotId == bot && !row.Active && row.BotTokenKeyId == "qualification-unusable" && row.BotTokenCiphertext == tokenBytes, token), ct);
+        return session.RunEfStepAsync(false, (data, token) => data.Data.Set<Brand>().AnyAsync(row => row.Id == brand && row.Code == code && row.BotId == bot && !row.Active && row.BotToken == tokenBytes, token), ct);
     }
-    private static Task<bool> SeedBrandAsync(DbSession session, Guid brand, string name, long bot, CancellationToken ct) => session.RunEfStepAsync(true, (data, token) => { data.RequireImportCommand(); data.Data.Add(new Brand { Id = brand, Code = "qual-" + name, InternalName = "qual-" + name, PublicName = "qual-" + name, Market = "international", DefaultLanguage = "en", BotUsername = "qual-" + name, BotId = bot, BotTokenCiphertext = [1], BotTokenKeyId = "qualification-unusable", Active = false }); return Task.FromResult(true); }, ct);
+    private static Task<bool> SeedBrandAsync(DbSession session, Guid brand, string name, long bot, CancellationToken ct) => session.RunEfStepAsync(true, (data, token) => { data.RequireImportCommand(); data.Data.Add(new Brand { Id = brand, Code = "qual-" + name, InternalName = "qual-" + name, PublicName = "qual-" + name, Market = "international", DefaultLanguage = "en", BotUsername = "qual-" + name, BotId = bot, BotToken = [1], Active = false }); return Task.FromResult(true); }, ct);
     internal static byte[] JsonBody(Action<Utf8JsonWriter> body)
     { using var stream = new MemoryStream(); using (var writer = new Utf8JsonWriter(stream)) { writer.WriteStartObject(); body(writer); writer.WriteEndObject(); } return stream.ToArray(); }
     internal static async Task WriteAsync(string path, byte[] bytes, CancellationToken ct)

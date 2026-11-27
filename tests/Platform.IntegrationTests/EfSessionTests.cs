@@ -16,8 +16,8 @@ public sealed class EfSessionTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             using var token = AdminToken.Create();
             Guid admin = Guid.NewGuid(), sessionId = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, cancel) =>
@@ -92,8 +92,8 @@ public sealed class EfSessionTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var brand = CheckoutFixture.ResolveContexts()[0];
             var other = CheckoutFixture.ResolveContexts()[1];
             Guid member = Guid.NewGuid();
@@ -101,8 +101,8 @@ public sealed class EfSessionTests
             {
                 using var command = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,
-                        bot_username,bot_id,bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brand,'ef','EF','EF','international','en','ef_bot',1001,x'01','fixture',1);
+                        bot_username,bot_id,bot_token,active)
+                    VALUES ($brand,'ef','EF','EF','international','en','ef_bot',1001,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($member,$brand,7001,'en');
                     """, ("$brand", brand.BrandId), ("$member", member));
                 await command.ExecuteNonQueryAsync(token);

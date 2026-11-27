@@ -6,14 +6,6 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Platform.Persistence;
 
-internal sealed class SqliteSnapshotDbContext(DbContextOptions<SqliteSnapshotDbContext> options) : AkantiDbContext(options)
-{
-    protected override void OnModelCreating(ModelBuilder builder)
-    {
-        base.OnModelCreating(builder);
-        SnapshotCopyQueries.PreserveExplicitValues(builder);
-    }
-}
 internal sealed class PlainTargetCopyDbContext(DbContextOptions<PlainTargetCopyDbContext> options) : PlainTargetDbContext(options)
 {
     protected override void OnModelCreating(ModelBuilder builder)
@@ -33,13 +25,13 @@ internal static class SnapshotCopyQueries
                 property.SetBeforeSaveBehavior(PropertySaveBehavior.Save);
             }
     }
-    internal static Task<long> CountAsync(AkantiDbContext data, string table, CancellationToken ct)
+    internal static Task<long> CountAsync(DbContext data, string table, CancellationToken ct)
     {
         var entity = data.Model.GetEntityTypes().SingleOrDefault(value => value.GetTableName() == table) ?? throw new InvalidOperationException("Snapshot entity is unavailable.");
         return (Task<long>)typeof(SnapshotCopyQueries).GetMethod(nameof(CountRowsAsync), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(entity.ClrType).Invoke(null, [data, ct])!;
     }
-    private static Task<long> CountRowsAsync<T>(AkantiDbContext data, CancellationToken ct) where T : class => data.Set<T>().LongCountAsync(ct);
-    internal static Task<long> CopyAsync(AkantiDbContext source, AkantiDbContext target, string table, string[] columns, string[] key, Action<IncrementalHash, object?> hash, Func<object?, object?> convert, CancellationToken ct)
+    private static Task<long> CountRowsAsync<T>(DbContext data, CancellationToken ct) where T : class => data.Set<T>().LongCountAsync(ct);
+    internal static Task<long> CopyAsync(DbContext source, DbContext target, string table, string[] columns, string[] key, Action<IncrementalHash, object?> hash, Func<object?, object?> convert, CancellationToken ct)
     {
         var entity = source.Model.GetEntityTypes().SingleOrDefault(value => value.GetTableName() == table) ?? throw new InvalidOperationException("Snapshot entity is unavailable.");
         var targetEntity = target.Model.FindEntityType(entity.ClrType) ?? throw new InvalidOperationException("Snapshot target entity is unavailable.");
@@ -49,7 +41,7 @@ internal static class SnapshotCopyQueries
         var method = typeof(SnapshotCopyQueries).GetMethod(nameof(CopyRowsAsync), BindingFlags.Static | BindingFlags.NonPublic)!.MakeGenericMethod(entity.ClrType);
         return (Task<long>)method.Invoke(null, [source, target, columns.Select(name => properties[name].PropertyInfo!).ToArray(), entity.FindPrimaryKey()!.Properties.Select(value => value.PropertyInfo!).ToArray(), hash, convert, ct])!;
     }
-    private static async Task<long> CopyRowsAsync<T>(AkantiDbContext source, AkantiDbContext target, PropertyInfo[] columns, PropertyInfo[] key, Action<IncrementalHash, object?> hash, Func<object?, object?> convert, CancellationToken ct) where T : class
+    private static async Task<long> CopyRowsAsync<T>(DbContext source, DbContext target, PropertyInfo[] columns, PropertyInfo[] key, Action<IncrementalHash, object?> hash, Func<object?, object?> convert, CancellationToken ct) where T : class
     {
         using var sourceHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         using var targetHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -74,7 +66,7 @@ internal static class SnapshotCopyQueries
         if (await target.Set<T>().LongCountAsync(ct) != count || !CryptographicOperations.FixedTimeEquals(sourceHash.GetHashAndReset(), targetHash.GetHashAndReset())) throw new InvalidOperationException("Snapshot row count or content differs.");
         return count;
     }
-    internal static Task HashRowsAsync(AkantiDbContext source, IEntityType entity, IncrementalHash hash, CancellationToken ct, Action<object>? inspect = null)
+    internal static Task HashRowsAsync(DbContext source, IEntityType entity, IncrementalHash hash, CancellationToken ct, Action<object>? inspect = null)
     {
         var key = entity.FindPrimaryKey()!.Properties.Select(property => property.PropertyInfo!).ToArray();
         var properties = entity.GetProperties().OrderBy(property => property.Name, StringComparer.Ordinal).ToArray();
@@ -84,7 +76,7 @@ internal static class SnapshotCopyQueries
         return (Task)method.Invoke(null, [source, key, properties.Select(property => property.PropertyInfo!).ToArray(), hash, ct, inspect])!;
     }
 
-    private static async Task HashTableAsync<T>(AkantiDbContext source, PropertyInfo[] key, PropertyInfo[] fields, IncrementalHash hash, CancellationToken ct, Action<object>? inspect) where T : class
+    private static async Task HashTableAsync<T>(DbContext source, PropertyInfo[] key, PropertyInfo[] fields, IncrementalHash hash, CancellationToken ct, Action<object>? inspect) where T : class
     {
         T? cursor = null;
         while (true)
@@ -105,7 +97,7 @@ internal static class SnapshotCopyQueries
         SqliteStagingCopy.HashValue(hash, "end");
     }
 
-    internal static Task<long> CopyOrVerifyAsync(AkantiDbContext source, PlainTargetCopyDbContext target, IEntityType entity,
+    internal static Task<long> CopyOrVerifyAsync(DbContext source, PlainTargetCopyDbContext target, IEntityType entity,
         Func<object, object, CancellationToken, Task> transform, bool verifyOnly, CancellationToken ct,
         Func<Func<CancellationToken, Task>, CancellationToken, Task>? commitBatch = null)
     {
@@ -118,7 +110,7 @@ internal static class SnapshotCopyQueries
         return (Task<long>)method.Invoke(null, [source, target, key, fields, transform, verifyOnly, ct, commitBatch])!;
     }
 
-    private static async Task<long> CopyOrVerifyRowsAsync<T>(AkantiDbContext source, PlainTargetCopyDbContext target,
+    private static async Task<long> CopyOrVerifyRowsAsync<T>(DbContext source, PlainTargetCopyDbContext target,
         PropertyInfo[] key, PropertyInfo[] fields, Func<object, object, CancellationToken, Task> transform, bool verifyOnly, CancellationToken ct,
         Func<Func<CancellationToken, Task>, CancellationToken, Task>? commitBatch) where T : class, new()
     {

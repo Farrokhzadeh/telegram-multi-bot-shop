@@ -13,19 +13,19 @@ public sealed class SqliteCustomerScreensTests
         try
         {
             string path = Path.Combine(directory.FullName, "shop.db");
-            await SqliteSchema.InitializeAsync(path, ct);
-            var sessions = new SqliteSessionFactory(path);
+            await SqliteSchema.InitializePlaintextAsync(path, ct);
+            var sessions = SqliteSessionFactory.ForPlaintext(path);
             var contexts = CheckoutFixture.ResolveContexts();
             Guid first = Guid.NewGuid(), second = Guid.NewGuid(), product = Guid.NewGuid();
             await sessions.RunAsync(true, async (_, tx, token) =>
             {
                 using var command = SqliteWallet.Command(tx, """
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brandA,'first','First','First','international','en','first_bot',1001,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($brandA,'first','First','First','international','en','first_bot',1001,x'01',1);
                     INSERT INTO brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,
-                        bot_token_ciphertext,bot_token_key_id,active)
-                    VALUES ($brandB,'second','Second','Second','international','en','second_bot',1002,x'01','fixture',1);
+                        bot_token,active)
+                    VALUES ($brandB,'second','Second','Second','international','en','second_bot',1002,x'01',1);
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($first,$brandA,7001,'en');
                     INSERT INTO users(id,brand_id,telegram_id,language) VALUES ($second,$brandB,7001,'fa');
                     INSERT INTO wallets(user_id) VALUES ($first),($second);
@@ -52,7 +52,7 @@ public sealed class SqliteCustomerScreensTests
                 }
                 return true;
             }, ct);
-            var screen = new SqliteCustomerScreens(new SqliteSessionFactory(path));
+            var screen = new SqliteCustomerScreens(SqliteSessionFactory.ForPlaintext(path));
             var home = await screen.HomeAsync(contexts[0], 7001, ct);
             Assert.Equal("First", home.Brand);
             Assert.Equal(7, home.Orders);

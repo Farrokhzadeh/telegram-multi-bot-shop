@@ -61,14 +61,14 @@ public sealed class CutoverPaymentCaptureTests
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE amount_due=10.25 AND quote_currency='USD' AND status='review'", Ct)); Assert.Equal(postings, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
     }
     [Fact]
-    public async Task ArchiveAuthenticationFailureCannotBecomeAReplayedAcknowledgement()
+    public async Task DirectArchiveTamperingCannotBecomeAReplayedAcknowledgement()
     {
         if (!OperatingSystem.IsLinux()) return;
         await using var f = await CheckoutFixture.CreateAsync(users: 1, ct: Ct); var key = await Setup(f); long postings = await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct); string root = Path.Combine(Path.GetTempPath(), "cutover-payment-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         try
         {
             var input = Input(key); var files = new CutoverPaymentFiles(root, f.Context(0), key, input); Assert.Equal("Ready", await CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, input, files.SaveAsync, Ct)); string path = Directory.GetFiles(root, "*.json").Single(); var row = JsonSerializer.Deserialize(await File.ReadAllBytesAsync(path, Ct), CutoverPaymentJson.Default.CutoverPaymentArchive)!; row.Content[^1] ^= 1; await File.WriteAllTextAsync(path, JsonSerializer.Serialize(row, CutoverPaymentJson.Default.CutoverPaymentArchive), Ct);
-            await Assert.ThrowsAsync<CipherRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, input, files.SaveAsync, Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment'", Ct)); Assert.Equal(postings, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
+            await Assert.ThrowsAsync<PaymentNoticeRejectedException>(() => CutoverPaymentCapture.CaptureAsync(f.Sessions, f.Context(0), f.Users[0], key.Run, key, input, files.SaveAsync, Ct)); Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.jobs WHERE job_kind='verify_payment'", Ct)); Assert.Equal(postings, await f.CountAsync("SELECT count(*) FROM shop.wallet_entries", Ct));
         }
         finally { Directory.Delete(root, true); }
     }

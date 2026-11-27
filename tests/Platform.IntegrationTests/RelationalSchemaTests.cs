@@ -32,7 +32,7 @@ public sealed class RelationalSchemaTests
     [InlineData("COMMENT ON SCHEMA shop IS 'unreviewed'")]
     public async Task CatalogOrMarkerDriftFailsWithoutSilentlyRepairing(string mutation)
     {
-        await using var database = await CreateAsync();
+        await using var database = await CreateLegacyAsync();
         await ExecuteAsync(database, mutation);
         await Assert.ThrowsAsync<InvalidOperationException>(() => Platform.Persistence.SchemaRunner.ApplyAsync(database.Data,
             SchemaManifest.ForQualification(database.Data.ConnectionString), Ct));
@@ -123,14 +123,14 @@ public sealed class RelationalSchemaTests
     }
 
     [Theory]
-    [InlineData("NULL,NULL,'crypto','USD','USDTBSC',NULL,NULL")]
-    [InlineData("'00000000-0000-0000-0000-000000000401','00000000-0000-0000-0000-000000000101','crypto','USD','USDTBSC',NULL,NULL")]
-    [InlineData("NULL,'00000000-0000-0000-0000-000000000101','bank','TOMAN',NULL,decode('01','hex'),'public-test-key'")]
-    [InlineData("NULL,'00000000-0000-0000-0000-000000000101','crypto','USD','BTC',NULL,NULL")]
+    [InlineData("NULL,NULL,'crypto','USD','USDTBSC',NULL")]
+    [InlineData("'00000000-0000-0000-0000-000000000401','00000000-0000-0000-0000-000000000101','crypto','USD','USDTBSC',NULL")]
+    [InlineData("NULL,'00000000-0000-0000-0000-000000000101','bank','TOMAN',NULL,decode('01','hex')")]
+    [InlineData("NULL,'00000000-0000-0000-0000-000000000101','crypto','USD','BTC',NULL")]
     public async Task PaymentXorAndPermittedMethodAssetCombinationsAreEnforced(string values)
     {
         await using var database = await CreateAsync();
-        await RejectAsync(database, "INSERT INTO shop.payments(order_id,topup_user_id,payment_method,quote_currency,network_asset,bank_destination_ciphertext,bank_destination_key_id,id,amount_due,idempotency_ref) VALUES (" + values + ",gen_random_uuid(),20,'public-test-invalid-payment')");
+        await RejectAsync(database, "INSERT INTO shop.payments(order_id,topup_user_id,payment_method,quote_currency,network_asset,bank_destination,id,amount_due,idempotency_ref) VALUES (" + values + ",gen_random_uuid(),20,'public-test-invalid-payment')");
     }
 
     [Fact]
@@ -259,12 +259,12 @@ public sealed class RelationalSchemaTests
         await using var database = await CreateAsync();
         await SeedSupplierAsync(database);
         await ExecuteAsync(database, """
-            INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,status,supplier_request_id,supplier_item_key,delivered_content,delivered_content_key_id,content_kind)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000404',1,'supplier','acquired','00000000-0000-0000-0000-000000000602',decode(repeat('22',32),'hex'),decode('01','hex'),'public-test-key','code')
+            INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,status,supplier_request_id,supplier_item_key,delivered_content,content_kind)
+            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000404',1,'supplier','acquired','00000000-0000-0000-0000-000000000602',decode(repeat('22',32),'hex'),decode('01','hex'),'code')
             """);
         const string bonus = """
-            INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind,supplier_request_id,supplier_item_key,state)
-            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000203',decode('01','hex'),'public-test-key',decode(repeat('33',32),'hex'),
+            INSERT INTO shop.inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind,supplier_request_id,supplier_item_key,state)
+            VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000203',decode('01','hex'),decode(repeat('33',32),'hex'),
                 'supplier_bonus','00000000-0000-0000-0000-000000000602',decode(repeat('22',32),'hex'),'admin_held')
             """;
         await RejectAsync(database, bonus);
@@ -287,8 +287,8 @@ public sealed class RelationalSchemaTests
                 ('00000000-0000-0000-0000-000000000613','00000000-0000-0000-0000-000000000405',1,'local');
             """);
         string Allocation(string unit, string fingerprint) => $$"""
-            INSERT INTO shop.inventory_items(id,product_id,credential_ciphertext,credential_key_id,source_fingerprint,origin_kind,state,assigned_fulfillment_id,allocated_at)
-            VALUES (gen_random_uuid(),'{{product}}',decode('01','hex'),'public-test-key',decode(repeat('{{fingerprint}}',32),'hex'),
+            INSERT INTO shop.inventory_items(id,product_id,credential_content,source_fingerprint,origin_kind,state,assigned_fulfillment_id,allocated_at)
+            VALUES (gen_random_uuid(),'{{product}}',decode('01','hex'),decode(repeat('{{fingerprint}}',32),'hex'),
                 'local_import','allocated','{{unit}}',CURRENT_TIMESTAMP);
             """;
         await RejectAsync(database, Allocation("00000000-0000-0000-0000-000000000611", "11"));
@@ -305,8 +305,8 @@ public sealed class RelationalSchemaTests
     {
         await using var database = await CreateAsync();
         await ExecuteTransactionAsync(database, """
-            INSERT INTO shop.discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,display_prefix,issuance_batch_id,kind,percent_off,max_total_uses,created_by_admin_id)
-            VALUES ('00000000-0000-0000-0000-000000000621','00000000-0000-0000-0000-000000000001',decode(repeat('55',32),'hex'),decode('01','hex'),'public-test-key','PUB',gen_random_uuid(),'promotion',10,2,'00000000-0000-0000-0000-000000000301');
+            INSERT INTO shop.discounts(id,brand_id,code_digest,code_content,display_prefix,issuance_batch_id,kind,percent_off,max_total_uses,created_by_admin_id)
+            VALUES ('00000000-0000-0000-0000-000000000621','00000000-0000-0000-0000-000000000001',decode(repeat('55',32),'hex'),decode('01','hex'),'PUB',gen_random_uuid(),'promotion',10,2,'00000000-0000-0000-0000-000000000301');
             INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,new_revision,correlation_id)
             VALUES ('00000000-0000-0000-0000-000000000622','admin','00000000-0000-0000-0000-000000000301','00000000-0000-0000-0000-000000000001','coupon_issue','discount','00000000-0000-0000-0000-000000000621','public coupon issue',0,gen_random_uuid());
             INSERT INTO shop.discount_revisions(id,discount_id,revision_no,audit_event_id,percent_off,max_total_uses,usage_adjustment_units,redeemed_count_at_revision,held_units_at_revision,active)
@@ -419,8 +419,8 @@ public sealed class RelationalSchemaTests
         """;
 
     private static string UnitSql(int number) => $$"""
-        INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,status,delivered_content,delivered_content_key_id,content_kind)
-        VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000403',{{number}},'manual','ready',decode('010203','hex'),'public-synthetic-key','code');
+        INSERT INTO shop.fulfillments(id,order_id,unit_no,kind,status,delivered_content,content_kind)
+        VALUES (gen_random_uuid(),'00000000-0000-0000-0000-000000000403',{{number}},'manual','ready',decode('010203','hex'),'code');
         """;
 
     private const string ManifestSql = """
@@ -430,16 +430,23 @@ public sealed class RelationalSchemaTests
         WHERE id='00000000-0000-0000-0000-000000000403';
         """;
 
+    private static async Task<DisposablePostgres> CreateLegacyAsync()
+    {
+        var database = await DisposablePostgres.CreateAsync(Ct);
+        try { await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct); return database; }
+        catch { await database.DisposeAsync(); throw; }
+    }
+
     private static async Task<DisposablePostgres> CreateAsync()
     {
         var database = await DisposablePostgres.CreateAsync(Ct);
         try
         {
-            await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
+            await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, Ct);
             await ExecuteTransactionAsync(database, """
-                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                VALUES ('00000000-0000-0000-0000-000000000001','a','public-a','public a','iran','fa','public_a',1001,decode('01','hex'),'public-key-a'),
-                       ('00000000-0000-0000-0000-000000000002','b','public-b','public b','international','en','public_b',1002,decode('02','hex'),'public-key-b');
+                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token)
+                VALUES ('00000000-0000-0000-0000-000000000001','a','public-a','public a','iran','fa','public_a',1001,decode('01','hex')),
+                       ('00000000-0000-0000-0000-000000000002','b','public-b','public b','international','en','public_b',1002,decode('02','hex'));
                 INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES
                     ('00000000-0000-0000-0000-000000000101','00000000-0000-0000-0000-000000000001',7001,'fa'),
                     ('00000000-0000-0000-0000-000000000102','00000000-0000-0000-0000-000000000002',7001,'en'),

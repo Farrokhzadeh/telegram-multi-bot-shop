@@ -22,7 +22,7 @@ public sealed class FoundationTests
     public async Task GlobalAdministratorCannotCommitMisattributedBrandAuditOrItsBusinessWrites()
     {
         await using var database = await DisposablePostgres.CreateAsync(Ct);
-        await Platform.Persistence.SchemaRunner.ApplyAsync(database.Data, SchemaManifest.ForQualification(database.Data.ConnectionString), Ct);
+        await Platform.Persistence.SchemaRunner.ApplyPlaintextAsync(database.Data, Ct);
         var sessions = new DbSessionFactory(database.Data);
         Guid admin = Guid.NewGuid(), first = Guid.NewGuid(), second = Guid.NewGuid(), user = Guid.NewGuid(), product = Guid.NewGuid();
         await using (var seed = await sessions.BeginAsync(Ct))
@@ -30,9 +30,9 @@ public sealed class FoundationTests
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.admins(id,login,authentication_mode,password_verifier) VALUES ($1,'public-foundation','password',$2)",
                 DbValue.Uuid(admin), DbValue.Text(AdminAuth.CreatePasswordVerifier(new string('s', 20)))), Ct);
             await seed.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token_ciphertext,bot_token_key_id)
-                VALUES ($1,'public-first','public first','public first','international','en','public_first',1001,$3,'public-key'),
-                    ($2,'public-second','public second','public second','international','en','public_second',1002,$3,'public-key')
+                INSERT INTO shop.brands(id,code,internal_name,public_name,market,default_language,bot_username,bot_id,bot_token)
+                VALUES ($1,'public-first','public first','public first','international','en','public_first',1001,$3),
+                    ($2,'public-second','public second','public second','international','en','public_second',1002,$3)
                 """, DbValue.Uuid(first), DbValue.Uuid(second), DbValue.Binary([1])), Ct);
             await seed.ExecuteAsync(new DbStatement("INSERT INTO shop.users(id,brand_id,telegram_id,language) VALUES ($1,$2,1001,'en')", DbValue.Uuid(user), DbValue.Uuid(first)), Ct);
             await seed.CommitAsync(Ct);

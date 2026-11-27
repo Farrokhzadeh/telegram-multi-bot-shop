@@ -328,7 +328,7 @@ public sealed class ExternalPaymentTests
         var original = await fixture.OrderAsync(ct: Ct);
         using (var notice = PaymentNoticeFixture.Notice(original.Origin, quote: original.Due, provider: PaymentSettlementFixture.Provider(original.Payment)))
             await Assert.ThrowsAsync<IOException>(() => Store(f).CaptureAsync(f.Context(0), notice, (_, _) => throw new IOException(), Ct));
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE first_payment_observed_at IS NOT NULL AND pending_evidence_ciphertext IS NOT NULL AND evidence_asset_ref IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE first_payment_observed_at IS NOT NULL AND pending_evidence IS NOT NULL AND evidence_asset_ref IS NULL", Ct));
         Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.orders WHERE payment_status='confirmation_pending'", Ct));
         await NoPosting(f);
         var replacement = await fixture.OrderAsync(ct: Ct);
@@ -352,7 +352,7 @@ public sealed class ExternalPaymentTests
         Assert.Equal(ExternalSettlementRoute.LocalGoods, (await worker.RunAsync(f.Context(0), lease, Ct))?.Route);
         await recovered.ResumeArchiveAsync(f.Context(0), original.Payment, archive.Save, ct: Ct);
         Assert.Single(archive.Items);
-        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE evidence_asset_ref IS NOT NULL AND pending_evidence_ciphertext IS NULL", Ct));
+        Assert.Equal(1L, await f.CountAsync("SELECT count(*) FROM shop.payments WHERE evidence_asset_ref IS NOT NULL AND pending_evidence IS NULL", Ct));
     }
 
     [Fact]

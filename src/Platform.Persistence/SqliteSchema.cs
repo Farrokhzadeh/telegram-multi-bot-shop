@@ -1,5 +1,6 @@
 using System.Globalization;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Platform.Core;
 
 namespace Platform.Persistence;
@@ -7,6 +8,22 @@ namespace Platform.Persistence;
 public static class SqliteSchema
 {
     private const string UtcFormat = "yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'";
+
+    public static async Task InitializePlaintextAsync(string path, CancellationToken ct = default)
+    {
+        if (!Path.IsPathFullyQualified(path)) throw new ArgumentException("An absolute SQLite database path is required.", nameof(path));
+        ct.ThrowIfCancellationRequested();
+        var fileOptions = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows()) fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using (new FileStream(path, fileOptions)) { }
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Mode = SqliteOpenMode.ReadWrite, Pooling = false, ForeignKeys = true, DefaultTimeout = 5 }.ToString());
+        await connection.OpenAsync(ct);
+        Configure(connection);
+        await using var command = connection.CreateCommand(); command.CommandText = "PRAGMA journal_mode=WAL";
+        if (!string.Equals(await command.ExecuteScalarAsync(ct) as string, "wal", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Could not enable WAL for the SQLite database.");
+        await using var data = new SqlitePlainTargetDbContext(new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<SqlitePlainTargetDbContext>().UseSqlite(connection).Options);
+        await Migrations.PlainTargetSchema.CreateAsync(data, ct);
+    }
 
     public static async Task InitializeAsync(string path, CancellationToken ct = default)
     {

@@ -139,7 +139,7 @@ public sealed class PaymentExpiryTests
         async Task<(string Method, string Currency, decimal Due, string? Provider, byte[]? Card)> OriginalAsync()
         {
             await using var read = await f.Sessions.BeginAsync(Ct);
-            return await read.QuerySingleAsync(new DbStatement("SELECT payment_method,quote_currency,amount_due::text,provider_payment_ref,bank_destination_ciphertext FROM shop.payments WHERE id=$1 AND order_id=$2", DbValue.Uuid(firstPayment), DbValue.Uuid(firstReq.OrderId)), row => (row.GetString(0), row.GetString(1), ExactDecimal.Parse(row.GetString(2)), row.IsDBNull(3) ? null : row.GetString(3), row.IsDBNull(4) ? null : row.GetBinary(4)), Ct);
+            return await read.QuerySingleAsync(new DbStatement("SELECT payment_method,quote_currency,amount_due::text,provider_payment_ref,bank_destination FROM shop.payments WHERE id=$1 AND order_id=$2", DbValue.Uuid(firstPayment), DbValue.Uuid(firstReq.OrderId)), row => (row.GetString(0), row.GetString(1), ExactDecimal.Parse(row.GetString(2)), row.IsDBNull(3) ? null : row.GetString(3), row.IsDBNull(4) ? null : row.GetBinary(4)), Ct);
         }
         var original = await OriginalAsync();
         var secondReq = new CheckoutRequest(OrderIds.New(), f.Product, 1, secondMethod);
@@ -217,8 +217,8 @@ public sealed class PaymentExpiryTests
         await using var f = await CheckoutFixture.CreateAsync(ct: Ct);
         await using var invalid = await f.Sessions.BeginAsync(Ct);
         var err = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("""
-            INSERT INTO shop.payments(id,topup_user_id,payment_method,quote_currency,amount_due,idempotency_ref,network_asset,bank_destination_ciphertext,bank_destination_key_id)
-            VALUES (gen_random_uuid(),$1,'bank','TOMAN',1000000,'topup-bank-bad',NULL,$2,'current')
+            INSERT INTO shop.payments(id,topup_user_id,payment_method,quote_currency,amount_due,idempotency_ref,network_asset,bank_destination)
+            VALUES (gen_random_uuid(),$1,'bank','TOMAN',1000000,'topup-bank-bad',NULL,$2)
             """, DbValue.Uuid(f.Users[0]), DbValue.Binary([1, 2, 3])), Ct));
         Assert.Equal(DbFailureKind.Constraint, err.Failure.Kind);
     }
@@ -244,8 +244,8 @@ public sealed class PaymentExpiryTests
         await using (var invalid = await f.Sessions.BeginAsync(Ct))
         {
             var error = await Assert.ThrowsAsync<DbOperationException>(() => invalid.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.payments(id,order_id,payment_method,quote_currency,amount_due,idempotency_ref,bank_destination_ciphertext,bank_destination_key_id)
-                VALUES (gen_random_uuid(),$1,'bank','USD',10,'public-invalid-usd-card',$2,'current')
+                INSERT INTO shop.payments(id,order_id,payment_method,quote_currency,amount_due,idempotency_ref,bank_destination)
+                VALUES (gen_random_uuid(),$1,'bank','USD',10,'public-invalid-usd-card',$2)
                 """, DbValue.Uuid(original.Order), DbValue.Binary([1, 2, 3])), Ct));
             Assert.Equal(DbFailureKind.Constraint, error.Failure.Kind);
         }

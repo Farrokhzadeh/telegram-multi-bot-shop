@@ -13,11 +13,9 @@ public sealed class HumanSupportTests
     private static readonly Lazy<string> Verifier = new(() => AdminAuth.CreatePasswordVerifier(new string('s', 20)));
 
     [Fact]
-    public async Task NumericTextInSupportRemainsAnEncryptedSupportReply()
+    public async Task NumericTextInSupportRemainsASupportReply()
     {
         await using var fixture = await SecretFixture();
-        using var files = new SyntheticSecretFiles();
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var router = new UpdateRouter(fixture.Sessions, (_, _, _) => throw new InvalidOperationException(), new HumanSupportRouter(fixture.Sessions));
         var first = await router.RouteAsync(Support(fixture, 501), Ct);
         var reply = await router.RouteAsync(Message(fixture, "2", 502), Ct);
@@ -33,8 +31,6 @@ public sealed class HumanSupportTests
     public async Task HumanSupportOperatesWithoutAiAndMovesNoMoney()
     {
         await using var fixture = await SecretFixture();
-        using var files = new SyntheticSecretFiles();
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var router = new HumanSupportRouter(fixture.Sessions);
         var first = await router.RouteAsync(Support(fixture, 31), Ct);
         Assert.True(first.Created);
@@ -67,8 +63,8 @@ public sealed class HumanSupportTests
                 DbValue.Uuid(adminId), DbValue.Text(Verifier.Value)), Ct);
             Guid discount = Guid.NewGuid(), audit = Guid.NewGuid(), revision = Guid.NewGuid();
             await seed.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,display_prefix,issuance_batch_id,kind,percent_off,created_by_admin_id)
-                VALUES ($1,$2,decode(repeat('55',32),'hex'),decode('01','hex'),'public-key','PUB',gen_random_uuid(),'promotion',10,$3)
+                INSERT INTO shop.discounts(id,brand_id,code_digest,code_content,display_prefix,issuance_batch_id,kind,percent_off,created_by_admin_id)
+                VALUES ($1,$2,decode(repeat('55',32),'hex'),convert_to('PUBLIC-SUPPORT','UTF8'),'PUB',gen_random_uuid(),'promotion',10,$3)
                 """, DbValue.Uuid(discount), DbValue.Uuid(fixture.Brands[0]), DbValue.Uuid(adminId)), Ct);
             await seed.ExecuteAsync(new DbStatement("""
                 INSERT INTO shop.audit_events(id,actor_kind,actor_admin_id,brand_id,action,entity_kind,entity_id,reason,new_revision,correlation_id)
@@ -171,11 +167,9 @@ public sealed class HumanSupportTests
     }
 
     [Fact]
-    public async Task VerifiedTextIsEncryptedAndCustomerMessagesNotifyStaffDurably()
+    public async Task VerifiedTextIsStoredDirectlyAndCustomerMessagesNotifyStaffDurably()
     {
         await using var fixture = await SecretFixture();
-        using var files = new SyntheticSecretFiles();
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var support = new HumanSupportRouter(fixture.Sessions);
         var router = new UpdateRouter(fixture.Sessions, (_, _, _) => throw new InvalidOperationException(), support);
         Guid order = await SeedPaidPreorder(fixture);
@@ -187,13 +181,11 @@ public sealed class HumanSupportTests
         Assert.True(opened.FlowRevision > 0);
         Assert.Equal(opened.FlowRevision, reply.FlowRevision);
         await using var read = await fixture.Sessions.BeginAsync(Ct);
-        var message = await read.QuerySingleAsync(new DbStatement("SELECT id,body_ciphertext,body_key_id,asset_ref FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=102", DbValue.Uuid(opened.EntityId!.Value)),
-            row => (Id: row.GetGuid(0), Bytes: row.GetBinary(1), Key: row.GetString(2), Asset: row.IsDBNull(3)), Ct);
+        var message = await read.QuerySingleAsync(new DbStatement("SELECT body_content,asset_ref FROM shop.support_messages WHERE ticket_id=$1 AND telegram_message_id=102", DbValue.Uuid(opened.EntityId!.Value)),
+            row => (Bytes: row.GetBinary(0), Asset: row.IsDBNull(1)), Ct);
         Assert.True(message.Asset);
-        byte[] decoded = new BrandCipher(secrets).Decrypt(fixture.Contexts[0], "support_messages", message.Id, "body_ciphertext", message.Key, message.Bytes);
-        try { Assert.Equal(text, System.Text.Encoding.UTF8.GetString(decoded)); }
-        finally { CryptographicOperations.ZeroMemory(decoded); }
-        Assert.Throws<CipherRejectedException>(() => new BrandCipher(secrets).Decrypt(fixture.Contexts[1], "support_messages", message.Id, "body_ciphertext", message.Key, message.Bytes));
+        try { Assert.Equal(text, System.Text.Encoding.UTF8.GetString(message.Bytes)); }
+        finally { CryptographicOperations.ZeroMemory(message.Bytes); }
         Assert.Equal(2L, await read.QuerySingleAsync(new DbStatement("SELECT count(*) FROM shop.jobs WHERE job_kind='support_notice' AND brand_id=$1", DbValue.Uuid(fixture.Brands[0])), row => row.GetInt64(0), Ct));
         Assert.Equal(before, await FinancialSnapshot(fixture));
     }
@@ -202,8 +194,6 @@ public sealed class HumanSupportTests
     public async Task RestartAndReplayAfterClosureDoNotCreateTicketMessageOrNotification()
     {
         await using var fixture = await SecretFixture();
-        using var files = new SyntheticSecretFiles();
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var update = Message(fixture, "/support", 201);
         var first = await new HumanSupportRouter(fixture.Sessions).RouteAsync(update, Ct);
         var actor = await Actor(fixture);
@@ -229,8 +219,6 @@ public sealed class HumanSupportTests
     public async Task UnrelatedCommandsWrongFlowForeignOrdersAndBlockedCustomersCannotWriteSupport()
     {
         await using var fixture = await SecretFixture();
-        using var files = new SyntheticSecretFiles();
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var router = new HumanSupportRouter(fixture.Sessions);
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Message(fixture, "/menu", 301), Ct));
         await Assert.ThrowsAsync<TelegramIngressRejectedException>(() => router.RouteAsync(Message(fixture, "public text outside support", 302), Ct));
@@ -249,8 +237,6 @@ public sealed class HumanSupportTests
     public async Task VerifiedMediaReferencesStayInTheSameSupportTicketWithoutDownloading()
     {
         await using var fixture = await SecretFixture();
-        using var files = new SyntheticSecretFiles();
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         var router = new HumanSupportRouter(fixture.Sessions);
         var ticket = await router.RouteAsync(Message(fixture, "/support", 351), Ct);
         using var verifier = new TelegramWebhookVerifier(fixture.Contexts[0], Secret);
@@ -266,8 +252,6 @@ public sealed class HumanSupportTests
     public async Task DisabledBrandSupportCannotOpenTickets()
     {
         await using var fixture = await SecretFixture();
-        using var files = new SyntheticSecretFiles();
-        using var secrets = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
         await using (var disable = await fixture.Sessions.BeginAsync(Ct))
         {
             await disable.ExecuteAsync(new DbStatement("UPDATE shop.brands SET support_enabled=false,policy_version=policy_version+1 WHERE id=$1", DbValue.Uuid(fixture.Brands[0])), Ct);

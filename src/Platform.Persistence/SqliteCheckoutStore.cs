@@ -9,7 +9,7 @@ namespace Platform.Persistence;
 
 public sealed class SqliteCheckoutStore(SqliteSessionFactory sessions)
 {
-    private readonly SqliteSessionFactory sessions = sessions.RequirePlaintext();
+    private readonly SqliteSessionFactory sessions = sessions;
 
     public Task<CheckoutResult> PurchaseLocalAsync(BrandContext context, long expectedRevision, long actor, LocalCheckoutRequest request, CancellationToken ct) => sessions.RunAsync(true, (_, tx, token) => AcceptLocalAsync(tx, context, expectedRevision, actor, request, token), ct);
     internal async Task<CheckoutResult> AcceptLocalAsync(SqliteTransaction tx, BrandContext context, long expectedRevision, long actor, LocalCheckoutRequest request, CancellationToken ct)

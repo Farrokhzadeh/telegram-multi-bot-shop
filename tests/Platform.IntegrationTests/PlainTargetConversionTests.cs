@@ -25,17 +25,17 @@ public sealed class PlainTargetConversionTests
         Assert.True(registry.TryResolveAuthenticated("conversion-test", principal, out var context));
 
         files.WriteManifest(activeKey: "old");
-        using var writerKeys = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var writerKeys = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         files.WriteManifest();
-        using var recoveryKeys = SecretFiles.Load(files.Root, "service-config.json", files.Grant());
+        using var recoveryKeys = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant());
         using var other = new SyntheticSecretFiles();
-        using var wrongKeys = SecretFiles.Load(other.Root, "service-config.json", other.Grant());
+        using var wrongKeys = RecoverySecretFiles.Load(other.Root, "service-config.json", other.Grant());
         Assert.Equal("current", recoveryKeys.CurrentBrandKeyId(context!));
 
         byte[] content = [0, 128, 255, .. "اصل"u8];
         byte[] cipher = new BrandCipher(writerKeys).Encrypt(context!, "brands", context!.BrandId, "bot_token_ciphertext", content);
         var original = new Brand { Id = context.BrandId, BotId = context.BotId, BotTokenCiphertext = cipher, BotTokenKeyId = "old" };
-        await using var source = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite("Data Source=:memory:").Options);
+        await using var source = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite("Data Source=:memory:").Options);
         await using var target = new PlainTargetCopyDbContext(new DbContextOptionsBuilder<PlainTargetCopyDbContext>().UseSqlite("Data Source=:memory:").Options);
 
         var rejected = new Brand();
@@ -58,7 +58,7 @@ public sealed class PlainTargetConversionTests
     {
         var ct = TestContext.Current.CancellationToken;
         using var keys = new SyntheticSecretFiles();
-        using var recovery = SecretFiles.Load(keys.Root, "service-config.json", keys.Grant());
+        using var recovery = RecoverySecretFiles.Load(keys.Root, "service-config.json", keys.Grant());
         var folder = Directory.CreateTempSubdirectory("akanti-plain-copy-");
         try
         {
@@ -75,7 +75,7 @@ public sealed class PlainTargetConversionTests
 
             Guid product = Guid.NewGuid(), item = Guid.NewGuid();
             byte[] original = [0, 128, 255, .. "اعتبار"u8];
-            await using (var old = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(writer).Options))
+            await using (var old = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite(writer).Options))
             {
                 old.Add(new Product { Id = product, FulfillmentKind = "local", AvailabilityPolicy = "immediate", Title = "Snapshot fixture" });
                 old.Add(new InventoryItem { Id = item, ProductId = product, CredentialCiphertext = new InventoryCipher(recovery).Encrypt(item, original),
@@ -87,7 +87,7 @@ public sealed class PlainTargetConversionTests
             byte[] snapshot = await SqlitePlaintextRowCopy.InspectAsync(source, ct);
             var copy = new SqlitePlaintextRowCopy(recovery, _ => throw new MigrationRejectedException());
             using var otherKeys = new SyntheticSecretFiles();
-            using var wrongRecovery = SecretFiles.Load(otherKeys.Root, "service-config.json", otherKeys.Grant());
+            using var wrongRecovery = RecoverySecretFiles.Load(otherKeys.Root, "service-config.json", otherKeys.Grant());
             var failing = new SqlitePlaintextRowCopy(wrongRecovery, _ => throw new MigrationRejectedException());
             await Assert.ThrowsAsync<MigrationRejectedException>(() => failing.TransferAsync(source, destination, snapshot, false, ct));
             await using (var pending = await OpenAsync(newPath, SqliteOpenMode.ReadOnly, ct))
@@ -125,14 +125,14 @@ public sealed class PlainTargetConversionTests
     {
         var ct = TestContext.Current.CancellationToken;
         using var fixture = new SyntheticSecretFiles();
-        using var keys = SecretFiles.Load(fixture.Root, "service-config.json", fixture.Grant());
+        using var keys = RecoverySecretFiles.Load(fixture.Root, "service-config.json", fixture.Grant());
         var folder = Directory.CreateTempSubdirectory("akanti-plain-assets-");
         try
         {
             string sourcePath = Path.Combine(folder.FullName, "source.db"), targetPath = Path.Combine(folder.FullName, "destination.db");
             await SqliteSchema.InitializeAsync(sourcePath, ct);
             await using (var writer = await OpenAsync(sourcePath, SqliteOpenMode.ReadWrite, ct))
-            await using (var data = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(writer).Options))
+            await using (var data = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite(writer).Options))
             {
                 foreach (int number in new[] { 1, 2 })
                     data.Add(new Product { Id = Guid.NewGuid(), Title = "Synthetic asset", FulfillmentKind = "local", AvailabilityPolicy = "immediate", IconRef = $"protected:fixture/{number}" });
@@ -193,7 +193,7 @@ public sealed class PlainTargetConversionTests
             const long botId = 1001;
             using var files = new SyntheticSecretFiles(directory.FullName);
             files.WriteManifest(brands: [brandId]);
-            using var keys = SecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: [brandId]));
+            using var keys = RecoverySecretFiles.Load(files.Root, "service-config.json", files.Grant(brands: [brandId]));
             var registry = new BotBrandRegistry([new("conversion-test", "original", brandId, botId, deployment, 7, true)]);
             var principal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, "original")], "conversion-test"));
             Assert.True(registry.TryResolveAuthenticated("conversion-test", principal, out var scope));
@@ -202,7 +202,7 @@ public sealed class PlainTargetConversionTests
             string sourceHash;
             Guid product = Guid.NewGuid();
             await using (var writer = await OpenAsync(original, SqliteOpenMode.ReadWrite, ct))
-            await using (var old = new SqliteAkantiDbContext(new DbContextOptionsBuilder<SqliteAkantiDbContext>().UseSqlite(writer).Options))
+            await using (var old = new SqliteRecoveryTargetDbContext(new DbContextOptionsBuilder<SqliteRecoveryTargetDbContext>().UseSqlite(writer).Options))
             {
                 old.Add(new Brand { Id = brandId, Code = "fixture", InternalName = "Fixture", PublicName = "Fixture",
                     Market = "international", DefaultLanguage = "en", BotUsername = "fixture_bot", BotId = botId,

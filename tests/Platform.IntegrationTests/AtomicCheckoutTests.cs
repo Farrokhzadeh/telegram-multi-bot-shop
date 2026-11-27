@@ -65,21 +65,19 @@ public sealed class AtomicCheckoutTests
     }
 
     [Fact]
-    public async Task CipherFailurePoisonsTheTransactionSoAPartialDebitCannotBeCommitted()
+    public async Task DirectContentIsCopiedWithoutRuntimeCipherTransformation()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
-        await using (var corrupt = await fixture.Sessions.BeginAsync(Ct))
+        await using (var edit = await fixture.Sessions.BeginAsync(Ct))
         {
-            await corrupt.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_ciphertext=decode('00','hex')"), Ct);
-            await corrupt.CommitAsync(Ct);
+            await edit.ExecuteAsync(new DbStatement("UPDATE shop.inventory_items SET credential_content=$1", DbValue.Binary("public direct credential"u8.ToArray())), Ct);
+            await edit.CommitAsync(Ct);
         }
-        await using (var session = await fixture.Sessions.BeginAsync(Ct))
-        {
-            await Assert.ThrowsAsync<CipherRejectedException>(() => fixture.Store.AcceptLocalAsync(session, fixture.Context(0), CheckoutFixture.Actor(0), fixture.Request(), Ct));
-            Assert.Equal(DbSessionState.Aborted, session.State);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => session.CommitAsync(Ct));
-        }
-        await NoPurchase(fixture);
+        Assert.Equal(CheckoutOutcome.Purchased, (await fixture.Store.PurchaseLocalAsync(fixture.Context(0), CheckoutFixture.Actor(0), fixture.Request(), Ct)).Outcome);
+        await using var read = await fixture.Sessions.BeginAsync(Ct);
+        byte[] content = await read.QuerySingleAsync(new DbStatement("SELECT delivered_content FROM shop.fulfillments"), row => row.GetBinary(0), Ct);
+        Assert.Equal("public direct credential"u8.ToArray(), content);
+        await ExactlyOne(fixture);
     }
 
     [Fact]
@@ -142,17 +140,13 @@ public sealed class AtomicCheckoutTests
     }
 
     [Fact]
-    public async Task AllocatedContentIsReencryptedForTheWinningBrandAndNotReleased()
+    public async Task AllocatedContentIsDirectForTheWinningOrderAndNotReleased()
     {
         await using var fixture = await CheckoutFixture.CreateAsync(ct: Ct);
         await fixture.Store.PurchaseLocalAsync(fixture.Context(0), CheckoutFixture.Actor(0), fixture.Request(), Ct);
         await using var read = await fixture.Sessions.BeginAsync(Ct);
-        var content = await read.QuerySingleAsync(new DbStatement("SELECT id,delivered_content,delivered_content_key_id,status FROM shop.fulfillments"), row => (Id: row.GetGuid(0), Bytes: row.GetBinary(1), Key: row.GetString(2), Status: row.GetString(3)), Ct);
-        var cipher = new BrandCipher(fixture.Secrets);
-        byte[] plain = cipher.Decrypt(fixture.Context(0), "fulfillments", content.Id, "delivered_content", content.Key, content.Bytes);
-        try { Assert.StartsWith("public synthetic credential ", System.Text.Encoding.UTF8.GetString(plain)); }
-        finally { System.Security.Cryptography.CryptographicOperations.ZeroMemory(plain); }
-        Assert.Throws<CipherRejectedException>(() => cipher.Decrypt(fixture.Context(1), "fulfillments", content.Id, "delivered_content", content.Key, content.Bytes));
+        var content = await read.QuerySingleAsync(new DbStatement("SELECT delivered_content,status FROM shop.fulfillments"), row => (Bytes: row.GetBinary(0), Status: row.GetString(1)), Ct);
+        Assert.StartsWith("public synthetic credential ", System.Text.Encoding.UTF8.GetString(content.Bytes));
         Assert.Equal("acquired", content.Status);
         Assert.Equal(0L, await fixture.CountAsync("SELECT count(*) FROM shop.orders WHERE release_authorized_at IS NOT NULL", Ct));
     }

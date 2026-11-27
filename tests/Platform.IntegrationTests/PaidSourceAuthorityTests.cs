@@ -41,8 +41,8 @@ public sealed class PaidSourceAuthorityTests
         {
             Guid id = Guid.NewGuid(), audit = Guid.NewGuid();
             await invalid.ExecuteAsync(new DbStatement("""
-                INSERT INTO shop.discounts(id,brand_id,code_digest,code_ciphertext,code_key_id,display_prefix,issuance_batch_id,kind,percent_off,created_by_admin_id)
-                VALUES ($1,$2,decode(repeat('33',32),'hex'),decode('01','hex'),'current','PUB',$1,'promotion',10,$3)
+                INSERT INTO shop.discounts(id,brand_id,code_digest,code_content,display_prefix,issuance_batch_id,kind,percent_off,created_by_admin_id)
+                VALUES ($1,$2,decode(repeat('33',32),'hex'),decode('01','hex'),'PUB',$1,'promotion',10,$3)
                 """, DbValue.Uuid(id), DbValue.Uuid(f.Brands[0]), DbValue.Uuid(admin.AdminId)), Ct);
             await invalid.ExecuteAsync(new DbStatement("INSERT INTO shop.audit_events(id,actor_kind,brand_id,action,entity_kind,entity_id,reason,new_revision,correlation_id) VALUES ($1,'system',$2,'coupon_issue','discount',$3,'paid_source_entitlement',0,gen_random_uuid())",
                 DbValue.Uuid(audit), DbValue.Uuid(f.Brands[0]), DbValue.Uuid(id)), Ct);
